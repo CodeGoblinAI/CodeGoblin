@@ -1,5 +1,5 @@
 import { Prompt, type PromptRef } from "@tui/component/prompt"
-import { createEffect, createSignal, onMount } from "solid-js"
+import { createEffect, createSignal, onCleanup, onMount } from "solid-js"
 import { Logo } from "../component/logo"
 import { useSync } from "../context/sync"
 import { Toast } from "../ui/toast"
@@ -11,6 +11,8 @@ import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
 import { useEditorContext } from "@tui/context/editor"
 import { useTheme } from "../context/theme"
 import { CodeGoblinBrand } from "@/codegoblin/brand"
+import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
+import { useProject } from "@tui/context/project"
 
 let once = false
 const placeholder = {
@@ -26,11 +28,19 @@ export function Home() {
   const args = useArgs()
   const local = useLocal()
   const editor = useEditorContext()
+  const project = useProject()
   const { theme } = useTheme()
+  const [frame, setFrame] = createSignal(0)
+  const [usage, setUsage] = createSignal("Loading local usage...")
   let sent = false
 
   onMount(() => {
     editor.clearSelection()
+    const timer = setInterval(() => setFrame((value) => (value + 1) % CodeGoblinBrand.mascotFrames.length), 550)
+    void CodeGoblinImageCommand.usageSummary(project.instance.directory() || process.cwd()).then(setUsage).catch(() => {
+      setUsage("Local usage will appear after the first generated image.")
+    })
+    onCleanup(() => clearInterval(timer))
   })
 
   const bind = (r: PromptRef | undefined) => {
@@ -69,8 +79,12 @@ export function Home() {
             <box alignItems="center">
               <Logo idle />
               <box height={1} />
-              <text fg={theme.text}>{CodeGoblinBrand.product}</text>
+              <text fg={theme.primary}>{CodeGoblinBrand.product}</text>
               <text fg={theme.textMuted}>{CodeGoblinBrand.tagline}</text>
+              <box height={1} />
+              <text fg={theme.text}>{CodeGoblinBrand.mascotFrames[frame()]}</text>
+              <text fg={theme.textMuted}>Image models save files under codegoblin-output/images.</text>
+              <text fg={theme.textMuted}>{usage().split("\n")[0]}</text>
             </box>
           </TuiPluginRuntime.Slot>
         </box>

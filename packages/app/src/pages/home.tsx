@@ -173,7 +173,8 @@ function HomeDesign() {
   }
 
   return (
-    <div class="mx-auto grid w-full h-full max-w-[1080px] gap-8 px-6 pb-16 lg:grid-cols-[280px_minmax(0,720px)]">
+    <div class="mx-auto grid w-full h-full max-w-[1080px] gap-x-8 gap-y-5 px-6 pb-16 lg:grid-cols-[280px_minmax(0,720px)]">
+      <CodeGoblinWebHero />
       <HomeProjectColumn
         projects={projects()}
         selected={selectedProject()?.worktree}
@@ -185,7 +186,7 @@ function HomeDesign() {
       />
 
       <section
-        class="min-w-0 flex-1 flex flex-col overflow-y-hidden pt-12"
+        class="min-w-0 flex-1 flex flex-col overflow-y-hidden pt-2"
         aria-label={language.t("sidebar.project.recentSessions")}
       >
         <HomeSessionSearch
@@ -228,6 +229,31 @@ function HomeDesign() {
   )
 }
 
+function CodeGoblinWebHero() {
+  return (
+    <div class="col-span-full pt-8">
+      <div class="flex min-w-0 items-center justify-between gap-6 border-b border-v2-border-border-subtle pb-5">
+        <div class="min-w-0">
+          <div class="text-32-bold leading-tight text-v2-text-text-base">CodeGoblin</div>
+          <div class="mt-1 max-w-[720px] text-13-regular text-v2-text-text-muted">
+            Your local AI goblin for code, images, and agents. BYOK providers stay intact; image outputs save locally.
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2 text-12-medium text-v2-text-text-muted">
+            <span class="rounded-[6px] bg-v2-background-bg-deep px-2 py-1">images -&gt; codegoblin-output/images</span>
+            <span class="rounded-[6px] bg-v2-background-bg-deep px-2 py-1">usage hoard tracked locally</span>
+            <span class="rounded-[6px] bg-v2-background-bg-deep px-2 py-1">OpenCode-compatible providers</span>
+          </div>
+        </div>
+        <img
+          src="/codegoblin-mascot.png"
+          alt="CodeGoblin mascot eating token coins beside a terminal"
+          class="hidden size-28 shrink-0 rounded-[8px] object-cover shadow-[var(--v2-elevation-raised)] sm:block"
+        />
+      </div>
+    </div>
+  )
+}
+
 function HomeProjectColumn(props: {
   projects: LocalProject[]
   selected?: string
@@ -238,7 +264,7 @@ function HomeProjectColumn(props: {
   language: ReturnType<typeof useLanguage>
 }) {
   return (
-    <aside class="flex min-w-0 flex-col lg:pt-[52px]" aria-label={props.language.t("home.projects")}>
+    <aside class="flex min-w-0 flex-col lg:pt-0" aria-label={props.language.t("home.projects")}>
       <div class="flex h-7 min-w-0 items-center justify-between pl-3">
         <div class={HOME_SECTION_LABEL}>{props.language.t("home.projects")}</div>
         <IconButtonV2

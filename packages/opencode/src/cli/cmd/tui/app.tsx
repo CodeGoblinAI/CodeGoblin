@@ -80,6 +80,7 @@ import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
 import { CodeGoblinBrand } from "@/codegoblin/brand"
 import { codeGoblinProviderSummary } from "@/codegoblin/provider"
+import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
 
 const appBindingCommands = [
   "command.palette.show",
@@ -664,7 +665,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           dialog.replace(() => (
             <DialogAlert
               title={CodeGoblinBrand.product}
-              message={`${CodeGoblinBrand.tagline}\n\nExisting OpenCode providers remain available. CodeGoblin adds local image-output, hosted-provider, usage, and agent orchestration scaffolds.\n\n${CodeGoblinBrand.disclaimer}`}
+              message={`${CodeGoblinBrand.mascot}\n${CodeGoblinBrand.tagline}\n\nImage prompts route to local files when an image model is selected. Try: create an image of a cat. Outputs land under codegoblin-output/images unless you pass --output.\n\nThe goblin eats token spend and writes the receipt to codegoblin-output/usage.json.\n\n${CodeGoblinBrand.disclaimer}`}
             />
           ))
         },
@@ -700,13 +701,9 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         title: "CodeGoblin usage",
         slashName: "goblin-usage",
         slashAliases: ["goblin usage"],
-        run: () => {
-          dialog.replace(() => (
-            <DialogAlert
-              title="CodeGoblin Usage"
-              message="Local session cost/tokens already flow through OpenCode session metadata and the stats command. CodeGoblin-specific text/image usage summaries are scaffolded for a future richer view."
-            />
-          ))
+        run: async () => {
+          const summary = await CodeGoblinImageCommand.usageSummary(project.instance.directory() || process.cwd())
+          dialog.replace(() => <DialogAlert title="Goblin Hoard" message={summary} />)
         },
         category: "CodeGoblin",
       },
@@ -719,7 +716,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           dialog.replace(() => (
             <DialogAlert
               title="CodeGoblin Theme"
-              message="Current first-pass branding uses the CodeGoblin wordmark, CG terminal title, and a small startup mascot. Theme hooks remain modular through the existing OpenCode TUI theme system."
+              message="CodeGoblin uses a custom wordmark, token-goblin home animation, CG terminal title, and local usage hoard. Theme hooks remain modular through the existing TUI theme system."
             />
           ))
         },

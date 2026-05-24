@@ -3,6 +3,21 @@ export const CodeGoblinBrand = {
   cli: "codegoblin",
   shortCli: "cg",
   tagline: "Your local AI goblin for code, images, and agents.",
+  mascot: String.raw`       ,      ,
+    .-/(.-""-.)\-.
+   /  |\  \/  /|  \
+  |   (_\_==_/_)   |  token goblin
+   \__  /|oo|\  __/
+      '   ><   '`,
+  mascotTiny: String.raw`(,_,)  goblin hoarding tokens`,
+  mascotFrames: [
+    String.raw`(,_,)  .`,
+    String.raw`(,_,)  o`,
+    String.raw`(,_,)  O`,
+    String.raw`(,_,) <O crunch`,
+  ],
+  imageDefaultPrompt:
+    "cute small green goblin mascot eating glowing token coins beside a developer terminal, useful serious dev tool style",
   disclaimer:
     "CodeGoblin is an independent fork/customization of OpenCode and is not affiliated with OpenCode, Anomaly, or their maintainers.",
   docs: "docs/PROJECT_STATE.md",

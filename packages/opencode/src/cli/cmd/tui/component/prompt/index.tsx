@@ -1021,6 +1021,7 @@ export function Prompt(props: PromptProps) {
     const agent = local.agent.current()
     if (!agent) return false
     const trimmed = store.prompt.input.trim()
+    const selectedModel = local.model.current()
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
       void exit()
       return true
@@ -1031,6 +1032,8 @@ export function Prompt(props: PromptProps) {
         const result = await CodeGoblinImageCommand.runSlash({
           input: store.prompt.input,
           cwd: project.instance.directory() || process.cwd(),
+          provider: selectedModel?.providerID,
+          model: selectedModel?.modelID,
         })
         toast.show({
           variant: result.ok ? "success" : "warning",
@@ -1058,10 +1061,54 @@ export function Prompt(props: PromptProps) {
       input.clear()
       return true
     }
-    const selectedModel = local.model.current()
     if (!selectedModel) {
       void promptModelWarning()
       return false
+    }
+    const selectedProvider = sync.data.provider.find((item) => item.id === selectedModel.providerID)
+    const selectedModelInfo = selectedProvider?.models[selectedModel.modelID]
+    if (
+      store.mode !== "shell" &&
+      CodeGoblinImageCommand.shouldRoutePromptToImage({
+        prompt: trimmed,
+        providerID: selectedModel.providerID,
+        modelID: selectedModel.modelID,
+        outputImage: selectedModelInfo?.capabilities?.output?.image,
+      })
+    ) {
+      const currentMode = store.mode
+      try {
+        const result = await CodeGoblinImageCommand.generate({
+          prompt: trimmed,
+          cwd: project.instance.directory() || process.cwd(),
+          provider: selectedModel.providerID,
+          model: selectedModel.modelID,
+        })
+        toast.show({
+          variant: result.ok ? "success" : "warning",
+          message: result.message,
+          duration: result.ok ? 7000 : 10000,
+        })
+      } catch (error) {
+        toast.show({
+          variant: "error",
+          message: error instanceof Error ? error.message : "CodeGoblin image command failed.",
+          duration: 9000,
+        })
+      }
+      history.append({
+        ...store.prompt,
+        mode: currentMode,
+      })
+      input.extmarks.clear()
+      setStore("prompt", {
+        input: "",
+        parts: [],
+      })
+      setStore("extmarkToPartIndex", new Map())
+      props.onSubmit?.()
+      input.clear()
+      return true
     }
 
     const workspaceSession = props.sessionID ? sync.session.get(props.sessionID) : undefined

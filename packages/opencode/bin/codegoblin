@@ -90,6 +90,8 @@ const candidates = [
   process.env.OPENCODE_BIN_PATH,
   path.join(scriptDir, ".codegoblin"),
   path.join(scriptDir, ".opencode"),
+  path.join(packageDir, "dist", `opencode-${platform}-${arch}`, "bin", binary),
+  path.join(packageDir, "dist", `opencode-${platform}-${arch}-baseline`, "bin", binary),
 ].filter(Boolean)
 
 const resolved = candidates.find((candidate) => fs.existsSync(candidate))
@@ -99,8 +101,6 @@ if (resolved) {
   run(bunCommand, ["--conditions=browser", source, ...argv])
 } else {
   const packageCandidates = [
-  path.join(packageDir, "dist", `opencode-${platform}-${arch}`, "bin", binary),
-  path.join(packageDir, "dist", `opencode-${platform}-${arch}-baseline`, "bin", binary),
   findBinary(scriptDir),
   ].filter(Boolean)
   const packaged = packageCandidates.find((candidate) => fs.existsSync(candidate))

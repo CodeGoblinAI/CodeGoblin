@@ -1,11 +1,11 @@
 export const logo = {
-  left: ["  ____   ____ ", " / ___| / ___|", "| |     | |  _", "| |___  | |_| |", " \\____| \\____|"],
-  right: [" CodeGoblin       ", " local AI         ", " code + images    ", " agents-ready     ", " independent fork "],
+  left: ["  ,      ,   ", " /(.-\"\"-.)\\ ", " |\\  \\/  /| ", " (_\\_==_/_) ", "    /||\\    "],
+  right: [" CodeGoblin       ", " local AI         ", " images -> files  ", " token-aware      ", " agents-ready     "],
 }
 
 export const go = {
-  left: ["  ", "C ", "C ", "CC"],
-  right: ["  ", "G ", "G ", "GG"],
+  left: [" , ", "/|\\", "\\_/", " / "],
+  right: ["CG ", "   ", "$$ ", "   "],
 }
 
 export const marks = "_^~,"

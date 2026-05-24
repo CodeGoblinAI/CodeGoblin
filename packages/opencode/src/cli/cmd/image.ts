@@ -5,6 +5,8 @@ type Args = {
   prompt?: string[]
   output?: string
   model?: string
+  provider?: string
+  keyFile?: string
   dryRun?: boolean
 }
 
@@ -27,6 +29,14 @@ export const ImageCommand = {
         describe: "Gemini image-capable model",
         type: "string",
       })
+      .option("provider", {
+        describe: "image provider: google or xai",
+        type: "string",
+      })
+      .option("key-file", {
+        describe: "optional local env file containing image provider keys",
+        type: "string",
+      })
       .option("dry-run", {
         describe: "validate path/model setup without calling Gemini",
         type: "boolean",
@@ -37,6 +47,8 @@ export const ImageCommand = {
       prompt,
       output: args.output,
       model: args.model,
+      provider: args.provider,
+      keyFile: args.keyFile,
       cwd: process.cwd(),
       dryRun: args.dryRun,
     }).catch((error) => ({

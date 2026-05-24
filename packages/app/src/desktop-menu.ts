@@ -72,7 +72,7 @@ export type DesktopMenu = {
 export const DESKTOP_MENU: DesktopMenu[] = [
   {
     id: "app",
-    label: "OpenCode",
+    label: "CodeGoblin",
     platforms: ["macos"],
     items: [
       { type: "item", role: "about" },
@@ -200,8 +200,9 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     id: "help",
     label: "Help",
     items: [
-      { type: "item", label: "OpenCode Documentation", href: "https://opencode.ai/docs" },
-      { type: "item", label: "Support Forum", href: "https://discord.com/invite/opencode" },
+      { type: "item", label: "CodeGoblin Project State", href: "https://github.com/shawnisikli/CodeGoblin/blob/dev/docs/PROJECT_STATE.md" },
+      { type: "item", label: "OpenCode Upstream Docs", href: "https://opencode.ai/docs" },
+      { type: "item", label: "OpenCode Support Forum", href: "https://discord.com/invite/opencode" },
       { type: "item", label: "Export Logs...", command: "logs.export" },
       { type: "separator" },
       {
