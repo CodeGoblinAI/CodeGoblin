@@ -4,6 +4,8 @@ node_modules
 .sst
 .env
 .env.local
+.env.*
+!.env.example
 .idea
 .vscode
 .codex
@@ -28,5 +30,20 @@ target
 opencode-dev
 UPCOMING_CHANGELOG.md
 logs/
+*.log
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+*.p12
+*.pfx
+*.heapsnapshot
 *.bun-build
 tsconfig.tsbuildinfo
+
+# CodeGoblin local/private state
+.codegoblin/
+codegoblin-output/
+codegoblin-generated/

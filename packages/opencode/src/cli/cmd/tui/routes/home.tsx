@@ -9,6 +9,8 @@ import { usePromptRef } from "../context/prompt"
 import { useLocal } from "../context/local"
 import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
 import { useEditorContext } from "@tui/context/editor"
+import { useTheme } from "../context/theme"
+import { CodeGoblinBrand } from "@/codegoblin/brand"
 
 let once = false
 const placeholder = {
@@ -24,6 +26,7 @@ export function Home() {
   const args = useArgs()
   const local = useLocal()
   const editor = useEditorContext()
+  const { theme } = useTheme()
   let sent = false
 
   onMount(() => {
@@ -63,7 +66,12 @@ export function Home() {
         <box height={4} minHeight={0} flexShrink={1} />
         <box flexShrink={0}>
           <TuiPluginRuntime.Slot name="home_logo" mode="replace">
-            <Logo />
+            <box alignItems="center">
+              <Logo idle />
+              <box height={1} />
+              <text fg={theme.text}>{CodeGoblinBrand.product}</text>
+              <text fg={theme.textMuted}>{CodeGoblinBrand.tagline}</text>
+            </box>
           </TuiPluginRuntime.Slot>
         </box>
         <box height={1} minHeight={0} flexShrink={1} />

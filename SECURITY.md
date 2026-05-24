@@ -1,4 +1,17 @@
-# Security
+# CodeGoblin Security Policy
+
+CodeGoblin is a private-first fork/customization of OpenCode. It preserves OpenCode's local provider/BYOK behavior while adding CodeGoblin-specific local image-output and hosted-provider scaffolds.
+
+Security defaults for this fork:
+
+- Do not commit provider API keys, Gemini keys, DeepSeek keys, Stripe secrets, production endpoints, personal access tokens, generated credentials, local databases, or logs.
+- Local prompts, chats, files, and generated assets remain local by default.
+- CodeGoblin hosted subscription/gateway code in this public fork is scaffold-only. Production keys, Stripe logic, pricing logic, and private business rules must live outside this repository.
+- New key storage should follow OpenCode's existing local auth/config patterns unless there is a documented reason to do otherwise.
+
+CodeGoblin is an independent fork/customization of OpenCode and is not affiliated with OpenCode, Anomaly, or their maintainers.
+
+# Upstream OpenCode Security Notes
 
 ## IMPORTANT
 

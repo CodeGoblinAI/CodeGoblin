@@ -13,13 +13,16 @@
     "bench:test": "bun run script/bench-test-suite.ts",
     "profile:test": "bun run script/profile-test-files.ts",
     "build": "bun run script/build.ts",
+    "codegoblin:mock-gateway": "bun run script/codegoblin-mock-gateway.ts",
     "fix-node-pty": "bun run script/fix-node-pty.ts",
     "dev": "bun run --conditions=browser ./src/index.ts",
     "dev:temporary": "bun run --conditions=browser ./src/temporary.ts",
     "db": "bun drizzle-kit"
   },
   "bin": {
-    "opencode": "./bin/opencode"
+    "opencode": "./bin/opencode",
+    "codegoblin": "./bin/codegoblin",
+    "cg": "./bin/cg"
   },
   "exports": {
     "./*": "./src/*.ts"

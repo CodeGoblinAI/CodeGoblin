@@ -78,6 +78,8 @@ import {
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
+import { CodeGoblinBrand } from "@/codegoblin/brand"
+import { codeGoblinProviderSummary } from "@/codegoblin/provider"
 
 const appBindingCommands = [
   "command.palette.show",
@@ -106,6 +108,11 @@ const appBindingCommands = [
   "provider.connect",
   "console.org.switch",
   "opencode.status",
+  "codegoblin.status",
+  "codegoblin.balance",
+  "codegoblin.models",
+  "codegoblin.usage",
+  "codegoblin.theme",
   "theme.switch",
   "theme.switch_mode",
   "theme.mode.lock",
@@ -353,24 +360,24 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     if (!terminalTitleEnabled() || Flag.OPENCODE_DISABLE_TERMINAL_TITLE) return
 
     if (route.data.type === "home") {
-      renderer.setTerminalTitle("OpenCode")
+      renderer.setTerminalTitle(CodeGoblinBrand.product)
       return
     }
 
     if (route.data.type === "session") {
       const session = sync.session.get(route.data.sessionID)
       if (!session || SessionApi.isDefaultTitle(session.title)) {
-        renderer.setTerminalTitle("OpenCode")
+        renderer.setTerminalTitle(CodeGoblinBrand.product)
         return
       }
 
       const title = session.title.length > 40 ? session.title.slice(0, 37) + "..." : session.title
-      renderer.setTerminalTitle(`OC | ${title}`)
+      renderer.setTerminalTitle(`CG | ${title}`)
       return
     }
 
     if (route.data.type === "plugin") {
-      renderer.setTerminalTitle(`OC | ${route.data.id}`)
+      renderer.setTerminalTitle(`CG | ${route.data.id}`)
     }
   })
 
@@ -647,6 +654,76 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           dialog.replace(() => <DialogStatus />)
         },
         category: "System",
+      },
+      {
+        name: "codegoblin.status",
+        title: "CodeGoblin status",
+        slashName: "goblin",
+        slashAliases: ["codegoblin"],
+        run: () => {
+          dialog.replace(() => (
+            <DialogAlert
+              title={CodeGoblinBrand.product}
+              message={`${CodeGoblinBrand.tagline}\n\nExisting OpenCode providers remain available. CodeGoblin adds local image-output, hosted-provider, usage, and agent orchestration scaffolds.\n\n${CodeGoblinBrand.disclaimer}`}
+            />
+          ))
+        },
+        category: "CodeGoblin",
+      },
+      {
+        name: "codegoblin.balance",
+        title: "CodeGoblin hosted balance",
+        slashName: "goblin-balance",
+        slashAliases: ["goblin balance"],
+        run: () => {
+          dialog.replace(() => (
+            <DialogAlert
+              title="CodeGoblin Balance"
+              message="Hosted wallet balance is scaffolded only. Future endpoint: GET /v1/me/balance. No hosted subscription secrets or pricing logic are committed."
+            />
+          ))
+        },
+        category: "CodeGoblin",
+      },
+      {
+        name: "codegoblin.models",
+        title: "CodeGoblin hosted models",
+        slashName: "goblin-models",
+        slashAliases: ["goblin models"],
+        run: () => {
+          dialog.replace(() => <DialogAlert title="CodeGoblin Models" message={codeGoblinProviderSummary()} />)
+        },
+        category: "CodeGoblin",
+      },
+      {
+        name: "codegoblin.usage",
+        title: "CodeGoblin usage",
+        slashName: "goblin-usage",
+        slashAliases: ["goblin usage"],
+        run: () => {
+          dialog.replace(() => (
+            <DialogAlert
+              title="CodeGoblin Usage"
+              message="Local session cost/tokens already flow through OpenCode session metadata and the stats command. CodeGoblin-specific text/image usage summaries are scaffolded for a future richer view."
+            />
+          ))
+        },
+        category: "CodeGoblin",
+      },
+      {
+        name: "codegoblin.theme",
+        title: "CodeGoblin theme",
+        slashName: "goblin-theme",
+        slashAliases: ["goblin theme"],
+        run: () => {
+          dialog.replace(() => (
+            <DialogAlert
+              title="CodeGoblin Theme"
+              message="Current first-pass branding uses the CodeGoblin wordmark, CG terminal title, and a small startup mascot. Theme hooks remain modular through the existing OpenCode TUI theme system."
+            />
+          ))
+        },
+        category: "CodeGoblin",
       },
       {
         name: "theme.switch",

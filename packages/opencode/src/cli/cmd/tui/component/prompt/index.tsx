@@ -61,6 +61,7 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import { type WorkspaceStatus } from "../workspace-label"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
 import { useTuiConfig } from "../../context/tui-config"
+import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
 
 export type PromptProps = {
   sessionID?: string
@@ -1022,6 +1023,39 @@ export function Prompt(props: PromptProps) {
     const trimmed = store.prompt.input.trim()
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
       void exit()
+      return true
+    }
+    if (store.mode !== "shell" && CodeGoblinImageCommand.isSlash(trimmed)) {
+      const currentMode = store.mode
+      try {
+        const result = await CodeGoblinImageCommand.runSlash({
+          input: store.prompt.input,
+          cwd: project.instance.directory() || process.cwd(),
+        })
+        toast.show({
+          variant: result.ok ? "success" : "warning",
+          message: result.message,
+          duration: result.ok ? 6000 : 9000,
+        })
+      } catch (error) {
+        toast.show({
+          variant: "error",
+          message: error instanceof Error ? error.message : "CodeGoblin image command failed.",
+          duration: 9000,
+        })
+      }
+      history.append({
+        ...store.prompt,
+        mode: currentMode,
+      })
+      input.extmarks.clear()
+      setStore("prompt", {
+        input: "",
+        parts: [],
+      })
+      setStore("extmarkToPartIndex", new Map())
+      props.onSubmit?.()
+      input.clear()
       return true
     }
     const selectedModel = local.model.current()

@@ -30,6 +30,7 @@ import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
+import { ImageCommand } from "./cli/cmd/image"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
 import { JsonMigration } from "@/storage/json-migration"
@@ -40,8 +41,10 @@ import { Heap } from "./cli/heap"
 import { drizzle } from "drizzle-orm/bun-sqlite"
 import { ensureProcessMetadata } from "@opencode-ai/core/util/opencode-process"
 import { isRecord } from "@/util/record"
+import { CodeGoblinBrand, codeGoblinCliName } from "@/codegoblin/brand"
 
 const processMetadata = ensureProcessMetadata("main")
+const cliName = codeGoblinCliName()
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -59,7 +62,7 @@ const args = hideBin(process.argv)
 
 function show(out: string) {
   const text = out.trimStart()
-  if (!text.startsWith("opencode ")) {
+  if (!text.startsWith(`${cliName} `) && !text.startsWith("opencode ")) {
     process.stderr.write(UI.logo() + EOL + EOL)
     process.stderr.write(text)
     return
@@ -69,7 +72,7 @@ function show(out: string) {
 
 const cli = yargs(args)
   .parserConfiguration({ "populate--": true })
-  .scriptName("opencode")
+  .scriptName(cliName)
   .wrap(100)
   .help("help", "show help")
   .alias("help", "h")
@@ -108,8 +111,10 @@ const cli = yargs(args)
     process.env.AGENT = "1"
     process.env.OPENCODE = "1"
     process.env.OPENCODE_PID = String(process.pid)
+    process.env.CODEGOBLIN = "1"
+    process.env.CODEGOBLIN_PID = String(process.pid)
 
-    Log.Default.info("opencode", {
+    Log.Default.info("codegoblin", {
       version: InstallationVersion,
       args: process.argv.slice(2),
       process_role: processMetadata.processRole,
@@ -119,7 +124,7 @@ const cli = yargs(args)
     const marker = path.join(Global.Path.data, "opencode.db")
     if (!(await Filesystem.exists(marker))) {
       const tty = process.stderr.isTTY
-      process.stderr.write("Performing one time database migration, may take a few minutes..." + EOL)
+      process.stderr.write(`${CodeGoblinBrand.product}: performing one time database migration, may take a few minutes...` + EOL)
       const width = 36
       const orange = "\x1b[38;5;214m"
       const muted = "\x1b[0;2m"
@@ -169,6 +174,7 @@ const cli = yargs(args)
   .command(UninstallCommand)
   .command(ServeCommand)
   .command(WebCommand)
+  .command(ImageCommand)
   .command(ModelsCommand)
   .command(StatsCommand)
   .command(ExportCommand)

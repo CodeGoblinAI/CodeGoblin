@@ -28,6 +28,7 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { codeGoblinProviderInfo } from "@/codegoblin/provider"
 
 const log = Log.create({ service: "provider" })
 
@@ -186,6 +187,35 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       return {
         autoload: Object.keys(input.models).length > 0,
         options: ok ? {} : { apiKey: "public" },
+      }
+    }),
+    codegoblin: Effect.fnUntraced(function* (input: Info) {
+      const env = yield* dep.env()
+      const cfg = yield* dep.config()
+      const stored = yield* dep.auth(input.id)
+      const configuredKey =
+        env["CODEGOBLIN_API_KEY"] ||
+        env["CODEGOBLIN_GATEWAY_KEY"] ||
+        (stored?.type === "api" ? stored.key : undefined) ||
+        cfg.provider?.["codegoblin"]?.options?.apiKey
+      const baseURL =
+        env["CODEGOBLIN_GATEWAY_URL"] ||
+        cfg.provider?.["codegoblin"]?.options?.baseURL ||
+        input.options?.baseURL
+      const ok = Boolean(configuredKey || env["CODEGOBLIN_GATEWAY_URL"] || cfg.provider?.["codegoblin"])
+
+      return {
+        autoload: ok,
+        options: {
+          baseURL,
+          name: "codegoblin",
+          apiKey: configuredKey || "local-mock",
+        },
+        vars(options): Record<string, string> {
+          return {
+            CODEGOBLIN_GATEWAY_URL: String(options.baseURL || baseURL || ""),
+          }
+        },
       }
     }),
     openai: () =>
@@ -1206,6 +1236,9 @@ export const layer = Layer.effect(
         const modelsDev = yield* modelsDevSvc.get()
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
         const database = mapValues(catalog, toPublicInfo)
+        const codeGoblin = codeGoblinProviderInfo()
+        catalog[codeGoblin.id] = codeGoblin
+        database[codeGoblin.id] = toPublicInfo(codeGoblin)
 
         const providers: Record<ProviderID, Info> = {} as Record<ProviderID, Info>
         const languages = new Map<string, LanguageModelV3>()
