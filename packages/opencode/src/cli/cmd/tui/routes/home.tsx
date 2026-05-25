@@ -611,19 +611,143 @@ function TuiGoblinRunner(props: { theme: any }) {
   const eyeColor = props.theme.backgroundElement
   const [tick, setTick] = createSignal(0)
 
-  const rightRunnerFrames = [
-    ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", "G.GGGGGG.G", "..GPPPPGG.", ".GS.G..G.."],
-    ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", ".GGGGGGGG.", "..GGPPGG..", "...G..G..."],
-    ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", "G.GGGGGG.G", ".GGPPPPG..", "..G..G.SG."],
-    ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", ".GGGGGGGG.", "..GPPPGG..", ".G.SG..G.."],
+  interface RunnerVariant {
+    id: string
+    name: string
+    frames: string[][]
+  }
+
+  const runnerVariants: RunnerVariant[] = [
+    {
+      id: "01",
+      name: "tiny classic",
+      frames: [
+        [".G..G.", "GGGGGG", "GGBBGG", ".GGGG.", ".GPPG.", "G...G."],
+        [".G..G.", "GGGGGG", "GGBBGG", ".GGGG.", ".GPPG.", ".GGGG."],
+        [".G..G.", "GGGGGG", "GGBBGG", ".GGGG.", ".GGPG.", ".G..G."],
+        [".G..G.", "GGGGGG", "GGBBGG", ".GGGG.", ".GPPG.", "G.G.G."],
+      ],
+    },
+    {
+      id: "02",
+      name: "micro scout",
+      frames: [
+        ["..S..S..", ".GGGGGG.", "SGGBBGGS", ".GGGGGG.", "..GPPG..", ".G..G.G."],
+        ["..S..S..", ".GGGGGG.", "SGGBBGGS", ".GGGGGG.", "..GGPG..", "..GGGG.."],
+        ["..S..S..", ".GGGGGG.", "SGGBBGGS", ".GGGGGG.", ".GPPGG..", ".G.G..G."],
+        ["..S..S..", ".GGGGGG.", "SGGBBGGS", ".GGGGGG.", "..GPPGG.", "..G..G.."],
+      ],
+    },
+    {
+      id: "03",
+      name: "round bobber",
+      frames: [
+        ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", ".GGGGGGGG.", "..GPPPGG..", ".G..G.G..."],
+        ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", ".GGGGGGGG.", "..GGPPGG..", "...GGG...."],
+        ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", ".GGGGGGGG.", ".GGPPPG...", "..G.G..G.."],
+        ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", ".GGGGGGGG.", "..GPPPGG..", ".G.G...G.."],
+      ],
+    },
+    {
+      id: "04",
+      name: "hooded runner",
+      frames: [
+        ["..P....P..", ".PGGGGGGP.", "PGGGBBGGGP", ".GGGGGGGG.", "..GPPPGG..", ".G..G.G..."],
+        ["..P....P..", ".PGGGGGGP.", "PGGGBBGGGP", ".GGGGGGGG.", "..GGPPGG..", "...GGG...."],
+        ["..P....P..", ".PGGGGGGP.", "PGGGBBGGGP", "..GGGGGG..", ".GGPPPG...", "..G.G..G.."],
+        ["..P....P..", ".PGGGGGGP.", "PGGGBBGGGP", ".GGGGGGGG.", "..GPPPGG..", ".G.G...G.."],
+      ],
+    },
+    {
+      id: "05",
+      name: "big ear scout",
+      frames: [
+        ["S...GGGG...S", ".SGGGGGGGGS.", "GGGGBBGGBGGG", ".GGGGGGGGGG.", "..GGPPPPGG..", ".G.G..G..G.."],
+        ["S...GGGG...S", ".SGGGGGGGGS.", "GGGGBBGGBGGG", ".GGGGGGGGGG.", "...GPPPGG...", "..GG..GG...."],
+        ["S...GGGG...S", ".SGGGGGGGGS.", "GGGGBBGGBGGG", "..GGGGGGGG..", "..GGPPPPG...", "...G.G..GG.."],
+        ["S...GGGG...S", ".SGGGGGGGGS.", "GGGGBBGGBGGG", ".GGGGGGGGGG.", "..GGPPPPGG..", ".GG...G.G..."],
+      ],
+    },
+    {
+      id: "06",
+      name: "sneaksnout",
+      frames: [
+        ["...S.......", "..SGGGS....", ".SGGBBGGG..", "SGGGPPPGG..", "..GGPPG....", ".G..G.G...."],
+        ["...S.......", "..SGGGS....", ".SGGBBGGG..", "SGGGPPPG...", "..GPPGG....", "...GG......"],
+        ["...S.......", "..SGGGS....", ".SGGBBGGG..", "SGGGPPPGG..", ".GGPPG.....", "..G.G..G..."],
+        ["...S.......", "..SGGGS....", ".SGGBBGGG..", "SGGGPPPG...", "..GGPPG....", ".G...G....."],
+      ],
+    },
+    {
+      id: "07",
+      name: "rogue dagger",
+      frames: [
+        ["..S.....MM...", ".SGGGGGGMM...", "SGGGBBGGGM...", ".GGPPPPGMM...", "..GGPPGG.....", ".G..G.G......"],
+        ["..S.....MM...", ".SGGGGGGMM...", "SGGGBBGGGM...", ".GGPPPPGMM...", "..GPPGG......", "...GG........"],
+        ["..S.....MM...", ".SGGGGGGMM...", "SGGGBBGGGM...", "GGGPPPPGGM...", "..GGPPG......", ".G.G..G......"],
+        ["..S.....MM...", ".SGGGGGGMM...", "SGGGBBGGGM...", ".GGPPPPGMM...", "..GGPPGG.....", ".G....G......"],
+      ],
+    },
+    {
+      id: "08",
+      name: "scar hood",
+      frames: [
+        ["..P....P..", ".PGGGGGGP.", "PGGBMBGGGP", ".GGGPPGGG.", "..GGPPGG..", ".G.G..G..."],
+        ["..P....P..", ".PGGGGGGP.", "PGGBMBGGGP", ".GGGPPGGG.", "...GPPG...", "..GG..GG.."],
+        ["..P....P..", ".PGGGGGGP.", "PGGBMBGGGP", ".GGGPPGGG.", ".GGPPPG...", "...G.G..G."],
+        ["..P....P..", ".PGGGGGGP.", "PGGBMBGGGP", ".GGGPPGGG.", "..GGPPGG..", ".G...G.G.."],
+      ],
+    },
+    {
+      id: "09",
+      name: "squat bruiser",
+      frames: [
+        [".SGGGGGS.", "SGGBBGGGS", "GGGPPPGGG", ".GGPPPGG.", "G.G...G.G"],
+        [".SGGGGGS.", "SGGBBGGGS", "GGGPPPGGG", "..GGPG...", ".GG..GG.."],
+        [".SGGGGGS.", "SGGBBGGGS", "GGGPPPGGG", ".GGPPGG..", "..G.G..G."],
+        [".SGGGGGS.", "SGGBBGGGS", "GGGPPPGGG", "..GGPPG..", ".G...G.G."],
+      ],
+    },
+    {
+      id: "10",
+      name: "deluxe goblin",
+      frames: [
+        ["..S....S....", ".SGGGGGGGS..", "SGGGBMMBGGGS", ".GGGGGGGGGG.", "..GGPPPPGG..", "...GPPG.....", ".G.G..G..G.."],
+        ["..S....S....", ".SGGGGGGGS..", "SGGGBMMBGGGS", ".GGGGGGGGGG.", "...GGPPGG...", "....GGG.....", "..GG..GG...."],
+        ["..S....S....", ".SGGGGGGGS..", "SGGGBMMBGGGS", ".GGGGGGGGGG.", "..GGPPPPG...", "...GPPGG....", ".G..G..G.G.."],
+        ["..S....S....", ".SGGGGGGGS..", "SGGGBMMBGGGS", ".GGGGGGGGGG.", "...GPPPGG...", "..GGPG......", ".G.G...G...."],
+      ],
+    },
   ]
+
+  function normalizeRunnerVariantId(value: string | undefined) {
+    const cleaned = value?.trim().replace(/^v/i, "")
+    const numeric = Number(cleaned)
+    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= runnerVariants.length) {
+      return String(numeric).padStart(2, "0")
+    }
+    return "03"
+  }
+
+  function normalizeRunnerFrames(frames: string[][]) {
+    const height = Math.max(...frames.map((frame) => frame.length))
+    const width = Math.max(...frames.flatMap((frame) => frame.map((row) => row.length)))
+    return frames.map((frame) => Array.from({ length: height }, (_, rowIndex) => (frame[rowIndex] ?? "").padEnd(width, ".")))
+  }
+
+  const selectedRunnerVariantId = normalizeRunnerVariantId(process.env.CODEGOBLIN_FOOTER_VARIANT)
+  const selectedRunnerVariant =
+    runnerVariants.find((variant) => variant.id === selectedRunnerVariantId) ??
+    runnerVariants.find((variant) => variant.id === "03") ??
+    runnerVariants[0]
+  const rightRunnerFrames = normalizeRunnerFrames(selectedRunnerVariant.frames)
   const leftRunnerFrames = rightRunnerFrames.map((frame) => frame.map((runnerRow) => [...runnerRow].reverse().join("")))
 
   const spriteHeight = rightRunnerFrames[0]?.length ?? 0
   const spriteWidth = Math.max(...rightRunnerFrames.flatMap((frame) => frame.map((runnerRow) => runnerRow.length)))
   const laneCells = () => {
     const availableChars = Math.max(12, dimensions().width - 8)
-    return Math.max(spriteWidth + 4, Math.min(28, Math.floor(availableChars / 2)))
+    return Math.max(spriteWidth + 4, Math.min(32, Math.floor(availableChars / 2)))
   }
   const laneWidth = () => laneCells() * 2
   const travelSpan = () => Math.max(0, laneCells() - spriteWidth)
@@ -672,6 +796,8 @@ function TuiGoblinRunner(props: { theme: any }) {
         cells.push(<text fg={vestColor}>██</text>)
       } else if (char === "B") {
         cells.push(<text fg={eyeColor}>██</text>)
+      } else if (char === "M") {
+        cells.push(<text fg={props.theme.textMuted}>██</text>)
       } else if (rowIndex === spriteHeight - 1 && cell >= trailStart && cell < trailEnd) {
         cells.push(<text fg={shadowColor}>░░</text>)
       } else {
