@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 const rawVariant = Bun.argv[2] ?? "01"
 
 if (rawVariant === "--list" || rawVariant === "list") {
-  for (let i = 1; i <= 20; i++) {
+  for (let i = 1; i <= 30; i++) {
     const variant = String(i).padStart(2, "0")
     console.log(`bun run dev:header:${variant}`)
   }
@@ -13,8 +13,8 @@ if (rawVariant === "--list" || rawVariant === "list") {
 
 const numeric = Number(rawVariant.trim().replace(/^v/i, ""))
 
-if (!Number.isInteger(numeric) || numeric < 1 || numeric > 20) {
-  console.error(`Expected a header variant from 1 to 20, got: ${rawVariant}`)
+if (!Number.isInteger(numeric) || numeric < 1 || numeric > 30) {
+  console.error(`Expected a header variant from 1 to 30, got: ${rawVariant}`)
   process.exit(1)
 }
 

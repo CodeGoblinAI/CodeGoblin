@@ -86,6 +86,30 @@ function TuiGoblinHeader(props: { theme: any }) {
     "....GGGG....",
   ]
 
+  const microMascotGrid = [
+    "...GG...",
+    "..GGGG..",
+    ".GGGGGG.",
+    "GGGBBGGG",
+    "GGGBBGGG",
+    ".GGGGGG.",
+    "..GGGG..",
+    "...GG...",
+  ]
+
+  const tinyMascotGrid = [
+    "..GG..",
+    ".GGGG.",
+    "GGGGGG",
+    "GGBBGG",
+    "GGBBGG",
+    "GGGGGG",
+    ".GGGG.",
+    "..GG..",
+  ]
+
+  const blankMascotGrid = Array.from({ length: 8 }, () => "")
+
   const buildFontRows = (word: string, font: Record<string, string[]>, gap = 1, shifts: number[] = []) => {
     const letters = [...word].map((char) => font[char] ?? [])
     const height = letters[0]?.length ?? 0
@@ -276,12 +300,22 @@ function TuiGoblinHeader(props: { theme: any }) {
     makeVariant("18", "split 3-row pixel CODE/GOBLIN, left narrow goblin", splitPixelRowsFor("CODE", "GOBLIN", pixelThreeGlyphs, 5, "█", 1), narrowMascotGrid, 60, 10, "left"),
     makeVariant("19", "split dot-matrix CODE/GOBLIN, cheek goblin", splitFontRows("CODE", "GOBLIN", dotMatrixFont, 4), cheekMascotGrid, 60, 8),
     makeVariant("20", "split outline CODE/GOBLIN, mini goblin left", splitFontRows("CODE", "GOBLIN", outlineFiveFont, 1).slice(1, 9), miniMascotGrid, 60, 10, "left"),
+    makeVariant("21", "5-row solid slant-cancel, micro goblin", buildFontRows("CODEGOBLIN", solidFiveFont, 1, [4, 3, 2, 1, 0]), microMascotGrid, 60, 12),
+    makeVariant("22", "5-row solid slant-cancel, text only", buildFontRows("CODEGOBLIN", solidFiveFont, 1, [4, 3, 2, 1, 0]), blankMascotGrid, 60, 0),
+    makeVariant("23", "5-row solid slant-cancel, left tiny goblin", buildFontRows("CODEGOBLIN", solidFiveFont, 1, [5, 4, 2, 1, 0]), tinyMascotGrid, 60, 12, "left"),
+    makeVariant("24", "5-row solid slant-cancel left-bias, text only", buildFontRows("CODEGOBLIN", solidFiveFont, 1, [5, 4, 2, 1, 0]), blankMascotGrid, 60, 0),
+    makeVariant("25", "4-row shaded full word, tiny goblin", buildFontRows("CODEGOBLIN", shadedFourFont, 2), tinyMascotGrid, 60, 12),
+    makeVariant("26", "4-row shaded full word, text only", buildFontRows("CODEGOBLIN", shadedFourFont, 2), blankMascotGrid, 60, 0),
+    makeVariant("27", "split compact CODE/GOBLIN, text only", splitFontRows("CODE", "GOBLIN", compactFourFont, 3), blankMascotGrid, 60, 0),
+    makeVariant("28", "split half-block CODE/GOBLIN, text only", splitFontRows("CODE", "GOBLIN", halfBlockThreeFont, 3, 1), blankMascotGrid, 60, 0),
+    makeVariant("29", "split 4-row pixel CODE/GOBLIN, text only", splitPixelRowsFor("CODE", "GOBLIN", pixelFourGlyphs, 2), blankMascotGrid, 60, 0),
+    makeVariant("30", "split dot-matrix CODE/GOBLIN, text only", splitFontRows("CODE", "GOBLIN", dotMatrixFont, 4), blankMascotGrid, 60, 0),
   ]
 
   function normalizeVariantId(value: string | undefined) {
     const cleaned = value?.trim().replace(/^v/i, "")
     const numeric = Number(cleaned)
-    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 20) return String(numeric).padStart(2, "0")
+    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 30) return String(numeric).padStart(2, "0")
     return "01"
   }
 
