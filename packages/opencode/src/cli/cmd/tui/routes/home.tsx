@@ -16,8 +16,8 @@ function TuiGoblinHeader(props: { theme: any }) {
   const shadowColor = RGBA.fromInts(120, 125, 135)
   const vestColor = RGBA.fromInts(130, 80, 223)
   const eyeColor = props.theme.backgroundElement
-  const interiorWidth = 96
-  const brandPanelWidth = 52
+  const interiorWidth = 104
+  const brandPanelWidth = 60
 
   // Goblin Mascot Head Only (8 rows high, 18 columns wide)
   const mascotGrid = [
@@ -31,16 +31,29 @@ function TuiGoblinHeader(props: { theme: any }) {
     "......GGGGGG......",  // Row 7: Neck/Chin
   ]
 
-  const brandLines = [
-    "",
-    "",
-    "CODEGOBLIN",
-    "C O D E G O B L I N",
-    "",
-    "",
-    "",
-    "",
-  ]
+  // Solid pixel wordmark: single-cell stems + wide holes survive slanted terminal fonts.
+  const blockLetters: Record<string, string[]> = {
+    C: ["█████", "█    ", "█    ", "█    ", "█    ", "█    ", "█████"],
+    O: ["█████", "█   █", "█   █", "█   █", "█   █", "█   █", "█████"],
+    D: ["████ ", "█   █", "█   █", "█   █", "█   █", "█   █", "████ "],
+    E: ["█████", "█    ", "█    ", "████ ", "█    ", "█    ", "█████"],
+    G: ["█████", "█    ", "█    ", "█ ███", "█   █", "█   █", "█████"],
+    B: ["████ ", "█   █", "█   █", "████ ", "█   █", "█   █", "████ "],
+    L: ["█    ", "█    ", "█    ", "█    ", "█    ", "█    ", "█████"],
+    I: ["███", " █ ", " █ ", " █ ", " █ ", " █ ", "███"],
+    N: ["█   █", "██  █", "█ █ █", "█  ██", "█   █", "█   █", "█   █"],
+  }
+
+  function buildWordmarkRows(word: string) {
+    const letters = [...word].map((char) => blockLetters[char] ?? ["", "", "", "", "", "", ""])
+    const rows: string[] = []
+    for (let rowIndex = 0; rowIndex < 7; rowIndex++) {
+      rows.push(letters.map((letter) => letter[rowIndex]).join(" "))
+    }
+    return [...rows, ""]
+  }
+
+  const brandLines = buildWordmarkRows("CODEGOBLIN")
 
   function centerText(line: string, width: number) {
     const clipped = line.slice(0, width)
@@ -51,11 +64,7 @@ function TuiGoblinHeader(props: { theme: any }) {
 
   function renderBrandRow(mascotRowIdx: number) {
     const line = centerText(brandLines[mascotRowIdx] ?? "", brandPanelWidth)
-    return (
-      <text fg={skinColor}>
-        <b>{line}</b>
-      </text>
-    )
+    return <text fg={skinColor}>{line}</text>
   }
 
   function renderMascotRow(rowIndex: number) {
@@ -79,7 +88,7 @@ function TuiGoblinHeader(props: { theme: any }) {
   const borderLeft = <text fg={shadowColor}>│</text>
   const borderRight = <text fg={shadowColor}>│</text>
   
-  // Row 0: Top border (96 interior chars + 2 border chars = 98 chars wide)
+  // Row 0: Top border (104 interior chars + 2 border chars = 106 chars wide)
   rows.push(
     <box flexDirection="row">
       <text fg={shadowColor}>┌</text>
@@ -88,7 +97,7 @@ function TuiGoblinHeader(props: { theme: any }) {
     </box>
   )
   
-  // Row 1: Empty padding (96 spaces)
+  // Row 1: Empty padding (104 spaces)
   rows.push(
     <box flexDirection="row">
       {borderLeft}
