@@ -43,6 +43,8 @@ import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
+import { MessageV2 } from "@/session/message-v2"
+import { MessageID, PartID, SessionID } from "@/session/schema"
 import { SessionShare } from "@/share/session"
 import { ShareNext } from "@/share/share-next"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -89,6 +91,18 @@ import { errorLayer } from "./middleware/error"
 import { fenceLayer } from "./middleware/fence"
 import { schemaErrorLayer } from "./middleware/schema-error"
 import { CodeGoblinImageCommand, type ImageInput } from "@/codegoblin/image-command"
+
+type CodeGoblinImagePersist = {
+  sessionID: SessionID
+  userMessageID: MessageID
+  assistantMessageID: MessageID
+  assistantPartID: PartID
+  agent: string
+  providerID: string
+  modelID: string
+  variant?: string
+  routeDirectory: string
+}
 
 export const context = Context.makeUnsafe<unknown>(new Map())
 
@@ -143,8 +157,11 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
 )
 
 const codeGoblinImageRoute = HttpRouter.use((router) =>
-  router.add("POST", "/codegoblin/image", (request) =>
-    Effect.gen(function* () {
+  Effect.gen(function* () {
+    const session = yield* Session.Service
+    const sessionStatus = yield* SessionStatus.Service
+    yield* router.add("POST", "/codegoblin/image", (request) =>
+      Effect.gen(function* () {
       const route = yield* WorkspaceRouteContext
       const text = yield* Effect.orDie(request.text)
       let body: any
@@ -171,32 +188,216 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         return HttpServerResponse.jsonUnsafe({ ok: false, message: "Image prompt is required." }, { status: 400 })
       }
 
-      const result = yield* Effect.promise(() =>
-        commandInput
-          ? CodeGoblinImageCommand.runSlash({
-              input: commandInput,
-              cwd: route.directory,
-              provider: typeof body?.provider === "string" ? body.provider : undefined,
-              model: typeof body?.model === "string" ? body.model : undefined,
-              inputImages,
-              requireImageModel: body?.requireImageModel !== false,
-            })
-          : CodeGoblinImageCommand.generate({
-              prompt,
-              cwd: route.directory,
-              output: typeof body?.output === "string" ? body.output : undefined,
-              provider: typeof body?.provider === "string" ? body.provider : undefined,
-              model: typeof body?.model === "string" ? body.model : undefined,
-              keyFile: typeof body?.keyFile === "string" ? body.keyFile : undefined,
-              inputImages,
-              requireImageModel: body?.requireImageModel !== false,
-            }),
-      )
+      const requestProvider = typeof body?.provider === "string" ? body.provider : undefined
+      const requestModel = typeof body?.model === "string" ? body.model : undefined
+      const agent = typeof body?.agent === "string" && body.agent.trim() ? body.agent.trim() : "Agent"
+      const variant = typeof body?.variant === "string" ? body.variant : undefined
+      const persist = typeof body?.sessionID === "string"
+        ? yield* createCodeGoblinImageMessages({
+            session,
+            sessionStatus,
+            sessionID: SessionID.make(body.sessionID),
+            messageID: typeof body?.messageID === "string" ? MessageID.make(body.messageID) : undefined,
+            agent,
+            providerID: requestProvider ?? "codegoblin",
+            modelID: requestModel ?? "image",
+            variant,
+            routeDirectory: route.directory,
+            input: commandInput ?? prompt,
+            inputImages,
+          })
+        : undefined
 
-      return HttpServerResponse.jsonUnsafe(result, { status: result.ok ? 200 : result.requiresImageModel ? 409 : 400 })
-    }),
-  ),
+      const result = yield* Effect.promise(async () => {
+        try {
+          return commandInput
+            ? await CodeGoblinImageCommand.runSlash({
+                input: commandInput,
+                cwd: route.directory,
+                provider: requestProvider,
+                model: requestModel,
+                inputImages,
+                requireImageModel: body?.requireImageModel !== false,
+              })
+            : await CodeGoblinImageCommand.generate({
+                prompt,
+                cwd: route.directory,
+                output: typeof body?.output === "string" ? body.output : undefined,
+                provider: requestProvider,
+                model: requestModel,
+                keyFile: typeof body?.keyFile === "string" ? body.keyFile : undefined,
+                inputImages,
+                requireImageModel: body?.requireImageModel !== false,
+              })
+        } catch (error) {
+          return {
+            ok: false,
+            message: error instanceof Error ? error.message : "CodeGoblin image generation failed.",
+          }
+        }
+      })
+
+      if (persist) {
+        yield* finishCodeGoblinImageMessages({ session, sessionStatus, persist, result })
+      }
+
+      return HttpServerResponse.jsonUnsafe(
+        persist ? { ...result, sessionID: persist.sessionID } : result,
+        { status: result.ok ? 200 : result.requiresImageModel ? 409 : 400 },
+      )
+      }),
+    )
+  }),
 )
+
+function createCodeGoblinImageMessages(input: {
+  session: Session.Interface
+  sessionStatus: SessionStatus.Interface
+  sessionID: SessionID
+  messageID?: MessageID
+  agent: string
+  providerID: string
+  modelID: string
+  variant?: string
+  routeDirectory: string
+  input: string
+  inputImages: ImageInput[]
+}) {
+  return Effect.gen(function* () {
+    const userMessageID = input.messageID ?? MessageID.ascending()
+    const assistantMessageID = MessageID.ascending()
+    const assistantPartID = PartID.ascending()
+    const now = Date.now()
+    yield* input.sessionStatus.set(input.sessionID, { type: "busy" })
+    yield* input.session.updateMessage({
+      id: userMessageID,
+      role: "user",
+      sessionID: input.sessionID,
+      time: { created: now },
+      agent: input.agent,
+      model: {
+        providerID: input.providerID,
+        modelID: input.modelID,
+        variant: input.variant,
+      },
+    } as MessageV2.User)
+    yield* input.session.updatePart({
+      id: PartID.ascending(),
+      sessionID: input.sessionID,
+      messageID: userMessageID,
+      type: "text",
+      text: input.input,
+      metadata: {
+        codegoblin: {
+          kind: "image-request",
+        },
+      },
+    } as MessageV2.TextPart)
+    for (const image of input.inputImages) {
+      if (!image.dataUrl) continue
+      yield* input.session.updatePart({
+        id: PartID.ascending(),
+        sessionID: input.sessionID,
+        messageID: userMessageID,
+        type: "file",
+        mime: image.mime ?? "image/png",
+        filename: image.filename,
+        url: image.dataUrl,
+      } as MessageV2.FilePart)
+    }
+    yield* input.session.updateMessage({
+      id: assistantMessageID,
+      parentID: userMessageID,
+      role: "assistant",
+      mode: input.agent,
+      agent: input.agent,
+      variant: input.variant,
+      path: { cwd: input.routeDirectory, root: input.routeDirectory },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      modelID: input.modelID,
+      providerID: input.providerID,
+      time: { created: Date.now() },
+      sessionID: input.sessionID,
+    } as MessageV2.Assistant)
+    yield* input.session.updatePart({
+      id: assistantPartID,
+      sessionID: input.sessionID,
+      messageID: assistantMessageID,
+      type: "text",
+      text: `CodeGoblin is generating an image with ${input.providerID}/${input.modelID}...`,
+      metadata: {
+        codegoblin: {
+          kind: "image-progress",
+        },
+      },
+    } as MessageV2.TextPart)
+    return {
+      sessionID: input.sessionID,
+      userMessageID,
+      assistantMessageID,
+      assistantPartID,
+      agent: input.agent,
+      providerID: input.providerID,
+      modelID: input.modelID,
+      variant: input.variant,
+      routeDirectory: input.routeDirectory,
+    } satisfies CodeGoblinImagePersist
+  })
+}
+
+function finishCodeGoblinImageMessages(input: {
+  session: Session.Interface
+  sessionStatus: SessionStatus.Interface
+  persist: CodeGoblinImagePersist
+  result: Awaited<ReturnType<typeof CodeGoblinImageCommand.generate>>
+}) {
+  return Effect.gen(function* () {
+    const providerID = input.result.provider ?? input.persist.providerID
+    const modelID = input.result.model ?? input.persist.modelID
+    const text = input.result.ok
+      ? [
+          `Image generated with ${providerID}/${modelID}.`,
+          input.result.output ? `Saved to ${input.result.output}.` : undefined,
+          input.result.cost !== undefined ? `Estimated spend: $${input.result.cost.toFixed(4)}.` : undefined,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : `Image generation failed with ${providerID}/${modelID}.\n${input.result.message}`
+
+    yield* input.session.updatePart({
+      id: input.persist.assistantPartID,
+      sessionID: input.persist.sessionID,
+      messageID: input.persist.assistantMessageID,
+      type: "text",
+      text,
+      metadata: {
+        codegoblin: {
+          kind: input.result.ok ? "image-result" : "image-error",
+          output: input.result.output,
+          provider: providerID,
+          model: modelID,
+        },
+      },
+    } as MessageV2.TextPart)
+    yield* input.session.updateMessage({
+      id: input.persist.assistantMessageID,
+      parentID: input.persist.userMessageID,
+      role: "assistant",
+      mode: input.persist.agent,
+      agent: input.persist.agent,
+      variant: input.persist.variant,
+      path: { cwd: input.persist.routeDirectory, root: input.persist.routeDirectory },
+      cost: input.result.cost ?? 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      modelID,
+      providerID,
+      time: { created: Date.now(), completed: Date.now() },
+      sessionID: input.persist.sessionID,
+    } as MessageV2.Assistant)
+    yield* input.sessionStatus.set(input.persist.sessionID, { type: "idle" })
+  })
+}
 
 const rawInstanceRoutes = Layer.mergeAll(ptyConnectRoute, codeGoblinImageRoute).pipe(Layer.provide(instanceRouterLayer))
 const instanceRoutes = Layer.mergeAll(rawInstanceRoutes, instanceApiRoutes).pipe(

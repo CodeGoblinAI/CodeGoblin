@@ -95,6 +95,21 @@ const money = new Intl.NumberFormat("en-US", {
 
 const DRAFT_RETENTION_MIN_CHARS = 20
 
+function displayAgentName(name: string) {
+  return name.toLowerCase() === "build" ? "Agent" : Locale.titlecase(name)
+}
+
+function configuredTokenHoard() {
+  const raw =
+    process.env.CODEGOBLIN_TOKEN_HOARD_USD ??
+    process.env.CODEGOBLIN_DEEPSEEK_BALANCE_USD ??
+    process.env.DEEPSEEK_BALANCE_USD
+  if (!raw) return
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value < 0) return
+  return value
+}
+
 function randomIndex(count: number) {
   if (count <= 0) return 0
   return Math.floor(Math.random() * count)
@@ -350,6 +365,13 @@ export function Prompt(props: PromptProps) {
       context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
       cost: cost > 0 ? money.format(cost) : undefined,
     }
+  })
+
+  const tokenHoard = createMemo(() => {
+    const configured = configuredTokenHoard()
+    const spent = props.sessionID ? (sync.session.get(props.sessionID)?.cost ?? 0) : 0
+    if (configured !== undefined) return `hoard ${money.format(Math.max(0, configured - spent))} left`
+    return "hoard local"
   })
 
   const [store, setStore] = createStore<{
@@ -1017,6 +1039,73 @@ export function Prompt(props: PromptProps) {
       }))
   }
 
+  async function ensureSessionForImage(agent: { name: string }, selectedModel: { providerID: string; modelID: string }, variant?: string) {
+    if (props.sessionID) return props.sessionID
+    const workspace = workspaceSelection()
+    const workspaceID = iife(() => {
+      if (!workspace) return undefined
+      if (workspace.type === "none") return undefined
+      if (workspace.type === "existing") return workspace.workspaceID
+      return undefined
+    })
+    const res = await sdk.client.session.create({
+      workspace: workspaceID,
+      agent: agent.name,
+      model: {
+        providerID: selectedModel.providerID,
+        id: selectedModel.modelID,
+        variant,
+      },
+    })
+    if (res.error || !res.data) {
+      toast.show({
+        message: "Creating a session for image generation failed.",
+        variant: "error",
+      })
+      return
+    }
+    setTimeout(() => {
+      route.navigate({
+        type: "session",
+        sessionID: res.data.id,
+      })
+    }, 50)
+    return res.data.id
+  }
+
+  async function postCodeGoblinImage(body: Record<string, unknown>) {
+    const response = await sdk.fetch(`${sdk.url}/codegoblin/image`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-opencode-directory": project.instance.directory() || process.cwd(),
+      },
+      body: JSON.stringify(body),
+    })
+    const result = (await response.json().catch(() => undefined)) as
+      | { ok?: boolean; message?: string; requiresImageModel?: boolean }
+      | undefined
+    if (!response.ok || !result?.ok) {
+      throw new Error(result?.message ?? "CodeGoblin image command failed.")
+    }
+    return result
+  }
+
+  function finishLocalSubmit(currentMode: "normal" | "shell") {
+    history.append({
+      ...store.prompt,
+      mode: currentMode,
+    })
+    input.extmarks.clear()
+    setStore("prompt", {
+      input: "",
+      parts: [],
+    })
+    setStore("extmarkToPartIndex", new Map())
+    props.onSubmit?.()
+    input.clear()
+  }
+
   async function submitInner() {
     setWarpNotice(undefined)
 
@@ -1035,52 +1124,61 @@ export function Prompt(props: PromptProps) {
     if (!agent) return false
     const trimmed = store.prompt.input.trim()
     const selectedModel = local.model.current()
+    const variant = local.model.variant.current()
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
       void exit()
       return true
     }
     if (store.mode !== "shell" && CodeGoblinImageCommand.isSlash(trimmed)) {
       const currentMode = store.mode
+      if (!selectedModel) {
+        void promptModelWarning()
+        return false
+      }
       try {
+        const sessionID = await ensureSessionForImage(agent, selectedModel, variant)
+        if (!sessionID) return false
         toast.show({
           variant: "info",
-          message: "CodeGoblin is checking the selected image model...",
+          message: `CodeGoblin is generating with ${selectedModel.providerID}/${selectedModel.modelID}...`,
           duration: 2500,
         })
-        const result = await CodeGoblinImageCommand.runSlash({
-          input: store.prompt.input,
-          cwd: project.instance.directory() || process.cwd(),
+        const submitted = store.prompt.input
+        const inputImages = currentImageInputs()
+        void postCodeGoblinImage({
+          sessionID,
+          agent: agent.name,
+          variant,
+          input: submitted,
           provider: selectedModel?.providerID,
           model: selectedModel?.modelID,
-          inputImages: currentImageInputs(),
+          inputImages,
           requireImageModel: true,
         })
-        toast.show({
-          variant: result.ok ? "success" : "warning",
-          message: result.message,
-          duration: result.ok ? 6000 : 9000,
-        })
-        if (result.requiresImageModel) return false
+          .then((result) => {
+            toast.show({
+              variant: "success",
+              message: result.message ?? "CodeGoblin saved the image locally.",
+              duration: 7000,
+            })
+          })
+          .catch((error) => {
+            toast.show({
+              variant: "error",
+              message: error instanceof Error ? error.message : "CodeGoblin image command failed.",
+              duration: 9000,
+            })
+          })
+        finishLocalSubmit(currentMode)
+        return true
       } catch (error) {
         toast.show({
           variant: "error",
           message: error instanceof Error ? error.message : "CodeGoblin image command failed.",
           duration: 9000,
         })
+        return false
       }
-      history.append({
-        ...store.prompt,
-        mode: currentMode,
-      })
-      input.extmarks.clear()
-      setStore("prompt", {
-        input: "",
-        parts: [],
-      })
-      setStore("extmarkToPartIndex", new Map())
-      props.onSubmit?.()
-      input.clear()
-      return true
     }
     if (!selectedModel) {
       void promptModelWarning()
@@ -1088,6 +1186,23 @@ export function Prompt(props: PromptProps) {
     }
     const selectedProvider = sync.data.provider.find((item) => item.id === selectedModel.providerID)
     const selectedModelInfo = selectedProvider?.models[selectedModel.modelID]
+    if (
+      store.mode !== "shell" &&
+      CodeGoblinImageCommand.isImageModelSelection({
+        providerID: selectedModel.providerID,
+        modelID: selectedModel.modelID,
+        outputImage: selectedModelInfo?.capabilities?.output?.image,
+      }) &&
+      !CodeGoblinImageCommand.looksLikeImageIntent(trimmed)
+    ) {
+      toast.show({
+        variant: "warning",
+        message:
+          "An image model is selected, but this does not look like an image request. Use /image or include generate/draw/edit so CodeGoblin does not spend image credits by accident.",
+        duration: 9000,
+      })
+      return false
+    }
     if (
       store.mode !== "shell" &&
       CodeGoblinImageCommand.shouldRoutePromptToImage({
@@ -1099,6 +1214,8 @@ export function Prompt(props: PromptProps) {
     ) {
       const currentMode = store.mode
       try {
+        const sessionID = await ensureSessionForImage(agent, selectedModel, variant)
+        if (!sessionID) return false
         const plan = CodeGoblinImageCommand.describe({
           prompt: trimmed,
           cwd: project.instance.directory() || process.cwd(),
@@ -1110,39 +1227,40 @@ export function Prompt(props: PromptProps) {
           message: `CodeGoblin is generating with ${plan.provider}/${plan.model}...`,
           duration: 4000,
         })
-        const result = await CodeGoblinImageCommand.generate({
+        void postCodeGoblinImage({
+          sessionID,
+          agent: agent.name,
+          variant,
           prompt: trimmed,
-          cwd: project.instance.directory() || process.cwd(),
           provider: selectedModel.providerID,
           model: selectedModel.modelID,
           inputImages: currentImageInputs(),
           requireImageModel: true,
         })
-        toast.show({
-          variant: result.ok ? "success" : "warning",
-          message: result.message,
-          duration: result.ok ? 7000 : 10000,
-        })
+          .then((result) => {
+            toast.show({
+              variant: "success",
+              message: result.message ?? "CodeGoblin saved the image locally.",
+              duration: 7000,
+            })
+          })
+          .catch((error) => {
+            toast.show({
+              variant: "error",
+              message: error instanceof Error ? error.message : "CodeGoblin image command failed.",
+              duration: 9000,
+            })
+          })
+        finishLocalSubmit(currentMode)
+        return true
       } catch (error) {
         toast.show({
           variant: "error",
           message: error instanceof Error ? error.message : "CodeGoblin image command failed.",
           duration: 9000,
         })
+        return false
       }
-      history.append({
-        ...store.prompt,
-        mode: currentMode,
-      })
-      input.extmarks.clear()
-      setStore("prompt", {
-        input: "",
-        parts: [],
-      })
-      setStore("extmarkToPartIndex", new Map())
-      props.onSubmit?.()
-      input.clear()
-      return true
     }
     if (store.mode !== "shell" && CodeGoblinImageCommand.looksLikeImageIntent(trimmed)) {
       toast.show({
@@ -1178,7 +1296,6 @@ export function Prompt(props: PromptProps) {
       return false
     }
 
-    const variant = local.model.variant.current()
     let sessionID = props.sessionID
     if (sessionID == null) {
       const workspace = workspaceSelection()
@@ -1682,7 +1799,7 @@ export function Prompt(props: PromptProps) {
                   {(agent) => (
                     <>
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
-                        {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
+                        {store.mode === "shell" ? "Shell" : displayAgentName(agent().name)}
                       </text>
                       <Show when={store.mode === "normal"}>
                         <box flexDirection="row" gap={1}>
@@ -1871,12 +1988,10 @@ export function Prompt(props: PromptProps) {
               <Switch>
                 <Match when={store.mode === "normal"}>
                   <Switch>
-                    <Match when={usage()}>
-                      {(item) => (
-                        <text fg={theme.textMuted} wrapMode="none">
-                          {[item().context, item().cost].filter(Boolean).join(" · ")}
-                        </text>
-                      )}
+                    <Match when={usage() || tokenHoard()}>
+                      <text fg={theme.textMuted} wrapMode="none">
+                        {[usage()?.context, usage()?.cost, tokenHoard()].filter(Boolean).join(" · ")}
+                      </text>
                     </Match>
                     <Match when={true}>
                       <text fg={theme.text}>

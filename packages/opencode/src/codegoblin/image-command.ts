@@ -94,7 +94,7 @@ async function generateImage(input: GenerateInput): Promise<ImageCommandResult> 
   const output = safeOutputPath(root, input.output)
   const plan = planImage(input, output)
 
-  if (input.requireImageModel && !plan.supported) {
+  if ((input.requireImageModel || input.provider || input.model) && !plan.supported) {
     return {
       ok: false,
       requiresImageModel: true,
@@ -697,7 +697,7 @@ function shouldRoutePromptToImage(input: {
   modelID?: string
   outputImage?: boolean
 }) {
-  return isImageModelSelection(input)
+  return isImageModelSelection(input) && looksLikeImageIntent(input.prompt)
 }
 
 function looksLikeImageIntent(prompt: string) {

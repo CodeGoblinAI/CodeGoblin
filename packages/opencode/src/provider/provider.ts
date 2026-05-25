@@ -1289,6 +1289,10 @@ export const layer = Layer.effect(
           return true
         }
 
+        if (isProviderAllowed(codeGoblin.id)) {
+          mergeProvider(codeGoblin.id, { source: "custom" })
+        }
+
         for (const hook of plugins) {
           const p = hook.provider
           const models = p?.models

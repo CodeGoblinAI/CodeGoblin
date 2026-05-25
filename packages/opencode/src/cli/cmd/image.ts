@@ -45,7 +45,7 @@ export const ImageCommand = {
         type: "string",
       })
       .option("dry-run", {
-        describe: "validate path/model setup without calling Gemini",
+        describe: "validate path/model setup without calling the provider",
         type: "boolean",
       }),
   handler: async (args) => {
@@ -61,6 +61,13 @@ export const ImageCommand = {
       dryRun: args.dryRun,
       inputImages,
     })
+    if ((args.provider || args.model) && !plan.supported) {
+      console.error(
+        "Select an image-capable model, such as google/gemini-2.5-flash-image, xai/grok-imagine-image-quality, openai/gpt-image-1, or qwen/wan2.7-image-pro.",
+      )
+      process.exitCode = 1
+      return
+    }
     const provider = plan.provider ?? "google"
     const model = plan.model ?? "gemini-2.5-flash-image"
     const output = plan.output ?? args.output ?? "codegoblin-output/images"

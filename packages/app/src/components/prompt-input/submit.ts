@@ -61,11 +61,11 @@ const imageModelSelected = (model: { id: string; provider: { id: string }; capab
   if (model.capabilities?.output?.image) return true
   const raw = `${model.provider.id}/${model.id}`.toLowerCase()
   return (
-    raw.includes("gemini") ||
     raw.includes("flash-image") ||
+    raw.includes("imagen") ||
     raw.includes("nano-banana") ||
     raw.includes("nanobanana") ||
-    raw.includes("grok-imagine") ||
+    raw.includes("grok-imagine-image") ||
     raw.includes("gpt-image") ||
     raw.includes("dall-e") ||
     raw.includes("qwen-image") ||
@@ -339,72 +339,19 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       const isImageSlash = trimmed.startsWith("/image")
       const selectedImageModel = imageModelSelected(currentModel)
       const looksLikeImageRequest = imageIntent(trimmed)
-      if (isImageSlash || selectedImageModel || looksLikeImageRequest) {
-        if (!isImageSlash && !selectedImageModel) {
-          showToast({
-            title: "Select an image model",
-            description:
-              "That looks like an image request. Pick an image model in /models first; CodeGoblin did not send it to the text model.",
-          })
-          return
-        }
-
-        const activeServer = server.current
-        const headers: Record<string, string> = {
-          "content-type": "application/json",
-          "x-opencode-directory": sdk.directory,
-        }
-        if (activeServer?.http.password) {
-          headers.authorization = `Basic ${authTokenFromCredentials({
-            username: activeServer.http.username,
-            password: activeServer.http.password,
-          })}`
-        }
-
+      if (!isImageSlash && looksLikeImageRequest && !selectedImageModel) {
         showToast({
-          title: "Generating image",
-          description: `CodeGoblin is using ${currentModel.provider.id}/${currentModel.id}.`,
+          title: "Select an image model",
+          description:
+            "That looks like an image request. Pick an image model in /models first; CodeGoblin did not send it to the text model.",
         })
-
-        const response = await fetch(`${sdk.url}/codegoblin/image`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            input: isImageSlash ? trimmed : undefined,
-            prompt: isImageSlash ? undefined : trimmed,
-            provider: currentModel.provider.id,
-            model: currentModel.id,
-            inputImages: images.map((attachment) => ({
-              dataUrl: attachment.dataUrl,
-              mime: attachment.mime,
-              filename: attachment.filename,
-            })),
-            requireImageModel: true,
-          }),
-        }).catch((err) => {
-          throw new Error(errorMessage(err))
-        })
-
-        const result = (await response.json().catch(() => undefined)) as
-          | { ok?: boolean; message?: string; requiresImageModel?: boolean }
-          | undefined
-        if (!response.ok || !result?.ok) {
-          showToast({
-            title: result?.requiresImageModel ? "Select an image model" : "Image generation failed",
-            description: result?.message ?? language.t("common.requestFailed"),
-          })
-          return
-        }
-
-        input.addToHistory(currentPrompt, mode)
-        input.resetHistoryNavigation()
-        prompt.reset()
-        input.setMode("normal")
-        input.setPopover(null)
-        input.onSubmit?.()
+        return
+      }
+      if (!isImageSlash && selectedImageModel && !looksLikeImageRequest) {
         showToast({
-          title: "Image generated",
-          description: result.message ?? "CodeGoblin saved the image locally.",
+          title: "Confirm image generation",
+          description:
+            "An image model is selected, but this does not look like an image request. Use /image or include generate/draw/edit so CodeGoblin does not spend image credits by accident.",
         })
         return
       }
@@ -532,6 +479,76 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
 
     input.onSubmit?.()
+
+    if (mode === "normal") {
+      const trimmed = text.trimStart()
+      const isImageSlash = trimmed.startsWith("/image")
+      const selectedImageModel = imageModelSelected(currentModel)
+      const looksLikeImageRequest = imageIntent(trimmed)
+      if (isImageSlash || (selectedImageModel && looksLikeImageRequest)) {
+        const activeServer = server.current
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+          "x-opencode-directory": sessionDirectory,
+        }
+        if (activeServer?.http.password) {
+          headers.authorization = `Basic ${authTokenFromCredentials({
+            username: activeServer.http.username,
+            password: activeServer.http.password,
+          })}`
+        }
+
+        clearInput()
+        clearContext()
+        showToast({
+          title: "Image generation started",
+          description: `CodeGoblin is using ${currentModel.provider.id}/${currentModel.id}. The result will stay in this chat.`,
+        })
+
+        fetch(`${sdk.url}/codegoblin/image`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            sessionID: session.id,
+            agent,
+            variant,
+            input: isImageSlash ? trimmed : undefined,
+            prompt: isImageSlash ? undefined : trimmed,
+            provider: currentModel.provider.id,
+            model: currentModel.id,
+            inputImages: images.map((attachment) => ({
+              dataUrl: attachment.dataUrl,
+              mime: attachment.mime,
+              filename: attachment.filename,
+            })),
+            requireImageModel: true,
+          }),
+        })
+          .then(async (response) => {
+            const result = (await response.json().catch(() => undefined)) as
+              | { ok?: boolean; message?: string; requiresImageModel?: boolean }
+              | undefined
+            if (!response.ok || !result?.ok) {
+              showToast({
+                title: result?.requiresImageModel ? "Select an image model" : "Image generation failed",
+                description: result?.message ?? language.t("common.requestFailed"),
+              })
+              return
+            }
+            showToast({
+              title: "Image generated",
+              description: result.message ?? "CodeGoblin saved the image locally.",
+            })
+          })
+          .catch((err) => {
+            showToast({
+              title: "Image generation failed",
+              description: errorMessage(err),
+            })
+          })
+        return
+      }
+    }
 
     if (mode === "shell") {
       clearInput()
