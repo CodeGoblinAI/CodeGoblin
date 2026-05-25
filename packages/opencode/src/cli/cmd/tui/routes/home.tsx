@@ -28,6 +28,8 @@ function TuiGoblinHeader(props: { theme: any }) {
     name: string
     brandPanelWidth: number
     rows: TextChunk[][]
+    gap?: number
+    mascotSide?: "left" | "right"
     mascotGrid?: string[]
   }
 
@@ -73,6 +75,17 @@ function TuiGoblinHeader(props: { theme: any }) {
     ".....GGGGGG.....",
   ]
 
+  const miniMascotGrid = [
+    "....GGGG....",
+    "..GGGGGGGG..",
+    "G.GGGGGGGG.G",
+    ".GGGGGGGGGG.",
+    "..GGBBGGBG..",
+    "..GGBBGGBG..",
+    "...GGGGGG...",
+    "....GGGG....",
+  ]
+
   const buildFontRows = (word: string, font: Record<string, string[]>, gap = 1, shifts: number[] = []) => {
     const letters = [...word].map((char) => font[char] ?? [])
     const height = letters[0]?.length ?? 0
@@ -92,6 +105,18 @@ function TuiGoblinHeader(props: { theme: any }) {
     )
   }
 
+  const splitFontRows = (topWord: string, bottomWord: string, font: Record<string, string[]>, gap = 1, spacer = 0) => [
+    ...buildFontRows(topWord, font, gap),
+    ...Array.from({ length: spacer }, () => ""),
+    ...buildFontRows(bottomWord, font, gap),
+  ]
+
+  const splitPixelRowsFor = (topWord: string, bottomWord: string, glyphs: Record<string, number[][]>, gap = 1, pixel = "█", spacer = 0) => [
+    ...buildPixelRows(topWord, glyphs, gap, pixel),
+    ...Array.from({ length: spacer }, () => ""),
+    ...buildPixelRows(bottomWord, glyphs, gap, pixel),
+  ]
+
   const makeArtRows = (lines: string[], width: number) => {
     const rows = Array.from({ length: 8 }, () => [] as TextChunk[])
     const start = Math.max(0, Math.floor((8 - lines.length) / 2))
@@ -101,12 +126,22 @@ function TuiGoblinHeader(props: { theme: any }) {
     return rows
   }
 
-  const makeVariant = (id: string, name: string, lines: string[], mascotGrid = baseMascotGrid, minWidth = 60): HeaderVariant => {
+  const makeVariant = (
+    id: string,
+    name: string,
+    lines: string[],
+    mascotGrid = baseMascotGrid,
+    minWidth = 60,
+    gap = 4,
+    mascotSide: "left" | "right" = "right",
+  ): HeaderVariant => {
     const brandPanelWidth = Math.max(minWidth, ...lines.map((line) => line.length))
     return {
       id,
       name,
       brandPanelWidth,
+      gap,
+      mascotSide,
       mascotGrid,
       rows: makeArtRows(lines, brandPanelWidth),
     }
@@ -208,28 +243,45 @@ function TuiGoblinHeader(props: { theme: any }) {
     N: [[1, 0, 0, 1], [1, 1, 0, 1], [1, 0, 1, 1], [1, 0, 0, 1]],
   }
 
-  const splitPixelRows = [
-    ...buildPixelRows("CODE", pixelFourGlyphs, 2),
-    ...buildPixelRows("GOBLIN", pixelFourGlyphs, 2),
-  ]
+  const pixelThreeGlyphs = {
+    C: [[0, 1, 1, 1], [1, 0, 0, 0], [0, 1, 1, 1]],
+    O: [[0, 1, 1, 0], [1, 0, 0, 1], [0, 1, 1, 0]],
+    D: [[1, 1, 1, 0], [1, 0, 0, 1], [1, 1, 1, 0]],
+    E: [[1, 1, 1, 1], [1, 1, 0, 0], [1, 1, 1, 1]],
+    G: [[0, 1, 1, 1], [1, 0, 1, 1], [0, 1, 1, 0]],
+    B: [[1, 1, 1, 0], [1, 1, 1, 0], [1, 1, 1, 0]],
+    L: [[1, 0, 0, 0], [1, 0, 0, 0], [1, 1, 1, 1]],
+    I: [[1, 1, 1], [0, 1, 0], [1, 1, 1]],
+    N: [[1, 0, 1], [1, 1, 1], [1, 0, 1]],
+  }
 
   const headerVariants: HeaderVariant[] = [
-    makeVariant("01", "5-row solid block, 1-space gaps", buildFontRows("CODEGOBLIN", solidFiveFont, 1), baseMascotGrid),
-    makeVariant("02", "5-row solid block, 2-space gaps", buildFontRows("CODEGOBLIN", solidFiveFont, 2), baseMascotGrid),
-    makeVariant("03", "3-row half-block arcade", buildFontRows("CODEGOBLIN", halfBlockThreeFont, 2), baseMascotGrid),
-    makeVariant("04", "5-row half-block arcade", buildFontRows("CODEGOBLIN", halfBlockFiveFont, 2), cheekMascotGrid),
-    makeVariant("05", "4-row compact block, wide gaps", buildFontRows("CODEGOBLIN", compactFourFont, 3), narrowMascotGrid),
-    makeVariant("06", "4-row shaded block", buildFontRows("CODEGOBLIN", shadedFourFont, 1), cheekMascotGrid),
-    makeVariant("07", "5-row dot-matrix glyphs", buildFontRows("CODEGOBLIN", dotMatrixFont, 2), baseMascotGrid),
-    makeVariant("08", "5-row slant-cancel solid", buildFontRows("CODEGOBLIN", solidFiveFont, 1, [3, 2, 1, 0, 0]), baseMascotGrid),
-    makeVariant("09", "split CODE/GOBLIN pixel blocks", splitPixelRows, narrowMascotGrid),
-    makeVariant("10", "5-row outline box glyphs", buildFontRows("CODEGOBLIN", outlineFiveFont, 1), cheekMascotGrid),
+    makeVariant("01", "compact 4-row full word, right narrow goblin", buildFontRows("CODEGOBLIN", compactFourFont, 3), narrowMascotGrid, 60, 8),
+    makeVariant("02", "compact 4-row full word, left narrow goblin", buildFontRows("CODEGOBLIN", compactFourFont, 4), narrowMascotGrid, 60, 8, "left"),
+    makeVariant("03", "compact 4-row full word, mini goblin", buildFontRows("CODEGOBLIN", compactFourFont, 5), miniMascotGrid, 60, 10),
+    makeVariant("04", "compact 4-row slant-cancel, right goblin", buildFontRows("CODEGOBLIN", compactFourFont, 3, [2, 1, 0, 0]), narrowMascotGrid, 60, 8),
+    makeVariant("05", "compact 4-row slant-cancel, left goblin", buildFontRows("CODEGOBLIN", compactFourFont, 3, [3, 2, 1, 0]), narrowMascotGrid, 60, 8, "left"),
+    makeVariant("06", "3-row half-block full word, right goblin", buildFontRows("CODEGOBLIN", halfBlockThreeFont, 3), baseMascotGrid, 60, 8),
+    makeVariant("07", "3-row half-block full word, left goblin", buildFontRows("CODEGOBLIN", halfBlockThreeFont, 3), baseMascotGrid, 60, 8, "left"),
+    makeVariant("08", "5-row solid slant-cancel, mini goblin", buildFontRows("CODEGOBLIN", solidFiveFont, 1, [4, 3, 2, 1, 0]), miniMascotGrid, 60, 8),
+    makeVariant("09", "5-row solid slant-cancel, left mini goblin", buildFontRows("CODEGOBLIN", solidFiveFont, 1, [5, 4, 2, 1, 0]), miniMascotGrid, 60, 8, "left"),
+    makeVariant("10", "4-row shaded full word, cheek goblin", buildFontRows("CODEGOBLIN", shadedFourFont, 2), cheekMascotGrid, 60, 8),
+    makeVariant("11", "split compact CODE/GOBLIN, right narrow goblin", splitFontRows("CODE", "GOBLIN", compactFourFont, 3), narrowMascotGrid, 60, 10),
+    makeVariant("12", "split compact CODE/GOBLIN, left narrow goblin", splitFontRows("CODE", "GOBLIN", compactFourFont, 4), narrowMascotGrid, 60, 10, "left"),
+    makeVariant("13", "split half-block CODE/GOBLIN, right goblin", splitFontRows("CODE", "GOBLIN", halfBlockThreeFont, 3, 1), baseMascotGrid, 60, 8),
+    makeVariant("14", "split half-block CODE/GOBLIN, left cheek goblin", splitFontRows("CODE", "GOBLIN", halfBlockThreeFont, 3, 1), cheekMascotGrid, 60, 8, "left"),
+    makeVariant("15", "split 4-row pixel CODE/GOBLIN, right mini goblin", splitPixelRowsFor("CODE", "GOBLIN", pixelFourGlyphs, 2), miniMascotGrid, 60, 10),
+    makeVariant("16", "split 4-row pixel CODE/GOBLIN, left mini goblin", splitPixelRowsFor("CODE", "GOBLIN", pixelFourGlyphs, 3), miniMascotGrid, 60, 10, "left"),
+    makeVariant("17", "split 3-row pixel CODE/GOBLIN, right narrow goblin", splitPixelRowsFor("CODE", "GOBLIN", pixelThreeGlyphs, 4, "█", 1), narrowMascotGrid, 60, 10),
+    makeVariant("18", "split 3-row pixel CODE/GOBLIN, left narrow goblin", splitPixelRowsFor("CODE", "GOBLIN", pixelThreeGlyphs, 5, "█", 1), narrowMascotGrid, 60, 10, "left"),
+    makeVariant("19", "split dot-matrix CODE/GOBLIN, cheek goblin", splitFontRows("CODE", "GOBLIN", dotMatrixFont, 4), cheekMascotGrid, 60, 8),
+    makeVariant("20", "split outline CODE/GOBLIN, mini goblin left", splitFontRows("CODE", "GOBLIN", outlineFiveFont, 1).slice(1, 9), miniMascotGrid, 60, 10, "left"),
   ]
 
   function normalizeVariantId(value: string | undefined) {
     const cleaned = value?.trim().replace(/^v/i, "")
     const numeric = Number(cleaned)
-    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 10) return String(numeric).padStart(2, "0")
+    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 20) return String(numeric).padStart(2, "0")
     return "01"
   }
 
@@ -237,9 +289,11 @@ function TuiGoblinHeader(props: { theme: any }) {
   const selectedVariant = headerVariants.find((variant) => variant.id === selectedVariantId) ?? headerVariants[0]
   const brandPanelWidth = selectedVariant.brandPanelWidth
   const mascotGrid = selectedVariant.mascotGrid ?? baseMascotGrid
+  const mascotSide = selectedVariant.mascotSide ?? "right"
+  const gap = selectedVariant.gap ?? 4
   const mascotColumns = Math.max(...mascotGrid.map((row) => row.length))
   const mascotWidth = mascotColumns * 2
-  const interiorWidth = 2 + brandPanelWidth + 4 + mascotWidth + 2
+  const interiorWidth = 2 + brandPanelWidth + gap + mascotWidth + 2
 
   function fitChunks(chunks: TextChunk[], width: number) {
     const fitted: TextChunk[] = []
@@ -326,17 +380,31 @@ function TuiGoblinHeader(props: { theme: any }) {
   
   // Rows 2-9: Word + Mascot (mascot rows 0-7)
   for (let i = 0; i < 8; i++) {
-    rows.push(
-      <box flexDirection="row">
-        {borderLeft}
-        <text>  </text>
-        {renderBrandRow(i)}
-        <text>    </text>
-        {renderMascotRow(i)}
-        <text>  </text>
-        {borderRight}
-      </box>
-    )
+    if (mascotSide === "left") {
+      rows.push(
+        <box flexDirection="row">
+          {borderLeft}
+          <text>  </text>
+          {renderMascotRow(i)}
+          <text>{" ".repeat(gap)}</text>
+          {renderBrandRow(i)}
+          <text>  </text>
+          {borderRight}
+        </box>,
+      )
+    } else {
+      rows.push(
+        <box flexDirection="row">
+          {borderLeft}
+          <text>  </text>
+          {renderBrandRow(i)}
+          <text>{" ".repeat(gap)}</text>
+          {renderMascotRow(i)}
+          <text>  </text>
+          {borderRight}
+        </box>,
+      )
+    }
   }
   
   // Row 10: Bottom border
