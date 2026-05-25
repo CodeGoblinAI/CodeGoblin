@@ -611,23 +611,29 @@ function TuiGoblinRunner(props: { theme: any }) {
   const eyeColor = props.theme.backgroundElement
   const [tick, setTick] = createSignal(0)
 
-  const runnerFrames = [
+  const rightRunnerFrames = [
     [".G..G.", "GGGGGG", "GGBBGG", ".GPPG.", "G....G"],
     [".G..G.", "GGGGGG", "GGBBGG", ".GPPG.", ".GGGG."],
     [".G..G.", "GGGGGG", "GGBBGG", ".GPPG.", ".G..G."],
     [".G..G.", "GGGGGG", "GGBBGG", ".GPPG.", "G.G..G"],
   ]
+  const leftRunnerFrames = rightRunnerFrames.map((frame) => frame.map((runnerRow) => [...runnerRow].reverse().join("")))
 
-  const spriteHeight = runnerFrames[0]?.length ?? 0
-  const spriteWidth = Math.max(...runnerFrames.flatMap((frame) => frame.map((runnerRow) => runnerRow.length)))
+  const spriteHeight = rightRunnerFrames[0]?.length ?? 0
+  const spriteWidth = Math.max(...rightRunnerFrames.flatMap((frame) => frame.map((runnerRow) => runnerRow.length)))
   const laneCells = () => {
     const availableChars = Math.max(12, dimensions().width - 8)
     return Math.max(spriteWidth + 4, Math.min(28, Math.floor(availableChars / 2)))
   }
   const laneWidth = () => laneCells() * 2
+  const travelSpan = () => Math.max(0, laneCells() - spriteWidth)
+  const cycleLength = () => Math.max(1, travelSpan() * 2)
+  const movingRight = () => travelSpan() === 0 || (tick() % cycleLength()) < travelSpan()
   const spriteOffset = () => {
-    const travel = laneCells() + spriteWidth + 2
-    return (tick() % travel) - spriteWidth
+    const span = travelSpan()
+    if (span <= 0) return 0
+    const phase = tick() % (span * 2)
+    return phase <= span ? phase : span * 2 - phase
   }
 
   let timer: ReturnType<typeof setInterval> | undefined
@@ -642,9 +648,16 @@ function TuiGoblinRunner(props: { theme: any }) {
   })
 
   function renderRunnerRow(rowIndex: number) {
-    const frame = runnerFrames[tick() % runnerFrames.length] ?? runnerFrames[0] ?? []
+    const frameSet = movingRight() ? rightRunnerFrames : leftRunnerFrames
+    const frame = frameSet[tick() % frameSet.length] ?? frameSet[0] ?? []
     const spriteRow = frame[rowIndex] ?? "".padEnd(spriteWidth, ".")
     const offset = spriteOffset()
+    const trailStart = movingRight()
+      ? Math.max(0, offset - 2)
+      : Math.min(laneCells(), offset + spriteWidth)
+    const trailEnd = movingRight()
+      ? Math.max(0, offset)
+      : Math.min(laneCells(), offset + spriteWidth + 2)
     const cells: JSX.Element[] = []
 
     for (let cell = 0; cell < laneCells(); cell++) {
@@ -657,7 +670,7 @@ function TuiGoblinRunner(props: { theme: any }) {
         cells.push(<text fg={vestColor}>██</text>)
       } else if (char === "B") {
         cells.push(<text fg={eyeColor}>██</text>)
-      } else if (rowIndex === spriteHeight - 1 && cell >= Math.max(0, offset - 2) && cell < Math.max(0, offset)) {
+      } else if (rowIndex === spriteHeight - 1 && cell >= trailStart && cell < trailEnd) {
         cells.push(<text fg={shadowColor}>░░</text>)
       } else {
         cells.push(<text>  </text>)
@@ -677,7 +690,7 @@ function TuiGoblinRunner(props: { theme: any }) {
       <box flexDirection="row" width={laneWidth()}>
         <text fg={shadowColor}>{"▁".repeat(laneWidth())}</text>
       </box>
-      <text fg={props.theme.textMuted}>token goblin jogging receipts</text>
+      <text fg={props.theme.textMuted}>tiny goblin pacing test</text>
     </box>
   )
 }
