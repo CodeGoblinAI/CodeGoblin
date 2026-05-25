@@ -612,10 +612,10 @@ function TuiGoblinRunner(props: { theme: any }) {
   const [tick, setTick] = createSignal(0)
 
   const rightRunnerFrames = [
-    ["..G..G..", ".GGGGGG.", "GGGBBGGG", ".GGGGGG.", "..GPPGG.", ".GGPPG..", ".G.G.G..", "G...G.G."],
-    ["..G..G..", ".GGGGGG.", "GGGBBGGG", ".GGGGGG.", "..GGPPG.", "..GPPGG.", "...GG...", "..G..G.."],
-    ["..G..G..", ".GGGGGG.", "GGGBBGGG", ".GGGGGG.", ".GGPPG..", "...GPPGG", "..G.G.G.", ".G.G...G"],
-    ["..G..G..", ".GGGGGG.", "GGGBBGGG", ".GGGGGG.", "..GPPG..", ".GGPPGG.", "..GGGG..", ".G....G."],
+    ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", "G.GGGGGG.G", "..GPPPPGG.", ".GS.G..G.."],
+    ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", ".GGGGGGGG.", "..GGPPGG..", "...G..G..."],
+    ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", "G.GGGGGG.G", ".GGPPPPG..", "..G..G.SG."],
+    ["..S....S..", ".SGGGGGGS.", "SGGGBBGGGS", ".GGGGGGGG.", "..GPPPGG..", ".G.SG..G.."],
   ]
   const leftRunnerFrames = rightRunnerFrames.map((frame) => frame.map((runnerRow) => [...runnerRow].reverse().join("")))
 
@@ -666,6 +666,8 @@ function TuiGoblinRunner(props: { theme: any }) {
 
       if (char === "G") {
         cells.push(<text fg={skinColor}>██</text>)
+      } else if (char === "S") {
+        cells.push(<text fg={shadowColor}>██</text>)
       } else if (char === "P") {
         cells.push(<text fg={vestColor}>██</text>)
       } else if (char === "B") {
@@ -681,7 +683,7 @@ function TuiGoblinRunner(props: { theme: any }) {
   }
 
   return (
-    <box flexDirection="column" alignItems="center" width="100%" paddingTop={1} paddingBottom={1}>
+    <box flexDirection="column" alignItems="center" width="100%" flexShrink={0}>
       {Array.from({ length: spriteHeight }, (_, rowIndex) => (
         <box flexDirection="row" width={laneWidth()}>
           {renderRunnerRow(rowIndex)}
@@ -690,7 +692,6 @@ function TuiGoblinRunner(props: { theme: any }) {
       <box flexDirection="row" width={laneWidth()}>
         <text fg={shadowColor}>{"▁".repeat(laneWidth())}</text>
       </box>
-      <text fg={props.theme.textMuted}>tiny goblin runner test</text>
     </box>
   )
 }

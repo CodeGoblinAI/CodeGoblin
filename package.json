@@ -17,6 +17,7 @@
     "dev:header:08": "bun run script/codegoblin-header-variant.ts 08",
     "dev:header:09": "bun run script/codegoblin-header-variant.ts 09",
     "dev:header:09:runner": "bun run script/codegoblin-header-variant.ts 09 --runner",
+    "dev:runner": "bun run script/codegoblin-header-variant.ts 08 --runner",
     "dev:header:10": "bun run script/codegoblin-header-variant.ts 10",
     "dev:header:11": "bun run script/codegoblin-header-variant.ts 11",
     "dev:header:12": "bun run script/codegoblin-header-variant.ts 12",
