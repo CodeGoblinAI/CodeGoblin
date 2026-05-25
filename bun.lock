@@ -403,6 +403,8 @@
       "version": "1.15.10",
       "bin": {
         "opencode": "./bin/opencode",
+        "codegoblin": "./bin/codegoblin",
+        "cg": "./bin/cg",
       },
       "dependencies": {
         "@actions/core": "1.11.1",
