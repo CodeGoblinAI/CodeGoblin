@@ -7,7 +7,7 @@ import { Process } from "@/util/process"
 
 export const PrCommand = effectCmd({
   command: "pr <number>",
-  describe: "fetch and checkout a GitHub PR branch, then run opencode",
+  describe: "fetch and checkout a GitHub PR branch, then run CodeGoblin",
   builder: (yargs) =>
     yargs.positional("number", {
       type: "number",
@@ -76,7 +76,7 @@ export const PrCommand = effectCmd({
         const sessionMatch = prInfo.body.match(/https:\/\/opncd\.ai\/s\/([a-zA-Z0-9_-]+)/)
         if (sessionMatch) {
           const sessionUrl = sessionMatch[0]
-          UI.println(`Found opencode session: ${sessionUrl}`)
+          UI.println(`Found upstream OpenCode session: ${sessionUrl}`)
           UI.println(`Importing session...`)
 
           const importResult = yield* Effect.promise(() =>
@@ -95,13 +95,13 @@ export const PrCommand = effectCmd({
 
     UI.println(`Successfully checked out PR #${prNumber} as branch '${localBranchName}'`)
     UI.println()
-    UI.println("Starting opencode...")
+    UI.println("Starting CodeGoblin...")
     UI.println()
 
-    const opencodeArgs = sessionId ? ["-s", sessionId] : []
+    const codegoblinArgs = sessionId ? ["-s", sessionId] : []
     const code = yield* Effect.promise(
       () =>
-        Process.spawn(["opencode", ...opencodeArgs], {
+        Process.spawn(["codegoblin", ...codegoblinArgs], {
           stdin: "inherit",
           stdout: "inherit",
           stderr: "inherit",
@@ -110,6 +110,6 @@ export const PrCommand = effectCmd({
     )
     // Match legacy throw semantics — propagate as a defect so the top-level
     // index.ts catch handles it identically (exit 1, "Unexpected error" banner).
-    if (code !== 0) return yield* Effect.die(new Error(`opencode exited with code ${code}`))
+    if (code !== 0) return yield* Effect.die(new Error(`CodeGoblin exited with code ${code}`))
   }),
 })

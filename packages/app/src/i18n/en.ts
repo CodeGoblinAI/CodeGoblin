@@ -101,9 +101,9 @@ export const dict = {
   "dialog.provider.group.popular": "Popular",
   "dialog.provider.group.other": "Other",
   "dialog.provider.tag.recommended": "Recommended",
-  "dialog.provider.opencode.note": "Curated models including Claude, GPT, Gemini and more",
-  "dialog.provider.opencode.tagline": "Reliable optimized models",
-  "dialog.provider.opencodeGo.tagline": "Low cost subscription for everyone",
+  "dialog.provider.opencode.note": "Upstream hosted models including Claude, GPT, Gemini and more",
+  "dialog.provider.opencode.tagline": "Upstream hosted models",
+  "dialog.provider.opencodeGo.tagline": "Upstream low cost subscription",
   "dialog.provider.anthropic.note": "Direct access to Claude models, including Pro and Max",
   "dialog.provider.copilot.note": "AI models for coding assistance via GitHub Copilot",
   "dialog.provider.openai.note": "GPT models for fast, capable general AI tasks",
@@ -136,9 +136,9 @@ export const dict = {
   "provider.connect.apiKey.placeholder": "API key",
   "provider.connect.apiKey.required": "API key is required",
   "provider.connect.opencodeZen.line1":
-    "OpenCode Zen gives you access to a curated set of reliable optimized models for coding agents.",
+    "This upstream OpenCode Zen provider gives access to a curated set of reliable optimized models for coding agents.",
   "provider.connect.opencodeZen.line2":
-    "With a single API key you'll get access to models such as Claude, GPT, Gemini, GLM and more.",
+    "CodeGoblin can use it with your key, but CodeGoblin is an independent fork and is not affiliated with OpenCode.",
   "provider.connect.opencodeZen.visit.prefix": "Visit ",
   "provider.connect.opencodeZen.visit.link": "opencode.ai/zen",
   "provider.connect.opencodeZen.visit.suffix": " to collect your API key.",
@@ -300,7 +300,7 @@ export const dict = {
   "dialog.mcp.empty": "No MCPs configured",
 
   "dialog.lsp.empty": "LSPs auto-detected from file types",
-  "dialog.plugins.empty": "Plugins configured in opencode.json",
+  "dialog.plugins.empty": "Plugins configured in CodeGoblin/OpenCode config",
 
   "mcp.status.connected": "connected",
   "mcp.status.failed": "failed",

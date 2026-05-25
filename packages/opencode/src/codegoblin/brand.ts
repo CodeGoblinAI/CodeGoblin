@@ -3,13 +3,13 @@ export const CodeGoblinBrand = {
   cli: "codegoblin",
   shortCli: "cg",
   tagline: "Your local AI goblin for code, images, and agents.",
-  mascot: String.raw`       ,      ,
-    .-/(.-""-.)\-.
-   /  |\  \/  /|  \
-  |   (_\_==_/_)   |  token goblin
-   \__  /|oo|\  __/
-      '   ><   '`,
-  mascotTiny: String.raw`(,_,)  goblin hoarding tokens`,
+  mascot: String.raw`      .-.
+   _(,_,)_        token goblin
+  /|  V  |\
+ ( |== ==| )      hoards credits
+    /|___|\
+     /   \\`,
+  mascotTiny: String.raw`(,_,)  hoarding tokens`,
   mascotFrames: [
     String.raw`(,_,)  .`,
     String.raw`(,_,)  o`,

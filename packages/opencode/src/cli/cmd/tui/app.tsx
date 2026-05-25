@@ -709,14 +709,14 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "codegoblin.theme",
-        title: "CodeGoblin theme",
-        slashName: "goblin-theme",
-        slashAliases: ["goblin theme"],
+        title: "CodeGoblin identity",
+        slashName: "goblin-identity",
+        slashAliases: ["goblin art"],
         run: () => {
           dialog.replace(() => (
             <DialogAlert
-              title="CodeGoblin Theme"
-              message="CodeGoblin uses a custom wordmark, token-goblin home animation, CG terminal title, and local usage hoard. Theme hooks remain modular through the existing TUI theme system."
+              title="CodeGoblin Identity"
+              message="CodeGoblin uses a custom wordmark, green/black TUI theme, CG terminal title, and local usage hoard. Use /themes to switch the actual TUI theme."
             />
           ))
         },
@@ -761,7 +761,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "docs.open",
-        title: "Open docs",
+        title: "Open upstream docs",
         run: () => {
           open("https://opencode.ai/docs").catch(() => {})
           dialog.clear()
@@ -999,7 +999,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     await DialogAlert.show(
       dialog,
       "Update Complete",
-      `Successfully updated to OpenCode v${result.data.version}. Please restart the application.`,
+      `Successfully updated CodeGoblin to v${result.data.version}. Please restart the application.`,
     )
 
     void exit()

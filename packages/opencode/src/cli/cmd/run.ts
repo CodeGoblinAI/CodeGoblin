@@ -190,7 +190,7 @@ export const RunCommand = effectCmd({
       })
       .option("attach", {
         type: "string",
-        describe: "attach to a running opencode server (e.g., http://localhost:4096)",
+        describe: "attach to a running CodeGoblin server (e.g., http://localhost:4096)",
       })
       .option("password", {
         alias: ["p"],
@@ -200,7 +200,7 @@ export const RunCommand = effectCmd({
       .option("username", {
         alias: ["u"],
         type: "string",
-        describe: "basic auth username (defaults to OPENCODE_SERVER_USERNAME or 'opencode')",
+        describe: "basic auth username (defaults to OPENCODE_SERVER_USERNAME or 'opencode' for compatibility)",
       })
       .option("dir", {
         type: "string",

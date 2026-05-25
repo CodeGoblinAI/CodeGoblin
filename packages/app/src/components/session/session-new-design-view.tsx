@@ -42,7 +42,7 @@ export function NewSessionDesignView(props: { worktree: string; children: JSX.El
       <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
         <div class="w-full max-w-[720px]">
           <div class="flex flex-col items-center gap-2 text-center">
-            <img src="/codegoblin-mascot.png" alt="" class="h-24 w-24 rounded-lg object-cover opacity-95" />
+            <img src="/favicon.svg" alt="" class="h-20 w-20 object-contain opacity-95" />
             <div class="text-[34px] font-semibold tracking-normal text-v2-text-text-base">CodeGoblin</div>
             <div class="text-[13px] font-medium text-v2-text-text-muted">
               Your local AI goblin for code, images, and agents.

@@ -3,7 +3,6 @@ import { createMemo, For, Match, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
 import { Button } from "@opencode-ai/ui/button"
-import { Logo } from "@opencode-ai/ui/logo"
 import { Spinner } from "@opencode-ai/ui/spinner"
 import { Avatar as AvatarV2 } from "@opencode-ai/ui/v2/components/avatar-v2.jsx"
 import { ButtonV2 } from "@opencode-ai/ui/v2/components/button-v2.jsx"
@@ -241,7 +240,7 @@ function CodeGoblinWebHero() {
           <div class="mt-3 flex flex-wrap gap-2 text-12-medium text-v2-text-text-muted">
             <span class="rounded-[6px] bg-v2-background-bg-deep px-2 py-1">images -&gt; codegoblin-output/images</span>
             <span class="rounded-[6px] bg-v2-background-bg-deep px-2 py-1">usage hoard tracked locally</span>
-            <span class="rounded-[6px] bg-v2-background-bg-deep px-2 py-1">OpenCode-compatible providers</span>
+            <span class="rounded-[6px] bg-v2-background-bg-deep px-2 py-1">BYOK providers intact</span>
           </div>
         </div>
         <img
@@ -540,7 +539,10 @@ function LegacyHome() {
 
   return (
     <div class="mx-auto mt-55 w-full md:w-auto px-4">
-      <Logo class="md:w-xl opacity-12" />
+      <div class="flex flex-col items-center gap-3 opacity-90">
+        <img src="/favicon.svg" alt="" class="h-16 w-16 object-contain" />
+        <div class="text-28-bold text-text-strong">CodeGoblin</div>
+      </div>
       <Button
         size="large"
         variant="ghost"

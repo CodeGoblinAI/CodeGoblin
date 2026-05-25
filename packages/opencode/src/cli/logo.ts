@@ -1,6 +1,6 @@
 export const logo = {
-  left: ["  ,      ,   ", " /(.-\"\"-.)\\ ", " |\\  \\/  /| ", " (_\\_==_/_) ", "    /||\\    "],
-  right: [" CodeGoblin       ", " local AI         ", " images -> files  ", " token-aware      ", " agents-ready     "],
+  left: ["     .      ", "  _(,_,)_  ", " /|  V  |\\ ", "( |== ==| )", "  /|___|\\  "],
+  right: [" CodeGoblin       ", " local AI         ", " images -> files  ", " token hoard      ", " agents-ready     "],
 }
 
 export const go = {
