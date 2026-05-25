@@ -11,7 +11,6 @@ import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
 import { useEditorContext } from "@tui/context/editor"
 import { useTheme } from "../context/theme"
 import { RGBA, TextAttributes } from "@opentui/core"
-import { CodeGoblinBrand } from "@/codegoblin/brand"
 
 function TuiGoblinHeader(props: { theme: any }) {
   const skinColor = RGBA.fromInts(154, 219, 53)
@@ -139,6 +138,39 @@ function TuiGoblinHeader(props: { theme: any }) {
     "...SPPPPS...",
   ]
 
+  const earShadowMiniMascotGrid = [
+    "....GGGG....",
+    "..SGGGGGGS..",
+    "G.GGGGGGGG.G",
+    ".GGGGGGGGGG.",
+    "..GSBBGGBS..",
+    "..GGSMMSGG..",
+    "...GGGGGG...",
+    "....GGGG....",
+  ]
+
+  const hoodShadowMiniMascotGrid = [
+    "....SGGS....",
+    "..GGGGGGGG..",
+    "S.GGGGGGGG.S",
+    ".SGGGGGGGGS.",
+    "..GGBBGGBG..",
+    "..GGSMMSGG..",
+    "...GGGGGG...",
+    "....SGGS....",
+  ]
+
+  const browMiniMascotGrid = [
+    "....GGGG....",
+    "..GGGGGGGG..",
+    "G.GGGGGGGG.G",
+    ".SGGGGGGGGS.",
+    "..GSBBMBSG..",
+    "..GGGMMGGG..",
+    "...GGGGGG...",
+    "....GGGG....",
+  ]
+
   const microMascotGrid = [
     "...GG...",
     "..GGGG..",
@@ -163,9 +195,10 @@ function TuiGoblinHeader(props: { theme: any }) {
 
   const blankMascotGrid = Array.from({ length: 8 }, () => "")
 
-  const goblinSupportNotes: HeaderHelperNote[] = [
-    { label: "tips", text: "refactor routes · explain symbols · fix broken tests" },
-    { label: "general", text: "history keys · Ctrl+C stops preview · bun dev returns home" },
+  const commandHelperNotes: HeaderHelperNote[] = [
+    { label: "slash", text: "/init setup · /review changes · /goblin help" },
+    { label: "more", text: "/editor long prompt · /skills browse · /codegoblin alias" },
+    { label: "mention", text: "@agent delegate · @file#12-20 attach context" },
   ]
 
   const buildFontRows = (word: string, font: Record<string, string[]>, gap = 1, shifts: number[] = []) => {
@@ -361,8 +394,7 @@ function TuiGoblinHeader(props: { theme: any }) {
     makeVariant("08", "5-row solid slant-cancel, mini goblin", solidSlantRows, miniMascotGrid, 60, 8),
     {
       ...makeVariant("09", "5-row solid slant-cancel, left mini goblin", solidLeftBiasRows, miniMascotGrid, 60, 8, "left"),
-      helperTitle: CodeGoblinBrand.tagline,
-      helperNotes: goblinSupportNotes,
+      helperNotes: commandHelperNotes,
     },
     makeVariant("10", "4-row shaded full word, cheek goblin", buildFontRows("CODEGOBLIN", shadedFourFont, 2), cheekMascotGrid, 60, 8),
     makeVariant("11", "split compact CODE/GOBLIN, right narrow goblin", splitFontRows("CODE", "GOBLIN", compactFourFont, 3), narrowMascotGrid, 60, 10),
@@ -397,30 +429,38 @@ function TuiGoblinHeader(props: { theme: any }) {
     makeVariant("40", "split 3-row pixel staggered, text only", offsetRows(splitPixelRowsFor("CODE", "GOBLIN", pixelThreeGlyphs, 8, "█", 2), [0, 0, 0, 0, 10, 10, 10, 10]), blankMascotGrid, 72, 0),
     {
       ...makeVariant("41", "design 9 with hooded detail goblin", solidLeftBiasRows, detailedMiniMascotGrid, 60, 8, "left"),
-      helperTitle: CodeGoblinBrand.tagline,
-      helperNotes: goblinSupportNotes,
+      helperNotes: commandHelperNotes,
     },
     {
       ...makeVariant("42", "design 9 with scout goblin ears", solidLeftBiasRows, scoutMiniMascotGrid, 60, 8, "left"),
-      helperTitle: CodeGoblinBrand.tagline,
-      helperNotes: goblinSupportNotes,
+      helperNotes: commandHelperNotes,
     },
     {
       ...makeVariant("43", "design 9 with cheek detail goblin", solidLeftBiasRows, cheekMiniMascotGrid, 60, 8, "left"),
-      helperTitle: CodeGoblinBrand.tagline,
-      helperNotes: goblinSupportNotes,
+      helperNotes: commandHelperNotes,
     },
     {
       ...makeVariant("44", "design 9 with scarred hood goblin", solidLeftBiasRows, scarMiniMascotGrid, 60, 8, "left"),
-      helperTitle: CodeGoblinBrand.tagline,
-      helperNotes: goblinSupportNotes,
+      helperNotes: commandHelperNotes,
+    },
+    {
+      ...makeVariant("45", "design 9 subtle ear-shadow goblin", solidLeftBiasRows, earShadowMiniMascotGrid, 60, 8, "left"),
+      helperNotes: commandHelperNotes,
+    },
+    {
+      ...makeVariant("46", "design 9 subtle hood-shadow goblin", solidLeftBiasRows, hoodShadowMiniMascotGrid, 60, 8, "left"),
+      helperNotes: commandHelperNotes,
+    },
+    {
+      ...makeVariant("47", "design 9 subtle brow goblin", solidLeftBiasRows, browMiniMascotGrid, 60, 8, "left"),
+      helperNotes: commandHelperNotes,
     },
   ]
 
   function normalizeVariantId(value: string | undefined) {
     const cleaned = value?.trim().replace(/^v/i, "")
     const numeric = Number(cleaned)
-    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 44) return String(numeric).padStart(2, "0")
+    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 47) return String(numeric).padStart(2, "0")
     return "09"
   }
 
