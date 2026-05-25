@@ -1,5 +1,6 @@
 import { Prompt, type PromptRef } from "@tui/component/prompt"
-import { createEffect, createSignal, onMount } from "solid-js"
+import { createEffect, createSignal, onCleanup, onMount } from "solid-js"
+import { useTerminalDimensions } from "@opentui/solid"
 import { useSync } from "../context/sync"
 import { Toast } from "../ui/toast"
 import { useArgs } from "../context/args"
@@ -470,6 +471,114 @@ function TuiGoblinHeader(props: { theme: any }) {
   )
 }
 
+function TuiGoblinRunner(props: { theme: any }) {
+  const dimensions = useTerminalDimensions()
+  const skinColor = RGBA.fromInts(154, 219, 53)
+  const shadowColor = RGBA.fromInts(120, 125, 135)
+  const vestColor = RGBA.fromInts(130, 80, 223)
+  const eyeColor = props.theme.backgroundElement
+  const [tick, setTick] = createSignal(0)
+
+  const runnerFrames = [
+    [
+      ".G..G.",
+      "GGGGGG",
+      "GGBBGG",
+      ".GPPG.",
+      "G....G",
+    ],
+    [
+      ".G..G.",
+      "GGGGGG",
+      "GGBBGG",
+      ".GPPG.",
+      ".GGGG.",
+    ],
+    [
+      ".G..G.",
+      "GGGGGG",
+      "GGBBGG",
+      ".GPPG.",
+      ".G..G.",
+    ],
+    [
+      ".G..G.",
+      "GGGGGG",
+      "GGBBGG",
+      ".GPPG.",
+      "G.G..G",
+    ],
+  ]
+
+  const spriteHeight = runnerFrames[0]?.length ?? 0
+  const spriteWidth = Math.max(...runnerFrames.flatMap((frame) => frame.map((row) => row.length)))
+  const laneCells = () => {
+    const availableChars = Math.max(12, dimensions().width - 8)
+    return Math.max(spriteWidth + 4, Math.min(28, Math.floor(availableChars / 2)))
+  }
+  const laneWidth = () => laneCells() * 2
+  const spriteOffset = () => {
+    const travel = laneCells() + spriteWidth + 2
+    return (tick() % travel) - spriteWidth
+  }
+
+  let timer: ReturnType<typeof setInterval> | undefined
+
+  onMount(() => {
+    timer = setInterval(() => setTick((value) => value + 1), 120)
+    timer?.unref?.()
+  })
+
+  onCleanup(() => {
+    if (timer) clearInterval(timer)
+  })
+
+  function renderRunnerRow(rowIndex: number) {
+    const frame = runnerFrames[tick() % runnerFrames.length] ?? runnerFrames[0] ?? []
+    const spriteRow = frame[rowIndex] ?? "".padEnd(spriteWidth, ".")
+    const offset = spriteOffset()
+    const cells: JSX.Element[] = []
+
+    for (let cell = 0; cell < laneCells(); cell++) {
+      const spriteColumn = cell - offset
+      const char = spriteColumn >= 0 && spriteColumn < spriteRow.length ? spriteRow[spriteColumn] : "."
+
+      if (char === "G") {
+        cells.push(<text fg={skinColor}>██</text>)
+      } else if (char === "P") {
+        cells.push(<text fg={vestColor}>██</text>)
+      } else if (char === "B") {
+        cells.push(<text fg={eyeColor}>██</text>)
+      } else if (rowIndex === spriteHeight - 1 && cell >= Math.max(0, offset - 2) && cell < Math.max(0, offset)) {
+        cells.push(<text fg={shadowColor}>░░</text>)
+      } else {
+        cells.push(<text>  </text>)
+      }
+    }
+
+    return cells
+  }
+
+  return (
+    <box flexDirection="column" alignItems="center" width="100%" paddingTop={1} paddingBottom={1}>
+      {Array.from({ length: spriteHeight }, (_, rowIndex) => (
+        <box flexDirection="row" width={laneWidth()}>
+          {renderRunnerRow(rowIndex)}
+        </box>
+      ))}
+      <box flexDirection="row" width={laneWidth()}>
+        <text fg={shadowColor}>{"▁".repeat(laneWidth())}</text>
+      </box>
+      <text fg={props.theme.textMuted}>tiny goblin run test</text>
+    </box>
+  )
+}
+
+function isFooterAnimationEnabled(value: string | undefined) {
+  const normalized = value?.trim().toLowerCase()
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
+}
+
 let once = false
 const placeholder = {
   normal: ["Fix a TODO in the codebase", "What is the tech stack of this project?", "Fix broken tests"],
@@ -485,6 +594,7 @@ export function Home() {
   const local = useLocal()
   const editor = useEditorContext()
   const { theme } = useTheme()
+  const showFooterAnimation = isFooterAnimationEnabled(process.env.CODEGOBLIN_FOOTER_ANIMATION)
   let sent = false
 
   onMount(() => {
@@ -535,6 +645,7 @@ export function Home() {
         </box>
         <TuiPluginRuntime.Slot name="home_bottom" />
         <box flexGrow={1} minHeight={0} />
+        {showFooterAnimation ? <TuiGoblinRunner theme={theme} /> : null}
         <Toast />
       </box>
       <box width="100%" flexShrink={0}>
