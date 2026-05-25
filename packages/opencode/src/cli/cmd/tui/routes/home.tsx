@@ -73,167 +73,157 @@ function TuiGoblinHeader(props: { theme: any }) {
     ".....GGGGGG.....",
   ]
 
+  const buildFontRows = (word: string, font: Record<string, string[]>, gap = 1, shifts: number[] = []) => {
+    const letters = [...word].map((char) => font[char] ?? [])
+    const height = letters[0]?.length ?? 0
+    return Array.from({ length: height }, (_, rowIndex) => {
+      const line = letters.map((letter) => letter[rowIndex] ?? "").join(" ".repeat(gap))
+      return `${" ".repeat(shifts[rowIndex] ?? 0)}${line}`
+    })
+  }
+
+  const buildPixelRows = (word: string, glyphs: Record<string, number[][]>, gap = 1, pixel = "█") => {
+    const letters = [...word].map((char) => glyphs[char] ?? [])
+    const height = letters[0]?.length ?? 0
+    return Array.from({ length: height }, (_, rowIndex) =>
+      letters
+        .map((letter) => (letter[rowIndex] ?? []).map((cell) => (cell ? pixel.repeat(2) : "  ")).join(""))
+        .join(" ".repeat(gap)),
+    )
+  }
+
+  const makeArtRows = (lines: string[], width: number) => {
+    const rows = Array.from({ length: 8 }, () => [] as TextChunk[])
+    const start = Math.max(0, Math.floor((8 - lines.length) / 2))
+    for (let index = 0; index < Math.min(lines.length, 8); index++) {
+      rows[start + index] = row(chunk(center(lines[index], width), skinColor, TextAttributes.BOLD))
+    }
+    return rows
+  }
+
+  const makeVariant = (id: string, name: string, lines: string[], mascotGrid = baseMascotGrid, minWidth = 60): HeaderVariant => {
+    const brandPanelWidth = Math.max(minWidth, ...lines.map((line) => line.length))
+    return {
+      id,
+      name,
+      brandPanelWidth,
+      mascotGrid,
+      rows: makeArtRows(lines, brandPanelWidth),
+    }
+  }
+
+  const solidFiveFont = {
+    C: ["█████", "█    ", "█    ", "█    ", "█████"],
+    O: ["█████", "█   █", "█   █", "█   █", "█████"],
+    D: ["████ ", "█   █", "█   █", "█   █", "████ "],
+    E: ["█████", "█    ", "████ ", "█    ", "█████"],
+    G: ["█████", "█    ", "█  ██", "█   █", "█████"],
+    B: ["████ ", "█   █", "████ ", "█   █", "████ "],
+    L: ["█    ", "█    ", "█    ", "█    ", "█████"],
+    I: ["███", " █ ", " █ ", " █ ", "███"],
+    N: ["█   █", "██  █", "█ █ █", "█  ██", "█   █"],
+  }
+
+  const halfBlockThreeFont = {
+    C: ["▄██▄", "█   ", "▀██▀"],
+    O: ["▄██▄", "█  █", "▀██▀"],
+    D: ["██▄ ", "█  █", "██▀ "],
+    E: ["████", "██  ", "████"],
+    G: ["▄██▄", "█ ██", "▀██▀"],
+    B: ["██▄ ", "██▄ ", "██▀ "],
+    L: ["█   ", "█   ", "████"],
+    I: ["████", " ██ ", "████"],
+    N: ["█▄ █", "█ ██", "█ ▀█"],
+  }
+
+  const halfBlockFiveFont = {
+    C: ["▄██▄", "█   ", "█   ", "█   ", "▀██▀"],
+    O: ["▄██▄", "█  █", "█  █", "█  █", "▀██▀"],
+    D: ["██▄ ", "█  █", "█  █", "█  █", "██▀ "],
+    E: ["████", "█   ", "███ ", "█   ", "████"],
+    G: ["▄██▄", "█   ", "█ ██", "█  █", "▀██▀"],
+    B: ["██▄ ", "█  █", "██▄ ", "█  █", "██▀ "],
+    L: ["█   ", "█   ", "█   ", "█   ", "████"],
+    I: ["████", " █  ", " █  ", " █  ", "████"],
+    N: ["█  █", "██ █", "████", "█ ██", "█  █"],
+  }
+
+  const compactFourFont = {
+    C: ["███", "█  ", "█  ", "███"],
+    O: ["███", "█ █", "█ █", "███"],
+    D: ["██ ", "█ █", "█ █", "██ "],
+    E: ["███", "██ ", "█  ", "███"],
+    G: ["███", "█  ", "█ █", "███"],
+    B: ["██ ", "███", "█ █", "██ "],
+    L: ["█  ", "█  ", "█  ", "███"],
+    I: ["███", " █ ", " █ ", "███"],
+    N: ["█ █", "███", "█ █", "█ █"],
+  }
+
+  const shadedFourFont = {
+    C: ["▓███▓", "██   ", "██   ", "▓███▓"],
+    O: ["▓███▓", "██ ██", "██ ██", "▓███▓"],
+    D: ["███▓ ", "██ ██", "██ ██", "███▓ "],
+    E: ["█████", "███  ", "██   ", "█████"],
+    G: ["▓███▓", "██   ", "██ ██", "▓███▓"],
+    B: ["███▓ ", "████▓", "██ ██", "███▓ "],
+    L: ["██   ", "██   ", "██   ", "█████"],
+    I: ["█████", " ██  ", " ██  ", "█████"],
+    N: ["██ ██", "█████", "█████", "██ ██"],
+  }
+
+  const dotMatrixFont = {
+    C: [" ●●●", "●   ", "●   ", "●   ", " ●●●"],
+    O: [" ●● ", "●  ●", "●  ●", "●  ●", " ●● "],
+    D: ["●●  ", "● ● ", "●  ●", "● ● ", "●●  "],
+    E: ["●●●●", "●   ", "●●● ", "●   ", "●●●●"],
+    G: [" ●●●", "●   ", "● ● ", "●  ●", " ●●●"],
+    B: ["●●  ", "● ● ", "●●  ", "● ● ", "●●  "],
+    L: ["●   ", "●   ", "●   ", "●   ", "●●●●"],
+    I: ["●●●", " ● ", " ● ", " ● ", "●●●"],
+    N: ["●  ●", "●● ●", "● ●●", "●  ●", "●  ●"],
+  }
+
+  const outlineFiveFont = {
+    C: ["┌───┐", "│    ", "│    ", "│    ", "└───┘"],
+    O: ["┌───┐", "│   │", "│   │", "│   │", "└───┘"],
+    D: ["┌──┐ ", "│  │ ", "│  │ ", "│  │ ", "└──┘ "],
+    E: ["┌────", "│    ", "├──  ", "│    ", "└────"],
+    G: ["┌───┐", "│    ", "│ ─┐ ", "│  │ ", "└──┘ "],
+    B: ["┌──┐ ", "│  │ ", "├──┘ ", "│  │ ", "└──┘ "],
+    L: ["│    ", "│    ", "│    ", "│    ", "└────"],
+    I: ["─┬── ", " │   ", " │   ", " │   ", "─┴── "],
+    N: ["│  │ ", "│╲ │ ", "│ ╲│ ", "│  │ ", "│  │ "],
+  }
+
+  const pixelFourGlyphs = {
+    C: [[0, 1, 1, 1], [1, 0, 0, 0], [1, 0, 0, 0], [0, 1, 1, 1]],
+    O: [[0, 1, 1, 0], [1, 0, 0, 1], [1, 0, 0, 1], [0, 1, 1, 0]],
+    D: [[1, 1, 1, 0], [1, 0, 0, 1], [1, 0, 0, 1], [1, 1, 1, 0]],
+    E: [[1, 1, 1, 1], [1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 1]],
+    G: [[0, 1, 1, 0], [1, 0, 0, 0], [1, 0, 1, 1], [0, 1, 1, 0]],
+    B: [[1, 1, 0, 0], [1, 0, 1, 0], [1, 1, 0, 0], [1, 1, 0, 0]],
+    L: [[1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [1, 1, 1, 1]],
+    I: [[1, 1, 1], [0, 1, 0], [0, 1, 0], [1, 1, 1]],
+    N: [[1, 0, 0, 1], [1, 1, 0, 1], [1, 0, 1, 1], [1, 0, 0, 1]],
+  }
+
+  const splitPixelRows = [
+    ...buildPixelRows("CODE", pixelFourGlyphs, 2),
+    ...buildPixelRows("GOBLIN", pixelFourGlyphs, 2),
+  ]
+
   const headerVariants: HeaderVariant[] = [
-    {
-      id: "01",
-      name: "HUD compact",
-      brandPanelWidth: 60,
-      mascotGrid: baseMascotGrid,
-      rows: [
-        [],
-        row(chunk("  "), chunk("●", skinColor), chunk("  SYSTEM ACTIVE  //  TUI CORE INTERFACE")),
-        row(chunk("  "), chunk("C O D E G O B L I N", skinColor, TextAttributes.BOLD)),
-        [],
-        [],
-        row(chunk("  "), chunk("─".repeat(45), shadowColor)),
-        row(chunk("  "), chunk("Your local AI goblin for code, images, and agents.", props.theme.text)),
-        row(chunk("  "), chunk("Type "), chunk("/help", props.theme.primary, TextAttributes.BOLD), chunk(" to see all available commands.")),
-      ],
-    },
-    {
-      id: "02",
-      name: "Centered wordmark",
-      brandPanelWidth: 56,
-      mascotGrid: baseMascotGrid,
-      rows: [
-        [],
-        row(chunk(center("CODEGOBLIN", 56), skinColor, TextAttributes.BOLD)),
-        row(chunk(center("C O D E G O B L I N", 56), skinColor)),
-        [],
-        row(chunk(center("local ai goblin shell", 56), props.theme.textMuted)),
-        row(chunk(center("────────────", 56), shadowColor)),
-        row(chunk(center("/help  ·  tab agents  ·  ctrl+p commands", 56), props.theme.textMuted)),
-        [],
-      ],
-    },
-    {
-      id: "03",
-      name: "Ultra wide tracking",
-      brandPanelWidth: 64,
-      mascotGrid: baseMascotGrid,
-      rows: [
-        [],
-        row(chunk("  HEADER VARIANT 03  //  WIDE TRACKING", shadowColor)),
-        row(chunk("  C   O   D   E   G   O   B   L   I   N", skinColor, TextAttributes.BOLD)),
-        [],
-        row(chunk("  clean native letters, no block wordmark", props.theme.textMuted)),
-        row(chunk("  "), chunk("─".repeat(50), shadowColor)),
-        row(chunk("  if this reads best, use as the safe default", props.theme.text)),
-        [],
-      ],
-    },
-    {
-      id: "04",
-      name: "Stacked CODE / GOBLIN",
-      brandPanelWidth: 54,
-      mascotGrid: cheekMascotGrid,
-      rows: [
-        [],
-        row(chunk(center("C  O  D  E", 54), skinColor, TextAttributes.BOLD)),
-        row(chunk(center("G  O  B  L  I  N", 54), skinColor, TextAttributes.BOLD)),
-        [],
-        row(chunk(center("two-line logo, extra breathing room", 54), props.theme.textMuted)),
-        row(chunk(center("──────────────", 54), shadowColor)),
-        row(chunk(center("head-only mascot with cheek pixels", 54), props.theme.text)),
-        [],
-      ],
-    },
-    {
-      id: "05",
-      name: "Badge frame",
-      brandPanelWidth: 58,
-      mascotGrid: narrowMascotGrid,
-      rows: [
-        [],
-        row(chunk(center("┌────────────────────────────┐", 58), shadowColor)),
-        row(chunk(center("│        CODEGOBLIN          │", 58), skinColor, TextAttributes.BOLD)),
-        row(chunk(center("│   local code · image ai    │", 58), props.theme.textMuted)),
-        row(chunk(center("└────────────────────────────┘", 58), shadowColor)),
-        [],
-        row(chunk(center("compact badge + narrower goblin", 58), props.theme.text)),
-        [],
-      ],
-    },
-    {
-      id: "06",
-      name: "Terminal prompt",
-      brandPanelWidth: 60,
-      mascotGrid: baseMascotGrid,
-      rows: [
-        [],
-        row(chunk("  $ ", props.theme.primary, TextAttributes.BOLD), chunk("codegoblin", skinColor, TextAttributes.BOLD), chunk(" --ready", props.theme.textMuted)),
-        row(chunk("  > ", shadowColor), chunk("C O D E G O B L I N", skinColor, TextAttributes.BOLD)),
-        [],
-        row(chunk("  mode: local tui    provider: selected model", props.theme.textMuted)),
-        row(chunk("  output: codegoblin-output/images", props.theme.textMuted)),
-        row(chunk("  "), chunk("─".repeat(42), shadowColor)),
-        row(chunk("  goblin ready. type /help for commands.", props.theme.text)),
-      ],
-    },
-    {
-      id: "07",
-      name: "Dot matrix",
-      brandPanelWidth: 62,
-      mascotGrid: cheekMascotGrid,
-      rows: [
-        row(chunk(center("● ● ● ● ● ● ● ● ● ●", 62), skinColor)),
-        row(chunk(center("C · O · D · E · G · O · B · L · I · N", 62), skinColor, TextAttributes.BOLD)),
-        row(chunk(center("● ● ● ● ● ● ● ● ● ●", 62), skinColor)),
-        [],
-        row(chunk(center("dot-matrix feel without fragile block letters", 62), props.theme.textMuted)),
-        row(chunk(center("────────────────────────", 62), shadowColor)),
-        row(chunk(center("variant 07", 62), props.theme.textMuted)),
-        [],
-      ],
-    },
-    {
-      id: "08",
-      name: "Micro pixel block",
-      brandPanelWidth: 60,
-      mascotGrid: baseMascotGrid,
-      rows: [
-        [],
-        row(chunk("   ███  ███  ██   ███  ███  ███  ██   █    ███  █ █", skinColor)),
-        row(chunk("   █    █ █  █ █  ██   █    █ █  ██   █     █   ███", skinColor)),
-        row(chunk("   ███  ███  ██   ███  ███  ███  ██   ███  ███  █ █", skinColor)),
-        [],
-        row(chunk(center("micro 3-row block test", 60), props.theme.textMuted)),
-        row(chunk(center("CODEGOBLIN", 60), skinColor, TextAttributes.BOLD)),
-        [],
-      ],
-    },
-    {
-      id: "09",
-      name: "Split pixel blocks",
-      brandPanelWidth: 64,
-      mascotGrid: narrowMascotGrid,
-      rows: [
-        row(chunk(center("████  ████  ███   █████", 64), skinColor)),
-        row(chunk(center("█     █  █  █  █  ███", 64), skinColor)),
-        row(chunk(center("████  ████  ███   █████", 64), skinColor)),
-        [],
-        row(chunk(center("████  ████  ███   █     ███  █  █", 64), skinColor)),
-        row(chunk(center("█     █  █  █  █  █      █   ██ █", 64), skinColor)),
-        row(chunk(center("████  ████  ███   ████  ███  █ ██", 64), skinColor)),
-        row(chunk(center("CODE / GOBLIN split block experiment", 64), props.theme.textMuted)),
-      ],
-    },
-    {
-      id: "10",
-      name: "Mascot-first card",
-      brandPanelWidth: 52,
-      mascotGrid: cheekMascotGrid,
-      rows: [
-        [],
-        row(chunk(center("CODEGOBLIN", 52), skinColor, TextAttributes.BOLD)),
-        row(chunk(center("C O D E  ::  G O B L I N", 52), skinColor)),
-        row(chunk(center("small text, bigger visual weight on mascot", 52), props.theme.textMuted)),
-        [],
-        row(chunk(center("local ai · code · images · agents", 52), props.theme.text)),
-        row(chunk(center("──────────────", 52), shadowColor)),
-        row(chunk(center("variant 10", 52), props.theme.textMuted)),
-      ],
-    },
+    makeVariant("01", "5-row solid block, 1-space gaps", buildFontRows("CODEGOBLIN", solidFiveFont, 1), baseMascotGrid),
+    makeVariant("02", "5-row solid block, 2-space gaps", buildFontRows("CODEGOBLIN", solidFiveFont, 2), baseMascotGrid),
+    makeVariant("03", "3-row half-block arcade", buildFontRows("CODEGOBLIN", halfBlockThreeFont, 2), baseMascotGrid),
+    makeVariant("04", "5-row half-block arcade", buildFontRows("CODEGOBLIN", halfBlockFiveFont, 2), cheekMascotGrid),
+    makeVariant("05", "4-row compact block, wide gaps", buildFontRows("CODEGOBLIN", compactFourFont, 3), narrowMascotGrid),
+    makeVariant("06", "4-row shaded block", buildFontRows("CODEGOBLIN", shadedFourFont, 1), cheekMascotGrid),
+    makeVariant("07", "5-row dot-matrix glyphs", buildFontRows("CODEGOBLIN", dotMatrixFont, 2), baseMascotGrid),
+    makeVariant("08", "5-row slant-cancel solid", buildFontRows("CODEGOBLIN", solidFiveFont, 1, [3, 2, 1, 0, 0]), baseMascotGrid),
+    makeVariant("09", "split CODE/GOBLIN pixel blocks", splitPixelRows, narrowMascotGrid),
+    makeVariant("10", "5-row outline box glyphs", buildFontRows("CODEGOBLIN", outlineFiveFont, 1), cheekMascotGrid),
   ]
 
   function normalizeVariantId(value: string | undefined) {
