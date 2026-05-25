@@ -10,7 +10,6 @@ import { base64Encode } from "@opencode-ai/core/util/encode"
 import { getFilename } from "@opencode-ai/core/util/path"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Select } from "@opencode-ai/ui/select"
-import { WordmarkV2 } from "@opencode-ai/ui/v2/components/wordmark-v2.jsx"
 
 const MAIN_WORKTREE = "main"
 
@@ -42,7 +41,13 @@ export function NewSessionDesignView(props: { worktree: string; children: JSX.El
     <div data-component="session-new-design" class="relative size-full overflow-hidden bg-v2-background-bg-deep">
       <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
         <div class="w-full max-w-[720px]">
-          <WordmarkV2 class="h-auto w-full text-v2-icon-icon-base" />
+          <div class="flex flex-col items-center gap-2 text-center">
+            <img src="/codegoblin-mascot.png" alt="" class="h-24 w-24 rounded-lg object-cover opacity-95" />
+            <div class="text-[34px] font-semibold tracking-normal text-v2-text-text-base">CodeGoblin</div>
+            <div class="text-[13px] font-medium text-v2-text-text-muted">
+              Your local AI goblin for code, images, and agents.
+            </div>
+          </div>
           <div class="mt-8">
             {props.children}
             <div class="mt-3 flex h-7 items-center gap-0 pl-2">

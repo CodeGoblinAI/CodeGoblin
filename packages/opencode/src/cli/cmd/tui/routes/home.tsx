@@ -330,7 +330,7 @@ function TuiGoblinHeader(props: { theme: any }) {
     const cleaned = value?.trim().replace(/^v/i, "")
     const numeric = Number(cleaned)
     if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 40) return String(numeric).padStart(2, "0")
-    return "01"
+    return "09"
   }
 
   const selectedVariantId = normalizeVariantId(process.env.CODEGOBLIN_HEADER_VARIANT)
@@ -569,7 +569,7 @@ function TuiGoblinRunner(props: { theme: any }) {
       <box flexDirection="row" width={laneWidth()}>
         <text fg={shadowColor}>{"▁".repeat(laneWidth())}</text>
       </box>
-      <text fg={props.theme.textMuted}>tiny goblin run test</text>
+      <text fg={props.theme.textMuted}>token goblin jogging receipts</text>
     </box>
   )
 }

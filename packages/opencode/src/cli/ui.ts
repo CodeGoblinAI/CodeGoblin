@@ -7,7 +7,7 @@ const wordmark = [
   `    .-/(.-""-.)\\-.    local AI for code + images`,
   `   /  |\\  \\/  /|  \\   token-aware, agents-ready`,
   `  |   (_\\_==_/_)   |  image prompts save locally`,
-  `   \\__  /|oo|\\  __/   independent OpenCode fork`,
+  `   \\__  /|oo|\\  __/   independent local fork`,
   `      '   ><   '`,
 ]
 
