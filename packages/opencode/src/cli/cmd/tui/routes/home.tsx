@@ -31,29 +31,17 @@ function TuiGoblinHeader(props: { theme: any }) {
     "......GGGGGG......",  // Row 7: Neck/Chin
   ]
 
-  // Solid pixel wordmark: single-cell stems + wide holes survive slanted terminal fonts.
-  const blockLetters: Record<string, string[]> = {
-    C: ["█████", "█    ", "█    ", "█    ", "█    ", "█    ", "█████"],
-    O: ["█████", "█   █", "█   █", "█   █", "█   █", "█   █", "█████"],
-    D: ["████ ", "█   █", "█   █", "█   █", "█   █", "█   █", "████ "],
-    E: ["█████", "█    ", "█    ", "████ ", "█    ", "█    ", "█████"],
-    G: ["█████", "█    ", "█    ", "█ ███", "█   █", "█   █", "█████"],
-    B: ["████ ", "█   █", "█   █", "████ ", "█   █", "█   █", "████ "],
-    L: ["█    ", "█    ", "█    ", "█    ", "█    ", "█    ", "█████"],
-    I: ["███", " █ ", " █ ", " █ ", " █ ", " █ ", "███"],
-    N: ["█   █", "██  █", "█ █ █", "█  ██", "█   █", "█   █", "█   █"],
-  }
-
-  function buildWordmarkRows(word: string) {
-    const letters = [...word].map((char) => blockLetters[char] ?? ["", "", "", "", "", "", ""])
-    const rows: string[] = []
-    for (let rowIndex = 0; rowIndex < 7; rowIndex++) {
-      rows.push(letters.map((letter) => letter[rowIndex]).join(" "))
-    }
-    return [...rows, ""]
-  }
-
-  const brandLines = buildWordmarkRows("CODEGOBLIN")
+  // Letter-built CLI art: normal glyphs stay readable in Monaspace Radon while still feeling like a logo.
+  const brandLines = [
+    "",
+    "CCCCC OOOOO DDDD  EEEEE GGGGG OOOOO BBBB  L     III N   N",
+    "C     O   O D   D E     G     O   O B   B L      I  NN  N",
+    "C     O   O D   D EEEE  G GGG O   O BBBB  L      I  N N N",
+    "C     O   O D   D E     G   G O   O B   B L      I  N  NN",
+    "CCCCC OOOOO DDDD  EEEEE GGGGG OOOOO BBBB  LLLLL III N   N",
+    "CODEGOBLIN",
+    "",
+  ]
 
   function centerText(line: string, width: number) {
     const clipped = line.slice(0, width)
@@ -64,7 +52,11 @@ function TuiGoblinHeader(props: { theme: any }) {
 
   function renderBrandRow(mascotRowIdx: number) {
     const line = centerText(brandLines[mascotRowIdx] ?? "", brandPanelWidth)
-    return <text fg={skinColor}>{line}</text>
+    return (
+      <text fg={skinColor}>
+        <b>{line}</b>
+      </text>
+    )
   }
 
   function renderMascotRow(rowIndex: number) {
