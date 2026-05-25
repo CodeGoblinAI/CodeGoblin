@@ -141,6 +141,9 @@ function TuiGoblinHeader(props: { theme: any }) {
     ...buildPixelRows(bottomWord, glyphs, gap, pixel),
   ]
 
+  const offsetRows = (lines: string[], offsets: number[]) =>
+    lines.map((line, index) => `${" ".repeat(offsets[index] ?? 0)}${line}`)
+
   const makeArtRows = (lines: string[], width: number) => {
     const rows = Array.from({ length: 8 }, () => [] as TextChunk[])
     const start = Math.max(0, Math.floor((8 - lines.length) / 2))
@@ -310,12 +313,22 @@ function TuiGoblinHeader(props: { theme: any }) {
     makeVariant("28", "split half-block CODE/GOBLIN, text only", splitFontRows("CODE", "GOBLIN", halfBlockThreeFont, 3, 1), blankMascotGrid, 60, 0),
     makeVariant("29", "split 4-row pixel CODE/GOBLIN, text only", splitPixelRowsFor("CODE", "GOBLIN", pixelFourGlyphs, 2), blankMascotGrid, 60, 0),
     makeVariant("30", "split dot-matrix CODE/GOBLIN, text only", splitFontRows("CODE", "GOBLIN", dotMatrixFont, 4), blankMascotGrid, 60, 0),
+    makeVariant("31", "wide solid full word, text only", buildFontRows("CODEGOBLIN", solidFiveFont, 3), blankMascotGrid, 72, 0),
+    makeVariant("32", "wide solid slant-cancel, text only", buildFontRows("CODEGOBLIN", solidFiveFont, 2, [6, 4, 3, 1, 0]), blankMascotGrid, 72, 0),
+    makeVariant("33", "wide shaded full word, text only", buildFontRows("CODEGOBLIN", shadedFourFont, 4), blankMascotGrid, 72, 0),
+    makeVariant("34", "wide outline full word, text only", buildFontRows("CODEGOBLIN", outlineFiveFont, 2), blankMascotGrid, 72, 0),
+    makeVariant("35", "split compact wide-gap, text only", splitFontRows("CODE", "GOBLIN", compactFourFont, 6), blankMascotGrid, 72, 0),
+    makeVariant("36", "split compact stagger-right, text only", offsetRows(splitFontRows("CODE", "GOBLIN", compactFourFont, 5), [0, 0, 0, 0, 14, 14, 14, 14]), blankMascotGrid, 72, 0),
+    makeVariant("37", "split compact stagger-left, text only", offsetRows(splitFontRows("CODE", "GOBLIN", compactFourFont, 5), [12, 12, 12, 12, 0, 0, 0, 0]), blankMascotGrid, 72, 0),
+    makeVariant("38", "split half-block wide, text only", splitFontRows("CODE", "GOBLIN", halfBlockThreeFont, 6, 2), blankMascotGrid, 72, 0),
+    makeVariant("39", "split 4-row pixel wide, text only", splitPixelRowsFor("CODE", "GOBLIN", pixelFourGlyphs, 4), blankMascotGrid, 72, 0),
+    makeVariant("40", "split 3-row pixel staggered, text only", offsetRows(splitPixelRowsFor("CODE", "GOBLIN", pixelThreeGlyphs, 8, "█", 2), [0, 0, 0, 0, 10, 10, 10, 10]), blankMascotGrid, 72, 0),
   ]
 
   function normalizeVariantId(value: string | undefined) {
     const cleaned = value?.trim().replace(/^v/i, "")
     const numeric = Number(cleaned)
-    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 30) return String(numeric).padStart(2, "0")
+    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 40) return String(numeric).padStart(2, "0")
     return "01"
   }
 
