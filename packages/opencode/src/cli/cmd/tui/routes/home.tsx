@@ -612,10 +612,10 @@ function TuiGoblinRunner(props: { theme: any }) {
   const [tick, setTick] = createSignal(0)
 
   const rightRunnerFrames = [
-    [".G..G.", "GGGGGG", "GGBBGG", ".GPPG.", "G....G"],
-    [".G..G.", "GGGGGG", "GGBBGG", ".GPPG.", ".GGGG."],
-    [".G..G.", "GGGGGG", "GGBBGG", ".GPPG.", ".G..G."],
-    [".G..G.", "GGGGGG", "GGBBGG", ".GPPG.", "G.G..G"],
+    ["..G..G..", ".GGGGGG.", "GGGBBGGG", ".GGGGGG.", "..GPPGG.", ".GGPPG..", ".G.G.G..", "G...G.G."],
+    ["..G..G..", ".GGGGGG.", "GGGBBGGG", ".GGGGGG.", "..GGPPG.", "..GPPGG.", "...GG...", "..G..G.."],
+    ["..G..G..", ".GGGGGG.", "GGGBBGGG", ".GGGGGG.", ".GGPPG..", "...GPPGG", "..G.G.G.", ".G.G...G"],
+    ["..G..G..", ".GGGGGG.", "GGGBBGGG", ".GGGGGG.", "..GPPG..", ".GGPPGG.", "..GGGG..", ".G....G."],
   ]
   const leftRunnerFrames = rightRunnerFrames.map((frame) => frame.map((runnerRow) => [...runnerRow].reverse().join("")))
 
@@ -690,7 +690,7 @@ function TuiGoblinRunner(props: { theme: any }) {
       <box flexDirection="row" width={laneWidth()}>
         <text fg={shadowColor}>{"▁".repeat(laneWidth())}</text>
       </box>
-      <text fg={props.theme.textMuted}>tiny goblin pacing test</text>
+      <text fg={props.theme.textMuted}>tiny goblin runner test</text>
     </box>
   )
 }
