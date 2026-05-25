@@ -24,7 +24,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 console.log(`Starting CodeGoblin TUI header variant ${variant}...`)
 console.log("Press Ctrl+C to stop this variant before trying another one.\n")
 
-const child = Bun.spawn(["bun", "run", "--cwd", "packages/opencode", "--conditions=browser", "src/index.ts"], {
+const child = Bun.spawn([process.execPath, "run", "--cwd", "packages/opencode", "--conditions=browser", "src/index.ts"], {
   cwd: repoRoot,
   env: {
     ...process.env,
