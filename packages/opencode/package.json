@@ -57,6 +57,10 @@
     "dev:header:38": "bun run ../../script/codegoblin-header-variant.ts 38",
     "dev:header:39": "bun run ../../script/codegoblin-header-variant.ts 39",
     "dev:header:40": "bun run ../../script/codegoblin-header-variant.ts 40",
+    "dev:header:41": "bun run ../../script/codegoblin-header-variant.ts 41",
+    "dev:header:42": "bun run ../../script/codegoblin-header-variant.ts 42",
+    "dev:header:43": "bun run ../../script/codegoblin-header-variant.ts 43",
+    "dev:header:44": "bun run ../../script/codegoblin-header-variant.ts 44",
     "dev:temporary": "bun run --conditions=browser ./src/temporary.ts",
     "db": "bun drizzle-kit"
   },

@@ -6,7 +6,7 @@ const rawVariant = args.find((arg) => arg !== "list" && arg !== "runner" && !arg
 const showRunner = args.includes("--runner") || args.includes("runner")
 
 if (args.includes("--list") || args.includes("list")) {
-  for (let i = 1; i <= 40; i++) {
+  for (let i = 1; i <= 44; i++) {
     const variant = String(i).padStart(2, "0")
     console.log(`bun run dev:header:${variant}`)
   }
@@ -15,8 +15,8 @@ if (args.includes("--list") || args.includes("list")) {
 
 const numeric = Number(rawVariant.trim().replace(/^v/i, ""))
 
-if (!Number.isInteger(numeric) || numeric < 1 || numeric > 40) {
-  console.error(`Expected a header variant from 1 to 40, got: ${rawVariant}`)
+if (!Number.isInteger(numeric) || numeric < 1 || numeric > 44) {
+  console.error(`Expected a header variant from 1 to 44, got: ${rawVariant}`)
   process.exit(1)
 }
 
