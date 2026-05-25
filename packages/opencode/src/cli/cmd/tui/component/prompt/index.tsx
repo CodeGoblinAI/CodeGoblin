@@ -1004,6 +1004,19 @@ export function Prompt(props: PromptProps) {
     }
   }
 
+  function currentImageInputs() {
+    return store.prompt.parts
+      .filter(
+        (part): part is Omit<FilePart, "id" | "messageID" | "sessionID"> =>
+          part.type === "file" && part.mime?.startsWith("image/") && part.url?.startsWith("data:"),
+      )
+      .map((part) => ({
+        dataUrl: part.url,
+        mime: part.mime,
+        filename: part.filename,
+      }))
+  }
+
   async function submitInner() {
     setWarpNotice(undefined)
 
@@ -1029,17 +1042,25 @@ export function Prompt(props: PromptProps) {
     if (store.mode !== "shell" && CodeGoblinImageCommand.isSlash(trimmed)) {
       const currentMode = store.mode
       try {
+        toast.show({
+          variant: "info",
+          message: "CodeGoblin is checking the selected image model...",
+          duration: 2500,
+        })
         const result = await CodeGoblinImageCommand.runSlash({
           input: store.prompt.input,
           cwd: project.instance.directory() || process.cwd(),
           provider: selectedModel?.providerID,
           model: selectedModel?.modelID,
+          inputImages: currentImageInputs(),
+          requireImageModel: true,
         })
         toast.show({
           variant: result.ok ? "success" : "warning",
           message: result.message,
           duration: result.ok ? 6000 : 9000,
         })
+        if (result.requiresImageModel) return false
       } catch (error) {
         toast.show({
           variant: "error",
@@ -1078,11 +1099,24 @@ export function Prompt(props: PromptProps) {
     ) {
       const currentMode = store.mode
       try {
+        const plan = CodeGoblinImageCommand.describe({
+          prompt: trimmed,
+          cwd: project.instance.directory() || process.cwd(),
+          provider: selectedModel.providerID,
+          model: selectedModel.modelID,
+        })
+        toast.show({
+          variant: "info",
+          message: `CodeGoblin is generating with ${plan.provider}/${plan.model}...`,
+          duration: 4000,
+        })
         const result = await CodeGoblinImageCommand.generate({
           prompt: trimmed,
           cwd: project.instance.directory() || process.cwd(),
           provider: selectedModel.providerID,
           model: selectedModel.modelID,
+          inputImages: currentImageInputs(),
+          requireImageModel: true,
         })
         toast.show({
           variant: result.ok ? "success" : "warning",
@@ -1109,6 +1143,15 @@ export function Prompt(props: PromptProps) {
       props.onSubmit?.()
       input.clear()
       return true
+    }
+    if (store.mode !== "shell" && CodeGoblinImageCommand.looksLikeImageIntent(trimmed)) {
+      toast.show({
+        variant: "warning",
+        message:
+          "That looks like an image request, but the selected model is not image-capable. Use /models to pick an image model first; I did not send it to the text model.",
+        duration: 9000,
+      })
+      return false
     }
 
     const workspaceSession = props.sessionID ? sync.session.get(props.sessionID) : undefined

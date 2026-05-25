@@ -80,7 +80,7 @@ import { tuiHandlers } from "./handlers/tui"
 import { v2Handlers } from "./handlers/v2"
 import { workspaceHandlers } from "./handlers/workspace"
 import { instanceContextLayer, instanceRouterMiddleware } from "./middleware/instance-context"
-import { workspaceRouterMiddleware, workspaceRoutingLayer } from "./middleware/workspace-routing"
+import { WorkspaceRouteContext, workspaceRouterMiddleware, workspaceRoutingLayer } from "./middleware/workspace-routing"
 import { disposeMiddleware } from "./lifecycle"
 import { memoMap } from "@opencode-ai/core/effect/memo-map"
 import { compressionLayer } from "./middleware/compression"
@@ -88,6 +88,7 @@ import { corsVaryFix } from "./middleware/cors-vary"
 import { errorLayer } from "./middleware/error"
 import { fenceLayer } from "./middleware/fence"
 import { schemaErrorLayer } from "./middleware/schema-error"
+import { CodeGoblinImageCommand, type ImageInput } from "@/codegoblin/image-command"
 
 export const context = Context.makeUnsafe<unknown>(new Map())
 
@@ -141,7 +142,63 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
   ]),
 )
 
-const rawInstanceRoutes = Layer.mergeAll(ptyConnectRoute).pipe(Layer.provide(instanceRouterLayer))
+const codeGoblinImageRoute = HttpRouter.use((router) =>
+  router.add("POST", "/codegoblin/image", (request) =>
+    Effect.gen(function* () {
+      const route = yield* WorkspaceRouteContext
+      const text = yield* Effect.orDie(request.text)
+      let body: any
+      try {
+        body = text ? JSON.parse(text) : {}
+      } catch {
+        return HttpServerResponse.jsonUnsafe({ ok: false, message: "Invalid JSON body." }, { status: 400 })
+      }
+
+      const inputImages: ImageInput[] = Array.isArray(body?.inputImages)
+        ? body.inputImages
+            .filter((item: any) => item && typeof item === "object")
+            .map((item: any) => ({
+              dataUrl: typeof item.dataUrl === "string" ? item.dataUrl : undefined,
+              path: typeof item.path === "string" ? item.path : undefined,
+              mime: typeof item.mime === "string" ? item.mime : undefined,
+              filename: typeof item.filename === "string" ? item.filename : undefined,
+            }))
+        : []
+
+      const commandInput = typeof body?.input === "string" ? body.input : undefined
+      const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : ""
+      if (!commandInput && !prompt) {
+        return HttpServerResponse.jsonUnsafe({ ok: false, message: "Image prompt is required." }, { status: 400 })
+      }
+
+      const result = yield* Effect.promise(() =>
+        commandInput
+          ? CodeGoblinImageCommand.runSlash({
+              input: commandInput,
+              cwd: route.directory,
+              provider: typeof body?.provider === "string" ? body.provider : undefined,
+              model: typeof body?.model === "string" ? body.model : undefined,
+              inputImages,
+              requireImageModel: body?.requireImageModel !== false,
+            })
+          : CodeGoblinImageCommand.generate({
+              prompt,
+              cwd: route.directory,
+              output: typeof body?.output === "string" ? body.output : undefined,
+              provider: typeof body?.provider === "string" ? body.provider : undefined,
+              model: typeof body?.model === "string" ? body.model : undefined,
+              keyFile: typeof body?.keyFile === "string" ? body.keyFile : undefined,
+              inputImages,
+              requireImageModel: body?.requireImageModel !== false,
+            }),
+      )
+
+      return HttpServerResponse.jsonUnsafe(result, { status: result.ok ? 200 : result.requiresImageModel ? 409 : 400 })
+    }),
+  ),
+)
+
+const rawInstanceRoutes = Layer.mergeAll(ptyConnectRoute, codeGoblinImageRoute).pipe(Layer.provide(instanceRouterLayer))
 const instanceRoutes = Layer.mergeAll(rawInstanceRoutes, instanceApiRoutes).pipe(
   Layer.provide([
     httpApiAuthLayer,

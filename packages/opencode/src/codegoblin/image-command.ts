@@ -9,6 +9,8 @@ export type ImageCommandResult = {
   model?: string
   provider?: string
   cost?: number
+  requiresImageModel?: boolean
+  startedTask?: string
 }
 
 type GenerateInput = {
@@ -19,6 +21,8 @@ type GenerateInput = {
   cwd: string
   dryRun?: boolean
   keyFile?: string
+  inputImages?: ImageInput[]
+  requireImageModel?: boolean
 }
 
 type SlashInput = {
@@ -26,11 +30,32 @@ type SlashInput = {
   cwd: string
   provider?: string
   model?: string
+  inputImages?: ImageInput[]
+  requireImageModel?: boolean
+}
+
+export type ImageInput = {
+  path?: string
+  dataUrl?: string
+  mime?: string
+  filename?: string
+}
+
+type ImageProvider = "google" | "xai" | "openai" | "qwen"
+
+type PlannedImage = {
+  provider?: ImageProvider
+  model?: string
+  output?: string
+  supported: boolean
+  defaulted: boolean
 }
 
 const DEFAULT_MODEL = "gemini-2.5-flash-image"
 const DEFAULT_DIR = "codegoblin-output/images"
 const USAGE_FILE = "codegoblin-output/usage.json"
+const IMAGE_MODEL_HINT =
+  "Select an image model with /models first, such as google/gemini-2.5-flash-image, xai/grok-imagine-image-quality, openai/gpt-image-1, or qwen/wan2.7-image-pro. I did not send this prompt to a text model."
 
 export const CodeGoblinImageCommand = {
   isSlash(input: string) {
@@ -44,11 +69,21 @@ export const CodeGoblinImageCommand = {
         message: 'Usage: /image "prompt" --output codegoblin-output/images/name.png',
       }
     }
-    return generateImage({ provider: input.provider, model: input.model, ...parsed, cwd: input.cwd })
+    return generateImage({
+      provider: parsed.provider ?? input.provider,
+      model: parsed.model ?? input.model,
+      ...parsed,
+      inputImages: parsed.inputImages?.length ? parsed.inputImages : input.inputImages,
+      cwd: input.cwd,
+      requireImageModel: input.requireImageModel && !parsed.provider && !parsed.model,
+    })
   },
   generate: generateImage,
   parse: parseImageArgs,
+  describe: describeImage,
   shouldRoutePromptToImage,
+  looksLikeImageIntent,
+  isImageModelSelection,
   async usageSummary(cwd: string) {
     return usageSummary(cwd)
   },
@@ -57,8 +92,19 @@ export const CodeGoblinImageCommand = {
 async function generateImage(input: GenerateInput): Promise<ImageCommandResult> {
   const root = path.resolve(input.cwd || process.cwd())
   const output = safeOutputPath(root, input.output)
-  const provider = normalizeProvider(input.provider, input.model)
-  const model = normalizeModel(provider, input.model)
+  const plan = planImage(input, output)
+
+  if (input.requireImageModel && !plan.supported) {
+    return {
+      ok: false,
+      requiresImageModel: true,
+      output,
+      message: IMAGE_MODEL_HINT,
+    }
+  }
+
+  const provider = plan.provider ?? "google"
+  const model = plan.model ?? DEFAULT_MODEL
 
   if (input.dryRun) {
     return {
@@ -66,7 +112,7 @@ async function generateImage(input: GenerateInput): Promise<ImageCommandResult> 
       model,
       provider,
       output,
-      message: `Image dry run OK. The goblin would save ${provider}/${model} output to ${output}`,
+      message: `Image dry run OK. CodeGoblin would generate with ${provider}/${model} and save to ${output}`,
     }
   }
 
@@ -78,19 +124,45 @@ async function generateImage(input: GenerateInput): Promise<ImageCommandResult> 
       model,
       provider,
       output,
-      message:
-        provider === "xai"
-          ? "No xAI image key found. Set XAI_API_KEY locally or connect the xai provider, then retry."
-          : "No Gemini image key found. Set GEMINI_API_KEY, GOOGLE_API_KEY, or GOOGLE_GENERATIVE_AI_API_KEY locally or connect the google provider, then retry.",
+      message: missingKeyMessage(provider),
     }
   }
 
-  const result = provider === "xai" ? await generateXai({ ...input, root, output, model, apiKey }) : await generateGemini({ ...input, root, output, model, apiKey })
+  const result =
+    provider === "xai"
+      ? await generateXai({ ...input, root, output, model, apiKey })
+      : provider === "openai"
+        ? await generateOpenAI({ ...input, root, output, model, apiKey })
+        : provider === "qwen"
+          ? await generateQwen({ ...input, root, output, model, apiKey })
+          : await generateGemini({ ...input, root, output, model, apiKey })
   if (result.ok) await recordUsage(root, result)
   return result
 }
 
+function describeImage(input: GenerateInput): PlannedImage {
+  const root = path.resolve(input.cwd || process.cwd())
+  const output = safeOutputPath(root, input.output)
+  return planImage(input, output)
+}
+
+function planImage(input: Pick<GenerateInput, "provider" | "model">, output: string): PlannedImage {
+  const provider = imageProviderFromSelection(input.provider, input.model)
+  if (!provider) return { output, supported: false, defaulted: false }
+  return {
+    output,
+    provider,
+    model: normalizeModel(provider, input.model),
+    supported: true,
+    defaulted: !input.model,
+  }
+}
+
 async function generateGemini(input: GenerateInput & { root: string; output: string; model: string; apiKey: string }): Promise<ImageCommandResult> {
+  const parts = [
+    { text: input.prompt },
+    ...(await imageInputParts(input.root, input.inputImages, { style: "gemini" })),
+  ]
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(input.model)}:generateContent?key=${encodeURIComponent(input.apiKey)}`
   const response = await fetch(endpoint, {
     method: "POST",
@@ -101,7 +173,7 @@ async function generateGemini(input: GenerateInput & { root: string; output: str
       contents: [
         {
           role: "user",
-          parts: [{ text: input.prompt }],
+          parts,
         },
       ],
       generationConfig: {
@@ -144,12 +216,14 @@ async function generateGemini(input: GenerateInput & { root: string; output: str
     provider: "google",
     output: input.output,
     cost: estimateCost("google", input.model),
-    message: `Saved Gemini image output to ${input.output}. Goblin ate ~${formatCost(estimateCost("google", input.model))} in tokens and hoarded the receipt.`,
+    message: successMessage("google", input.model, input.output, estimateCost("google", input.model)),
   }
 }
 
 async function generateXai(input: GenerateInput & { root: string; output: string; model: string; apiKey: string }): Promise<ImageCommandResult> {
-  const response = await fetch("https://api.x.ai/v1/images/generations", {
+  const imageParts = await imageInputParts(input.root, input.inputImages, { style: "dataUrl" })
+  const editing = imageParts.length > 0
+  const response = await fetch(`https://api.x.ai/v1/images/${editing ? "edits" : "generations"}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -159,6 +233,14 @@ async function generateXai(input: GenerateInput & { root: string; output: string
       model: input.model,
       prompt: input.prompt,
       response_format: "b64_json",
+      ...(editing
+        ? {
+            image: {
+              url: imageParts[0].dataUrl,
+              type: "image_url",
+            },
+          }
+        : {}),
     }),
   })
 
@@ -207,7 +289,222 @@ async function generateXai(input: GenerateInput & { root: string; output: string
     provider: "xai",
     output: input.output,
     cost: estimateCost("xai", input.model),
-    message: `Saved xAI image output to ${input.output}. Goblin ate ~${formatCost(estimateCost("xai", input.model))} in tokens and hoarded the receipt.`,
+    message: successMessage("xai", input.model, input.output, estimateCost("xai", input.model)),
+  }
+}
+
+async function generateOpenAI(input: GenerateInput & { root: string; output: string; model: string; apiKey: string }): Promise<ImageCommandResult> {
+  const imageParts = await imageInputParts(input.root, input.inputImages, { style: "dataUrl" })
+  const editing = imageParts.length > 0
+  let response: Response
+  if (editing) {
+    const form = new FormData()
+    form.append("model", input.model)
+    form.append("prompt", input.prompt)
+    for (const [index, image] of imageParts.entries()) {
+      const blob = new Blob([Buffer.from(image.data, "base64")], { type: image.mime })
+      form.append("image[]", blob, image.filename || `input-${index + 1}.${extensionForMime(image.mime)}`)
+    }
+    response = await fetch("https://api.openai.com/v1/images/edits", {
+      method: "POST",
+      headers: { authorization: `Bearer ${input.apiKey}` },
+      body: form,
+    })
+  } else {
+    response = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${input.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: input.model,
+        prompt: input.prompt,
+      }),
+    })
+  }
+
+  const saved = await saveOpenAIStyleResponse(response, {
+    provider: "openai",
+    model: input.model,
+    output: input.output,
+    label: "OpenAI image",
+  })
+  if (!saved.ok) return saved
+  return {
+    ...saved,
+    cost: estimateCost("openai", input.model),
+    message: successMessage("openai", input.model, input.output, estimateCost("openai", input.model)),
+  }
+}
+
+async function generateQwen(input: GenerateInput & { root: string; output: string; model: string; apiKey: string }): Promise<ImageCommandResult> {
+  const imageParts = await imageInputParts(input.root, input.inputImages, { style: "dataUrl" })
+  const content = [{ text: input.prompt }, ...imageParts.map((item) => ({ image: item.dataUrl }))]
+  const created = await fetch("https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/image-generation/generation", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${input.apiKey}`,
+      "x-dashscope-async": "enable",
+    },
+    body: JSON.stringify({
+      model: input.model,
+      input: {
+        messages: [
+          {
+            role: "user",
+            content,
+          },
+        ],
+      },
+      parameters: {
+        n: 1,
+        size: "2K",
+        watermark: false,
+      },
+    }),
+  })
+
+  if (!created.ok) {
+    const detail = await created.text().catch(() => "")
+    return {
+      ok: false,
+      model: input.model,
+      provider: "qwen",
+      output: input.output,
+      message: `Qwen image request failed with HTTP ${created.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+    }
+  }
+
+  const json = (await created.json()) as any
+  const taskID = json?.output?.task_id
+  if (!taskID) {
+    return {
+      ok: false,
+      model: input.model,
+      provider: "qwen",
+      output: input.output,
+      message: "Qwen image request did not return a task id.",
+    }
+  }
+
+  const completed = await pollQwenTask(taskID, input.apiKey)
+  if (!completed.ok) {
+    return {
+      ok: false,
+      model: input.model,
+      provider: "qwen",
+      output: input.output,
+      startedTask: taskID,
+      message: completed.message,
+    }
+  }
+
+  const image = await fetch(completed.url)
+  if (!image.ok) {
+    return {
+      ok: false,
+      model: input.model,
+      provider: "qwen",
+      output: input.output,
+      startedTask: taskID,
+      message: `Qwen task ${taskID} succeeded, but image download failed with HTTP ${image.status}`,
+    }
+  }
+
+  await fs.mkdir(path.dirname(input.output), { recursive: true })
+  await fs.writeFile(input.output, Buffer.from(await image.arrayBuffer()))
+
+  return {
+    ok: true,
+    model: input.model,
+    provider: "qwen",
+    output: input.output,
+    startedTask: taskID,
+    cost: estimateCost("qwen", input.model),
+    message: successMessage("qwen", input.model, input.output, estimateCost("qwen", input.model)),
+  }
+}
+
+async function pollQwenTask(taskID: string, apiKey: string) {
+  const deadline = Date.now() + 120_000
+  let lastStatus = "PENDING"
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 4_000))
+    const response = await fetch(`https://dashscope-intl.aliyuncs.com/api/v1/tasks/${encodeURIComponent(taskID)}`, {
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+      },
+    })
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "")
+      return { ok: false as const, message: `Qwen task ${taskID} polling failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 220)}` : ""}` }
+    }
+    const json = (await response.json()) as any
+    const output = json?.output ?? {}
+    lastStatus = output.task_status ?? lastStatus
+    if (lastStatus === "FAILED" || lastStatus === "CANCELED" || lastStatus === "UNKNOWN") {
+      return { ok: false as const, message: `Qwen task ${taskID} ended with ${lastStatus}${output.message ? `: ${output.message}` : ""}` }
+    }
+    if (lastStatus !== "SUCCEEDED") continue
+    const url =
+      output.choices?.[0]?.message?.content?.find?.((item: any) => typeof item?.image === "string")?.image ??
+      output.results?.[0]?.url ??
+      output.results?.[0]?.image
+    if (typeof url === "string" && url) return { ok: true as const, url }
+    return { ok: false as const, message: `Qwen task ${taskID} succeeded but did not include an image URL.` }
+  }
+  return { ok: false as const, message: `Qwen task ${taskID} is still ${lastStatus}; try again later or inspect the task in Qwen Cloud.` }
+}
+
+async function saveOpenAIStyleResponse(
+  response: Response,
+  input: { provider: ImageProvider; model: string; output: string; label: string },
+): Promise<ImageCommandResult> {
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "")
+    return {
+      ok: false,
+      model: input.model,
+      provider: input.provider,
+      output: input.output,
+      message: `${input.label} request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+    }
+  }
+  const json = (await response.json()) as any
+  const data = json?.data?.[0]?.b64_json
+  const url = json?.data?.[0]?.url
+  await fs.mkdir(path.dirname(input.output), { recursive: true })
+  if (typeof data === "string" && data.length) {
+    await fs.writeFile(input.output, Buffer.from(data, "base64"))
+  } else if (typeof url === "string" && url) {
+    const image = await fetch(url)
+    if (!image.ok) {
+      return {
+        ok: false,
+        model: input.model,
+        provider: input.provider,
+        output: input.output,
+        message: `${input.label} returned an image URL, but download failed with HTTP ${image.status}`,
+      }
+    }
+    await fs.writeFile(input.output, Buffer.from(await image.arrayBuffer()))
+  } else {
+    return {
+      ok: false,
+      model: input.model,
+      provider: input.provider,
+      output: input.output,
+      message: `${input.label} response did not include image data or an image URL.`,
+    }
+  }
+  return {
+    ok: true,
+    model: input.model,
+    provider: input.provider,
+    output: input.output,
+    message: successMessage(input.provider, input.model, input.output, estimateCost(input.provider, input.model)),
   }
 }
 
@@ -218,6 +515,7 @@ function parseImageArgs(raw: string): Omit<GenerateInput, "cwd"> {
   let model: string | undefined
   let provider: string | undefined
   let keyFile: string | undefined
+  const inputImages: ImageInput[] = []
   let dryRun = false
 
   for (let i = 0; i < tokens.length; i++) {
@@ -254,6 +552,19 @@ function parseImageArgs(raw: string): Omit<GenerateInput, "cwd"> {
       keyFile = token.slice("--key-file=".length)
       continue
     }
+    if (token === "--input" || token === "--image") {
+      const value = tokens[++i]
+      if (value) inputImages.push({ path: value })
+      continue
+    }
+    if (token.startsWith("--input=")) {
+      inputImages.push({ path: token.slice("--input=".length) })
+      continue
+    }
+    if (token.startsWith("--image=")) {
+      inputImages.push({ path: token.slice("--image=".length) })
+      continue
+    }
     if (token === "--dry-run") {
       dryRun = true
       continue
@@ -267,6 +578,7 @@ function parseImageArgs(raw: string): Omit<GenerateInput, "cwd"> {
     model,
     provider,
     keyFile,
+    inputImages,
     dryRun,
   }
 }
@@ -325,19 +637,58 @@ function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, "-")
 }
 
-function normalizeProvider(provider?: string, model?: string) {
+function normalizeProvider(provider?: string, model?: string): ImageProvider {
   const raw = `${provider ?? ""}/${model ?? ""}`.toLowerCase()
+  if (raw.includes("qwen") || raw.includes("wan") || raw.includes("dashscope") || raw.includes("alibaba")) return "qwen"
+  if (raw.includes("openai") || raw.includes("gpt-image") || raw.includes("dall-e")) return "openai"
   if (raw.includes("xai") || raw.includes("grok")) return "xai"
   return "google"
 }
 
-function normalizeModel(provider: string, model?: string) {
+function imageProviderFromSelection(provider?: string, model?: string): ImageProvider | undefined {
+  if (!provider && !model) return
+  const providerRaw = provider?.toLowerCase() ?? ""
+  const modelRaw = model?.toLowerCase() ?? ""
+
+  if (!modelRaw) {
+    if (providerRaw.includes("qwen") || providerRaw.includes("dashscope") || providerRaw.includes("alibaba")) return "qwen"
+    if (providerRaw.includes("openai")) return "openai"
+    if (providerRaw.includes("xai")) return "xai"
+    if (providerRaw.includes("google") || providerRaw.includes("gemini")) return "google"
+    return
+  }
+
+  if (modelRaw.includes("wan2.") || modelRaw.includes("qwen-image") || modelRaw.includes("image-edit")) return "qwen"
+  if (modelRaw.includes("gpt-image") || modelRaw.includes("chatgpt-image") || modelRaw.includes("dall-e")) return "openai"
+  if (modelRaw.includes("grok-imagine-image")) return "xai"
+  if (
+    modelRaw.includes("flash-image") ||
+    modelRaw.includes("imagen") ||
+    modelRaw.includes("nanobanana") ||
+    modelRaw.includes("nano-banana")
+  )
+    return "google"
+}
+
+function normalizeModel(provider: ImageProvider, model?: string) {
   const raw = model?.trim()
-  if (!raw) return provider === "xai" ? "grok-imagine-image-quality" : DEFAULT_MODEL
+  if (!raw) {
+    if (provider === "xai") return "grok-imagine-image-quality"
+    if (provider === "openai") return "gpt-image-1"
+    if (provider === "qwen") return "wan2.7-image-pro"
+    return DEFAULT_MODEL
+  }
   const lower = raw.toLowerCase().replace(/\s+/g, "-")
   if (lower === "nanobanana" || lower === "nano-banana" || lower === "banana") return DEFAULT_MODEL
   if (provider === "xai" && (lower === "grok-imagine-image" || lower === "grok-imagine")) return "grok-imagine-image-quality"
+  if (provider === "qwen" && lower === "qwen-image") return "wan2.7-image-pro"
   return raw
+}
+
+function isImageModelSelection(input: { providerID?: string; modelID?: string; outputImage?: boolean }) {
+  if (input.outputImage) return true
+  if (!input.providerID && !input.modelID) return false
+  return Boolean(imageProviderFromSelection(input.providerID, input.modelID))
 }
 
 function shouldRoutePromptToImage(input: {
@@ -346,10 +697,11 @@ function shouldRoutePromptToImage(input: {
   modelID?: string
   outputImage?: boolean
 }) {
-  if (input.outputImage) return true
-  const model = `${input.providerID ?? ""}/${input.modelID ?? ""}`.toLowerCase()
-  if (model.includes("grok-imagine") || model.includes("image") || model.includes("nanobanana")) return true
-  return /\b(create|generate|make|draw|render)\b.{0,80}\b(image|picture|photo|logo|mascot|illustration|avatar|icon|cat|dog)\b/i.test(input.prompt)
+  return isImageModelSelection(input)
+}
+
+function looksLikeImageIntent(prompt: string) {
+  return /\b(create|generate|make|draw|render|design|edit|change|transform|paint)\b.{0,100}\b(image|picture|photo|logo|mascot|illustration|avatar|icon|cat|dog|horse|goblin|red|style)\b/i.test(prompt)
 }
 
 async function loadLocalEnv(root: string, keyFile?: string) {
@@ -399,8 +751,10 @@ function unquoteEnv(value: string) {
   return trimmed
 }
 
-async function findImageKey(provider: string, env: Record<string, string | undefined>) {
+async function findImageKey(provider: ImageProvider, env: Record<string, string | undefined>) {
   if (provider === "xai") return env.XAI_API_KEY || (await authKey("xai"))
+  if (provider === "openai") return env.OPENAI_API_KEY || (await authKey("openai"))
+  if (provider === "qwen") return env.DASHSCOPE_API_KEY || env.QWEN_API_KEY || env.ALIBABA_API_KEY || (await authKey("alibaba"))
   return env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_GENERATIVE_AI_API_KEY || (await authKey("google"))
 }
 
@@ -417,8 +771,91 @@ async function authKey(provider: string) {
 
 function estimateCost(provider: string, model: string) {
   if (provider === "xai") return 0.02
+  if (provider === "openai") return model.includes("mini") ? 0.011 : 0.042
+  if (provider === "qwen") return 0
   if (model.includes("flash-image")) return 0.039
   return 0
+}
+
+function missingKeyMessage(provider: ImageProvider) {
+  if (provider === "xai") return "No xAI image key found. Set XAI_API_KEY locally or connect the xai provider, then retry."
+  if (provider === "openai") return "No OpenAI image key found. Set OPENAI_API_KEY locally or connect the openai provider, then retry."
+  if (provider === "qwen") return "No Qwen/DashScope image key found. Set DASHSCOPE_API_KEY locally or connect the alibaba provider, then retry."
+  return "No Gemini image key found. Set GEMINI_API_KEY, GOOGLE_API_KEY, or GOOGLE_GENERATIVE_AI_API_KEY locally or connect the google provider, then retry."
+}
+
+function successMessage(provider: string, model: string, output: string, cost?: number) {
+  return `Image generated with ${provider}/${model} and saved to ${output}. Goblin pocketed ~${formatCost(cost)} from the token pile.`
+}
+
+async function imageInputParts(
+  root: string,
+  inputs: ImageInput[] | undefined,
+  opts: { style: "gemini" | "dataUrl" },
+): Promise<Array<any>> {
+  const images = await normalizeInputImages(root, inputs)
+  if (opts.style === "dataUrl") return images
+  return images.map((item) => ({
+    inline_data: {
+      mime_type: item.mime,
+      data: item.data,
+    },
+  }))
+}
+
+async function normalizeInputImages(root: string, inputs: ImageInput[] | undefined) {
+  const result: Array<{ data: string; dataUrl: string; mime: string; filename?: string }> = []
+  for (const item of inputs ?? []) {
+    if (result.length >= 9) break
+    if (item.dataUrl) {
+      const parsed = parseDataUrl(item.dataUrl, item.mime, item.filename)
+      if (parsed) result.push(parsed)
+      continue
+    }
+    if (!item.path) continue
+    const resolved = path.resolve(root, item.path)
+    const data = await fs.readFile(resolved)
+    const mime = item.mime || mimeFromPath(resolved)
+    if (!mime.startsWith("image/")) continue
+    const base64 = data.toString("base64")
+    result.push({
+      data: base64,
+      dataUrl: `data:${mime};base64,${base64}`,
+      mime,
+      filename: item.filename || path.basename(resolved),
+    })
+  }
+  return result
+}
+
+function parseDataUrl(dataUrl: string, fallbackMime?: string, filename?: string) {
+  const match = /^data:([^;,]+);base64,(.+)$/s.exec(dataUrl)
+  if (!match) return
+  const mime = fallbackMime || match[1]
+  if (!mime.startsWith("image/")) return
+  return {
+    data: match[2],
+    dataUrl,
+    mime,
+    filename,
+  }
+}
+
+function mimeFromPath(file: string) {
+  const ext = path.extname(file).toLowerCase()
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg"
+  if (ext === ".webp") return "image/webp"
+  if (ext === ".gif") return "image/gif"
+  if (ext === ".bmp") return "image/bmp"
+  return "image/png"
+}
+
+function extensionForMime(mime: string) {
+  if (mime === "image/jpeg") return "jpg"
+  if (mime === "image/webp") return "webp"
+  if (mime === "image/gif") return "gif"
+  if (mime === "image/bmp") return "bmp"
+  return "png"
 }
 
 function formatCost(cost = 0) {

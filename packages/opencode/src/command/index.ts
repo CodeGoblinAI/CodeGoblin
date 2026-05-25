@@ -10,7 +10,6 @@ import { Skill } from "../skill"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 import PROMPT_GOBLIN from "./template/goblin.txt"
-import PROMPT_IMAGE from "./template/image.txt"
 
 type State = {
   commands: Record<string, Info>
@@ -57,7 +56,6 @@ export const Default = {
   REVIEW: "review",
   GOBLIN: "goblin",
   CODEGOBLIN: "codegoblin",
-  IMAGE: "image",
 } as const
 
 export interface Interface {
@@ -112,14 +110,6 @@ export const layer = Layer.effect(
         template: PROMPT_GOBLIN,
         hints: hints(PROMPT_GOBLIN),
       }
-      commands[Default.IMAGE] = {
-        name: Default.IMAGE,
-        description: "generate/save an image locally with Gemini when the local handler is available",
-        source: "command",
-        template: PROMPT_IMAGE,
-        hints: hints(PROMPT_IMAGE),
-      }
-
       for (const [name, command] of Object.entries(cfg.command ?? {})) {
         commands[name] = {
           name,

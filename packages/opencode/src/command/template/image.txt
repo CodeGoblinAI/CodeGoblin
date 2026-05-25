@@ -1,8 +1,0 @@
-The user requested CodeGoblin image output with arguments:
-$ARGUMENTS
-
-In the CodeGoblin TUI, /image is handled locally and should call Gemini image generation when a local Gemini key is configured. The intended form is:
-/image "prompt" --output codegoblin-output/images/name.png
-
-If this prompt reached the model instead of the local handler, explain that the local command handler may not be active in the current client and suggest using:
-codegoblin image "prompt" --output codegoblin-output/images/name.png

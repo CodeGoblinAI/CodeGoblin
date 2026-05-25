@@ -12,12 +12,14 @@ import { useLocal } from "@/context/local"
 import { usePermission } from "@/context/permission"
 import { type ContextItem, type ImageAttachmentPart, type Prompt, usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
+import { useServer } from "@/context/server"
 import { useSync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { buildRequestParts } from "./build-request-parts"
 import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
+import { authTokenFromCredentials } from "@/utils/server"
 
 type PendingPrompt = {
   abort: AbortController
@@ -49,6 +51,27 @@ type FollowupSendInput = {
 const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? part.content : "")).join("")
 
 const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
+
+const imageIntent = (text: string) =>
+  /\b(create|generate|make|draw|render|design|edit|change|transform|paint)\b.{0,100}\b(image|picture|photo|logo|mascot|illustration|avatar|icon|cat|dog|horse|goblin|red|style)\b/i.test(
+    text,
+  )
+
+const imageModelSelected = (model: { id: string; provider: { id: string }; capabilities?: any }) => {
+  if (model.capabilities?.output?.image) return true
+  const raw = `${model.provider.id}/${model.id}`.toLowerCase()
+  return (
+    raw.includes("gemini") ||
+    raw.includes("flash-image") ||
+    raw.includes("nano-banana") ||
+    raw.includes("nanobanana") ||
+    raw.includes("grok-imagine") ||
+    raw.includes("gpt-image") ||
+    raw.includes("dall-e") ||
+    raw.includes("qwen-image") ||
+    raw.includes("wan2.")
+  )
+}
 
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
@@ -207,6 +230,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const sync = useSync()
   const globalSync = useGlobalSync()
   const local = useLocal()
+  const server = useServer()
   const permission = usePermission()
   const prompt = usePrompt()
   const layout = useLayout()
@@ -308,6 +332,82 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         description: language.t("prompt.toast.modelAgentRequired.description"),
       })
       return
+    }
+
+    if (mode === "normal") {
+      const trimmed = text.trimStart()
+      const isImageSlash = trimmed.startsWith("/image")
+      const selectedImageModel = imageModelSelected(currentModel)
+      const looksLikeImageRequest = imageIntent(trimmed)
+      if (isImageSlash || selectedImageModel || looksLikeImageRequest) {
+        if (!isImageSlash && !selectedImageModel) {
+          showToast({
+            title: "Select an image model",
+            description:
+              "That looks like an image request. Pick an image model in /models first; CodeGoblin did not send it to the text model.",
+          })
+          return
+        }
+
+        const activeServer = server.current
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+          "x-opencode-directory": sdk.directory,
+        }
+        if (activeServer?.http.password) {
+          headers.authorization = `Basic ${authTokenFromCredentials({
+            username: activeServer.http.username,
+            password: activeServer.http.password,
+          })}`
+        }
+
+        showToast({
+          title: "Generating image",
+          description: `CodeGoblin is using ${currentModel.provider.id}/${currentModel.id}.`,
+        })
+
+        const response = await fetch(`${sdk.url}/codegoblin/image`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            input: isImageSlash ? trimmed : undefined,
+            prompt: isImageSlash ? undefined : trimmed,
+            provider: currentModel.provider.id,
+            model: currentModel.id,
+            inputImages: images.map((attachment) => ({
+              dataUrl: attachment.dataUrl,
+              mime: attachment.mime,
+              filename: attachment.filename,
+            })),
+            requireImageModel: true,
+          }),
+        }).catch((err) => {
+          throw new Error(errorMessage(err))
+        })
+
+        const result = (await response.json().catch(() => undefined)) as
+          | { ok?: boolean; message?: string; requiresImageModel?: boolean }
+          | undefined
+        if (!response.ok || !result?.ok) {
+          showToast({
+            title: result?.requiresImageModel ? "Select an image model" : "Image generation failed",
+            description: result?.message ?? language.t("common.requestFailed"),
+          })
+          return
+        }
+
+        input.addToHistory(currentPrompt, mode)
+        input.resetHistoryNavigation()
+        prompt.reset()
+        input.setMode("normal")
+        input.setPopover(null)
+        input.onSubmit?.()
+        showToast({
+          title: "Image generated",
+          description: result.message ?? "CodeGoblin saved the image locally.",
+        })
+        return
+      }
     }
 
     input.addToHistory(currentPrompt, mode)
