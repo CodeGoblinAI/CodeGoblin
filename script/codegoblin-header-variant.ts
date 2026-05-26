@@ -31,7 +31,7 @@ const showRunner =
   args.includes("--runner-variant") ||
   Boolean(getOptionValue("--runner")) ||
   Boolean(getOptionValue("--runner-variant"))
-const rawRunnerVariant = getOptionValue("--runner") ?? getOptionValue("--runner-variant") ?? "03"
+const rawRunnerVariant = getOptionValue("--runner") ?? getOptionValue("--runner-variant") ?? "12"
 const runnerVariantNames = {
   "01": "tiny classic",
   "02": "micro scout",
@@ -43,7 +43,18 @@ const runnerVariantNames = {
   "08": "scar hood",
   "09": "squat bruiser",
   "10": "deluxe goblin",
+  "11": "lean sneak",
+  "12": "pickpocket",
+  "13": "mini nib",
+  "14": "crouch hop",
+  "15": "hunched runner",
+  "16": "satchel scout",
+  "17": "hood pip",
+  "18": "low bruiser",
+  "19": "crooknose",
+  "20": "compact deluxe",
 } as const
+const runnerVariantCount = Object.keys(runnerVariantNames).length
 
 if (args.includes("--list") || args.includes("list")) {
   for (let i = 1; i <= 47; i++) {
@@ -54,7 +65,7 @@ if (args.includes("--list") || args.includes("list")) {
 }
 
 if (args.includes("--list-runner") || args.includes("list-runner")) {
-  for (let i = 1; i <= 10; i++) {
+  for (let i = 1; i <= runnerVariantCount; i++) {
     const runnerVariant = String(i).padStart(2, "0") as keyof typeof runnerVariantNames
     console.log(`bun run dev:runner:${runnerVariant}  # ${runnerVariantNames[runnerVariant]}`)
   }
@@ -70,8 +81,8 @@ if (!Number.isInteger(numeric) || numeric < 1 || numeric > 47) {
 
 const runnerNumeric = Number(rawRunnerVariant.trim().replace(/^v/i, ""))
 
-if (showRunner && (!Number.isInteger(runnerNumeric) || runnerNumeric < 1 || runnerNumeric > 10)) {
-  console.error(`Expected a footer runner variant from 1 to 10, got: ${rawRunnerVariant}`)
+if (showRunner && (!Number.isInteger(runnerNumeric) || runnerNumeric < 1 || runnerNumeric > runnerVariantCount)) {
+  console.error(`Expected a footer runner variant from 1 to ${runnerVariantCount}, got: ${rawRunnerVariant}`)
   process.exit(1)
 }
 

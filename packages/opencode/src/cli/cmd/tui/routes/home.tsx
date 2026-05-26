@@ -718,6 +718,106 @@ function TuiGoblinRunner(props: { theme: any }) {
         ["..S....S....", ".SGGGGGGGS..", "SGGGBMMBGGGS", ".GGGGGGGGGG.", "...GPPPGG...", "..GGPG......", ".G.G...G...."],
       ],
     },
+    {
+      id: "11",
+      name: "lean sneak",
+      frames: [
+        ["..S.....", ".SGGG...", "SGGBBG..", ".GGPPGG.", "..GPPG..", ".G..G.G."],
+        ["..S.....", ".SGGG...", "SGGBBG..", ".GGPPGG.", "..GGPG..", "..GGGG.."],
+        ["..S.....", ".SGGG...", "SGGBBG..", ".GGPPG..", "...GPGG.", ".G.G..G."],
+        ["..S.....", ".SGGG...", "SGGBBG..", ".GGPPGG.", "..GPPGG.", ".G...G.."],
+      ],
+    },
+    {
+      id: "12",
+      name: "pickpocket",
+      frames: [
+        ["...S.....", "..SGGG...", ".SGGBBG..", "SGGPPPGG.", "..GPPPG..", ".G..G.G.."],
+        ["...S.....", "..SGGG...", ".SGGBBG..", "SGGPPPG..", "..GGPPG..", "...GGGG.."],
+        ["...S.....", "..SGGG...", ".SGGBBG..", "SGGPPPGG.", ".GGPPG...", "..G.G..G."],
+        ["...S.....", "..SGGG...", ".SGGBBG..", ".GGPPPGG.", "..GPPGG..", ".G...G.G."],
+      ],
+    },
+    {
+      id: "13",
+      name: "mini nib",
+      frames: [
+        [".S.....", "SGGG...", "GGBBG..", ".GPPGG.", "..GPG..", ".G..G.."],
+        [".S.....", "SGGG...", "GGBBG..", ".GPPGG.", "..GGG..", "..G.G.."],
+        [".S.....", "SGGG...", "GGBBG..", ".GGPG..", "...PPGG", ".G.G..."],
+        [".S.....", "SGGG...", "GGBBG..", ".GPPGG.", "..GPG..", ".G...G."],
+      ],
+    },
+    {
+      id: "14",
+      name: "crouch hop",
+      frames: [
+        ["..S....", ".SGGG..", "SGGBGG.", ".GPPPG.", "..GGG..", ".G.G..."],
+        ["..S....", ".SGGG..", "SGGBGG.", ".GPPPG.", "...GG..", "..G.G.."],
+        ["..S....", ".SGGG..", "SGGBGG.", ".GGPPG.", "..GPG..", ".G..G.."],
+        ["..S....", ".SGGG..", "SGGBGG.", ".GPPPG.", "..GGPG.", ".G.G..."],
+      ],
+    },
+    {
+      id: "15",
+      name: "hunched runner",
+      frames: [
+        ["...S....", "..SGGG..", ".SGGBGG.", "SGGPPPG.", "..GPPGG.", ".G.G..G."],
+        ["...S....", "..SGGG..", ".SGGBGG.", "SGGPPPG.", "...GGPG.", "..GGG..."],
+        ["...S....", "..SGGG..", ".SGGBGG.", ".GGPPPGG", "..GPPG..", ".G..G.G."],
+        ["...S....", "..SGGG..", ".SGGBGG.", "SGGPPPG.", "..GGPGG.", ".G...G.."],
+      ],
+    },
+    {
+      id: "16",
+      name: "satchel scout",
+      frames: [
+        ["..S......", ".SGGG....", "SGGBBG...", ".GGPPGGMM", "..GPPGMM.", ".G..G...."],
+        ["..S......", ".SGGG....", "SGGBBG...", ".GGPPGGMM", "..GGPGMM.", "..GG....."],
+        ["..S......", ".SGGG....", "SGGBBG...", ".GGPPG.MM", "...GPGGMM", ".G.G....."],
+        ["..S......", ".SGGG....", "SGGBBG...", ".GGPPGGMM", "..GPPGMM.", ".G...G..."],
+      ],
+    },
+    {
+      id: "17",
+      name: "hood pip",
+      frames: [
+        ["..P....", ".PGGG..", "PGGBG..", ".GPPGG.", "..GPG..", ".G.G..."],
+        ["..P....", ".PGGG..", "PGGBG..", ".GPPGG.", "..GGG..", "..G.G.."],
+        ["..P....", ".PGGG..", "PGGBG..", ".GGPG..", "...PPGG", ".G..G.."],
+        ["..P....", ".PGGG..", "PGGBG..", ".GPPGG.", "..GPG..", ".G...G."],
+      ],
+    },
+    {
+      id: "18",
+      name: "low bruiser",
+      frames: [
+        [".SGGGG..", "SGGBBG..", "GGPPPPG.", ".GGPPGG.", "G.G..G.."],
+        [".SGGGG..", "SGGBBG..", "GGPPPPG.", "..GPPG..", ".GGGG..."],
+        [".SGGGG..", "SGGBBG..", "GGPPPPGG", ".GGPPG..", "..G.G.G."],
+        [".SGGGG..", "SGGBBG..", "GGPPPPG.", "..GGPGG.", ".G...G.."],
+      ],
+    },
+    {
+      id: "19",
+      name: "crooknose",
+      frames: [
+        ["...S.....", "..SGGG...", ".SGBBGG..", "SGGPPPGG.", "..GGPG...", ".G..G.G.."],
+        ["...S.....", "..SGGG...", ".SGBBGG..", "SGGPPPG..", "..GPPG...", "...GGGG.."],
+        ["...S.....", "..SGGG...", ".SGBBGG..", ".GGPPPGG.", "..GPGG...", ".G.G..G.."],
+        ["...S.....", "..SGGG...", ".SGBBGG..", "SGGPPPGG.", "..GGPGG..", ".G...G..."],
+      ],
+    },
+    {
+      id: "20",
+      name: "compact deluxe",
+      frames: [
+        ["..S..S..", ".SGGGGG.", "SGGBMBGG", ".GGPPPG.", "..GPPGG.", ".G..G.G."],
+        ["..S..S..", ".SGGGGG.", "SGGBMBGG", ".GGPPPG.", "..GGPG..", "..GGGG.."],
+        ["..S..S..", ".SGGGGG.", "SGGBMBGG", ".GGPPPG.", ".GGPPG..", ".G.G..G."],
+        ["..S..S..", ".SGGGGG.", "SGGBMBGG", ".GGPPPG.", "..GPPGG.", ".G...G.."],
+      ],
+    },
   ]
 
   function normalizeRunnerVariantId(value: string | undefined) {
@@ -726,7 +826,7 @@ function TuiGoblinRunner(props: { theme: any }) {
     if (Number.isInteger(numeric) && numeric >= 1 && numeric <= runnerVariants.length) {
       return String(numeric).padStart(2, "0")
     }
-    return "03"
+    return "12"
   }
 
   function normalizeRunnerFrames(frames: string[][]) {
@@ -738,7 +838,7 @@ function TuiGoblinRunner(props: { theme: any }) {
   const selectedRunnerVariantId = normalizeRunnerVariantId(process.env.CODEGOBLIN_FOOTER_VARIANT)
   const selectedRunnerVariant =
     runnerVariants.find((variant) => variant.id === selectedRunnerVariantId) ??
-    runnerVariants.find((variant) => variant.id === "03") ??
+    runnerVariants.find((variant) => variant.id === "12") ??
     runnerVariants[0]
   const rightRunnerFrames = normalizeRunnerFrames(selectedRunnerVariant.frames)
   const leftRunnerFrames = rightRunnerFrames.map((frame) => frame.map((runnerRow) => [...runnerRow].reverse().join("")))
