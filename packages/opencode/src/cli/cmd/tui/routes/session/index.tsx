@@ -1659,23 +1659,134 @@ function CollapsedReasoningText(props: { title: string | null; duration: number 
   )
 }
 
+type CodeGoblinImageMeta = {
+  kind: "image-progress" | "image-result" | "image-error"
+  provider?: string
+  model?: string
+  output?: string
+}
+
+function codeGoblinImageMeta(metadata: Record<string, unknown> | undefined): CodeGoblinImageMeta | undefined {
+  const raw = metadata?.codegoblin
+  if (!raw || typeof raw !== "object") return
+  const value = raw as Record<string, unknown>
+  const kind = value.kind
+  if (kind !== "image-progress" && kind !== "image-result" && kind !== "image-error") return
+  return {
+    kind,
+    provider: typeof value.provider === "string" ? value.provider : undefined,
+    model: typeof value.model === "string" ? value.model : undefined,
+    output: typeof value.output === "string" ? value.output : undefined,
+  }
+}
+
+function CodeGoblinImageStatusPart(props: { part: TextPart }) {
+  const { theme } = useTheme()
+  const meta = createMemo(() => codeGoblinImageMeta(props.part.metadata))
+  const status = createMemo(() => {
+    const kind = meta()?.kind
+    if (kind === "image-progress") return "running"
+    if (kind === "image-error") return "error"
+    return "done"
+  })
+  const model = createMemo(() => [meta()?.provider, meta()?.model].filter(Boolean).join("/"))
+  const title = createMemo(() => {
+    if (status() === "running") return "CodeGoblin is generating an image"
+    if (status() === "error") return "Image generation failed"
+    return "Image generated"
+  })
+  const detail = createMemo(() =>
+    props.part.text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => {
+        const output = meta()?.output
+        if (!line) return false
+        if (line.startsWith("CodeGoblin is generating an image")) return false
+        if (line.startsWith("This chat message will update")) return false
+        if (line.startsWith("Image generated")) return false
+        if (line.startsWith("Image generation failed")) return false
+        if (line.startsWith("Model:")) return false
+        if (line.startsWith("Saved to:")) return false
+        if (line.startsWith("Saving to:")) return false
+        if (line.startsWith("Planned output:")) return false
+        if (output && line.includes(output)) return false
+        return true
+      })
+      .join("\n"),
+  )
+  return (
+    <Show when={meta()}>
+      {(image) => (
+        <box
+          id={"text-" + props.part.id}
+          paddingLeft={2}
+          paddingRight={2}
+          paddingTop={1}
+          paddingBottom={1}
+          marginTop={1}
+          marginLeft={3}
+          flexShrink={0}
+          flexDirection="column"
+          border={["left"]}
+          borderColor={status() === "error" ? theme.error : theme.primary}
+          backgroundColor={theme.backgroundPanel}
+          customBorderChars={SplitBorder.customBorderChars}
+          gap={1}
+        >
+          <box flexDirection="row" gap={1} flexShrink={0}>
+            <Show
+              when={status() === "running"}
+              fallback={<text fg={status() === "error" ? theme.error : theme.primary}>{title()}</text>}
+            >
+              <Spinner color={theme.primary}>{title()}</Spinner>
+            </Show>
+            <Show when={model()}>
+              {(value) => <text fg={theme.textMuted}>{value()}</text>}
+            </Show>
+          </box>
+          <Show when={image().output}>
+            {(output) => (
+              <text fg={theme.text} wrapMode="word">
+                <span style={{ fg: theme.textMuted }}>{status() === "error" ? "Planned output: " : "Saved to: "}</span>
+                {output()}
+              </text>
+            )}
+          </Show>
+          <Show when={detail()}>
+            {(value) => <text fg={theme.textMuted}>{value()}</text>}
+          </Show>
+        </box>
+      )}
+    </Show>
+  )
+}
+
 function TextPart(props: { last: boolean; part: TextPart; message: AssistantMessage }) {
   const ctx = use()
   const { theme, syntax } = useTheme()
+  const imageMeta = createMemo(() => codeGoblinImageMeta(props.part.metadata))
   return (
     <Show when={props.part.text.trim()}>
-      <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
-        <markdown
-          syntaxStyle={syntax()}
-          streaming={true}
-          internalBlockMode="top-level"
-          content={props.part.text.trim()}
-          tableOptions={{ style: "grid" }}
-          conceal={ctx.conceal()}
-          fg={theme.markdownText}
-          bg={theme.background}
-        />
-      </box>
+      <Show
+        when={imageMeta()}
+        fallback={
+          <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
+            <markdown
+              syntaxStyle={syntax()}
+              streaming={true}
+              internalBlockMode="top-level"
+              content={props.part.text.trim()}
+              tableOptions={{ style: "grid" }}
+              conceal={ctx.conceal()}
+              fg={theme.markdownText}
+              bg={theme.background}
+            />
+          </box>
+        }
+      >
+        <CodeGoblinImageStatusPart part={props.part} />
+      </Show>
     </Show>
   )
 }

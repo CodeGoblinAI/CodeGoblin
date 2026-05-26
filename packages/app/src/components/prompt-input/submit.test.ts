@@ -30,6 +30,7 @@ let params: { id?: string } = {}
 let selected = "/repo/worktree-a"
 let variant: string | undefined
 let selectedModel = { id: "model", provider: { id: "provider" } }
+let imageGenerationAutoApprove = false
 let promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 let promptResetCount = 0
 let promptSetCount = 0
@@ -158,6 +159,14 @@ beforeAll(async () => {
     useServer: () => ({ current: undefined }),
   }))
 
+  mock.module("@/context/settings", () => ({
+    useSettings: () => ({
+      permissions: {
+        imageGenerationAutoApprove: () => imageGenerationAutoApprove,
+      },
+    }),
+  }))
+
   mock.module("@/context/sync", () => ({
     useSync: () => ({
       data: { command: [] },
@@ -262,6 +271,7 @@ beforeEach(() => {
   syncedDirectories.length = 0
   selected = "/repo/worktree-a"
   selectedModel = { id: "model", provider: { id: "provider" } }
+  imageGenerationAutoApprove = false
   promptValue = [{ type: "text", content: "ls", start: 0, end: 2 }]
   promptResetCount = 0
   promptSetCount = 0
@@ -473,12 +483,24 @@ describe("prompt submit worktree selection", () => {
       },
     })
     expect(String(optimistic[1]?.parts?.[0]?.text)).toContain("CodeGoblin is generating an image with openai/gpt-image-1")
+    expect(String(optimistic[1]?.parts?.[0]?.text)).toContain("/repo/main/codegoblin-output/images/")
+    expect((optimistic[1]?.parts?.[0] as any)?.metadata).toMatchObject({
+      codegoblin: {
+        kind: "image-progress",
+        provider: "openai",
+        model: "gpt-image-1",
+      },
+    })
+    expect(String((optimistic[1]?.parts?.[0] as any)?.metadata?.codegoblin?.output)).toContain(
+      "/repo/main/codegoblin-output/images/",
+    )
     expect(fetchRequests).toHaveLength(1)
     expect(fetchRequests[0]).toMatchObject({
       url: "http://localhost:4096/codegoblin/image",
       body: {
         sessionID: "session-1",
         prompt: "generate an image of a horse",
+        output: expect.stringMatching(/^codegoblin-output\/images\/.+\.png$/),
         provider: "openai",
         model: "gpt-image-1",
         inputImages: [
@@ -532,6 +554,44 @@ describe("prompt submit worktree selection", () => {
     expect(fetchRequests).toHaveLength(0)
     expect(optimistic).toHaveLength(0)
     expect(promptResetCount).toBe(0)
+  })
+
+  test("uses settings to auto-approve implicit web image requests", async () => {
+    params = { id: "session-1" }
+    selectedModel = { id: "gpt-image-1", provider: { id: "openai" } }
+    promptValue = [
+      {
+        type: "text",
+        content: "generate an image of a horse",
+        start: 0,
+        end: "generate an image of a horse".length,
+      },
+    ]
+    imageGenerationAutoApprove = true
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+    await submit.handleSubmit(event)
+
+    expect(confirmPrompts).toHaveLength(0)
+    expect(fetchRequests).toHaveLength(1)
+    expect(promptResetCount).toBe(1)
   })
 
   test("does not send casual text to a selected image model", async () => {

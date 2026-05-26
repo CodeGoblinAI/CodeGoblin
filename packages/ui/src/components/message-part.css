@@ -250,6 +250,89 @@
   }
 }
 
+[data-component="codegoblin-image-status"] {
+  width: min(100%, 720px);
+  border: 1px solid color-mix(in srgb, var(--border-success-selected) 55%, var(--border-weak-base));
+  border-left: 4px solid var(--border-success-selected);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--surface-success-strong) 9%, transparent), transparent 46%),
+    var(--background-stronger);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--surface-success-strong) 10%, transparent);
+}
+
+[data-component="codegoblin-image-status"][data-status="error"] {
+  border-color: color-mix(in srgb, var(--border-critical-selected) 55%, var(--border-weak-base));
+  border-left-color: var(--border-critical-selected);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--surface-critical-strong) 8%, transparent), transparent 48%),
+    var(--background-stronger);
+}
+
+[data-slot="codegoblin-image-header"] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+[data-slot="codegoblin-image-title"] {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-strong);
+  font-weight: var(--font-weight-medium);
+}
+
+[data-slot="codegoblin-image-model"] {
+  flex: 0 0 auto;
+  color: var(--text-weak);
+  font-size: 12px;
+  font-family: var(--font-family-mono);
+}
+
+[data-slot="codegoblin-image-output"] {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 8px 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--background-base) 72%, transparent);
+  border: 1px solid var(--border-weak-base);
+}
+
+[data-slot="codegoblin-image-output-label"] {
+  color: var(--text-weak);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+[data-slot="codegoblin-image-output"] code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-family: var(--font-family-mono);
+}
+
+[data-slot="codegoblin-image-detail"] {
+  color: var(--text-weak);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 [data-component="compaction-part"] {
   width: 100%;
   display: flex;

@@ -1446,11 +1446,115 @@ PART_MAPPING["compaction"] = function CompactionPartDisplay() {
   return <MessageDivider label={i18n.t("ui.messagePart.compaction")} />
 }
 
+type CodeGoblinImageMeta = {
+  kind: "image-progress" | "image-result" | "image-error"
+  provider?: string
+  model?: string
+  output?: string
+}
+
+function codeGoblinImageMeta(metadata: Record<string, unknown> | undefined): CodeGoblinImageMeta | undefined {
+  const raw = metadata?.codegoblin
+  if (!raw || typeof raw !== "object") return
+  const value = raw as Record<string, unknown>
+  const kind = value.kind
+  if (kind !== "image-progress" && kind !== "image-result" && kind !== "image-error") return
+  return {
+    kind,
+    provider: typeof value.provider === "string" ? value.provider : undefined,
+    model: typeof value.model === "string" ? value.model : undefined,
+    output: typeof value.output === "string" ? value.output : undefined,
+  }
+}
+
+function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string }) {
+  const [copied, setCopied] = createSignal(false)
+  const status = createMemo(() => {
+    if (props.meta.kind === "image-progress") return "running"
+    if (props.meta.kind === "image-error") return "error"
+    return "done"
+  })
+  const title = createMemo(() => {
+    if (status() === "running") return "CodeGoblin is generating an image"
+    if (status() === "error") return "Image generation failed"
+    return "Image generated"
+  })
+  const model = createMemo(() => [props.meta.provider, props.meta.model].filter(Boolean).join("/"))
+  const detail = createMemo(() => {
+    const output = props.meta.output
+    return props.text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => {
+        if (!line) return false
+        if (line.startsWith("CodeGoblin is generating an image")) return false
+        if (line.startsWith("This chat message will update")) return false
+        if (line.startsWith("Image generated")) return false
+        if (line.startsWith("Image generation failed")) return false
+        if (line.startsWith("Model:")) return false
+        if (line.startsWith("Saved to:")) return false
+        if (line.startsWith("Saving to:")) return false
+        if (line.startsWith("Planned output:")) return false
+        if (output && line.includes(output)) return false
+        return true
+      })
+      .join("\n")
+  })
+
+  const copyOutput = async () => {
+    if (!props.meta.output) return
+    if (await writeClipboard(props.meta.output)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  return (
+    <div data-component="codegoblin-image-status" data-status={status()}>
+      <div data-slot="codegoblin-image-header">
+        <div data-slot="codegoblin-image-title">
+          <Show when={status() === "running"}>
+            <Spinner />
+          </Show>
+          <span>{title()}</span>
+        </div>
+        <Show when={model()}>
+          <span data-slot="codegoblin-image-model">{model()}</span>
+        </Show>
+      </div>
+      <Show when={props.meta.output}>
+        {(output) => (
+          <div data-slot="codegoblin-image-output">
+            <span data-slot="codegoblin-image-output-label">
+              {status() === "error" ? "Planned output" : "Saved to"}
+            </span>
+            <code>{output()}</code>
+            <Tooltip value={copied() ? "Copied path" : "Copy output path"} placement="top" gutter={4}>
+              <IconButton
+                icon={copied() ? "check" : "copy"}
+                size="normal"
+                variant="ghost"
+                aria-label={copied() ? "Copied path" : "Copy output path"}
+                onClick={copyOutput}
+                onMouseDown={(e) => e.preventDefault()}
+              />
+            </Tooltip>
+          </div>
+        )}
+      </Show>
+      <Show when={detail()}>
+        {(value) => <div data-slot="codegoblin-image-detail">{value()}</div>}
+      </Show>
+    </div>
+  )
+}
+
 PART_MAPPING["text"] = function TextPartDisplay(props) {
   const data = useData()
   const i18n = useI18n()
   const numfmt = createMemo(() => new Intl.NumberFormat(i18n.locale()))
   const part = () => props.part as TextPart
+  const imageStatus = createMemo(() => codeGoblinImageMeta(part().metadata))
   const interrupted = createMemo(
     () =>
       props.message.role === "assistant" && (props.message as AssistantMessage).error?.name === "MessageAbortedError",
@@ -1527,8 +1631,15 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
     <Show when={text()}>
       <div data-component="text-part" data-timeline-part-id={part().id}>
         <div data-slot="text-part-body">
-          <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
-            <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
+          <Show
+            when={imageStatus()}
+            fallback={
+              <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
+                <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
+              </Show>
+            }
+          >
+            {(status) => <CodeGoblinImageStatus meta={status()} text={text()} />}
           </Show>
         </div>
         <Show when={showCopy()}>

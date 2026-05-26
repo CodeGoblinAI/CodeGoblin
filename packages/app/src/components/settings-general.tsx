@@ -331,6 +331,18 @@ export const SettingsGeneral: Component = () => {
         </SettingsRow>
 
         <SettingsRow
+          title={language.t("settings.general.row.imageAutoApprove.title")}
+          description={language.t("settings.general.row.imageAutoApprove.description")}
+        >
+          <div data-action="settings-image-generation-auto-approve">
+            <Switch
+              checked={settings.permissions.imageGenerationAutoApprove()}
+              onChange={(checked) => settings.permissions.setImageGenerationAutoApprove(checked)}
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
           title={language.t("settings.general.row.shell.title")}
           description={language.t("settings.general.row.shell.description")}
         >

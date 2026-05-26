@@ -13,6 +13,7 @@ import { usePermission } from "@/context/permission"
 import { type ContextItem, type ImageAttachmentPart, type Prompt, usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
+import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
 import { Worktree as WorktreeState } from "@/utils/worktree"
@@ -73,7 +74,7 @@ const imageModelSelected = (model: { id: string; provider: { id: string }; capab
   )
 }
 
-const imageAutoApprove = () => {
+const legacyImageAutoApprove = () => {
   if (typeof window === "undefined") return false
   try {
     return window.localStorage.getItem("codegoblin.image.autoApprove") === "true"
@@ -82,8 +83,8 @@ const imageAutoApprove = () => {
   }
 }
 
-const confirmImageGeneration = (provider: string, model: string, text: string) => {
-  if (imageAutoApprove()) return true
+const confirmImageGeneration = (provider: string, model: string, text: string, autoApprove: boolean) => {
+  if (autoApprove || legacyImageAutoApprove()) return true
   if (typeof globalThis.confirm !== "function") return false
   return globalThis.confirm(
     [
@@ -91,9 +92,24 @@ const confirmImageGeneration = (provider: string, model: string, text: string) =
       "",
       text.slice(0, 240),
       "",
-      "Use /image for explicit image jobs, or set codegoblin.image.autoApprove=true in localStorage to skip this prompt.",
+      "Use /image for explicit image jobs, or turn on Auto-approve image generation in Settings > General.",
     ].join("\n"),
   )
+}
+
+const defaultImageOutput = () => `codegoblin-output/images/${new Date().toISOString().replace(/[:.]/g, "-")}.png`
+
+const slashImageOutput = (input: string) => {
+  const match = /(?:^|\s)--output(?:=|\s+)(?:"([^"]+)"|'([^']+)'|(\S+))/i.exec(input)
+  return match?.[1] ?? match?.[2] ?? match?.[3]
+}
+
+const displayImageOutput = (directory: string, output: string | undefined) => {
+  if (!output) return
+  if (/^[A-Za-z]:[\\/]/.test(output) || output.startsWith("\\\\") || output.startsWith("/")) return output
+  const root = directory.replace(/[\\/]+$/, "")
+  if (/^[A-Za-z]:[\\/]/.test(root) || root.includes("\\")) return `${root}\\${output.replace(/\//g, "\\")}`
+  return `${root}/${output.replace(/\\/g, "/")}`
 }
 
 export async function sendFollowupDraft(input: FollowupSendInput) {
@@ -254,6 +270,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const globalSync = useGlobalSync()
   const local = useLocal()
   const server = useServer()
+  const settings = useSettings()
   const permission = usePermission()
   const prompt = usePrompt()
   const layout = useLayout()
@@ -378,7 +395,17 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         })
         return
       }
-      if (!isImageSlash && selectedImageModel && looksLikeImageRequest && !confirmImageGeneration(currentModel.provider.id, currentModel.id, trimmed)) {
+      if (
+        !isImageSlash &&
+        selectedImageModel &&
+        looksLikeImageRequest &&
+        !confirmImageGeneration(
+          currentModel.provider.id,
+          currentModel.id,
+          trimmed,
+          settings.permissions.imageGenerationAutoApprove(),
+        )
+      ) {
         showToast({
           title: "Image generation not sent",
           description: "CodeGoblin did not spend image credits. Use /image to generate without this confirmation.",
@@ -534,6 +561,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         const assistantPartID = Identifier.ascending("part")
         const now = Date.now()
         const requestText = isImageSlash ? trimmed : text.trim()
+        const plannedOutput = isImageSlash ? slashImageOutput(requestText) : defaultImageOutput()
+        const plannedOutputDisplay = displayImageOutput(sessionDirectory, plannedOutput)
         const optimisticUser: Message = {
           id: userMessageID,
           sessionID: session.id,
@@ -584,7 +613,18 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             sessionID: session.id,
             messageID: assistantMessageID,
             type: "text",
-            text: `CodeGoblin is generating an image with ${currentModel.provider.id}/${currentModel.id}.\nThe final output path will stay in this chat.`,
+            text: [
+              `CodeGoblin is generating an image with ${currentModel.provider.id}/${currentModel.id}.`,
+              plannedOutputDisplay ? `Saving to: ${plannedOutputDisplay}` : "The final output path will stay in this chat.",
+            ].join("\n"),
+            metadata: {
+              codegoblin: {
+                kind: "image-progress",
+                provider: currentModel.provider.id,
+                model: currentModel.id,
+                output: plannedOutputDisplay,
+              },
+            },
           } as Part,
         ]
         batch(() => {
@@ -610,6 +650,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           description: `CodeGoblin is using ${currentModel.provider.id}/${currentModel.id}. The output path will stay in this chat.`,
         })
 
+        setTimeout(() => {
+          void sync.session.sync?.(session.id, { force: true })
+        }, 500)
+
         fetch(`${sdk.url}/codegoblin/image`, {
           method: "POST",
           headers,
@@ -623,6 +667,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             variant,
             input: isImageSlash ? trimmed : undefined,
             prompt: isImageSlash ? undefined : trimmed,
+            output: plannedOutput,
             provider: currentModel.provider.id,
             model: currentModel.id,
             inputImages: images.map((attachment) => ({
