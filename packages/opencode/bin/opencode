@@ -1,16 +1,25 @@
 #!/usr/bin/env node
 
-const childProcess = require("child_process")
-const fs = require("fs")
-const path = require("path")
-const os = require("os")
+import childProcess from "child_process"
+import fs from "fs"
+import path from "path"
+import os from "os"
+import { fileURLToPath } from "url"
 
 const forwardedSignals = ["SIGINT", "SIGTERM", "SIGHUP"]
 
 function run(target) {
-  const child = childProcess.spawn(target, process.argv.slice(2), {
-    stdio: "inherit",
-  })
+  const useShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(target)
+  let child
+  try {
+    child = childProcess.spawn(target, process.argv.slice(2), {
+      stdio: "inherit",
+      shell: useShell,
+    })
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
 
   child.on("error", (error) => {
     console.error(error.message)
@@ -45,8 +54,9 @@ function run(target) {
 
 const envPath = process.env.OPENCODE_BIN_PATH
 
-const scriptPath = fs.realpathSync(__filename)
+const scriptPath = fs.realpathSync(fileURLToPath(import.meta.url))
 const scriptDir = path.dirname(scriptPath)
+const packageDir = path.dirname(scriptDir)
 
 //
 const cached = path.join(scriptDir, ".opencode")
@@ -186,7 +196,8 @@ function findBinary(startDir) {
   }
 }
 
-const resolved = envPath || (fs.existsSync(cached) ? cached : findBinary(scriptDir))
+const local = names.map((name) => path.join(packageDir, "dist", name, "bin", binary)).find((candidate) => fs.existsSync(candidate))
+const resolved = envPath || (fs.existsSync(cached) ? cached : local || findBinary(scriptDir))
 if (!resolved) {
   console.error(
     "It seems that your package manager failed to install the right version of the opencode CLI for your platform. You can try manually installing " +

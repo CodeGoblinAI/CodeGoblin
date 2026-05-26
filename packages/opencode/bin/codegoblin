@@ -17,10 +17,18 @@ const env = {
 }
 
 function run(command, args = argv) {
-  const child = childProcess.spawn(command, args, {
-    stdio: "inherit",
-    env,
-  })
+  const useShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command)
+  let child
+  try {
+    child = childProcess.spawn(command, args, {
+      stdio: "inherit",
+      env,
+      shell: useShell,
+    })
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
 
   child.on("error", (error) => {
     console.error(error.message)
