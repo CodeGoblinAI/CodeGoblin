@@ -28,6 +28,7 @@ import { sessionTitle } from "@/utils/session-title"
 import { pathKey } from "@/utils/path-key"
 import { messageAgentColor } from "@/utils/agent"
 import { sessionPermissionRequest } from "@/pages/session/composer/session-request-tree"
+import { CodeGoblinLogoMark } from "@/components/codegoblin-logo"
 
 const USE_HOME_DESIGN = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
 const HOME_SESSION_LIMIT = 15
@@ -235,9 +236,7 @@ function CodeGoblinWebHero() {
     <div class="col-span-full pt-8">
       <div class="flex min-w-0 items-center justify-between gap-6 border-b border-[#2b6d31] pb-5">
         <div class="flex min-w-0 items-center gap-4">
-          <div class="grid size-16 shrink-0 place-items-center rounded-[8px] border border-[#62f56e] bg-[#030703] shadow-[0_0_24px_rgba(98,245,110,0.14)]">
-            <img src="/favicon.svg" alt="" class="size-11 object-contain [image-rendering:pixelated]" />
-          </div>
+          <CodeGoblinLogoMark size="md" />
           <div class="min-w-0">
             <div class="text-32-bold leading-tight text-[#62f56e]">CodeGoblin</div>
             <div class="mt-1 max-w-[720px] text-13-regular text-[#d9f7da]">
@@ -549,7 +548,7 @@ function LegacyHome() {
   return (
     <div class="mx-auto mt-55 w-full md:w-auto px-4">
       <div class="flex flex-col items-center gap-3 opacity-90">
-        <img src="/favicon.svg" alt="" class="h-16 w-16 object-contain" />
+        <CodeGoblinLogoMark size="md" />
         <div class="text-28-bold text-text-strong">CodeGoblin</div>
       </div>
       <Button

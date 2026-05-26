@@ -709,14 +709,14 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "codegoblin.theme",
-        title: "CodeGoblin identity",
+        title: "CodeGoblin theme identity",
         slashName: "goblin-identity",
-        slashAliases: ["goblin art"],
+        slashAliases: ["goblin art", "goblin theme", "codegoblin theme"],
         run: () => {
           dialog.replace(() => (
             <DialogAlert
               title="CodeGoblin Identity"
-              message="CodeGoblin uses a custom wordmark, green/black TUI theme, CG terminal title, and local usage hoard. Use /themes to switch the actual TUI theme."
+              message="CodeGoblin theme identity shows the product look: custom wordmark, green/black default TUI palette, CG terminal title, and local usage hoard. /themes opens the actual theme picker."
             />
           ))
         },
@@ -724,8 +724,9 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "theme.switch",
-        title: "Switch theme",
+        title: "Switch TUI theme",
         slashName: "themes",
+        slashAliases: ["theme"],
         run: () => {
           dialog.replace(() => <DialogThemeList />)
         },

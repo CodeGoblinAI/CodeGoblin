@@ -8,7 +8,7 @@ export function DialogThemeList() {
   const options = Object.keys(theme.all())
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
     .map((value) => ({
-      title: value,
+      title: value === "codegoblin" ? "CodeGoblin (default)" : value === "classic" ? "Upstream Classic" : value,
       value: value,
     }))
   const dialog = useDialog()

@@ -175,6 +175,10 @@ function use() {
   return ctx
 }
 
+function displayAgentMode(mode: string | undefined) {
+  return mode?.toLowerCase() === "build" ? "Agent" : Locale.titlecase(mode ?? "agent")
+}
+
 function isChatGoblinFlagEnabled(value: string | undefined) {
   const normalized = value?.trim().toLowerCase()
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
@@ -1548,12 +1552,14 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
                   fg:
                     props.message.error?.name === "MessageAbortedError"
                       ? theme.textMuted
-                      : local.agent.color(props.message.agent),
+                      : props.message.agent?.toLowerCase() === "build"
+                        ? theme.primary
+                        : local.agent.color(props.message.agent),
                 }}
               >
                 ▣{" "}
               </span>{" "}
-              <span style={{ fg: theme.text }}>{Locale.titlecase(props.message.mode)}</span>
+              <span style={{ fg: theme.text }}>{displayAgentMode(props.message.mode)}</span>
               <span style={{ fg: theme.textMuted }}> · {model()}</span>
               <Show when={duration()}>
                 <span style={{ fg: theme.textMuted }}> · {Locale.duration(duration())}</span>

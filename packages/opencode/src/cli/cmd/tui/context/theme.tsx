@@ -162,6 +162,12 @@ const [store, setStore] = createStore<State>({
   ready: false,
 })
 
+function normalizeCodeGoblinTheme(value: unknown, opts?: { migrateSystem?: boolean }) {
+  if (value === "opencode" || value === "classic") return "codegoblin"
+  if (opts?.migrateSystem && value === "system") return "codegoblin"
+  return typeof value === "string" ? value : "codegoblin"
+}
+
 export function allThemes() {
   return store.themes
 }
@@ -323,15 +329,17 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         }
         draft.mode = mode
         draft.lock = lock
-        const active = config.theme ?? kv.get("theme", "codegoblin")
-        draft.active = active === "opencode" ? "codegoblin" : typeof active === "string" ? active : "codegoblin"
+        const saved = config.theme ?? kv.get("theme", "codegoblin")
+        const active = normalizeCodeGoblinTheme(saved, { migrateSystem: !config.theme })
+        if (!config.theme && saved !== active) kv.set("theme", active)
+        draft.active = active
         draft.ready = false
       }),
     )
 
     createEffect(() => {
       const theme = config.theme
-      if (theme) setStore("active", theme)
+      if (theme) setStore("active", normalizeCodeGoblinTheme(theme))
     })
 
     function init() {

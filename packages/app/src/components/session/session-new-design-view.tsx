@@ -10,6 +10,7 @@ import { base64Encode } from "@opencode-ai/core/util/encode"
 import { getFilename } from "@opencode-ai/core/util/path"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Select } from "@opencode-ai/ui/select"
+import { CodeGoblinLogoMark } from "@/components/codegoblin-logo"
 
 const MAIN_WORKTREE = "main"
 
@@ -42,7 +43,7 @@ export function NewSessionDesignView(props: { worktree: string; children: JSX.El
       <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
         <div class="w-full max-w-[720px]">
           <div class="flex flex-col items-center gap-2 text-center">
-            <img src="/favicon.svg" alt="" class="h-20 w-20 object-contain opacity-95" />
+            <CodeGoblinLogoMark size="lg" />
             <div class="text-[34px] font-semibold tracking-normal text-v2-text-text-base">CodeGoblin</div>
             <div class="text-[13px] font-medium text-v2-text-text-muted">
               Your local AI goblin for code, images, and agents.
