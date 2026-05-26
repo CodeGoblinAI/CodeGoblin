@@ -23,7 +23,7 @@ const HTML_SUCCESS = `<!DOCTYPE html>
 <body>
   <div class="container">
     <h1>Authorization Successful</h1>
-    <p>You can close this window and return to OpenCode.</p>
+    <p>You can close this window and return to CodeGoblin.</p>
   </div>
   <script>setTimeout(() => window.close(), 2000);</script>
 </body>

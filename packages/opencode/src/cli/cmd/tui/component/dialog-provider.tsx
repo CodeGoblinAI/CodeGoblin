@@ -92,7 +92,7 @@ export function createDialogProviderOptions() {
       placeholder: "Provider id",
       description: () => (
         <text fg={theme.textMuted}>
-          This only stores a credential. Configure the provider in CodeGoblin/OpenCode config to use it.
+          This only stores a credential. Configure the provider in CodeGoblin config to use it.
         </text>
       ),
     })
@@ -358,7 +358,7 @@ function ApiMethod(props: ApiMethodProps) {
           opencode: (
             <box gap={1}>
               <text fg={theme.textMuted}>
-                OpenCode Zen is an upstream hosted provider. CodeGoblin can use it with your key, but is not affiliated.
+                Zen is an upstream hosted provider. CodeGoblin can use it with your key, but is not affiliated.
               </text>
               <text fg={theme.text}>
                 Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> to get a key
@@ -368,11 +368,10 @@ function ApiMethod(props: ApiMethodProps) {
           "opencode-go": (
             <box gap={1}>
               <text fg={theme.textMuted}>
-                Upstream OpenCode Go is a subscription provider. CodeGoblin can use it with your key, but is not
-                affiliated.
+                Upstream Go is a subscription provider. CodeGoblin can use it with your key, but is not affiliated.
               </text>
               <text fg={theme.text}>
-                Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> and enable upstream OpenCode Go
+                Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> and enable upstream Go
               </text>
             </box>
           ),
@@ -393,7 +392,7 @@ function ApiMethod(props: ApiMethodProps) {
         if (props.custom && !sync.data.provider_next.all.some((provider) => provider.id === props.providerID)) {
           toast.show({
             variant: "info",
-            message: `Saved credential for ${props.providerID}. Configure it in CodeGoblin/OpenCode config to use it.`,
+            message: `Saved credential for ${props.providerID}. Configure it in CodeGoblin config to use it.`,
           })
           dialog.clear()
           return

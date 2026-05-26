@@ -5,9 +5,9 @@ const sizeClass = {
 } as const
 
 const imageClass = {
-  sm: "size-8",
-  md: "size-10",
-  lg: "size-12",
+  sm: "size-11",
+  md: "size-13",
+  lg: "size-17",
 } as const
 
 export function CodeGoblinLogoMark(props: { size?: keyof typeof sizeClass; class?: string }) {
@@ -25,11 +25,7 @@ export function CodeGoblinLogoMark(props: { size?: keyof typeof sizeClass; class
         .filter(Boolean)
         .join(" ")}
     >
-      <div class="absolute left-1 top-1 size-1.5 rounded-[2px] bg-[#62f56e]" />
-      <div class="absolute bottom-1 right-1 h-1.5 w-4 rounded-[2px] bg-[#f5c84b]" />
-      <div class="grid size-[72%] place-items-center rounded-[6px] border border-[#214f24] bg-[#071107]">
-        <img src="/favicon.svg" alt="" class={`${imageClass[size()]} object-contain [image-rendering:pixelated]`} />
-      </div>
+      <img src="/codegoblin-logo.png" alt="" class={`${imageClass[size()]} object-contain`} />
     </div>
   )
 }

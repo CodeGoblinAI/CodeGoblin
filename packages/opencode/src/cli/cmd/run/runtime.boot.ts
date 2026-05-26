@@ -18,7 +18,7 @@ import { pickVariant } from "./variant.shared"
 const DEFAULT_KEYBINDS: FooterKeybinds = {
   leader: TuiKeybind.LeaderDefault,
   leaderTimeout: 2000,
-  commandList: [{ key: "ctrl+p" }],
+  commandList: [{ key: "ctrl+g" }, { key: "ctrl+shift+g" }],
   variantCycle: [{ key: "ctrl+t" }],
   interrupt: [{ key: "escape" }],
   historyPrevious: [{ key: "up" }],

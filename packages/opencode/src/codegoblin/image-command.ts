@@ -43,6 +43,19 @@ export type ImageInput = {
 
 type ImageProvider = "google" | "xai" | "openai" | "qwen"
 
+type ResolvedImageKey = {
+  value: string
+  source: string
+}
+
+type ProviderGenerateInput = GenerateInput & {
+  root: string
+  output: string
+  model: string
+  apiKey: string
+  keySource: string
+}
+
 type PlannedImage = {
   provider?: ImageProvider
   model?: string
@@ -117,8 +130,8 @@ async function generateImage(input: GenerateInput): Promise<ImageCommandResult> 
   }
 
   const env = await loadLocalEnv(root, input.keyFile)
-  const apiKey = await findImageKey(provider, env)
-  if (!apiKey) {
+  const imageKey = await findImageKey(provider, env)
+  if (!imageKey) {
     return {
       ok: false,
       model,
@@ -130,12 +143,12 @@ async function generateImage(input: GenerateInput): Promise<ImageCommandResult> 
 
   const result =
     provider === "xai"
-      ? await generateXai({ ...input, root, output, model, apiKey })
+      ? await generateXai({ ...input, root, output, model, apiKey: imageKey.value, keySource: imageKey.source })
       : provider === "openai"
-        ? await generateOpenAI({ ...input, root, output, model, apiKey })
+        ? await generateOpenAI({ ...input, root, output, model, apiKey: imageKey.value, keySource: imageKey.source })
         : provider === "qwen"
-          ? await generateQwen({ ...input, root, output, model, apiKey })
-          : await generateGemini({ ...input, root, output, model, apiKey })
+          ? await generateQwen({ ...input, root, output, model, apiKey: imageKey.value, keySource: imageKey.source })
+          : await generateGemini({ ...input, root, output, model, apiKey: imageKey.value, keySource: imageKey.source })
   if (result.ok) await recordUsage(root, result)
   return result
 }
@@ -158,7 +171,7 @@ function planImage(input: Pick<GenerateInput, "provider" | "model">, output: str
   }
 }
 
-async function generateGemini(input: GenerateInput & { root: string; output: string; model: string; apiKey: string }): Promise<ImageCommandResult> {
+async function generateGemini(input: ProviderGenerateInput): Promise<ImageCommandResult> {
   const parts = [
     { text: input.prompt },
     ...(await imageInputParts(input.root, input.inputImages, { style: "gemini" })),
@@ -189,7 +202,13 @@ async function generateGemini(input: GenerateInput & { root: string; output: str
       model: input.model,
       provider: "google",
       output: input.output,
-      message: `Gemini image request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+      message: providerFailureMessage({
+        label: "Gemini image",
+        provider: "google",
+        status: response.status,
+        detail,
+        keySource: input.keySource,
+      }),
     }
   }
 
@@ -220,7 +239,7 @@ async function generateGemini(input: GenerateInput & { root: string; output: str
   }
 }
 
-async function generateXai(input: GenerateInput & { root: string; output: string; model: string; apiKey: string }): Promise<ImageCommandResult> {
+async function generateXai(input: ProviderGenerateInput): Promise<ImageCommandResult> {
   const imageParts = await imageInputParts(input.root, input.inputImages, { style: "dataUrl" })
   const editing = imageParts.length > 0
   const response = await fetch(`https://api.x.ai/v1/images/${editing ? "edits" : "generations"}`, {
@@ -251,7 +270,13 @@ async function generateXai(input: GenerateInput & { root: string; output: string
       model: input.model,
       provider: "xai",
       output: input.output,
-      message: `xAI image request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+      message: providerFailureMessage({
+        label: "xAI image",
+        provider: "xai",
+        status: response.status,
+        detail,
+        keySource: input.keySource,
+      }),
     }
   }
 
@@ -293,7 +318,7 @@ async function generateXai(input: GenerateInput & { root: string; output: string
   }
 }
 
-async function generateOpenAI(input: GenerateInput & { root: string; output: string; model: string; apiKey: string }): Promise<ImageCommandResult> {
+async function generateOpenAI(input: ProviderGenerateInput): Promise<ImageCommandResult> {
   const imageParts = await imageInputParts(input.root, input.inputImages, { style: "dataUrl" })
   const editing = imageParts.length > 0
   let response: Response
@@ -329,6 +354,7 @@ async function generateOpenAI(input: GenerateInput & { root: string; output: str
     model: input.model,
     output: input.output,
     label: "OpenAI image",
+    keySource: input.keySource,
   })
   if (!saved.ok) return saved
   return {
@@ -338,7 +364,7 @@ async function generateOpenAI(input: GenerateInput & { root: string; output: str
   }
 }
 
-async function generateQwen(input: GenerateInput & { root: string; output: string; model: string; apiKey: string }): Promise<ImageCommandResult> {
+async function generateQwen(input: ProviderGenerateInput): Promise<ImageCommandResult> {
   const imageParts = await imageInputParts(input.root, input.inputImages, { style: "dataUrl" })
   const content = [{ text: input.prompt }, ...imageParts.map((item) => ({ image: item.dataUrl }))]
   const created = await fetch("https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/image-generation/generation", {
@@ -373,7 +399,13 @@ async function generateQwen(input: GenerateInput & { root: string; output: strin
       model: input.model,
       provider: "qwen",
       output: input.output,
-      message: `Qwen image request failed with HTTP ${created.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+      message: providerFailureMessage({
+        label: "Qwen image",
+        provider: "qwen",
+        status: created.status,
+        detail,
+        keySource: input.keySource,
+      }),
     }
   }
 
@@ -460,7 +492,7 @@ async function pollQwenTask(taskID: string, apiKey: string) {
 
 async function saveOpenAIStyleResponse(
   response: Response,
-  input: { provider: ImageProvider; model: string; output: string; label: string },
+  input: { provider: ImageProvider; model: string; output: string; label: string; keySource: string },
 ): Promise<ImageCommandResult> {
   if (!response.ok) {
     const detail = await response.text().catch(() => "")
@@ -469,7 +501,13 @@ async function saveOpenAIStyleResponse(
       model: input.model,
       provider: input.provider,
       output: input.output,
-      message: `${input.label} request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+      message: providerFailureMessage({
+        label: input.label,
+        provider: input.provider,
+        status: response.status,
+        detail,
+        keySource: input.keySource,
+      }),
     }
   }
   const json = (await response.json()) as any
@@ -752,10 +790,32 @@ function unquoteEnv(value: string) {
 }
 
 async function findImageKey(provider: ImageProvider, env: Record<string, string | undefined>) {
-  if (provider === "xai") return env.XAI_API_KEY || (await authKey("xai"))
-  if (provider === "openai") return env.OPENAI_API_KEY || (await authKey("openai"))
-  if (provider === "qwen") return env.DASHSCOPE_API_KEY || env.QWEN_API_KEY || env.ALIBABA_API_KEY || (await authKey("alibaba"))
-  return env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_GENERATIVE_AI_API_KEY || (await authKey("google"))
+  const local = localImageKey(provider, env)
+  if (local) return local
+
+  const key = await authKey(authProvider(provider))
+  if (!key) return
+  return { value: key, source: `connected ${authProvider(provider)} provider` } satisfies ResolvedImageKey
+}
+
+function localImageKey(provider: ImageProvider, env: Record<string, string | undefined>) {
+  const names =
+    provider === "xai"
+      ? ["XAI_API_KEY"]
+      : provider === "openai"
+        ? ["OPENAI_API_KEY"]
+        : provider === "qwen"
+          ? ["DASHSCOPE_API_KEY", "QWEN_API_KEY", "ALIBABA_API_KEY"]
+          : ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"]
+
+  return names
+    .map((name) => (env[name] ? ({ value: env[name], source: name } satisfies ResolvedImageKey) : undefined))
+    .filter((item): item is ResolvedImageKey => Boolean(item))[0]
+}
+
+function authProvider(provider: ImageProvider) {
+  if (provider === "qwen") return "alibaba"
+  return provider
 }
 
 async function authKey(provider: string) {
@@ -782,6 +842,90 @@ function missingKeyMessage(provider: ImageProvider) {
   if (provider === "openai") return "No OpenAI image key found. Set OPENAI_API_KEY locally or connect the openai provider, then retry."
   if (provider === "qwen") return "No Qwen/DashScope image key found. Set DASHSCOPE_API_KEY locally or connect the alibaba provider, then retry."
   return "No Gemini image key found. Set GEMINI_API_KEY, GOOGLE_API_KEY, or GOOGLE_GENERATIVE_AI_API_KEY locally or connect the google provider, then retry."
+}
+
+function providerFailureMessage(input: {
+  label: string
+  provider: ImageProvider
+  status: number
+  detail: string
+  keySource: string
+}) {
+  const detail = providerErrorDetail(input.detail)
+  const code = detail.reason ?? detail.status
+  const reason = code ? ` ${code}` : ""
+  const auth = imageAuthFailureHint(input.provider, input.status, input.keySource, detail)
+  if (auth) {
+    return [
+      `${input.label} request was rejected by the provider (HTTP ${input.status}${reason}).`,
+      auth,
+      detail.message ? `Provider said: ${detail.message}` : undefined,
+    ]
+      .filter((item): item is string => Boolean(item))
+      .join(" ")
+  }
+  return `${input.label} request failed with HTTP ${input.status}${detail.message ? `: ${detail.message}` : ""}`
+}
+
+function imageAuthFailureHint(
+  provider: ImageProvider,
+  status: number,
+  keySource: string,
+  detail: { message?: string; status?: string; reason?: string },
+) {
+  const text = [detail.message, detail.status, detail.reason].filter(Boolean).join(" ").toLowerCase()
+  const looksAuth = status === 401 || status === 403 || /api[_ -]?key|auth|credential|permission|unauth/.test(text)
+  if (!looksAuth) return
+  if (provider === "google" && isEnvKeySource(keySource)) {
+    return `CodeGoblin used ${keySource} from your environment before checking connected Google auth. Update or remove that environment key, restart CodeGoblin, then retry.`
+  }
+  if (isEnvKeySource(keySource)) {
+    return `CodeGoblin used ${keySource} from your environment. Update or remove that environment key, restart CodeGoblin, then retry.`
+  }
+  return `CodeGoblin used the ${keySource}. Reconnect that provider or check that the key is valid, unrestricted for this API, and enabled in the provider project.`
+}
+
+function isEnvKeySource(source: string) {
+  return source.endsWith("_API_KEY") || source === "DASHSCOPE_API_KEY"
+}
+
+function providerErrorDetail(detail: string): { message?: string; status?: string; reason?: string } {
+  const parsed = parseJsonObject(detail)
+  const error = asRecord(parsed?.error)
+  if (!error) return { message: detail.trim().slice(0, 300) || undefined }
+  return {
+    message: stringValue(error.message),
+    status: stringValue(error.status),
+    reason: stringValue(error.reason) ?? providerErrorReason(error.details),
+  }
+}
+
+function parseJsonObject(text: string) {
+  if (!text.trim()) return
+  try {
+    return asRecord(JSON.parse(text))
+  } catch {
+    return
+  }
+}
+
+function providerErrorReason(details: unknown) {
+  if (!Array.isArray(details)) return
+  return details
+    .map(asRecord)
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .map((item) => stringValue(item.reason))
+    .filter((item): item is string => Boolean(item))[0]
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null) return
+  return value as Record<string, unknown>
+}
+
+function stringValue(value: unknown) {
+  if (typeof value !== "string") return
+  return value
 }
 
 function successMessage(provider: string, model: string, output: string, cost?: number) {

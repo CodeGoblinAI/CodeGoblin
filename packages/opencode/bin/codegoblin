@@ -17,10 +17,18 @@ const env = {
 }
 
 function run(command, args = argv) {
-  const child = childProcess.spawn(command, args, {
-    stdio: "inherit",
-    env,
-  })
+  const useShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command)
+  let child
+  try {
+    child = childProcess.spawn(command, args, {
+      stdio: "inherit",
+      env,
+      shell: useShell,
+    })
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
 
   child.on("error", (error) => {
     console.error(error.message)
@@ -108,7 +116,7 @@ if (resolved) {
     run(packaged)
   } else {
     console.error("CodeGoblin could not find a built CLI binary or local source checkout.")
-    console.error("Run `bun install` and `bun --cwd packages/opencode run build --single --skip-embed-web-ui --skip-install`.")
+    console.error("Run `bun install`, `bun run --cwd packages/opencode build --single --skip-install`, then `npm --prefix packages/opencode link`.")
     process.exit(1)
   }
 }
