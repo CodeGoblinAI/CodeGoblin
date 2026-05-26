@@ -36,7 +36,7 @@ jobs:
         env:
           OPENCODE_VERSION: ${{ inputs.version }}
         run: |
-          ./packages/opencode/script/build.ts --skip-embed-web-ui
+          ./packages/opencode/script/build.ts
 
       - name: Pack or publish CodeGoblin npm packages
         shell: bash

@@ -30,12 +30,14 @@ This repo uses Bun internally.
 
 ```bash
 bun install
-bun run --cwd packages/opencode build --single --skip-embed-web-ui --skip-install
+bun run --cwd packages/opencode build --single --skip-install
 cd packages/opencode
 npm link
 codegoblin --help
 cg --help
 ```
+
+If you only need quick CLI/TUI smoke tests, `--skip-embed-web-ui` is still available. Do **not** use it for `codegoblin web` builds: without embedded web assets the binary proxies the browser UI through `https://app.opencode.ai`, which can be blocked by corporate filters even though the local server still runs on `127.0.0.1`.
 
 On Windows, if native dependency install scripts fail in a local checkout, this lighter setup is often enough for CLI smoke testing:
 
@@ -44,6 +46,8 @@ bun install --ignore-scripts
 set MODELS_DEV_API_JSON=%CD%\packages\opencode\test\tool\fixtures\models-api.json
 bun run --cwd packages/opencode build --single --skip-embed-web-ui --skip-install
 ```
+
+For a Windows build that supports `codegoblin web`, drop `--skip-embed-web-ui` from that last command.
 
 ## Image dry run
 
@@ -59,6 +63,7 @@ Useful package-level commands:
 
 ```bash
 bun run --cwd packages/opencode typecheck
+bun run --cwd packages/opencode build --single --skip-install
 bun run --cwd packages/opencode build --single --skip-embed-web-ui --skip-install
 bun run --cwd packages/opencode script/publish.ts --dry-run
 ```
