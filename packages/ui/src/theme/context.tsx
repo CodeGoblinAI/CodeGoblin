@@ -30,6 +30,7 @@ function themeIDs() {
   if (ids) return ids
   ids = Object.keys(getFiles())
     .map((path) => path.slice("./themes/".length, -".json".length))
+    .filter((id) => id !== "opencode")
     .sort()
   return ids
 }
@@ -57,6 +58,7 @@ const names: Record<string, string> = {
   github: "GitHub",
   gruvbox: "Gruvbox",
   kanagawa: "Kanagawa",
+  codegoblin: "CodeGoblin",
   "lucent-orng": "Lucent Orng",
   material: "Material",
   matrix: "Matrix",
@@ -66,7 +68,7 @@ const names: Record<string, string> = {
   nord: "Nord",
   "one-dark": "One Dark",
   onedarkpro: "One Dark Pro",
-  opencode: "CodeGoblin",
+  opencode: "Upstream Classic",
   orng: "Orng",
   "osaka-jade": "Osaka Jade",
   palenight: "Palenight",
@@ -82,6 +84,7 @@ const names: Record<string, string> = {
 const oc2Theme = oc2ThemeJson as DesktopTheme
 
 function normalize(id: string | null | undefined) {
+  if (id === "opencode") return "codegoblin"
   return id === "oc-1" ? "oc-2" : id
 }
 
@@ -166,9 +169,13 @@ function cacheThemeVariants(theme: DesktopTheme, themeId: string) {
 
 export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
   name: "Theme",
-  init: (props: { defaultTheme?: string; onThemeApplied?: (theme: DesktopTheme, mode: "light" | "dark") => void }) => {
+  init: (props: {
+    defaultTheme?: string
+    defaultColorScheme?: ColorScheme
+    onThemeApplied?: (theme: DesktopTheme, mode: "light" | "dark") => void
+  }) => {
     const themeId = normalize(read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme) ?? "oc-2"
-    const colorScheme = (read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "system"
+    const colorScheme = (read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? props.defaultColorScheme ?? "system"
     const mode = colorScheme === "system" ? getSystemMode() : colorScheme
     const [store, setStore] = createStore({
       themes: {
@@ -254,7 +261,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
 
       const rawTheme = read(STORAGE_KEYS.THEME_ID)
       const savedTheme = normalize(rawTheme ?? props.defaultTheme) ?? "oc-2"
-      const savedScheme = (read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "system"
+      const savedScheme = (read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? props.defaultColorScheme ?? "system"
       if (rawTheme && rawTheme !== savedTheme) {
         write(STORAGE_KEYS.THEME_ID, savedTheme)
         clear()

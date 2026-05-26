@@ -229,25 +229,34 @@ function HomeDesign() {
 }
 
 function CodeGoblinWebHero() {
+  const chipClass = "rounded-[6px] border border-[#214f24] bg-[#071107] px-2 py-1 text-[#b8f8bb]"
+
   return (
     <div class="col-span-full pt-8">
-      <div class="flex min-w-0 items-center justify-between gap-6 border-b border-v2-border-border-subtle pb-5">
-        <div class="min-w-0">
-          <div class="text-32-bold leading-tight text-v2-text-text-base">CodeGoblin</div>
-          <div class="mt-1 max-w-[720px] text-13-regular text-v2-text-text-muted">
-            Your local AI goblin for code, images, and agents. BYOK providers stay intact; image outputs save locally.
+      <div class="flex min-w-0 items-center justify-between gap-6 border-b border-[#2b6d31] pb-5">
+        <div class="flex min-w-0 items-center gap-4">
+          <div class="grid size-16 shrink-0 place-items-center rounded-[8px] border border-[#62f56e] bg-[#030703] shadow-[0_0_24px_rgba(98,245,110,0.14)]">
+            <img src="/favicon.svg" alt="" class="size-11 object-contain [image-rendering:pixelated]" />
           </div>
-          <div class="mt-3 flex flex-wrap gap-2 text-12-medium text-v2-text-text-muted">
-            <span class="rounded-[6px] bg-v2-background-bg-deep px-2 py-1">images -&gt; codegoblin-output/images</span>
-            <span class="rounded-[6px] bg-v2-background-bg-deep px-2 py-1">usage hoard tracked locally</span>
-            <span class="rounded-[6px] bg-v2-background-bg-deep px-2 py-1">BYOK providers intact</span>
+          <div class="min-w-0">
+            <div class="text-32-bold leading-tight text-[#62f56e]">CodeGoblin</div>
+            <div class="mt-1 max-w-[720px] text-13-regular text-[#d9f7da]">
+              Your local AI goblin for code, images, and agents. BYOK providers stay intact; image outputs save locally.
+            </div>
+            <div class="mt-3 flex flex-wrap gap-2 text-12-medium">
+              <span class={chipClass}>images -&gt; codegoblin-output/images</span>
+              <span class={chipClass}>usage hoard tracked locally</span>
+              <span class="rounded-[6px] border border-[#6f5413] bg-[#171203] px-2 py-1 text-[#f5c84b]">
+                BYOK providers intact
+              </span>
+            </div>
           </div>
         </div>
-        <img
-          src="/codegoblin-mascot.png"
-          alt="CodeGoblin mascot eating token coins beside a terminal"
-          class="hidden size-28 shrink-0 rounded-[8px] object-cover shadow-[var(--v2-elevation-raised)] sm:block"
-        />
+        <div class="hidden shrink-0 text-right text-12-medium leading-5 text-[#9bb09d] sm:block">
+          <div class="text-[#62f56e]">CG local</div>
+          <div>image jobs stay in chat</div>
+          <div>black/green theme</div>
+        </div>
       </div>
     </div>
   )

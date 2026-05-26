@@ -1076,7 +1076,8 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
 
   const metaHead = createMemo(() => {
     const agent = props.message.agent
-    const items = [agent ? agent[0]?.toUpperCase() + agent.slice(1) : "", model()]
+    const agentLabel = agent?.toLowerCase() === "build" ? "Agent" : agent ? agent[0]?.toUpperCase() + agent.slice(1) : ""
+    const items = [agentLabel, model()]
     return items.filter((x) => !!x).join("\u00A0\u00B7\u00A0")
   })
 

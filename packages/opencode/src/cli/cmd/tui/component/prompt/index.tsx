@@ -103,6 +103,7 @@ function configuredTokenHoard() {
   const raw =
     process.env.CODEGOBLIN_TOKEN_HOARD_USD ??
     process.env.CODEGOBLIN_DEEPSEEK_BALANCE_USD ??
+    process.env.CODEGOBLIN_DEEPSEEK_CREDITS_USD ??
     process.env.DEEPSEEK_BALANCE_USD
   if (!raw) return
   const value = Number(raw)
@@ -370,8 +371,8 @@ export function Prompt(props: PromptProps) {
   const tokenHoard = createMemo(() => {
     const configured = configuredTokenHoard()
     const spent = props.sessionID ? (sync.session.get(props.sessionID)?.cost ?? 0) : 0
-    if (configured !== undefined) return `hoard ${money.format(Math.max(0, configured - spent))} left`
-    return "hoard local"
+    if (configured !== undefined) return `token hoard ${money.format(Math.max(0, configured - spent))} left`
+    return "token hoard local"
   })
 
   const [store, setStore] = createStore<{
@@ -2000,7 +2001,7 @@ export function Prompt(props: PromptProps) {
                     </Match>
                   </Switch>
                   <text fg={theme.text}>
-                    {paletteShortcut()} <span style={{ fg: theme.textMuted }}>commands</span>
+                    {paletteShortcut()} <span style={{ fg: theme.textMuted }}>actions</span>
                   </text>
                 </Match>
                 <Match when={store.mode === "shell"}>
