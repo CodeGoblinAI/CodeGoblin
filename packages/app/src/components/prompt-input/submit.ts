@@ -1,4 +1,4 @@
-import type { Message, Session } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, Session } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@opencode-ai/ui/toast"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { Binary } from "@opencode-ai/core/util/binary"
@@ -498,11 +498,86 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           })}`
         }
 
+        const userMessageID = Identifier.ascending("message")
+        const userPartID = Identifier.ascending("part")
+        const assistantMessageID = Identifier.ascending("message")
+        const assistantPartID = Identifier.ascending("part")
+        const now = Date.now()
+        const requestText = isImageSlash ? trimmed : text.trim()
+        const optimisticUser: Message = {
+          id: userMessageID,
+          sessionID: session.id,
+          role: "user",
+          time: { created: now },
+          agent,
+          model: { ...model, variant },
+        }
+        const optimisticUserParts: Part[] = [
+          {
+            id: userPartID,
+            sessionID: session.id,
+            messageID: userMessageID,
+            type: "text",
+            text: requestText,
+          } as Part,
+          ...images.map(
+            (attachment) =>
+              ({
+                id: Identifier.ascending("part"),
+                sessionID: session.id,
+                messageID: userMessageID,
+                type: "file",
+                mime: attachment.mime,
+                url: attachment.dataUrl,
+                filename: attachment.filename,
+              }) as Part,
+          ),
+        ]
+        const optimisticAssistant: Message = {
+          id: assistantMessageID,
+          parentID: userMessageID,
+          sessionID: session.id,
+          role: "assistant",
+          mode: agent,
+          agent,
+          variant,
+          providerID: currentModel.provider.id,
+          modelID: currentModel.id,
+          path: { cwd: sessionDirectory, root: sessionDirectory },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now + 1 },
+        } as Message
+        const optimisticAssistantParts: Part[] = [
+          {
+            id: assistantPartID,
+            sessionID: session.id,
+            messageID: assistantMessageID,
+            type: "text",
+            text: `CodeGoblin is generating an image with ${currentModel.provider.id}/${currentModel.id}.\nThe final output path will stay in this chat.`,
+          } as Part,
+        ]
+        batch(() => {
+          const [, setDirectoryStore] = globalSync.child(sessionDirectory)
+          setDirectoryStore("session_status", session.id, { type: "busy" })
+          sync.session.optimistic.add({
+            directory: sessionDirectory,
+            sessionID: session.id,
+            message: optimisticUser,
+            parts: optimisticUserParts,
+          })
+          sync.session.optimistic.add({
+            directory: sessionDirectory,
+            sessionID: session.id,
+            message: optimisticAssistant,
+            parts: optimisticAssistantParts,
+          })
+        })
         clearInput()
         clearContext()
         showToast({
           title: "Image generation started",
-          description: `CodeGoblin is using ${currentModel.provider.id}/${currentModel.id}. The result will stay in this chat.`,
+          description: `CodeGoblin is using ${currentModel.provider.id}/${currentModel.id}. The output path will stay in this chat.`,
         })
 
         fetch(`${sdk.url}/codegoblin/image`, {
@@ -510,6 +585,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           headers,
           body: JSON.stringify({
             sessionID: session.id,
+            messageID: userMessageID,
+            userPartID,
+            assistantMessageID,
+            assistantPartID,
             agent,
             variant,
             input: isImageSlash ? trimmed : undefined,
@@ -541,6 +620,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             })
           })
           .catch((err) => {
+            const [, setDirectoryStore] = globalSync.child(sessionDirectory)
+            setDirectoryStore("session_status", session.id, { type: "idle" })
             showToast({
               title: "Image generation failed",
               description: errorMessage(err),

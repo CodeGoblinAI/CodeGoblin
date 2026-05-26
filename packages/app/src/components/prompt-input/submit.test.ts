@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import type { Prompt } from "@/context/prompt"
 
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
@@ -10,10 +10,15 @@ const optimistic: Array<{
   directory?: string
   sessionID?: string
   message: {
-    agent: string
-    model: { providerID: string; modelID: string }
+    agent?: string
+    role?: string
+    id?: string
+    model?: { providerID: string; modelID: string; variant?: string }
+    providerID?: string
+    modelID?: string
     variant?: string
   }
+  parts?: Array<Record<string, unknown>>
 }> = []
 const optimisticSeeded: boolean[] = []
 const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
@@ -24,8 +29,12 @@ const syncedDirectories: string[] = []
 let params: { id?: string } = {}
 let selected = "/repo/worktree-a"
 let variant: string | undefined
-
-const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
+let selectedModel = { id: "model", provider: { id: "provider" } }
+let promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
+let promptResetCount = 0
+let promptSetCount = 0
+const fetchRequests: Array<{ url: string; body: any }> = []
+const originalFetch = globalThis.fetch
 
 const clientFor = (directory: string) => {
   createdClients.push(directory)
@@ -81,7 +90,7 @@ beforeAll(async () => {
   mock.module("@/context/local", () => ({
     useLocal: () => ({
       model: {
-        current: () => ({ id: "model", provider: { id: "provider" } }),
+        current: () => selectedModel,
         variant: { current: () => variant },
       },
       agent: {
@@ -106,8 +115,12 @@ beforeAll(async () => {
   mock.module("@/context/prompt", () => ({
     usePrompt: () => ({
       current: () => promptValue,
-      reset: () => undefined,
-      set: () => undefined,
+      reset: () => {
+        promptResetCount++
+      },
+      set: () => {
+        promptSetCount++
+      },
       context: {
         add: () => undefined,
         remove: () => undefined,
@@ -138,6 +151,10 @@ beforeAll(async () => {
     },
   }))
 
+  mock.module("@/context/server", () => ({
+    useServer: () => ({ current: undefined }),
+  }))
+
   mock.module("@/context/sync", () => ({
     useSync: () => ({
       data: { command: [] },
@@ -146,7 +163,16 @@ beforeAll(async () => {
           add: (value: {
             directory?: string
             sessionID?: string
-            message: { agent: string; model: { providerID: string; modelID: string; variant?: string } }
+            message: {
+              agent?: string
+              role?: string
+              id?: string
+              model?: { providerID: string; modelID: string; variant?: string }
+              providerID?: string
+              modelID?: string
+              variant?: string
+            }
+            parts?: Array<Record<string, unknown>>
           }) => {
             optimistic.push(value)
             optimisticSeeded.push(
@@ -202,9 +228,23 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    fetchRequests.push({
+      url: String(url),
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    })
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        message: "Image generated with openai/gpt-image-1. Saved to C:\\repo\\main\\codegoblin-output\\images\\test.png.",
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )
+  }) as typeof fetch
   createdClients.length = 0
   createdSessions.length = 0
   enabledAutoAccept.length = 0
+  fetchRequests.length = 0
   optimistic.length = 0
   optimisticSeeded.length = 0
   promoted.length = 0
@@ -212,8 +252,16 @@ beforeEach(() => {
   sentShell.length = 0
   syncedDirectories.length = 0
   selected = "/repo/worktree-a"
+  selectedModel = { id: "model", provider: { id: "provider" } }
+  promptValue = [{ type: "text", content: "ls", start: 0, end: 2 }]
+  promptResetCount = 0
+  promptSetCount = 0
   variant = undefined
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
+})
+
+afterAll(() => {
+  globalThis.fetch = originalFetch
 })
 
 describe("prompt submit worktree selection", () => {
@@ -341,5 +389,107 @@ describe("prompt submit worktree selection", () => {
 
     expect(storedSessions["/repo/worktree-a"]).toEqual([{ id: "session-1", title: "New session 1" }])
     expect(optimisticSeeded).toEqual([true])
+  })
+
+  test("persists web image requests as chat messages with the selected image model", async () => {
+    params = { id: "session-1" }
+    selectedModel = { id: "gpt-image-1", provider: { id: "openai" } }
+    promptValue = [
+      {
+        type: "text",
+        content: "generate an image of a horse",
+        start: 0,
+        end: "generate an image of a horse".length,
+      },
+    ]
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+    await submit.handleSubmit(event)
+
+    expect(promptResetCount).toBe(1)
+    expect(optimistic).toHaveLength(2)
+    expect(optimistic[0]).toMatchObject({
+      directory: "/repo/main",
+      sessionID: "session-1",
+      message: {
+        role: "user",
+        model: { providerID: "openai", modelID: "gpt-image-1" },
+      },
+    })
+    expect(optimistic[0]?.parts?.[0]).toMatchObject({
+      type: "text",
+      text: "generate an image of a horse",
+    })
+    expect(optimistic[1]).toMatchObject({
+      directory: "/repo/main",
+      sessionID: "session-1",
+      message: {
+        role: "assistant",
+        providerID: "openai",
+        modelID: "gpt-image-1",
+      },
+    })
+    expect(String(optimistic[1]?.parts?.[0]?.text)).toContain("CodeGoblin is generating an image with openai/gpt-image-1")
+    expect(fetchRequests).toHaveLength(1)
+    expect(fetchRequests[0]).toMatchObject({
+      url: "http://localhost:4096/codegoblin/image",
+      body: {
+        sessionID: "session-1",
+        prompt: "generate an image of a horse",
+        provider: "openai",
+        model: "gpt-image-1",
+        requireImageModel: true,
+      },
+    })
+    expect(fetchRequests[0]?.body.messageID).toBe(optimistic[0]?.message.id)
+    expect(fetchRequests[0]?.body.assistantMessageID).toBe(optimistic[1]?.message.id)
+  })
+
+  test("does not send casual text to a selected image model", async () => {
+    params = { id: "session-1" }
+    selectedModel = { id: "gpt-image-1", provider: { id: "openai" } }
+    promptValue = [{ type: "text", content: "hi", start: 0, end: 2 }]
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+    await submit.handleSubmit(event)
+
+    expect(fetchRequests).toHaveLength(0)
+    expect(optimistic).toHaveLength(0)
+    expect(promptResetCount).toBe(0)
+    expect(promptSetCount).toBe(0)
   })
 })

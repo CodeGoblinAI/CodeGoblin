@@ -198,6 +198,10 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
             sessionStatus,
             sessionID: SessionID.make(body.sessionID),
             messageID: typeof body?.messageID === "string" ? MessageID.make(body.messageID) : undefined,
+            userPartID: typeof body?.userPartID === "string" ? PartID.make(body.userPartID) : undefined,
+            assistantMessageID:
+              typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
+            assistantPartID: typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
             agent,
             providerID: requestProvider ?? "codegoblin",
             modelID: requestModel ?? "image",
@@ -255,6 +259,9 @@ function createCodeGoblinImageMessages(input: {
   sessionStatus: SessionStatus.Interface
   sessionID: SessionID
   messageID?: MessageID
+  userPartID?: PartID
+  assistantMessageID?: MessageID
+  assistantPartID?: PartID
   agent: string
   providerID: string
   modelID: string
@@ -265,8 +272,9 @@ function createCodeGoblinImageMessages(input: {
 }) {
   return Effect.gen(function* () {
     const userMessageID = input.messageID ?? MessageID.ascending()
-    const assistantMessageID = MessageID.ascending()
-    const assistantPartID = PartID.ascending()
+    const userPartID = input.userPartID ?? PartID.ascending()
+    const assistantMessageID = input.assistantMessageID ?? MessageID.ascending()
+    const assistantPartID = input.assistantPartID ?? PartID.ascending()
     const now = Date.now()
     yield* input.sessionStatus.set(input.sessionID, { type: "busy" })
     yield* input.session.updateMessage({
@@ -282,7 +290,7 @@ function createCodeGoblinImageMessages(input: {
       },
     } as MessageV2.User)
     yield* input.session.updatePart({
-      id: PartID.ascending(),
+      id: userPartID,
       sessionID: input.sessionID,
       messageID: userMessageID,
       type: "text",
@@ -325,7 +333,7 @@ function createCodeGoblinImageMessages(input: {
       sessionID: input.sessionID,
       messageID: assistantMessageID,
       type: "text",
-      text: `CodeGoblin is generating an image with ${input.providerID}/${input.modelID}...`,
+      text: `CodeGoblin is generating an image with ${input.providerID}/${input.modelID}.\nThe final output path will stay in this chat.`,
       metadata: {
         codegoblin: {
           kind: "image-progress",
