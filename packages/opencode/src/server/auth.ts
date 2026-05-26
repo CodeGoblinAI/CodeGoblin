@@ -15,8 +15,14 @@ export type DecodedCredentials = {
 }
 
 export class Config extends ConfigService.Service<Config>()("@opencode/ServerAuthConfig", {
-  password: EffectConfig.string("OPENCODE_SERVER_PASSWORD").pipe(EffectConfig.option),
-  username: EffectConfig.string("OPENCODE_SERVER_USERNAME").pipe(EffectConfig.withDefault("opencode")),
+  password: EffectConfig.string("CODEGOBLIN_SERVER_PASSWORD").pipe(
+    EffectConfig.orElse(() => EffectConfig.string("OPENCODE_SERVER_PASSWORD")),
+    EffectConfig.option,
+  ),
+  username: EffectConfig.string("CODEGOBLIN_SERVER_USERNAME").pipe(
+    EffectConfig.orElse(() => EffectConfig.string("OPENCODE_SERVER_USERNAME")),
+    EffectConfig.withDefault("codegoblin"),
+  ),
 }) {}
 
 export type Info = Context.Service.Shape<typeof Config>
@@ -34,10 +40,10 @@ export function authorized(credentials: DecodedCredentials, config: Info) {
 }
 
 export function header(credentials?: Credentials) {
-  const password = credentials?.password ?? Flag.OPENCODE_SERVER_PASSWORD
+  const password = credentials?.password ?? Flag.CODEGOBLIN_SERVER_PASSWORD
   if (!password) return undefined
 
-  const username = credentials?.username ?? Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
+  const username = credentials?.username ?? Flag.CODEGOBLIN_SERVER_USERNAME ?? "codegoblin"
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`
 }
 
