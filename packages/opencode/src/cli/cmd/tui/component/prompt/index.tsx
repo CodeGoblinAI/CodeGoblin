@@ -364,16 +364,16 @@ export function Prompt(props: PromptProps) {
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
     const cost = session?.cost ?? 0
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
-      cost: cost > 0 ? money.format(cost) : undefined,
+      context: pct ? `ctx ${Locale.number(tokens)} (${pct})` : `ctx ${Locale.number(tokens)}`,
+      cost: `spent ${money.format(cost)}`,
     }
   })
 
   const tokenHoard = createMemo(() => {
     const configured = configuredTokenHoard()
     const spent = props.sessionID ? (sync.session.get(props.sessionID)?.cost ?? 0) : 0
-    if (configured !== undefined) return `token hoard ${money.format(Math.max(0, configured - spent))} left`
-    return "token hoard local"
+    if (configured !== undefined) return `hoard ${money.format(Math.max(0, configured - spent))} left`
+    return "hoard local"
   })
 
   const [store, setStore] = createStore<{
@@ -1909,6 +1909,9 @@ export function Prompt(props: PromptProps) {
                     </Show>
                   </box>
                   <box flexDirection="row" gap={1} flexShrink={0}>
+                    <Show when={status().type !== "retry"}>
+                      <text fg={theme.textMuted}>goblin working</text>
+                    </Show>
                     {(() => {
                       const retry = createMemo(() => {
                         const s = status()

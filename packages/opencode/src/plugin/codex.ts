@@ -159,7 +159,7 @@ async function refreshAccessToken(refreshToken: string, issuer = ISSUER): Promis
 const HTML_SUCCESS = `<!doctype html>
 <html>
   <head>
-    <title>OpenCode - Codex Authorization Successful</title>
+    <title>CodeGoblin - Codex Authorization Successful</title>
     <style>
       body {
         font-family:
@@ -201,7 +201,7 @@ const HTML_SUCCESS = `<!doctype html>
 const HTML_ERROR = (error: string) => `<!doctype html>
 <html>
   <head>
-    <title>OpenCode - Codex Authorization Failed</title>
+    <title>CodeGoblin - Codex Authorization Failed</title>
     <style>
       body {
         font-family:

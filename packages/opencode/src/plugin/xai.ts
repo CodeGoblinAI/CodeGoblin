@@ -309,7 +309,7 @@ export async function pollDeviceCodeToken(
 const HTML_SUCCESS = `<!doctype html>
 <html>
   <head>
-    <title>OpenCode - xAI Authorization Successful</title>
+    <title>CodeGoblin - xAI Authorization Successful</title>
     <style>
       body {
         font-family:
@@ -351,7 +351,7 @@ const HTML_SUCCESS = `<!doctype html>
 const HTML_ERROR = (error: string) => `<!doctype html>
 <html>
   <head>
-    <title>OpenCode - xAI Authorization Failed</title>
+    <title>CodeGoblin - xAI Authorization Failed</title>
     <style>
       body {
         font-family:
