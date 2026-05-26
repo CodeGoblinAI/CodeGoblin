@@ -309,6 +309,12 @@
   border: 1px solid var(--border-weak-base);
 }
 
+[data-slot="codegoblin-image-output-actions"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 [data-slot="codegoblin-image-output-label"] {
   color: var(--text-weak);
   font-size: 12px;
@@ -323,6 +329,20 @@
   color: var(--text-strong);
   font-size: 12px;
   font-family: var(--font-family-mono);
+}
+
+[data-slot="codegoblin-image-status-actions"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+[data-slot="codegoblin-image-action-note"] {
+  min-width: 0;
+  color: var(--text-weak);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 [data-slot="codegoblin-image-detail"] {

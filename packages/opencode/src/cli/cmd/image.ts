@@ -61,9 +61,9 @@ export const ImageCommand = {
       dryRun: args.dryRun,
       inputImages,
     })
-    if ((args.provider || args.model) && !plan.supported) {
+    if (!plan.supported) {
       console.error(
-        "Select an image-capable model, such as google/gemini-2.5-flash-image, xai/grok-imagine-image-quality, openai/gpt-image-1, or qwen/wan2.7-image-pro.",
+        "Select an image-capable model with --provider and --model, such as google/gemini-2.5-flash-image, xai/grok-imagine-image-quality, openai/gpt-image-1, or qwen/wan2.7-image-pro.",
       )
       process.exitCode = 1
       return
@@ -79,13 +79,14 @@ export const ImageCommand = {
     }
     const result = await CodeGoblinImageCommand.generate({
       prompt,
-      output: args.output,
+      output: plan.output ?? args.output,
       model: args.model,
       provider: args.provider,
       keyFile: args.keyFile,
       cwd: process.cwd(),
       dryRun: args.dryRun,
       inputImages,
+      requireImageModel: true,
     }).catch((error) => ({
       ok: false,
       message: error instanceof Error ? error.message : "CodeGoblin image command failed.",

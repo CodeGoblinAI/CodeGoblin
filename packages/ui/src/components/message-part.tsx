@@ -1467,8 +1467,54 @@ function codeGoblinImageMeta(metadata: Record<string, unknown> | undefined): Cod
   }
 }
 
-function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string }) {
+type CodeGoblinImageRetryRequest = {
+  prompt: string
+  slashInput?: string
+  inputImages: Array<{ dataUrl: string; mime?: string; filename?: string }>
+}
+
+function codeGoblinImageRetryRequest(
+  partsByMessage: Record<string, PartType[]>,
+  message: MessageType,
+): CodeGoblinImageRetryRequest | undefined {
+  if (message.role !== "assistant") return
+
+  const parentParts = partsByMessage[(message as AssistantMessage).parentID] ?? []
+  const prompt = parentParts
+    .filter((item): item is TextPart => item?.type === "text" && typeof item.text === "string")
+    .map((item) => item.text)
+    .join("\n")
+    .trim()
+  if (!prompt) return
+
+  const inputImages = parentParts
+    .filter(
+      (item): item is FilePart =>
+        item?.type === "file" &&
+        typeof item.url === "string" &&
+        item.url.startsWith("data:") &&
+        typeof item.mime === "string" &&
+        item.mime.startsWith("image/"),
+    )
+    .map((item) => ({
+      dataUrl: item.url,
+      mime: item.mime,
+      filename: item.filename,
+    }))
+
+  return {
+    prompt,
+    slashInput: prompt.trimStart().startsWith("/image") ? prompt : undefined,
+    inputImages,
+  }
+}
+
+function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string; message: MessageType }) {
+  const data = useData()
   const [copied, setCopied] = createSignal(false)
+  const [opened, setOpened] = createSignal<"idle" | "opening" | "done" | "error">("idle")
+  const [retrying, setRetrying] = createSignal<"idle" | "running" | "done" | "error">("idle")
+  const retryRequest = createMemo(() => codeGoblinImageRetryRequest(data.store.part, props.message))
   const status = createMemo(() => {
     if (props.meta.kind === "image-progress") return "running"
     if (props.meta.kind === "image-error") return "error"
@@ -1509,6 +1555,59 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string 
     }
   }
 
+  const codeGoblinRequest = async (url: string, body: Record<string, unknown>) => {
+    const response = await fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "content-type": "application/json",
+        "x-opencode-directory": data.directory,
+      },
+      body: JSON.stringify(body),
+    })
+    const json = await response.json().catch(() => undefined)
+    if (!response.ok || json?.ok === false) {
+      throw new Error(typeof json?.message === "string" ? json.message : "CodeGoblin request failed.")
+    }
+    return json
+  }
+
+  const openOutputFolder = async () => {
+    const output = props.meta.output
+    if (!output || opened() === "opening") return
+    setOpened("opening")
+    try {
+      await codeGoblinRequest("/codegoblin/open-output", { output, mode: "folder" })
+      setOpened("done")
+      setTimeout(() => setOpened("idle"), 2000)
+    } catch {
+      setOpened("error")
+      setTimeout(() => setOpened("idle"), 2500)
+    }
+  }
+
+  const retryImage = async () => {
+    const request = retryRequest()
+    if (!request || retrying() === "running") return
+    setRetrying("running")
+    try {
+      await codeGoblinRequest("/codegoblin/image", {
+        sessionID: props.message.sessionID,
+        ...(request.slashInput ? { input: request.slashInput } : { prompt: request.prompt }),
+        output: props.meta.output,
+        provider: props.meta.provider,
+        model: props.meta.model,
+        inputImages: request.inputImages,
+        requireImageModel: true,
+      })
+      setRetrying("done")
+      setTimeout(() => setRetrying("idle"), 2000)
+    } catch {
+      setRetrying("error")
+      setTimeout(() => setRetrying("idle"), 2500)
+    }
+  }
+
   return (
     <div data-component="codegoblin-image-status" data-status={status()}>
       <div data-slot="codegoblin-image-header">
@@ -1529,18 +1628,75 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string 
               {status() === "error" ? "Planned output" : "Saved to"}
             </span>
             <code>{output()}</code>
-            <Tooltip value={copied() ? "Copied path" : "Copy output path"} placement="top" gutter={4}>
-              <IconButton
-                icon={copied() ? "check" : "copy"}
-                size="normal"
-                variant="ghost"
-                aria-label={copied() ? "Copied path" : "Copy output path"}
-                onClick={copyOutput}
-                onMouseDown={(e) => e.preventDefault()}
-              />
-            </Tooltip>
+            <div data-slot="codegoblin-image-output-actions">
+              <Tooltip value={copied() ? "Copied path" : "Copy output path"} placement="top" gutter={4}>
+                <IconButton
+                  icon={copied() ? "check" : "copy"}
+                  size="normal"
+                  variant="ghost"
+                  aria-label={copied() ? "Copied path" : "Copy output path"}
+                  onClick={copyOutput}
+                  onMouseDown={(e) => e.preventDefault()}
+                />
+              </Tooltip>
+              <Tooltip
+                value={
+                  opened() === "done"
+                    ? "Opened folder"
+                    : opened() === "error"
+                      ? "Folder not available"
+                      : "Open output folder"
+                }
+                placement="top"
+                gutter={4}
+              >
+                <IconButton
+                  icon={opened() === "done" ? "check" : "folder"}
+                  size="normal"
+                  variant="ghost"
+                  aria-label="Open output folder"
+                  disabled={opened() === "opening"}
+                  onClick={openOutputFolder}
+                  onMouseDown={(e) => e.preventDefault()}
+                />
+              </Tooltip>
+            </div>
           </div>
         )}
+      </Show>
+      <Show when={status() === "error" && retryRequest()}>
+        <div data-slot="codegoblin-image-status-actions">
+          <Tooltip
+            value={
+              retrying() === "done"
+                ? "Retry queued"
+                : retrying() === "error"
+                  ? "Retry failed"
+                  : "Retry with the same image model"
+            }
+            placement="top"
+            gutter={4}
+          >
+            <IconButton
+              icon={retrying() === "done" ? "check" : "reset"}
+              size="normal"
+              variant="secondary"
+              aria-label="Retry image generation"
+              disabled={retrying() === "running"}
+              onClick={retryImage}
+              onMouseDown={(e) => e.preventDefault()}
+            />
+          </Tooltip>
+          <span data-slot="codegoblin-image-action-note">
+            {retrying() === "running"
+              ? "Retrying image job..."
+              : retrying() === "done"
+                ? "Retry queued"
+                : retrying() === "error"
+                  ? "Retry failed"
+                  : "Retry keeps the selected image model and attached images."}
+          </span>
+        </div>
       </Show>
       <Show when={detail()}>
         {(value) => <div data-slot="codegoblin-image-detail">{value()}</div>}
@@ -1639,7 +1795,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
               </Show>
             }
           >
-            {(status) => <CodeGoblinImageStatus meta={status()} text={text()} />}
+            {(status) => <CodeGoblinImageStatus meta={status()} text={text()} message={props.message} />}
           </Show>
         </div>
         <Show when={showCopy()}>

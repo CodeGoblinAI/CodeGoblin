@@ -1,5 +1,7 @@
 import { Config as EffectConfig, Context, Effect, Layer } from "effect"
 import { HttpApiBuilder, OpenApi } from "effect/unstable/httpapi"
+import fs from "fs/promises"
+import path from "path"
 import {
   FetchHttpClient,
   HttpClient,
@@ -91,6 +93,7 @@ import { errorLayer } from "./middleware/error"
 import { fenceLayer } from "./middleware/fence"
 import { schemaErrorLayer } from "./middleware/schema-error"
 import { CodeGoblinImageCommand, type ImageInput } from "@/codegoblin/image-command"
+import { Process } from "@/util/process"
 
 type CodeGoblinImagePersist = {
   sessionID: SessionID
@@ -161,6 +164,32 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
     const sessionStatus = yield* SessionStatus.Service
+    yield* router.add("POST", "/codegoblin/open-output", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const text = yield* Effect.orDie(request.text)
+        let body: any
+        try {
+          body = text ? JSON.parse(text) : {}
+        } catch {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Invalid JSON body." }, { status: 400 })
+        }
+
+        const output = typeof body?.output === "string" ? body.output : ""
+        const mode = body?.mode === "file" ? "file" : "folder"
+        const opened = yield* Effect.promise(async () => {
+          try {
+            return await openCodeGoblinOutput(route.directory, output, mode)
+          } catch (error) {
+            return {
+              ok: false as const,
+              message: error instanceof Error ? error.message : "Could not open image output.",
+            }
+          }
+        })
+        return HttpServerResponse.jsonUnsafe(opened, { status: opened.ok ? 200 : 400 })
+      }),
+    )
     yield* router.add("POST", "/codegoblin/image", (request) =>
       Effect.gen(function* () {
       const route = yield* WorkspaceRouteContext
@@ -278,6 +307,39 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
     )
   }),
 )
+
+async function openCodeGoblinOutput(root: string, output: string, mode: "file" | "folder") {
+  if (!output.trim()) throw new Error("Image output path is required.")
+
+  const rootPath = path.resolve(root)
+  const target = path.resolve(rootPath, output)
+  const rel = path.relative(rootPath, target)
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("Image output path must stay inside the current project directory.")
+  }
+
+  const stat = await fs.stat(target).catch(() => undefined)
+  const isDirectory = stat?.isDirectory() === true
+  const openerTarget =
+    mode === "folder" ? (isDirectory ? target : path.dirname(target)) : stat && !isDirectory ? target : path.dirname(target)
+  const openerStat = await fs.stat(openerTarget).catch(() => undefined)
+  if (!openerStat) throw new Error("Image output folder does not exist yet.")
+
+  if (process.platform === "win32") {
+    const args = mode === "file" && stat && !isDirectory ? [`/select,${target}`] : [openerTarget]
+    Process.spawn(["explorer.exe", ...args])
+  } else if (process.platform === "darwin") {
+    const args = mode === "file" && stat && !isDirectory ? ["-R", target] : [openerTarget]
+    Process.spawn(["open", ...args])
+  } else {
+    Process.spawn(["xdg-open", openerTarget])
+  }
+
+  return {
+    ok: true as const,
+    opened: openerTarget,
+  }
+}
 
 function createCodeGoblinImageMessages(input: {
   session: Session.Interface
