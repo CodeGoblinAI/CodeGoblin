@@ -3,12 +3,11 @@ import { Schema } from "effect"
 import { logo as glyphs } from "./logo"
 
 const wordmark = [
-  `         .            CodeGoblin`,
-  `      _(,_,)_         local AI for code + images`,
-  `     /|  V  |\\        token-aware, agents-ready`,
-  `    ( |== ==| )       image prompts save locally`,
-  `      /|___|\\         independent local fork`,
-  `       /   \\          cute, serious, local`,
+  `       /\\-/\\          CodeGoblin`,
+  `      ( o.o )         local AI for code + images`,
+  `     <|  $  |>        token-aware, agents-ready`,
+  `      /|---|\\         image prompts save locally`,
+  `       /   \\          independent local fork`,
 ]
 
 export class CancelledError extends Schema.TaggedErrorClass<CancelledError>()("UICancelledError", {}) {}
