@@ -22,6 +22,7 @@ const env = {
   OPENCODE_BUMP: process.env["OPENCODE_BUMP"],
   OPENCODE_VERSION: process.env["OPENCODE_VERSION"],
   OPENCODE_RELEASE: process.env["OPENCODE_RELEASE"],
+  CODEGOBLIN_NPM_PACKAGE: process.env["CODEGOBLIN_NPM_PACKAGE"] || "codegoblin",
 }
 const CHANNEL = await (async () => {
   if (env.OPENCODE_CHANNEL) return env.OPENCODE_CHANNEL
@@ -31,11 +32,21 @@ const CHANNEL = await (async () => {
 })()
 const IS_PREVIEW = CHANNEL !== "latest"
 
+function prerelease(value: string) {
+  return value
+    .replace(/[^0-9A-Za-z-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-+/g, "-")
+}
+
 const VERSION = await (async () => {
   if (env.OPENCODE_VERSION) return env.OPENCODE_VERSION
-  if (IS_PREVIEW) return `0.0.0-${CHANNEL}-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}`
-  const version = await fetch("https://registry.npmjs.org/opencode-ai/latest")
+  if (IS_PREVIEW)
+    return `0.0.0-${prerelease(CHANNEL) || "preview"}-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}`
+  const packagePath = encodeURIComponent(env.CODEGOBLIN_NPM_PACKAGE)
+  const version = await fetch(`https://registry.npmjs.org/${packagePath}/latest`)
     .then((res) => {
+      if (res.status === 404) return { version: "0.0.0" }
       if (!res.ok) throw new Error(res.statusText)
       return res.json()
     })
@@ -74,4 +85,4 @@ export const Script = {
     return team
   },
 }
-console.log(`opencode script`, JSON.stringify(Script, null, 2))
+console.log(`codegoblin script`, JSON.stringify(Script, null, 2))

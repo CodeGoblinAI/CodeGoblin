@@ -1,0 +1,59 @@
+name: publish-codegoblin-npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, for example 0.1.0"
+        required: false
+        type: string
+      dry_run:
+        description: "Pack packages without publishing to npm"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish-npm:
+    if: github.repository == 'shawnisikli/CodeGoblin'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+
+      - uses: ./.github/actions/setup-bun
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Build native CLI packages
+        shell: bash
+        env:
+          OPENCODE_VERSION: ${{ inputs.version }}
+        run: |
+          ./packages/opencode/script/build.ts --skip-embed-web-ui
+
+      - name: Pack or publish CodeGoblin npm packages
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+          OPENCODE_VERSION: ${{ inputs.version }}
+          CODEGOBLIN_PUBLISH_DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+        run: |
+          if [ "${{ inputs.dry_run }}" != "true" ] && [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN is required for a real publish."
+            exit 1
+          fi
+
+          if [ "${{ inputs.dry_run }}" != "true" ] && [ -z "${{ inputs.version }}" ]; then
+            echo "A version input is required for a real publish."
+            exit 1
+          fi
+
+          bun ./packages/opencode/script/publish.ts
