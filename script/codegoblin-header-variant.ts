@@ -20,9 +20,15 @@ const rawVariant =
     (arg, index) =>
       arg !== "list" &&
       arg !== "list-runner" &&
+      arg !== "list-chat-goblin" &&
       arg !== "runner" &&
+      arg !== "chat-goblin" &&
       arg !== "--runner-variant" &&
+      arg !== "--chat-goblin" &&
+      arg !== "--chat-goblin-variant" &&
       args[index - 1] !== "--runner-variant" &&
+      args[index - 1] !== "--chat-goblin" &&
+      args[index - 1] !== "--chat-goblin-variant" &&
       !arg.startsWith("--"),
   ) ?? "01"
 const showRunner =
@@ -32,6 +38,13 @@ const showRunner =
   Boolean(getOptionValue("--runner")) ||
   Boolean(getOptionValue("--runner-variant"))
 const rawRunnerVariant = getOptionValue("--runner") ?? getOptionValue("--runner-variant") ?? "12"
+const showChatGoblin =
+  args.includes("--chat-goblin") ||
+  args.includes("chat-goblin") ||
+  args.includes("--chat-goblin-variant") ||
+  Boolean(getOptionValue("--chat-goblin")) ||
+  Boolean(getOptionValue("--chat-goblin-variant"))
+const rawChatGoblinVariant = getOptionValue("--chat-goblin") ?? getOptionValue("--chat-goblin-variant") ?? "04"
 const runnerVariantNames = {
   "01": "tiny classic",
   "02": "micro scout",
@@ -55,6 +68,14 @@ const runnerVariantNames = {
   "20": "compact deluxe",
 } as const
 const runnerVariantCount = Object.keys(runnerVariantNames).length
+const chatGoblinVariantNames = {
+  "01": "nibble pip",
+  "02": "crouch munch",
+  "03": "satchel chew",
+  "04": "hood pip eater",
+  "05": "compact deluxe munch",
+} as const
+const chatGoblinVariantCount = Object.keys(chatGoblinVariantNames).length
 
 if (args.includes("--list") || args.includes("list")) {
   for (let i = 1; i <= 47; i++) {
@@ -68,6 +89,14 @@ if (args.includes("--list-runner") || args.includes("list-runner")) {
   for (let i = 1; i <= runnerVariantCount; i++) {
     const runnerVariant = String(i).padStart(2, "0") as keyof typeof runnerVariantNames
     console.log(`bun run dev:runner:${runnerVariant}  # ${runnerVariantNames[runnerVariant]}`)
+  }
+  process.exit(0)
+}
+
+if (args.includes("--list-chat-goblin") || args.includes("list-chat-goblin")) {
+  for (let i = 1; i <= chatGoblinVariantCount; i++) {
+    const chatGoblinVariant = String(i).padStart(2, "0") as keyof typeof chatGoblinVariantNames
+    console.log(`bun run dev:chat:goblin:${chatGoblinVariant}  # ${chatGoblinVariantNames[chatGoblinVariant]}`)
   }
   process.exit(0)
 }
@@ -86,13 +115,29 @@ if (showRunner && (!Number.isInteger(runnerNumeric) || runnerNumeric < 1 || runn
   process.exit(1)
 }
 
+const chatGoblinNumeric = Number(rawChatGoblinVariant.trim().replace(/^v/i, ""))
+
+if (
+  showChatGoblin &&
+  (!Number.isInteger(chatGoblinNumeric) || chatGoblinNumeric < 1 || chatGoblinNumeric > chatGoblinVariantCount)
+) {
+  console.error(`Expected a chat goblin variant from 1 to ${chatGoblinVariantCount}, got: ${rawChatGoblinVariant}`)
+  process.exit(1)
+}
+
 const variant = String(numeric).padStart(2, "0")
 const runnerVariant = String(runnerNumeric).padStart(2, "0")
+const chatGoblinVariant = String(chatGoblinNumeric).padStart(2, "0")
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
 console.log(`Starting CodeGoblin TUI header variant ${variant}...`)
 if (showRunner) {
   console.log(`Footer goblin runner ${runnerVariant} enabled (${runnerVariantNames[runnerVariant as keyof typeof runnerVariantNames]}).`)
+}
+if (showChatGoblin) {
+  console.log(
+    `Chat sidebar goblin ${chatGoblinVariant} enabled (${chatGoblinVariantNames[chatGoblinVariant as keyof typeof chatGoblinVariantNames]}).`,
+  )
 }
 console.log("Press Ctrl+C to stop this variant before trying another one.\n")
 
@@ -102,6 +147,7 @@ const child = Bun.spawn([process.execPath, "run", "--cwd", "packages/opencode", 
     ...process.env,
     CODEGOBLIN_HEADER_VARIANT: variant,
     ...(showRunner ? { CODEGOBLIN_FOOTER_ANIMATION: "1", CODEGOBLIN_FOOTER_VARIANT: runnerVariant } : {}),
+    ...(showChatGoblin ? { CODEGOBLIN_CHAT_GOBLIN: "1", CODEGOBLIN_CHAT_GOBLIN_VARIANT: chatGoblinVariant } : {}),
   },
   stdin: "inherit",
   stdout: "inherit",
