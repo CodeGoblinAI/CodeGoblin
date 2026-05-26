@@ -1057,7 +1057,7 @@ export function Prompt(props: PromptProps) {
         "",
         Locale.truncate(input.prompt, 220),
         "",
-        "Use /image for explicit image jobs. Set CODEGOBLIN_IMAGE_AUTO_APPROVE=1 to skip this confirmation.",
+        "Set CODEGOBLIN_IMAGE_AUTO_APPROVE=1 to skip this confirmation.",
       ].join("\n"),
       "not now",
     )
@@ -1223,7 +1223,7 @@ export function Prompt(props: PromptProps) {
       toast.show({
         variant: "warning",
         message:
-          "An image model is selected, but this does not look like an image request. Use /image or include generate/draw/edit so CodeGoblin does not spend image credits by accident.",
+          "An image model is selected, but this does not look like an image request. Include generate/draw/edit so CodeGoblin does not spend image credits by accident.",
         duration: 9000,
       })
       return false

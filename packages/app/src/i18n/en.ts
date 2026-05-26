@@ -136,9 +136,9 @@ export const dict = {
   "provider.connect.apiKey.placeholder": "API key",
   "provider.connect.apiKey.required": "API key is required",
   "provider.connect.opencodeZen.line1":
-    "This upstream OpenCode Zen provider gives access to a curated set of reliable optimized models for coding agents.",
+    "This hosted Zen provider gives access to a curated set of reliable optimized models for coding agents.",
   "provider.connect.opencodeZen.line2":
-    "CodeGoblin can use it with your key, but CodeGoblin is an independent fork and is not affiliated with OpenCode.",
+    "CodeGoblin can use it with your key while keeping the rest of the app branded and routed through CodeGoblin.",
   "provider.connect.opencodeZen.visit.prefix": "Visit ",
   "provider.connect.opencodeZen.visit.link": "opencode.ai/zen",
   "provider.connect.opencodeZen.visit.suffix": " to collect your API key.",
@@ -300,7 +300,7 @@ export const dict = {
   "dialog.mcp.empty": "No MCPs configured",
 
   "dialog.lsp.empty": "LSPs auto-detected from file types",
-  "dialog.plugins.empty": "Plugins configured in CodeGoblin/OpenCode config",
+  "dialog.plugins.empty": "Plugins configured in CodeGoblin config (opencode.json)",
 
   "mcp.status.connected": "connected",
   "mcp.status.failed": "failed",
@@ -500,8 +500,8 @@ export const dict = {
   "error.chain.responseBody": "Response body:\n{{body}}",
   "error.chain.didYouMean": "Did you mean: {{suggestions}}",
   "error.chain.modelNotFound": "Model not found: {{provider}}/{{model}}",
-  "error.chain.checkConfig": "Check your config (opencode.json) provider/model names",
-  "error.chain.mcpFailed": 'MCP server "{{name}}" failed. Note, CodeGoblin inherits OpenCode MCP authentication limits for now.',
+  "error.chain.checkConfig": "Check your CodeGoblin config (opencode.json) provider/model names",
+  "error.chain.mcpFailed": 'MCP server "{{name}}" failed. CodeGoblin could not complete this MCP authentication flow yet.',
   "error.chain.providerAuthFailed": "Provider authentication failed ({{provider}}): {{message}}",
   "error.chain.providerInitFailed":
     'Failed to initialize provider "{{provider}}". Check credentials and configuration.',

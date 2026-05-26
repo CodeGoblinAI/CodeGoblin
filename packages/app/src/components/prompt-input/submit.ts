@@ -92,7 +92,7 @@ const confirmImageGeneration = (provider: string, model: string, text: string, a
       "",
       text.slice(0, 240),
       "",
-      "Use /image for explicit image jobs, or turn on Auto-approve image generation in Settings > General.",
+      "Turn on Auto-approve image generation in Settings > General to skip this confirmation.",
     ].join("\n"),
   )
 }
@@ -391,7 +391,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         showToast({
           title: "Confirm image generation",
           description:
-            "An image model is selected, but this does not look like an image request. Use /image or include generate/draw/edit so CodeGoblin does not spend image credits by accident.",
+            "An image model is selected, but this does not look like an image request. Include generate/draw/edit so CodeGoblin does not spend image credits by accident.",
         })
         return
       }
@@ -408,7 +408,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       ) {
         showToast({
           title: "Image generation not sent",
-          description: "CodeGoblin did not spend image credits. Use /image to generate without this confirmation.",
+          description: "CodeGoblin did not spend image credits. Enable Auto-approve image generation to skip this confirmation.",
         })
         return
       }

@@ -201,19 +201,19 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     label: "Help",
     items: [
       { type: "item", label: "CodeGoblin Project State", href: "https://github.com/shawnisikli/CodeGoblin/blob/dev/docs/PROJECT_STATE.md" },
-      { type: "item", label: "Upstream OpenCode Docs", href: "https://opencode.ai/docs" },
-      { type: "item", label: "Upstream OpenCode Discord", href: "https://discord.com/invite/opencode" },
+      { type: "item", label: "Base Project Docs", href: "https://opencode.ai/docs" },
+      { type: "item", label: "Base Project Discord", href: "https://discord.com/invite/opencode" },
       { type: "item", label: "Export Logs...", command: "logs.export" },
       { type: "separator" },
       {
         type: "item",
         label: "Share Feedback",
-        href: "https://github.com/anomalyco/opencode/issues/new?template=feature_request.yml",
+        href: "https://github.com/shawnisikli/CodeGoblin/issues/new?template=feature-request.yml",
       },
       {
         type: "item",
         label: "Report a Bug",
-        href: "https://github.com/anomalyco/opencode/issues/new?template=bug_report.yml",
+        href: "https://github.com/shawnisikli/CodeGoblin/issues/new?template=bug-report.yml",
       },
     ],
   },
