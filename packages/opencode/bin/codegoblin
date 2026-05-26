@@ -116,7 +116,7 @@ if (resolved) {
     run(packaged)
   } else {
     console.error("CodeGoblin could not find a built CLI binary or local source checkout.")
-    console.error("Run `bun install` and `bun --cwd packages/opencode run build --single --skip-embed-web-ui --skip-install`.")
+    console.error("Run `bun install`, `bun run --cwd packages/opencode build --single --skip-install`, then `npm --prefix packages/opencode link`.")
     process.exit(1)
   }
 }

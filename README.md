@@ -30,11 +30,19 @@ This repo uses Bun internally.
 
 ```bash
 bun install
-bun run --cwd packages/opencode build --single --skip-install
-cd packages/opencode
-npm link
+npm run build
+npm run link:local
 codegoblin --help
 cg --help
+```
+
+`npm run build` is a convenience wrapper around `bun run --cwd packages/opencode build --single --skip-install`; Bun is still the package manager for dependencies.
+
+On Windows, the embedded web build may need a newer Node first on `PATH`:
+
+```powershell
+$env:PATH='C:\Users\shawn\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;' + $env:PATH
+npm run build
 ```
 
 If you only need quick CLI/TUI smoke tests, `--skip-embed-web-ui` is still available. Do **not** use it for `codegoblin web` builds: without embedded web assets the binary proxies the browser UI through `https://app.opencode.ai`, which can be blocked by corporate filters even though the local server still runs on `127.0.0.1`.
@@ -63,6 +71,8 @@ Useful package-level commands:
 
 ```bash
 bun run --cwd packages/opencode typecheck
+npm run typecheck:codegoblin
+npm run build
 bun run --cwd packages/opencode build --single --skip-install
 bun run --cwd packages/opencode build --single --skip-embed-web-ui --skip-install
 bun run --cwd packages/opencode script/publish.ts --dry-run
