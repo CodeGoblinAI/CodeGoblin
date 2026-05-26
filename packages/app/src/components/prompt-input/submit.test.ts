@@ -35,6 +35,9 @@ let promptResetCount = 0
 let promptSetCount = 0
 const fetchRequests: Array<{ url: string; body: any }> = []
 const originalFetch = globalThis.fetch
+const originalConfirm = globalThis.confirm
+const confirmPrompts: string[] = []
+let confirmResponse = true
 
 const clientFor = (directory: string) => {
   createdClients.push(directory)
@@ -228,6 +231,10 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
+  globalThis.confirm = ((message?: string) => {
+    confirmPrompts.push(String(message ?? ""))
+    return confirmResponse
+  }) as typeof globalThis.confirm
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     fetchRequests.push({
       url: String(url),
@@ -245,6 +252,8 @@ beforeEach(() => {
   createdSessions.length = 0
   enabledAutoAccept.length = 0
   fetchRequests.length = 0
+  confirmPrompts.length = 0
+  confirmResponse = true
   optimistic.length = 0
   optimisticSeeded.length = 0
   promoted.length = 0
@@ -262,6 +271,7 @@ beforeEach(() => {
 
 afterAll(() => {
   globalThis.fetch = originalFetch
+  globalThis.confirm = originalConfirm
 })
 
 describe("prompt submit worktree selection", () => {
@@ -405,7 +415,15 @@ describe("prompt submit worktree selection", () => {
 
     const submit = createPromptSubmit({
       info: () => ({ id: "session-1" }),
-      imageAttachments: () => [],
+      imageAttachments: () => [
+        {
+          type: "image",
+          id: "image-1",
+          dataUrl: "data:image/png;base64,abc123",
+          mime: "image/png",
+          filename: "input.png",
+        },
+      ],
       commentCount: () => 0,
       autoAccept: () => false,
       mode: () => "normal",
@@ -423,6 +441,8 @@ describe("prompt submit worktree selection", () => {
     const event = { preventDefault: () => undefined } as unknown as Event
     await submit.handleSubmit(event)
 
+    expect(confirmPrompts).toHaveLength(1)
+    expect(confirmPrompts[0]).toContain("Generate an image with openai/gpt-image-1")
     expect(promptResetCount).toBe(1)
     expect(optimistic).toHaveLength(2)
     expect(optimistic[0]).toMatchObject({
@@ -436,6 +456,12 @@ describe("prompt submit worktree selection", () => {
     expect(optimistic[0]?.parts?.[0]).toMatchObject({
       type: "text",
       text: "generate an image of a horse",
+    })
+    expect(optimistic[0]?.parts?.[1]).toMatchObject({
+      type: "file",
+      mime: "image/png",
+      url: "data:image/png;base64,abc123",
+      filename: "input.png",
     })
     expect(optimistic[1]).toMatchObject({
       directory: "/repo/main",
@@ -455,11 +481,57 @@ describe("prompt submit worktree selection", () => {
         prompt: "generate an image of a horse",
         provider: "openai",
         model: "gpt-image-1",
+        inputImages: [
+          {
+            dataUrl: "data:image/png;base64,abc123",
+            mime: "image/png",
+            filename: "input.png",
+          },
+        ],
         requireImageModel: true,
       },
     })
     expect(fetchRequests[0]?.body.messageID).toBe(optimistic[0]?.message.id)
     expect(fetchRequests[0]?.body.assistantMessageID).toBe(optimistic[1]?.message.id)
+  })
+
+  test("does not send implicit web image requests when confirmation is rejected", async () => {
+    params = { id: "session-1" }
+    selectedModel = { id: "gpt-image-1", provider: { id: "openai" } }
+    promptValue = [
+      {
+        type: "text",
+        content: "generate an image of a horse",
+        start: 0,
+        end: "generate an image of a horse".length,
+      },
+    ]
+    confirmResponse = false
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+    await submit.handleSubmit(event)
+
+    expect(confirmPrompts).toHaveLength(1)
+    expect(fetchRequests).toHaveLength(0)
+    expect(optimistic).toHaveLength(0)
+    expect(promptResetCount).toBe(0)
   })
 
   test("does not send casual text to a selected image model", async () => {

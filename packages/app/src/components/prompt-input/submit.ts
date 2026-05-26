@@ -73,6 +73,29 @@ const imageModelSelected = (model: { id: string; provider: { id: string }; capab
   )
 }
 
+const imageAutoApprove = () => {
+  if (typeof window === "undefined") return false
+  try {
+    return window.localStorage.getItem("codegoblin.image.autoApprove") === "true"
+  } catch {
+    return false
+  }
+}
+
+const confirmImageGeneration = (provider: string, model: string, text: string) => {
+  if (imageAutoApprove()) return true
+  if (typeof globalThis.confirm !== "function") return false
+  return globalThis.confirm(
+    [
+      `Generate an image with ${provider}/${model}?`,
+      "",
+      text.slice(0, 240),
+      "",
+      "Use /image for explicit image jobs, or set codegoblin.image.autoApprove=true in localStorage to skip this prompt.",
+    ].join("\n"),
+  )
+}
+
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
   const images = draftImages(input.draft.prompt)
@@ -355,6 +378,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         })
         return
       }
+      if (!isImageSlash && selectedImageModel && looksLikeImageRequest && !confirmImageGeneration(currentModel.provider.id, currentModel.id, trimmed)) {
+        showToast({
+          title: "Image generation not sent",
+          description: "CodeGoblin did not spend image credits. Use /image to generate without this confirmation.",
+        })
+        return
+      }
     }
 
     input.addToHistory(currentPrompt, mode)
@@ -607,21 +637,23 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             const result = (await response.json().catch(() => undefined)) as
               | { ok?: boolean; message?: string; requiresImageModel?: boolean }
               | undefined
+            void sync.session.sync?.(session.id, { force: true })
             if (!response.ok || !result?.ok) {
               showToast({
                 title: result?.requiresImageModel ? "Select an image model" : "Image generation failed",
-                description: result?.message ?? language.t("common.requestFailed"),
+                description: "The details were written to the chat.",
               })
               return
             }
             showToast({
               title: "Image generated",
-              description: result.message ?? "CodeGoblin saved the image locally.",
+              description: "The saved file path was written to the chat.",
             })
           })
           .catch((err) => {
             const [, setDirectoryStore] = globalSync.child(sessionDirectory)
             setDirectoryStore("session_status", session.id, { type: "idle" })
+            void sync.session.sync?.(session.id, { force: true })
             showToast({
               title: "Image generation failed",
               description: errorMessage(err),

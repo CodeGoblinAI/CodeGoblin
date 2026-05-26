@@ -45,6 +45,7 @@ import { createColors, createFrames } from "../../ui/spinner.ts"
 import { useDialog } from "@tui/ui/dialog"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
+import { DialogConfirm } from "../../ui/dialog-confirm"
 import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
@@ -1040,6 +1041,29 @@ export function Prompt(props: PromptProps) {
       }))
   }
 
+  function codeGoblinAutoApproveImages() {
+    const raw = process.env.CODEGOBLIN_IMAGE_AUTO_APPROVE ?? process.env.CODEGOBLIN_AUTO_IMAGE
+    const normalized = raw?.trim().toLowerCase()
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
+  }
+
+  async function confirmImplicitImageGeneration(input: { providerID: string; modelID: string; prompt: string }) {
+    if (codeGoblinAutoApproveImages()) return true
+    const ok = await DialogConfirm.show(
+      dialog,
+      "Generate Image?",
+      [
+        `Use ${input.providerID}/${input.modelID} for this image request?`,
+        "",
+        Locale.truncate(input.prompt, 220),
+        "",
+        "Use /image for explicit image jobs. Set CODEGOBLIN_IMAGE_AUTO_APPROVE=1 to skip this confirmation.",
+      ].join("\n"),
+      "not now",
+    )
+    return ok === true
+  }
+
   async function ensureSessionForImage(agent: { name: string }, selectedModel: { providerID: string; modelID: string }, variant?: string) {
     if (props.sessionID) return props.sessionID
     const workspace = workspaceSelection()
@@ -1139,13 +1163,14 @@ export function Prompt(props: PromptProps) {
       try {
         const sessionID = await ensureSessionForImage(agent, selectedModel, variant)
         if (!sessionID) return false
-        toast.show({
-          variant: "info",
-          message: `CodeGoblin is generating with ${selectedModel.providerID}/${selectedModel.modelID}...`,
-          duration: 2500,
-        })
         const submitted = store.prompt.input
         const inputImages = currentImageInputs()
+        finishLocalSubmit(currentMode)
+        toast.show({
+          variant: "info",
+          message: `CodeGoblin is generating with ${selectedModel.providerID}/${selectedModel.modelID}. The output path will stay in chat.`,
+          duration: 2500,
+        })
         void postCodeGoblinImage({
           sessionID,
           agent: agent.name,
@@ -1170,7 +1195,6 @@ export function Prompt(props: PromptProps) {
               duration: 9000,
             })
           })
-        finishLocalSubmit(currentMode)
         return true
       } catch (error) {
         toast.show({
@@ -1215,6 +1239,12 @@ export function Prompt(props: PromptProps) {
     ) {
       const currentMode = store.mode
       try {
+        const confirmed = await confirmImplicitImageGeneration({
+          providerID: selectedModel.providerID,
+          modelID: selectedModel.modelID,
+          prompt: trimmed,
+        })
+        if (!confirmed) return false
         const sessionID = await ensureSessionForImage(agent, selectedModel, variant)
         if (!sessionID) return false
         const plan = CodeGoblinImageCommand.describe({
@@ -1223,9 +1253,11 @@ export function Prompt(props: PromptProps) {
           provider: selectedModel.providerID,
           model: selectedModel.modelID,
         })
+        const inputImages = currentImageInputs()
+        finishLocalSubmit(currentMode)
         toast.show({
           variant: "info",
-          message: `CodeGoblin is generating with ${plan.provider}/${plan.model}...`,
+          message: `CodeGoblin is generating with ${plan.provider}/${plan.model}. The output path will stay in chat.`,
           duration: 4000,
         })
         void postCodeGoblinImage({
@@ -1235,7 +1267,7 @@ export function Prompt(props: PromptProps) {
           prompt: trimmed,
           provider: selectedModel.providerID,
           model: selectedModel.modelID,
-          inputImages: currentImageInputs(),
+          inputImages,
           requireImageModel: true,
         })
           .then((result) => {
@@ -1252,7 +1284,6 @@ export function Prompt(props: PromptProps) {
               duration: 9000,
             })
           })
-        finishLocalSubmit(currentMode)
         return true
       } catch (error) {
         toast.show({
@@ -1622,12 +1653,14 @@ export function Prompt(props: PromptProps) {
     setStore("extmarkToPartIndex", new Map())
   }
 
+  const agentColor = (name: string) => (name.toLowerCase() === "build" ? theme.primary : local.agent.color(name))
+
   const highlight = createMemo(() => {
     if (leader()) return theme.border
     if (store.mode === "shell") return theme.primary
     const agent = local.agent.current()
     if (!agent) return theme.border
-    return local.agent.color(agent.name)
+    return agentColor(agent.name)
   })
 
   const showVariant = createMemo(() => {
@@ -1684,7 +1717,7 @@ export function Prompt(props: PromptProps) {
       status().type !== "idle"
         ? (local.agent.list().find((a) => a.name === lastUserMessage()?.agent) ?? local.agent.current())
         : local.agent.current()
-    const color = agent ? local.agent.color(agent.name) : theme.border
+    const color = agent ? agentColor(agent.name) : theme.border
     return {
       frames: createFrames({
         color,

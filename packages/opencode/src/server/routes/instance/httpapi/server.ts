@@ -102,6 +102,7 @@ type CodeGoblinImagePersist = {
   modelID: string
   variant?: string
   routeDirectory: string
+  plannedOutput?: string
 }
 
 export const context = Context.makeUnsafe<unknown>(new Map())
@@ -192,6 +193,29 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
       const requestModel = typeof body?.model === "string" ? body.model : undefined
       const agent = typeof body?.agent === "string" && body.agent.trim() ? body.agent.trim() : "Agent"
       const variant = typeof body?.variant === "string" ? body.variant : undefined
+      const parsedCommand = commandInput
+        ? CodeGoblinImageCommand.parse(commandInput.trimStart().replace(/^\/image\b/, "").trim())
+        : undefined
+      let preview: ReturnType<typeof CodeGoblinImageCommand.describe>
+      try {
+        preview = CodeGoblinImageCommand.describe({
+          prompt: parsedCommand?.prompt ?? prompt,
+          cwd: route.directory,
+          output: parsedCommand?.output ?? (typeof body?.output === "string" ? body.output : undefined),
+          provider: parsedCommand?.provider ?? requestProvider,
+          model: parsedCommand?.model ?? requestModel,
+        })
+      } catch (error) {
+        return HttpServerResponse.jsonUnsafe(
+          {
+            ok: false,
+            message: error instanceof Error ? error.message : "Image output path is invalid.",
+          },
+          { status: 400 },
+        )
+      }
+      const previewProvider = preview.provider ?? requestProvider ?? "image"
+      const previewModel = preview.model ?? requestModel ?? "selected-model"
       const persist = typeof body?.sessionID === "string"
         ? yield* createCodeGoblinImageMessages({
             session,
@@ -203,12 +227,13 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
               typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
             assistantPartID: typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
             agent,
-            providerID: requestProvider ?? "codegoblin",
-            modelID: requestModel ?? "image",
+            providerID: previewProvider,
+            modelID: previewModel,
             variant,
             routeDirectory: route.directory,
             input: commandInput ?? prompt,
             inputImages,
+            plannedOutput: preview.output,
           })
         : undefined
 
@@ -269,6 +294,7 @@ function createCodeGoblinImageMessages(input: {
   routeDirectory: string
   input: string
   inputImages: ImageInput[]
+  plannedOutput?: string
 }) {
   return Effect.gen(function* () {
     const userMessageID = input.messageID ?? MessageID.ascending()
@@ -333,10 +359,19 @@ function createCodeGoblinImageMessages(input: {
       sessionID: input.sessionID,
       messageID: assistantMessageID,
       type: "text",
-      text: `CodeGoblin is generating an image with ${input.providerID}/${input.modelID}.\nThe final output path will stay in this chat.`,
+      text: [
+        `CodeGoblin is generating an image with ${input.providerID}/${input.modelID}.`,
+        input.plannedOutput ? `Saving to: ${input.plannedOutput}` : undefined,
+        "This chat message will update when the image finishes.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
       metadata: {
         codegoblin: {
           kind: "image-progress",
+          output: input.plannedOutput,
+          provider: input.providerID,
+          model: input.modelID,
         },
       },
     } as MessageV2.TextPart)
@@ -350,6 +385,7 @@ function createCodeGoblinImageMessages(input: {
       modelID: input.modelID,
       variant: input.variant,
       routeDirectory: input.routeDirectory,
+      plannedOutput: input.plannedOutput,
     } satisfies CodeGoblinImagePersist
   })
 }
@@ -363,15 +399,23 @@ function finishCodeGoblinImageMessages(input: {
   return Effect.gen(function* () {
     const providerID = input.result.provider ?? input.persist.providerID
     const modelID = input.result.model ?? input.persist.modelID
+    const output = input.result.output ?? input.persist.plannedOutput
     const text = input.result.ok
       ? [
-          `Image generated with ${providerID}/${modelID}.`,
-          input.result.output ? `Saved to ${input.result.output}.` : undefined,
+          "Image generated.",
+          `Model: ${providerID}/${modelID}`,
+          output ? `Saved to: ${output}` : undefined,
           input.result.cost !== undefined ? `Estimated spend: $${input.result.cost.toFixed(4)}.` : undefined,
         ]
           .filter(Boolean)
           .join("\n")
-      : `Image generation failed with ${providerID}/${modelID}.\n${input.result.message}`
+      : [
+          `Image generation failed with ${providerID}/${modelID}.`,
+          output ? `Planned output: ${output}` : undefined,
+          input.result.message,
+        ]
+          .filter(Boolean)
+          .join("\n")
 
     yield* input.session.updatePart({
       id: input.persist.assistantPartID,
@@ -382,7 +426,7 @@ function finishCodeGoblinImageMessages(input: {
       metadata: {
         codegoblin: {
           kind: input.result.ok ? "image-result" : "image-error",
-          output: input.result.output,
+          output,
           provider: providerID,
           model: modelID,
         },
