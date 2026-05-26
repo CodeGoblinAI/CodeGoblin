@@ -97,7 +97,6 @@
     "db": "bun drizzle-kit"
   },
   "bin": {
-    "opencode": "./bin/opencode",
     "codegoblin": "./bin/codegoblin",
     "cg": "./bin/cg"
   },
