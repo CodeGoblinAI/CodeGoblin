@@ -7,6 +7,7 @@ import {
   For,
   Match,
   on,
+  onCleanup,
   onMount,
   Show,
   Switch,
@@ -174,6 +175,76 @@ function use() {
   return ctx
 }
 
+function isChatGoblinFlagEnabled(value: string | undefined) {
+  const normalized = value?.trim().toLowerCase()
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
+}
+
+function TuiChatBottomGoblin(props: { theme: any }) {
+  const skinColor = RGBA.fromInts(154, 219, 53)
+  const shadowColor = RGBA.fromInts(120, 125, 135)
+  const vestColor = RGBA.fromInts(130, 80, 223)
+  const eyeColor = props.theme.backgroundElement
+  const tokenColor = props.theme.warning
+  const [tick, setTick] = createSignal(0)
+
+  const frames = [
+    ["..P....", ".PGGG..", "PGBBGT.", ".GPPGT.", ".G.G..."],
+    ["..P....", ".PGGG..", "PGBBGT.", "..GPGT.", "..GG..."],
+    ["..P....", ".PGGG..", "PGBBT..", ".GPPG..", ".G.G..."],
+    ["..P....", ".PGGG..", "PGBBG..", ".GPPG..", ".G.G..."],
+  ]
+  const width = Math.max(...frames.flatMap((frame) => frame.map((row) => row.length)))
+
+  let timer: ReturnType<typeof setInterval> | undefined
+
+  onMount(() => {
+    timer = setInterval(() => setTick((value) => value + 1), 180)
+    timer?.unref?.()
+  })
+
+  onCleanup(() => {
+    if (timer) clearInterval(timer)
+  })
+
+  function renderRow(rowIndex: number) {
+    const frame = frames[tick() % frames.length] ?? frames[0] ?? []
+    const spriteRow = (frame[rowIndex] ?? "").padEnd(width, ".")
+    const cells: JSX.Element[] = []
+
+    for (const char of spriteRow) {
+      if (char === "G") {
+        cells.push(<text fg={skinColor}>██</text>)
+      } else if (char === "P") {
+        cells.push(<text fg={vestColor}>██</text>)
+      } else if (char === "B") {
+        cells.push(<text fg={eyeColor}>██</text>)
+      } else if (char === "S") {
+        cells.push(<text fg={shadowColor}>██</text>)
+      } else if (char === "T") {
+        cells.push(<text fg={tokenColor}>██</text>)
+      } else {
+        cells.push(<text>  </text>)
+      }
+    }
+
+    return cells
+  }
+
+  return (
+    <box flexDirection="column" alignItems="center" width="100%" paddingTop={1} flexShrink={0}>
+      {Array.from({ length: frames[0]?.length ?? 0 }, (_, rowIndex) => (
+        <box flexDirection="row" width={(width + 2) * 2}>
+          {renderRow(rowIndex)}
+        </box>
+      ))}
+      <box flexDirection="row" width={(width + 2) * 2}>
+        <text fg={shadowColor}>{"▁".repeat((width + 2) * 2)}</text>
+      </box>
+    </box>
+  )
+}
+
 export function Session() {
   const route = useRouteData("session")
   const { navigate } = useRoute()
@@ -232,6 +303,11 @@ export function Session() {
     if (sidebarOpen()) return true
     if (sidebar() === "auto" && wide()) return true
     return false
+  })
+  const showBottomChatGoblin = createMemo(() => {
+    const bottom = isChatGoblinFlagEnabled(process.env.CODEGOBLIN_CHAT_BOTTOM_GOBLIN)
+    const sidebarGoblin = isChatGoblinFlagEnabled(process.env.CODEGOBLIN_CHAT_GOBLIN)
+    return bottom || (sidebarGoblin && !sidebarVisible())
   })
   const showTimestamps = createMemo(() => timestamps() === "show")
   const contentWidth = createMemo(() => dimensions().width - (sidebarVisible() ? 42 : 0) - 4)
@@ -1252,6 +1328,9 @@ export function Session() {
                       right={<TuiPluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
                     />
                   </TuiPluginRuntime.Slot>
+                </Show>
+                <Show when={visible() && showBottomChatGoblin()}>
+                  <TuiChatBottomGoblin theme={theme} />
                 </Show>
               </box>
             </Show>

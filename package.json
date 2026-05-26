@@ -44,6 +44,8 @@
     "dev:chat:goblin:03": "bun run script/codegoblin-header-variant.ts 09 --chat-goblin=03",
     "dev:chat:goblin:04": "bun run script/codegoblin-header-variant.ts 09 --chat-goblin=04",
     "dev:chat:goblin:05": "bun run script/codegoblin-header-variant.ts 09 --chat-goblin=05",
+    "dev:chat:bottom": "bun run script/codegoblin-header-variant.ts 09 --chat-bottom-goblin",
+    "dev:chat:both": "bun run script/codegoblin-header-variant.ts 09 --chat-goblin=04 --chat-bottom-goblin",
     "dev:header:10": "bun run script/codegoblin-header-variant.ts 10",
     "dev:header:11": "bun run script/codegoblin-header-variant.ts 11",
     "dev:header:12": "bun run script/codegoblin-header-variant.ts 12",
