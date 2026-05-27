@@ -19,6 +19,7 @@ describe("CodeGoblin image command model routing", () => {
       ["openai", "gpt-image-1"],
       ["alibaba", "wan2.7-image-pro"],
       ["qwen", "wan2.7-image-edit"],
+      ["codegoblin", "qwen-image-pro"],
     ]) {
       expect(
         CodeGoblinImageCommand.shouldRoutePromptToImage({
@@ -57,5 +58,51 @@ describe("CodeGoblin image command model routing", () => {
     expect(result.provider).toBe("openai")
     expect(result.model).toBe("gpt-image-1")
     expect(result.message).toContain("openai/gpt-image-1")
+  })
+
+  test("normalizes CodeGoblin Qwen aliases to DashScope model IDs", async () => {
+    const result = await CodeGoblinImageCommand.generate({
+      prompt: "generate an image of a horse",
+      provider: "codegoblin",
+      model: "qwen-image-pro",
+      output: "codegoblin-output/images/test-qwen.png",
+      cwd: process.cwd(),
+      dryRun: true,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.provider).toBe("qwen")
+    expect(result.model).toBe("wan2.7-image-pro")
+  })
+
+  test("returns a friendly missing-key error for Qwen image models", async () => {
+    const previous = {
+      DASHSCOPE_API_KEY: process.env.DASHSCOPE_API_KEY,
+      QWEN_API_KEY: process.env.QWEN_API_KEY,
+      ALIBABA_API_KEY: process.env.ALIBABA_API_KEY,
+      CODEGOBLIN_IMAGE_DISABLE_CONNECTED_AUTH: process.env.CODEGOBLIN_IMAGE_DISABLE_CONNECTED_AUTH,
+    }
+    delete process.env.DASHSCOPE_API_KEY
+    delete process.env.QWEN_API_KEY
+    delete process.env.ALIBABA_API_KEY
+    process.env.CODEGOBLIN_IMAGE_DISABLE_CONNECTED_AUTH = "1"
+    try {
+      const result = await CodeGoblinImageCommand.generate({
+        prompt: "generate an image of a horse",
+        provider: "codegoblin",
+        model: "qwen-image-pro",
+        output: "codegoblin-output/images/test-qwen.png",
+        keyFile: "missing.env",
+        cwd: process.cwd(),
+      })
+
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain("No Qwen/DashScope image key found")
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
   })
 })

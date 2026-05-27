@@ -133,7 +133,7 @@ export const Definitions = {
   messages_line_down: keybind("ctrl+alt+e", "Scroll messages down by one line"),
   messages_half_page_up: keybind("ctrl+alt+u", "Scroll messages up by half page"),
   messages_half_page_down: keybind("ctrl+alt+d", "Scroll messages down by half page"),
-  messages_first: keybind("ctrl+g,home", "Navigate to first message"),
+  messages_first: keybind("ctrl+home", "Navigate to first message"),
   messages_last: keybind("ctrl+alt+g,end", "Navigate to last message"),
   messages_next: keybind("none", "Navigate to next message"),
   messages_previous: keybind("none", "Navigate to previous message"),

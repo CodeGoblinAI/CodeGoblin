@@ -9,7 +9,7 @@ import {
   type Renderable,
 } from "@opentui/core"
 import type { CommandContext } from "@opentui/keymap"
-import { createEffect, createMemo, onMount, createSignal, onCleanup, on, Show, Switch, Match } from "solid-js"
+import { createEffect, createMemo, createResource, onMount, createSignal, onCleanup, on, Show, Switch, Match } from "solid-js"
 import "opentui-spinner/solid"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -63,6 +63,7 @@ import { type WorkspaceStatus } from "../workspace-label"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
 import { useTuiConfig } from "../../context/tui-config"
 import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
+import { CodeGoblinBalance } from "@/codegoblin/balance"
 
 export type PromptProps = {
   sessionID?: string
@@ -98,18 +99,6 @@ const DRAFT_RETENTION_MIN_CHARS = 20
 
 function displayAgentName(name: string) {
   return name.toLowerCase() === "build" ? "Agent" : Locale.titlecase(name)
-}
-
-function configuredTokenHoard() {
-  const raw =
-    process.env.CODEGOBLIN_TOKEN_HOARD_USD ??
-    process.env.CODEGOBLIN_DEEPSEEK_BALANCE_USD ??
-    process.env.CODEGOBLIN_DEEPSEEK_CREDITS_USD ??
-    process.env.DEEPSEEK_BALANCE_USD
-  if (!raw) return
-  const value = Number(raw)
-  if (!Number.isFinite(value) || value < 0) return
-  return value
 }
 
 function randomIndex(count: number) {
@@ -166,6 +155,9 @@ export function Prompt(props: PromptProps) {
   const dialog = useDialog()
   const toast = useToast()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
+  const [balanceState, balanceActions] = createResource(() => project.instance.directory() || process.cwd(), (cwd) =>
+    CodeGoblinBalance.resolve({ cwd }).catch(() => ({ balances: [], errors: [] })),
+  )
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = useOpencodeKeymap()
@@ -303,6 +295,11 @@ export function Prompt(props: PromptProps) {
     onCleanup(() => clearInterval(timer))
   })
 
+  createEffect(() => {
+    const timer = setInterval(() => void balanceActions.refetch(), 180_000)
+    onCleanup(() => clearInterval(timer))
+  })
+
   function promptModelWarning() {
     toast.show({
       variant: "warning",
@@ -370,10 +367,8 @@ export function Prompt(props: PromptProps) {
   })
 
   const tokenHoard = createMemo(() => {
-    const configured = configuredTokenHoard()
     const spent = props.sessionID ? (sync.session.get(props.sessionID)?.cost ?? 0) : 0
-    if (configured !== undefined) return `hoard ${money.format(Math.max(0, configured - spent))} left`
-    return "hoard local"
+    return CodeGoblinBalance.formatFooter({ balances: balanceState()?.balances, spent })
   })
 
   const [store, setStore] = createStore<{

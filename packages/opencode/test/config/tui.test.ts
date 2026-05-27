@@ -503,6 +503,18 @@ it.instance("resolves keybind lookup from canonical keybinds", () =>
   ),
 )
 
+it.instance("keeps Ctrl+G dedicated to the action palette in sessions", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const config = yield* getTuiConfig(test.directory)
+
+      expect(config.keybinds.get("command.palette.show").map((binding) => binding.key)).toContain("ctrl+g")
+      expect(config.keybinds.get("session.first").map((binding) => binding.key)).toEqual(["ctrl+home"])
+    }),
+  ),
+)
+
 it.instance("keybinds accept OpenTUI binding specs", () =>
   withCleanState(
     Effect.gen(function* () {
@@ -519,7 +531,7 @@ it.instance("keybinds accept OpenTUI binding specs", () =>
 
       const config = yield* getTuiConfig(test.directory)
       expect(config.keybinds.get("command.palette.show")).toEqual([
-        { key: "alt+p", cmd: "command.palette.show", preventDefault: false, desc: "List available commands" },
+        { key: "alt+p", cmd: "command.palette.show", preventDefault: false, desc: "Open the action palette" },
       ])
       expect(config.keybinds.get("prompt.editor")?.[0]).toMatchObject({
         key: { name: "e", ctrl: true },

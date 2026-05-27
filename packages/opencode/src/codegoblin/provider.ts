@@ -37,6 +37,46 @@ export const CodeGoblinProvider = {
       inputModalities: ["text", "image"],
       outputModalities: ["image"],
     },
+    "qwen-image-pro": {
+      id: ModelID.make("qwen-image-pro"),
+      apiID: "wan2.7-image-pro",
+      name: "Qwen Image Pro",
+      family: "qwen-image",
+      context: 8_000,
+      output: 1_000,
+      inputModalities: ["text"],
+      outputModalities: ["image"],
+    },
+    "qwen-image-edit": {
+      id: ModelID.make("qwen-image-edit"),
+      apiID: "wan2.7-image-edit",
+      name: "Qwen Image Edit",
+      family: "qwen-image",
+      context: 8_000,
+      output: 1_000,
+      inputModalities: ["text", "image"],
+      outputModalities: ["image"],
+    },
+    "elevenlabs-tts": {
+      id: ModelID.make("elevenlabs-tts"),
+      apiID: "eleven_multilingual_v2",
+      name: "ElevenLabs Text to Speech",
+      family: "elevenlabs",
+      context: 5_000,
+      output: 0,
+      inputModalities: ["text"],
+      outputModalities: ["audio"],
+    },
+    "elevenlabs-music": {
+      id: ModelID.make("elevenlabs-music"),
+      apiID: "elevenlabs-music",
+      name: "ElevenLabs Music",
+      family: "elevenlabs",
+      context: 2_000,
+      output: 0,
+      inputModalities: ["text"],
+      outputModalities: ["audio"],
+    },
   },
 } as const
 
@@ -62,14 +102,14 @@ function model(id: keyof typeof CodeGoblinProvider.models): Model {
       toolcall: true,
       input: {
         text: (item.inputModalities as readonly string[]).includes("text"),
-        audio: false,
+        audio: (item.inputModalities as readonly string[]).includes("audio"),
         image: (item.inputModalities as readonly string[]).includes("image"),
         video: false,
         pdf: false,
       },
       output: {
         text: (item.outputModalities as readonly string[]).includes("text"),
-        audio: false,
+        audio: (item.outputModalities as readonly string[]).includes("audio"),
         image: (item.outputModalities as readonly string[]).includes("image"),
         video: false,
         pdf: false,
@@ -107,6 +147,10 @@ export function codeGoblinProviderInfo(): Info {
       "deepseek-chat": model("deepseek-chat"),
       "goblin-mock": model("goblin-mock"),
       "goblin-image-mock": model("goblin-image-mock"),
+      "qwen-image-pro": model("qwen-image-pro"),
+      "qwen-image-edit": model("qwen-image-edit"),
+      "elevenlabs-tts": model("elevenlabs-tts"),
+      "elevenlabs-music": model("elevenlabs-music"),
     },
   }
 }
@@ -143,6 +187,24 @@ export function augmentImageModelCatalog(catalog: Record<string, Info>) {
     npm: "@ai-sdk/openai-compatible",
     inputImage: true,
     cost: 0,
+  })
+}
+
+export function augmentAudioModelCatalog(catalog: Record<string, Info>) {
+  addAudioModel(catalog, "elevenlabs", "eleven_multilingual_v2", {
+    name: "ElevenLabs Text to Speech",
+    family: "elevenlabs",
+    apiURL: "https://api.elevenlabs.io/v1",
+  })
+  addAudioModel(catalog, "elevenlabs", "eleven_turbo_v2_5", {
+    name: "ElevenLabs Turbo 2.5",
+    family: "elevenlabs",
+    apiURL: "https://api.elevenlabs.io/v1",
+  })
+  addAudioModel(catalog, "elevenlabs", "elevenlabs-music", {
+    name: "ElevenLabs Music",
+    family: "elevenlabs",
+    apiURL: "https://api.elevenlabs.io/v1",
   })
 }
 
@@ -213,12 +275,76 @@ function addImageModel(
   }
 }
 
+function addAudioModel(
+  catalog: Record<string, Info>,
+  providerID: string,
+  modelID: string,
+  opts: {
+    name: string
+    family: string
+    apiURL: string
+  },
+) {
+  const provider = catalog[providerID]
+  if (!provider || provider.models[modelID]) return
+  const id = ProviderID.make(providerID)
+  provider.models[modelID] = {
+    id: ModelID.make(modelID),
+    providerID: id,
+    name: opts.name,
+    family: opts.family,
+    api: {
+      id: modelID,
+      npm: "@ai-sdk/openai-compatible",
+      url: opts.apiURL,
+    },
+    status: "active",
+    headers: {},
+    options: {},
+    capabilities: {
+      temperature: false,
+      reasoning: false,
+      attachment: false,
+      toolcall: false,
+      input: {
+        text: true,
+        audio: false,
+        image: false,
+        video: false,
+        pdf: false,
+      },
+      output: {
+        text: false,
+        audio: true,
+        image: false,
+        video: false,
+        pdf: false,
+      },
+      interleaved: false,
+    },
+    cost: {
+      input: 0,
+      output: 0,
+      cache: {
+        read: 0,
+        write: 0,
+      },
+    },
+    limit: {
+      context: 5_000,
+      output: 0,
+    },
+    release_date: "",
+    variants: {},
+  }
+}
+
 export function codeGoblinProviderSummary() {
   return [
     "Provider: codegoblin",
     `Default mock gateway: ${CodeGoblinProvider.baseURL}`,
-    "Models: deepseek-chat, goblin-mock, goblin-image-mock",
-    "Env: CODEGOBLIN_GATEWAY_URL, CODEGOBLIN_API_KEY or CODEGOBLIN_GATEWAY_KEY",
+    "Models: deepseek-chat, goblin-mock, goblin-image-mock, qwen-image-pro, qwen-image-edit, elevenlabs-tts, elevenlabs-music",
+    "Env: CODEGOBLIN_GATEWAY_URL, CODEGOBLIN_API_KEY or CODEGOBLIN_GATEWAY_KEY; image/audio helpers use provider-specific local keys when selected.",
     "Status: scaffold only; production hosted keys, Stripe, and pricing logic are intentionally private.",
   ].join("\n")
 }

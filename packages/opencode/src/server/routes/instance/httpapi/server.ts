@@ -176,14 +176,14 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         }
 
         const output = typeof body?.output === "string" ? body.output : ""
-        const mode = body?.mode === "file" ? "file" : "folder"
+        const mode = body?.mode === "open" || body?.mode === "file" ? body.mode : "folder"
         const opened = yield* Effect.promise(async () => {
           try {
             return await openCodeGoblinOutput(route.directory, output, mode)
           } catch (error) {
             return {
               ok: false as const,
-              message: error instanceof Error ? error.message : "Could not open image output.",
+              message: error instanceof Error ? error.message : "Could not open CodeGoblin output.",
             }
           }
         })
@@ -308,31 +308,35 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
   }),
 )
 
-async function openCodeGoblinOutput(root: string, output: string, mode: "file" | "folder") {
-  if (!output.trim()) throw new Error("Image output path is required.")
+export async function openCodeGoblinOutput(
+  root: string,
+  output: string,
+  mode: "open" | "file" | "folder",
+  spawn: typeof Process.spawn = Process.spawn,
+) {
+  if (!output.trim()) throw new Error("CodeGoblin output path is required.")
 
   const rootPath = path.resolve(root)
   const target = path.resolve(rootPath, output)
   const rel = path.relative(rootPath, target)
   if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error("Image output path must stay inside the current project directory.")
+    throw new Error("CodeGoblin output path must stay inside the current project directory.")
   }
 
   const stat = await fs.stat(target).catch(() => undefined)
   const isDirectory = stat?.isDirectory() === true
-  const openerTarget =
-    mode === "folder" ? (isDirectory ? target : path.dirname(target)) : stat && !isDirectory ? target : path.dirname(target)
+  const openerTarget = mode === "folder" ? (isDirectory ? target : path.dirname(target)) : target
   const openerStat = await fs.stat(openerTarget).catch(() => undefined)
-  if (!openerStat) throw new Error("Image output folder does not exist yet.")
+  if (!openerStat) throw new Error("CodeGoblin output does not exist yet.")
 
   if (process.platform === "win32") {
     const args = mode === "file" && stat && !isDirectory ? [`/select,${target}`] : [openerTarget]
-    Process.spawn(["explorer.exe", ...args])
+    spawn(["explorer.exe", ...args])
   } else if (process.platform === "darwin") {
     const args = mode === "file" && stat && !isDirectory ? ["-R", target] : [openerTarget]
-    Process.spawn(["open", ...args])
+    spawn(["open", ...args])
   } else {
-    Process.spawn(["xdg-open", openerTarget])
+    spawn(["xdg-open", openerTarget])
   }
 
   return {

@@ -197,6 +197,18 @@ export function Session() {
       .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   })
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
+  const lastCodeGoblinAsset = createMemo(() =>
+    messages()
+      .flatMap((message) =>
+        (sync.data.part[message.id] ?? []).flatMap((part) => {
+          if (part.type !== "text") return []
+          const meta = codeGoblinImageMeta(part.metadata)
+          if (!meta?.output || meta.kind === "image-progress") return []
+          return [{ output: meta.output, kind: meta.kind }]
+        }),
+      )
+      .at(-1),
+  )
   const permissions = createMemo(() => {
     if (session()?.parentID) return []
     return children().flatMap((x) => sync.data.permission[x.id] ?? [])
@@ -246,6 +258,15 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
   const editor = useEditorContext()
+
+  function openLastCodeGoblinAsset(mode: "open" | "file") {
+    const asset = lastCodeGoblinAsset()
+    if (!asset?.output) {
+      toast.show({ message: "No generated CodeGoblin asset found in this session yet.", variant: "warning" })
+      return
+    }
+    void openCodeGoblinOutputFromTui({ sdk, project, toast, output: asset.output, mode })
+  }
 
   createEffect(() => {
     const sessionID = route.sessionID
@@ -731,6 +752,26 @@ export function Session() {
       category: "Session",
       run: () => {
         setShowGenericToolOutput((prev) => !prev)
+        dialog.clear()
+      },
+    },
+    {
+      title: "Open last generated asset",
+      value: "codegoblin.asset.open",
+      category: "CodeGoblin",
+      enabled: Boolean(lastCodeGoblinAsset()?.output),
+      run: () => {
+        openLastCodeGoblinAsset("open")
+        dialog.clear()
+      },
+    },
+    {
+      title: "Reveal last generated asset",
+      value: "codegoblin.asset.reveal",
+      category: "CodeGoblin",
+      enabled: Boolean(lastCodeGoblinAsset()?.output),
+      run: () => {
+        openLastCodeGoblinAsset("file")
         dialog.clear()
       },
     },
@@ -1602,8 +1643,44 @@ function codeGoblinImageMeta(metadata: Record<string, unknown> | undefined): Cod
   }
 }
 
+async function openCodeGoblinOutputFromTui(input: {
+  sdk: ReturnType<typeof useSDK>
+  project: ReturnType<typeof useProject>
+  toast: ReturnType<typeof useToast>
+  output: string
+  mode: "open" | "file"
+}) {
+  const response = await input.sdk.fetch(`${input.sdk.url}/codegoblin/open-output`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-opencode-directory": input.project.instance.directory() || process.cwd(),
+    },
+    body: JSON.stringify({ output: input.output, mode: input.mode }),
+  })
+  const result = (await response.json().catch(() => undefined)) as { ok?: boolean; message?: string } | undefined
+  if (!response.ok || !result?.ok) {
+    input.toast.show({
+      message: result?.message ?? "Could not open CodeGoblin output.",
+      variant: "error",
+      duration: 7000,
+    })
+    return
+  }
+  input.toast.show({
+    message: input.mode === "open" ? "Opened generated asset." : "Revealed generated asset in file explorer.",
+    variant: "success",
+    duration: 2500,
+  })
+}
+
 function CodeGoblinImageStatusPart(props: { part: TextPart }) {
   const { theme } = useTheme()
+  const sdk = useSDK()
+  const project = useProject()
+  const toast = useToast()
+  const renderer = useRenderer()
+  const [hover, setHover] = createSignal(false)
   const meta = createMemo(() => codeGoblinImageMeta(props.part.metadata))
   const status = createMemo(() => {
     const kind = meta()?.kind
@@ -1653,6 +1730,14 @@ function CodeGoblinImageStatusPart(props: { part: TextPart }) {
           border={["left"]}
           borderColor={status() === "error" ? theme.error : theme.primary}
           backgroundColor={theme.backgroundPanel}
+          onMouseOver={() => setHover(true)}
+          onMouseOut={() => setHover(false)}
+          onMouseUp={() => {
+            if (renderer.getSelection()?.getSelectedText()) return
+            const output = image().output
+            if (!output || status() === "running") return
+            void openCodeGoblinOutputFromTui({ sdk, project, toast, output, mode: "open" })
+          }}
           customBorderChars={SplitBorder.customBorderChars}
           gap={1}
         >
@@ -1677,6 +1762,9 @@ function CodeGoblinImageStatusPart(props: { part: TextPart }) {
           </Show>
           <Show when={detail()}>
             {(value) => <text fg={theme.textMuted}>{value()}</text>}
+          </Show>
+          <Show when={image().output && status() !== "running"}>
+            <text fg={hover() ? theme.text : theme.textMuted}>click to open · command palette can reveal in Explorer</text>
           </Show>
         </box>
       )}

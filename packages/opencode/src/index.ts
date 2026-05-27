@@ -30,6 +30,7 @@ import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
+import { AudioCommand } from "./cli/cmd/audio"
 import { ImageCommand } from "./cli/cmd/image"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
@@ -174,6 +175,7 @@ const cli = yargs(args)
   .command(UninstallCommand)
   .command(ServeCommand)
   .command(WebCommand)
+  .command(AudioCommand)
   .command(ImageCommand)
   .command(ModelsCommand)
   .command(StatsCommand)

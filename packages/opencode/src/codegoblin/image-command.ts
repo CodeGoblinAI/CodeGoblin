@@ -719,7 +719,8 @@ function normalizeModel(provider: ImageProvider, model?: string) {
   const lower = raw.toLowerCase().replace(/\s+/g, "-")
   if (lower === "nanobanana" || lower === "nano-banana" || lower === "banana") return DEFAULT_MODEL
   if (provider === "xai" && (lower === "grok-imagine-image" || lower === "grok-imagine")) return "grok-imagine-image-quality"
-  if (provider === "qwen" && lower === "qwen-image") return "wan2.7-image-pro"
+  if (provider === "qwen" && (lower === "qwen-image" || lower === "qwen-image-pro")) return "wan2.7-image-pro"
+  if (provider === "qwen" && lower === "qwen-image-edit") return "wan2.7-image-edit"
   return raw
 }
 
@@ -792,6 +793,7 @@ function unquoteEnv(value: string) {
 async function findImageKey(provider: ImageProvider, env: Record<string, string | undefined>) {
   const local = localImageKey(provider, env)
   if (local) return local
+  if (env.CODEGOBLIN_IMAGE_DISABLE_CONNECTED_AUTH === "1") return
 
   const key = await authKey(authProvider(provider))
   if (!key) return
