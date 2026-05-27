@@ -187,14 +187,13 @@ function isChatGoblinFlagEnabled(value: string | undefined) {
 function TuiChatBottomGoblin(props: { theme: any }) {
   const skinColor = RGBA.fromInts(154, 219, 53)
   const vestColor = RGBA.fromInts(130, 80, 223)
-  const eyeColor = props.theme.text
   const stashColor = props.theme.textMuted
   const tokenColor = props.theme.warning
   const [tick, setTick] = createSignal(0)
 
-  const idleFrame = ["S.S.T.", "GBGAT.", ".P.G.."]
-  const reachFrame = ["S.S..T", "GBGAAT", ".P.G.."]
-  const grabFrame = ["S.S...", "GBGAM.", ".P.G.."]
+  const idleFrame = ["S.S.T.", "GBG.T.", ".P.G.."]
+  const reachFrame = ["S.S..T", "GBGG.T", ".P.G.."]
+  const grabFrame = ["S.S...", "GBG.M.", ".P.G.."]
   const stashFrame = ["S.S...", "GBGM..", ".P.G.."]
   const frames = [
     idleFrame,
@@ -231,23 +230,11 @@ function TuiChatBottomGoblin(props: { theme: any }) {
     const cells: JSX.Element[] = []
 
     for (const char of spriteRow) {
-      if (char === "G") {
-        cells.push(<text fg={skinColor}>o</text>)
-      } else if (char === "P") {
-        cells.push(<text fg={vestColor}>v</text>)
-      } else if (char === "B") {
-        cells.push(<text fg={eyeColor}>•</text>)
-      } else if (char === "M") {
-        cells.push(<text fg={stashColor}>¤</text>)
-      } else if (char === "S") {
-        cells.push(<text fg={skinColor}>^</text>)
-      } else if (char === "A") {
-        cells.push(<text fg={skinColor}>-</text>)
-      } else if (char === "T") {
-        cells.push(<text fg={tokenColor}>•</text>)
-      } else {
-        cells.push(<text> </text>)
-      }
+      if (char === "G" || char === "S") cells.push(<text><span style={{ bg: skinColor }}> </span></text>)
+      else if (char === "P") cells.push(<text><span style={{ bg: vestColor }}> </span></text>)
+      else if (char === "M") cells.push(<text><span style={{ bg: stashColor }}> </span></text>)
+      else if (char === "T") cells.push(<text><span style={{ bg: tokenColor }}> </span></text>)
+      else cells.push(<text> </text>)
     }
 
     return cells

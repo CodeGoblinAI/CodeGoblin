@@ -48,6 +48,46 @@ function TuiSidebarTokenGoblin(props: { theme: any }) {
     }
   }
 
+  const menuHeadSmall: GoblinRow[] = [
+    "....GGGG....",
+    "..GGGGGGGG..",
+    "G.GGGGGGGG.G",
+    ".GGGGGGGGGG.",
+    ["..GGBBGGBG..", "..GGBBGGBGT.", "..GGBBGGBT..", "..GGBBGGBG.."],
+    ["..GGBBGGBG..", "..GGGBWWBG..", "..GGGBBBGT..", "..GGBBGGBG.."],
+    "...GGGGGG...",
+  ]
+
+  const menuHeadWide: GoblinRow[] = [
+    ".....GGGG.....",
+    "...GGGGGGGG...",
+    "G..GGGGGGGG..G",
+    ".GGGGGGGGGGGG.",
+    ["..GGGBBGGBGG..", "..GGGBBGGBGGT.", "..GGGBBGGBT...", "..GGGBBGGBGG.."],
+    ["..GGGBBGGBGG..", "..GGGGBWWBGG..", "..GGGGBBBGTT..", "..GGGBBGGBGG.."],
+    "....GGGGGG....",
+  ]
+
+  const menuHeadSlim: GoblinRow[] = [
+    "...GGGG...",
+    "..GGGGGG..",
+    "G.GGGGGG.G",
+    ".GGGGGGGG.",
+    [".GGBBGBG..", ".GGBBGBGT.", ".GGBBGBT..", ".GGBBGBG.."],
+    [".GGBBGBG..", ".GGGBWBG..", ".GGGBBGT..", ".GGBBGBG.."],
+    "..GGGGGG..",
+  ]
+
+  const profileHead: GoblinRow[] = [
+    "....GGGGG....",
+    "..GGGGGGGGG..",
+    ".GGGGGGGGGGT.",
+    "GGGGGGGGGGTT",
+    [".GGGBBGGGGT.", ".GGGBBGGGTT", ".GGGBBGGTT.", ".GGGBBGGGG."],
+    ["..GGGBBBGG..", "..GGGBWWG..", "..GGGBBGT..", "..GGGBGG..."],
+    "...GGGGG....",
+  ]
+
   const chatGoblinVariants: ChatGoblinVariant[] = [
     createChatGoblinVariant("01", "gate snap", [
       ".....S..S........",
@@ -248,6 +288,141 @@ function TuiSidebarTokenGoblin(props: { theme: any }) {
       "...GGPMMPGG.......",
       "....G....G........",
       "..................",
+    ]),
+    createChatGoblinVariant("21", "menu tiny body", [
+      ...menuHeadSmall,
+      "....GPPG....",
+      "...G.PP.G...",
+      "..G......G..",
+    ]),
+    createChatGoblinVariant("22", "menu thin scout", [
+      ...menuHeadSlim,
+      "...GPPG...",
+      "....PP....",
+      "...G..G...",
+      "..G....G..",
+    ]),
+    createChatGoblinVariant("23", "menu chunky hoodie", [
+      ...menuHeadWide,
+      "..GGPPPPGG..",
+      ".GGGPPPPGGG.",
+      "GG..PPPP..GG",
+      "...G....G...",
+    ]),
+    createChatGoblinVariant("24", "menu tall lanky", [
+      ...menuHeadSmall,
+      "....GPPG....",
+      "....GPPG....",
+      ".....PP.....",
+      "....G..G....",
+      "...G....G...",
+    ]),
+    createChatGoblinVariant("25", "menu squat bruiser", [
+      ...menuHeadWide,
+      ".GGGPPPPGGG.",
+      "GGGGPPPPGGGG",
+      "..GG....GG..",
+    ]),
+    createChatGoblinVariant("26", "menu little thief", [
+      ...menuHeadSmall,
+      ["...GGPPGG..T", "...GGPPGGT.", "...GGPPGT..", "...GGPPGG.."],
+      ["..G.PPPP.GT", "..G.PPPGT.", "..G.PPGT..", "..G.PPGG.."],
+      "...G....G..",
+    ]),
+    createChatGoblinVariant("27", "menu cloak triangle", [
+      ...menuHeadSmall,
+      ".....PP.....",
+      "....PPPP....",
+      "...PPPPPP...",
+      "..G.PPPP.G..",
+    ]),
+    createChatGoblinVariant("28", "menu big boots", [
+      ...menuHeadSmall,
+      "....GPPG....",
+      "...GGPPGG...",
+      "..GG....GG..",
+      ".GG......GG.",
+    ]),
+    createChatGoblinVariant("29", "menu needle thin", [
+      ...menuHeadSlim,
+      "....PP....",
+      "....PP....",
+      "...G..G...",
+      "...G..G...",
+    ]),
+    createChatGoblinVariant("30", "menu wide arms", [
+      ...menuHeadWide,
+      ["GG..GPPG..GG", "GG..GPPG..GT", "G...GPPG.TG", "GG..GPPG..GG"],
+      ".G..PPPP..G.",
+      "...G....G...",
+    ]),
+    createChatGoblinVariant("31", "profile bite body", [
+      ...profileHead,
+      "...GGPPGG...",
+      "....GPPG....",
+      "...G....G...",
+    ]),
+    createChatGoblinVariant("32", "profile skinny run", [
+      ...profileHead,
+      "....GPPG....",
+      ".....PP.....",
+      "....G..G....",
+      "..G......G..",
+    ]),
+    createChatGoblinVariant("33", "profile heavy pack", [
+      ...profileHead,
+      "...GGPPGGMM.",
+      "..GGPPPPGMM.",
+      "...G....G...",
+    ]),
+    createChatGoblinVariant("34", "menu satchel side", [
+      ...menuHeadSmall,
+      "...GGPPGGMM.",
+      "..G.PPPPGMM.",
+      "...G....G...",
+    ]),
+    createChatGoblinVariant("35", "menu tiny imp", [
+      "...GGG...",
+      ".GGGGGGG.",
+      "GGGGGGGGG",
+      [".GGBBGBG.", ".GGBBGBT.", ".GGBBGT..", ".GGBBGBG."],
+      [".GGGBGG..", ".GGGBWT..", ".GGGBG...", ".GGGBGG.."],
+      "..GPPG...",
+      ".G....G..",
+    ]),
+    createChatGoblinVariant("36", "menu tall robe", [
+      ...menuHeadWide,
+      "....PPPP....",
+      "...PPPPPP...",
+      "...PPPPPP...",
+      "..G.PPPP.G..",
+      ".G........G.",
+    ]),
+    createChatGoblinVariant("37", "menu thick shell", [
+      ...menuHeadWide,
+      ".GGGPPPPGGG.",
+      "GGGGPPPPGGGG",
+      "GGG..PP..GGG",
+      "..GG....GG..",
+    ]),
+    createChatGoblinVariant("38", "menu spare mascot", [
+      ...menuHeadSmall,
+      ".....PP.....",
+      "....P..P....",
+      "...G....G...",
+    ]),
+    createChatGoblinVariant("39", "menu token lunge", [
+      ...menuHeadSmall,
+      ["...GGPPGG...T", "...GGPPGG..T.", "...GGPPGG.T..", "...GGPPGG...."],
+      ["..G.PPPP.G.T", "..G.PPPP.GT.", "..G.PPPPGT..", "..G.PPPPG..."],
+      "...G....G...",
+    ]),
+    createChatGoblinVariant("40", "menu clean body", [
+      ...menuHeadWide,
+      "...GGPPGG...",
+      "..G.PPPP.G..",
+      "....G..G....",
+      "...G....G...",
     ]),
   ]
 

@@ -63,6 +63,12 @@ function findMatchingBracket(source: string, start: number) {
 function parseVariants(source: string) {
   const variants: ChatGoblinVariant[] = []
   let cursor = 0
+  const sharedRows = {
+    menuHeadSmall: parseSharedRows(source, "menuHeadSmall"),
+    menuHeadWide: parseSharedRows(source, "menuHeadWide"),
+    menuHeadSlim: parseSharedRows(source, "menuHeadSlim"),
+    profileHead: parseSharedRows(source, "profileHead"),
+  }
 
   while (true) {
     const start = source.indexOf("createChatGoblinVariant(", cursor)
@@ -78,7 +84,18 @@ function parseVariants(source: string) {
     const rowsStart = source.indexOf("[", start)
     const rowsEnd = findMatchingBracket(source, rowsStart)
     const rowsExpression = source.slice(rowsStart, rowsEnd + 1)
-    const rows = Function(`return ${rowsExpression}`)() as GoblinRow[]
+    const rows = Function(
+      "menuHeadSmall",
+      "menuHeadWide",
+      "menuHeadSlim",
+      "profileHead",
+      `return ${rowsExpression}`,
+    )(
+      sharedRows.menuHeadSmall,
+      sharedRows.menuHeadWide,
+      sharedRows.menuHeadSlim,
+      sharedRows.profileHead,
+    ) as GoblinRow[]
 
     variants.push({
       id: match[1]!,
@@ -89,6 +106,15 @@ function parseVariants(source: string) {
   }
 
   return variants
+}
+
+function parseSharedRows(source: string, name: string) {
+  const start = source.indexOf(`const ${name}`)
+  if (start === -1) return []
+  const assignmentStart = source.indexOf("=", start)
+  const rowsStart = source.indexOf("[", assignmentStart)
+  const rowsEnd = findMatchingBracket(source, rowsStart)
+  return Function(`return ${source.slice(rowsStart, rowsEnd + 1)}`)() as GoblinRow[]
 }
 
 function normalizeFrame(frame: string[]) {
@@ -122,38 +148,27 @@ function renderVariant(variant: ChatGoblinVariant) {
 }
 
 const bottomFrames = [
-  ["S.S.T.", "GBGAT.", ".P.G.."],
-  ["S.S..T", "GBGAAT", ".P.G.."],
-  ["S.S...", "GBGAM.", ".P.G.."],
+  ["S.S.T.", "GBG.T.", ".P.G.."],
+  ["S.S..T", "GBGG.T", ".P.G.."],
+  ["S.S...", "GBG.M.", ".P.G.."],
   ["S.S...", "GBGM..", ".P.G.."],
 ]
 
-const microGlyphs: Record<string, string> = {
-  S: "^",
-  G: "o",
-  B: "•",
-  P: "v",
-  A: "-",
-  T: "•",
-  M: "¤",
-  ".": " ",
-}
-
 function renderMicroFrame(frame: string[], label: string) {
   const rows = normalizeFrame(frame)
-    .map((row) =>
-      [...row]
-        .map((char) => `<span class="micro-char ${char === "." ? "empty" : char}">${microGlyphs[char] ?? char}</span>`)
-        .join(""),
-    )
-    .join("<br />")
+  const width = rows[0]?.length ?? 0
+  const cells = rows
+    .flatMap((row) => [...row].map((char) => `<span class="${char === "B" ? "cell empty" : cellClass(char)}"></span>`))
+    .join("")
 
-  return `<div class="micro-frame"><div class="frame-label">${label}</div><pre>${rows}</pre></div>`
+  return `<div class="micro-frame"><div class="frame-label">${label}</div><div class="micro-grid" style="grid-template-columns: repeat(${width}, var(--micro-cell));">${cells}</div></div>`
 }
 
 const source = await Bun.file(sidebarPath).text()
 const variants = parseVariants(source)
 if (variants.length === 0) throw new Error("No chat goblin variants found")
+const originalVariants = variants.filter((variant) => Number(variant.id) <= 20)
+const menuBodyVariants = variants.filter((variant) => Number(variant.id) > 20)
 
 const html = `<!doctype html>
 <html lang="en">
@@ -175,6 +190,7 @@ const html = `<!doctype html>
         --token: #ffc45b;
         --teeth: #eaf7e7;
         --cell: 8px;
+        --micro-cell: 7px;
       }
       body {
         margin: 0;
@@ -198,6 +214,11 @@ const html = `<!doctype html>
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
         gap: 16px;
+      }
+      .section-title {
+        margin: 24px 0 12px;
+        color: #f0ffe9;
+        font-size: 16px;
       }
       .card, .bottom-card {
         background: var(--panel);
@@ -246,18 +267,16 @@ const html = `<!doctype html>
         margin-bottom: 8px;
       }
       .micro-row { display: flex; gap: 14px; align-items: flex-end; }
-      .micro-frame pre {
-        margin: 0;
-        line-height: 1.1;
-        font-size: 12px;
-        letter-spacing: 0.04em;
+      .micro-grid {
+        display: grid;
+        gap: 1px;
+        padding: 5px;
+        background: #020403;
+        border: 1px solid #102414;
+        border-radius: 6px;
       }
-      .micro-char { display: inline-block; background: transparent !important; }
-      .micro-char.G, .micro-char.S, .micro-char.A { color: var(--skin); }
-      .micro-char.B { color: var(--teeth); }
-      .micro-char.P { color: var(--vest); }
-      .micro-char.T { color: var(--token); }
-      .micro-char.M { color: var(--shadow); }
+      .micro-grid .cell { width: var(--micro-cell); height: var(--micro-cell); }
+      .micro-grid .cell.S { background: var(--skin); }
     </style>
   </head>
   <body>
@@ -274,7 +293,10 @@ const html = `<!doctype html>
           <div class="micro-row">${bottomFrames.map((frame, index) => renderMicroFrame(frame, `f${index + 1}`)).join("")}</div>
         </div>
       </section>
-      <div class="grid">${variants.map(renderVariant).join("")}</div>
+      <h2 class="section-title">New menu-head/body variants (${menuBodyVariants.length})</h2>
+      <div class="grid new-menu-batch">${menuBodyVariants.map(renderVariant).join("")}</div>
+      <h2 class="section-title">Earlier sidebar experiments (${originalVariants.length})</h2>
+      <div class="grid">${originalVariants.map(renderVariant).join("")}</div>
     </main>
   </body>
 </html>`
