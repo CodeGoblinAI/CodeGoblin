@@ -4,6 +4,7 @@ import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { useTheme } from "../../context/theme"
 import { useTuiConfig } from "../../context/tui-config"
 import { InstallationChannel, InstallationVersion } from "@opencode-ai/core/installation/version"
+import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
 import { RGBA } from "@opentui/core"
 import type { JSX } from "@opentui/solid"
@@ -18,13 +19,21 @@ function isChatGoblinEnabled(value: string | undefined) {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
 }
 
-function TuiSidebarTokenGoblin(props: { theme: any }) {
+function TuiSidebarTokenGoblin(props: {
+  theme: any
+  active: boolean
+  contextText: string
+  costText: string
+  remainingRatio: number
+}) {
   const skinColor = RGBA.fromInts(154, 219, 53)
   const shadowColor = RGBA.fromInts(120, 125, 135)
   const vestColor = RGBA.fromInts(130, 80, 223)
   const eyeColor = props.theme.backgroundElement
   const tokenColor = props.theme.warning
+  const biteColor = props.theme.backgroundElement
   const [tick, setTick] = createSignal(0)
+  const budgetCells = 12
 
   interface ChatGoblinVariant {
     id: string
@@ -441,13 +450,30 @@ function TuiSidebarTokenGoblin(props: { theme: any }) {
     return frames.map((frame) => Array.from({ length: height }, (_, rowIndex) => (frame[rowIndex] ?? "").padEnd(width, ".")))
   }
 
-  const selectedVariantId = normalizeChatGoblinVariantId(process.env.CODEGOBLIN_CHAT_GOBLIN_VARIANT)
-  const selectedVariant =
-    chatGoblinVariants.find((variant) => variant.id === selectedVariantId) ??
-    chatGoblinVariants.find((variant) => variant.id === "04") ??
-    chatGoblinVariants[0]
-  const frames = normalizeFrames(selectedVariant.frames)
-  const width = Math.max(...frames.flatMap((frame) => frame.map((row) => row.length)))
+  const requestedVariantId = normalizeChatGoblinVariantId(process.env.CODEGOBLIN_CHAT_GOBLIN_VARIANT)
+  const bitePattern = [0, 1, 2, 3, 2, 1]
+  const usingFavoriteCycle = createMemo(() => ["04", "30", "39", "40"].includes(requestedVariantId))
+  const biteDepth = createMemo(() => (props.active ? (bitePattern[tick() % bitePattern.length] ?? 0) : 0))
+  const displayVariantId = createMemo(() => {
+    if (!usingFavoriteCycle()) return requestedVariantId
+    if (!props.active) return "40"
+    return biteDepth() >= 2 ? "39" : "30"
+  })
+  const selectedVariant = createMemo(
+    () =>
+      chatGoblinVariants.find((variant) => variant.id === displayVariantId()) ??
+      chatGoblinVariants.find((variant) => variant.id === "40") ??
+      chatGoblinVariants[0],
+  )
+  const frames = createMemo(() => normalizeFrames(selectedVariant().frames))
+  const width = createMemo(() => Math.max(...frames().flatMap((frame) => frame.map((row) => row.length))))
+  const stableBudgetCells = createMemo(() => {
+    const ratio = Math.max(0, Math.min(1, props.remainingRatio))
+    if (ratio <= 0) return 0
+    return Math.max(1, Math.round(ratio * budgetCells))
+  })
+  const visibleBudgetCells = createMemo(() => Math.max(0, stableBudgetCells() - biteDepth()))
+  const budgetHeadline = createMemo(() => (props.active ? "goblin chewing budget" : "token stash"))
 
   let timer: ReturnType<typeof setInterval> | undefined
 
@@ -461,8 +487,10 @@ function TuiSidebarTokenGoblin(props: { theme: any }) {
   })
 
   function renderRow(rowIndex: number) {
-    const frame = frames[tick() % frames.length] ?? frames[0] ?? []
-    const spriteRow = frame[rowIndex] ?? "".padEnd(width, ".")
+    const currentFrames = frames()
+    const currentWidth = width()
+    const frame = currentFrames[tick() % currentFrames.length] ?? currentFrames[0] ?? []
+    const spriteRow = frame[rowIndex] ?? "".padEnd(currentWidth, ".")
     const cells: JSX.Element[] = []
 
     for (const char of spriteRow) {
@@ -488,10 +516,33 @@ function TuiSidebarTokenGoblin(props: { theme: any }) {
     return cells
   }
 
+  function renderBudgetMeter() {
+    const cells: JSX.Element[] = []
+    for (let index = 0; index < budgetCells; index++) {
+      if (index < visibleBudgetCells()) {
+        cells.push(<text fg={tokenColor}>██</text>)
+      } else if (index < stableBudgetCells()) {
+        cells.push(<text fg={biteColor}>▓▓</text>)
+      } else {
+        cells.push(<text fg={props.theme.border}>░░</text>)
+      }
+    }
+    return cells
+  }
+
   return (
-    <box flexDirection="column" alignItems="center" paddingTop={1} paddingBottom={1}>
-      {Array.from({ length: frames[0]?.length ?? 0 }, (_, rowIndex) => (
-        <box flexDirection="row" width={width * 2}>
+    <box flexDirection="column" alignItems="center" paddingTop={1} paddingBottom={1} width="100%">
+      <box flexDirection="column" gap={0} width="100%" paddingBottom={1}>
+        <text fg={props.active ? tokenColor : props.theme.text}>
+          <b>{budgetHeadline()}</b>
+        </text>
+        <box flexDirection="row">{renderBudgetMeter()}</box>
+        <text fg={props.theme.textMuted} wrapMode="none">
+          {props.contextText} · {props.costText}
+        </text>
+      </box>
+      {Array.from({ length: frames()[0]?.length ?? 0 }, (_, rowIndex) => (
+        <box flexDirection="row" width={width() * 2}>
           {renderRow(rowIndex)}
         </box>
       ))}
@@ -505,7 +556,44 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const { theme } = useTheme()
   const tuiConfig = useTuiConfig()
   const session = createMemo(() => sync.session.get(props.sessionID))
+  const messages = createMemo(() => sync.data.message[props.sessionID] ?? [])
+  const pending = createMemo(() => messages().findLast((item) => item.role === "assistant" && !item.time.completed)?.id)
   const showChatGoblin = createMemo(() => isChatGoblinEnabled(process.env.CODEGOBLIN_CHAT_GOBLIN))
+  const budgetUsage = createMemo(() => {
+    const money = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 4,
+    })
+    const number = new Intl.NumberFormat("en-US")
+    const cost = session()?.cost ?? 0
+    const costText = `spent ${money.format(cost)}`
+    const last = messages().findLast(
+      (item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0,
+    )
+    if (!last) {
+      return {
+        contextText: pending() ? "warming up the token pile" : "full stash waiting",
+        costText,
+        remainingRatio: 1,
+      }
+    }
+
+    const tokens =
+      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
+    const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
+    const ratio = model?.limit.context ? Math.max(0, Math.min(1, tokens / model.limit.context)) : undefined
+
+    return {
+      contextText:
+        ratio !== undefined
+          ? `${number.format(tokens)} tokens · ${Math.round(ratio * 100)}% ctx`
+          : `${number.format(tokens)} tokens tracked`,
+      costText,
+      remainingRatio: ratio !== undefined ? Math.max(0, 1 - ratio) : 1,
+    }
+  })
   const workspace = () => {
     const workspaceID = session()?.workspaceID
     if (!workspaceID) return
@@ -578,7 +666,13 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
 
         <Show when={showChatGoblin()}>
           <box flexShrink={0} paddingTop={1}>
-            <TuiSidebarTokenGoblin theme={theme} />
+            <TuiSidebarTokenGoblin
+              theme={theme}
+              active={Boolean(pending())}
+              contextText={budgetUsage().contextText}
+              costText={budgetUsage().costText}
+              remainingRatio={budgetUsage().remainingRatio}
+            />
           </box>
         </Show>
 

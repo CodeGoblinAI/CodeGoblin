@@ -147,21 +147,25 @@ function renderVariant(variant: ChatGoblinVariant) {
   </section>`
 }
 
-const bottomFrames = [
-  ["S.S.T.", "GBG.T.", ".P.G.."],
-  ["S.S..T", "GBGG.T", ".P.G.."],
-  ["S.S...", "GBG.M.", ".P.G.."],
-  ["S.S...", "GBGM..", ".P.G.."],
-]
+function renderBudgetMeter(visible: number, stable = visible, total = 12) {
+  return `<div class="budget-meter">${Array.from({ length: total }, (_, index) => {
+    if (index < visible) return '<span class="meter-cell full"></span>'
+    if (index < stable) return '<span class="meter-cell bite"></span>'
+    return '<span class="meter-cell empty"></span>'
+  }).join("")}</div>`
+}
 
-function renderMicroFrame(frame: string[], label: string) {
-  const rows = normalizeFrame(frame)
-  const width = rows[0]?.length ?? 0
-  const cells = rows
-    .flatMap((row) => [...row].map((char) => `<span class="${char === "B" ? "cell empty" : cellClass(char)}"></span>`))
-    .join("")
-
-  return `<div class="micro-frame"><div class="frame-label">${label}</div><div class="micro-grid" style="grid-template-columns: repeat(${width}, var(--micro-cell));">${cells}</div></div>`
+function renderBudgetScene(
+  variant: ChatGoblinVariant,
+  options: { label: string; headline: string; detail: string; frameIndex: number; visible: number; stable?: number },
+) {
+  return `<section class="card budget-scene">
+    <h2>${options.label}</h2>
+    <div class="budget-headline">${options.headline}</div>
+    ${renderBudgetMeter(options.visible, options.stable ?? options.visible)}
+    <div class="budget-detail">${options.detail}</div>
+    <div class="frames">${renderFrame(variant.frames[options.frameIndex] ?? variant.frames[0] ?? [], `${variant.id}. ${variant.name}`)}</div>
+  </section>`
 }
 
 const source = await Bun.file(sidebarPath).text()
@@ -169,6 +173,9 @@ const variants = parseVariants(source)
 if (variants.length === 0) throw new Error("No chat goblin variants found")
 const originalVariants = variants.filter((variant) => Number(variant.id) <= 20)
 const menuBodyVariants = variants.filter((variant) => Number(variant.id) > 20)
+const favoriteBudgetVariants = ["40", "39", "30"]
+  .map((id) => variants.find((variant) => variant.id === id))
+  .filter(Boolean) as ChatGoblinVariant[]
 
 const html = `<!doctype html>
 <html lang="en">
@@ -190,7 +197,6 @@ const html = `<!doctype html>
         --token: #ffc45b;
         --teeth: #eaf7e7;
         --cell: 8px;
-        --micro-cell: 7px;
       }
       body {
         margin: 0;
@@ -220,7 +226,7 @@ const html = `<!doctype html>
         color: #f0ffe9;
         font-size: 16px;
       }
-      .card, .bottom-card {
+      .card {
         background: var(--panel);
         border: 1px solid #143319;
         border-radius: 14px;
@@ -248,51 +254,82 @@ const html = `<!doctype html>
       .cell.T, .micro-char.T { background: var(--token); color: var(--token); }
       .cell.W { background: var(--teeth); }
       .empty { opacity: 0; }
-      .bottom-card { margin-bottom: 18px; }
-      .chat-mock {
-        margin-top: 12px;
-        height: 160px;
-        border: 1px solid #15391a;
-        border-radius: 10px;
-        background: #020403;
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-end;
-        padding: 12px;
+      .budget-samples {
+        margin-bottom: 18px;
       }
-      .prompt-bar {
-        height: 44px;
-        background: #071409;
-        border-left: 4px solid #54ff66;
-        margin-bottom: 8px;
-      }
-      .micro-row { display: flex; gap: 14px; align-items: flex-end; }
-      .micro-grid {
+      .budget-scene {
         display: grid;
-        gap: 1px;
-        padding: 5px;
-        background: #020403;
-        border: 1px solid #102414;
-        border-radius: 6px;
+        gap: 10px;
       }
-      .micro-grid .cell { width: var(--micro-cell); height: var(--micro-cell); }
-      .micro-grid .cell.S { background: var(--skin); }
+      .budget-headline {
+        color: #f0ffe9;
+        font-size: 13px;
+      }
+      .budget-detail {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .budget-meter {
+        display: flex;
+        gap: 4px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid #102414;
+        background: #020403;
+      }
+      .meter-cell {
+        width: 16px;
+        height: 12px;
+        border-radius: 2px;
+        background: #1f3221;
+      }
+      .meter-cell.full {
+        background: var(--token);
+        box-shadow: 0 0 10px rgba(255, 196, 91, 0.25);
+      }
+      .meter-cell.bite {
+        background: #071409;
+      }
     </style>
   </head>
   <body>
     <header>
       <h1>CodeGoblin chat goblin review</h1>
-      <p>${variants.length} right-sidebar variants parsed from sidebar.tsx. Bottom micro-goblin is shown at actual bottom-left scale.</p>
+      <p>${variants.length} right-sidebar variants parsed from sidebar.tsx. Top cards preview the new budget-chewing direction with favorites 40, 39, and 30.</p>
     </header>
     <main>
-      <section class="bottom-card">
-        <h2>Bottom-left micro goblin</h2>
-        <p>Small text-scale sprite under the prompt, left aligned.</p>
-        <div class="chat-mock">
-          <div class="prompt-bar"></div>
-          <div class="micro-row">${bottomFrames.map((frame, index) => renderMicroFrame(frame, `f${index + 1}`)).join("")}</div>
-        </div>
-      </section>
+      <h2 class="section-title">Budget chewing preview</h2>
+      <div class="grid budget-samples">${[
+        favoriteBudgetVariants[0]
+          ? renderBudgetScene(favoriteBudgetVariants[0], {
+              label: "Idle stash · 40",
+              headline: "token stash",
+              detail: "18,200 tokens · 14% ctx · spent $0.0124",
+              frameIndex: 0,
+              visible: 10,
+            })
+          : "",
+        favoriteBudgetVariants[1]
+          ? renderBudgetScene(favoriteBudgetVariants[1], {
+              label: "Chewing pass · 39",
+              headline: "goblin chewing budget",
+              detail: "18,200 tokens · 14% ctx · spent $0.0124",
+              frameIndex: 1,
+              visible: 7,
+              stable: 10,
+            })
+          : "",
+        favoriteBudgetVariants[2]
+          ? renderBudgetScene(favoriteBudgetVariants[2], {
+              label: "Wide-mouth bite · 30",
+              headline: "goblin chewing budget",
+              detail: "18,200 tokens · 14% ctx · spent $0.0124",
+              frameIndex: 1,
+              visible: 8,
+              stable: 10,
+            })
+          : "",
+      ].join("")}</div>
       <h2 class="section-title">New menu-head/body variants (${menuBodyVariants.length})</h2>
       <div class="grid new-menu-batch">${menuBodyVariants.map(renderVariant).join("")}</div>
       <h2 class="section-title">Earlier sidebar experiments (${originalVariants.length})</h2>

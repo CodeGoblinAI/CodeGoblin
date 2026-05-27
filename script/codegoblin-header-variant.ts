@@ -23,15 +23,12 @@ const rawVariant =
       arg !== "list-chat-goblin" &&
       arg !== "runner" &&
       arg !== "chat-goblin" &&
-      arg !== "chat-bottom-goblin" &&
       arg !== "--runner-variant" &&
       arg !== "--chat-goblin" &&
       arg !== "--chat-goblin-variant" &&
-      arg !== "--chat-bottom-goblin" &&
       args[index - 1] !== "--runner-variant" &&
       args[index - 1] !== "--chat-goblin" &&
       args[index - 1] !== "--chat-goblin-variant" &&
-      args[index - 1] !== "--chat-bottom-goblin" &&
       !arg.startsWith("--"),
   ) ?? "01"
 const showRunner =
@@ -47,8 +44,7 @@ const showChatGoblin =
   args.includes("--chat-goblin-variant") ||
   Boolean(getOptionValue("--chat-goblin")) ||
   Boolean(getOptionValue("--chat-goblin-variant"))
-const showChatBottomGoblin = args.includes("--chat-bottom-goblin") || args.includes("chat-bottom-goblin")
-const rawChatGoblinVariant = getOptionValue("--chat-goblin") ?? getOptionValue("--chat-goblin-variant") ?? "04"
+const rawChatGoblinVariant = getOptionValue("--chat-goblin") ?? getOptionValue("--chat-goblin-variant") ?? "40"
 const runnerVariantNames = {
   "01": "tiny classic",
   "02": "micro scout",
@@ -178,9 +174,6 @@ if (showChatGoblin) {
     `Chat sidebar goblin ${chatGoblinVariant} enabled (${chatGoblinVariantNames[chatGoblinVariant as keyof typeof chatGoblinVariantNames]}).`,
   )
 }
-if (showChatBottomGoblin) {
-  console.log("Chat bottom goblin enabled.")
-}
 console.log("Press Ctrl+C to stop this variant before trying another one.\n")
 
 const child = Bun.spawn([process.execPath, "run", "--cwd", "packages/opencode", "--conditions=browser", "src/index.ts"], {
@@ -190,7 +183,6 @@ const child = Bun.spawn([process.execPath, "run", "--cwd", "packages/opencode", 
     CODEGOBLIN_HEADER_VARIANT: variant,
     ...(showRunner ? { CODEGOBLIN_FOOTER_ANIMATION: "1", CODEGOBLIN_FOOTER_VARIANT: runnerVariant } : {}),
     ...(showChatGoblin ? { CODEGOBLIN_CHAT_GOBLIN: "1", CODEGOBLIN_CHAT_GOBLIN_VARIANT: chatGoblinVariant } : {}),
-    ...(showChatBottomGoblin ? { CODEGOBLIN_CHAT_BOTTOM_GOBLIN: "1" } : {}),
   },
   stdin: "inherit",
   stdout: "inherit",

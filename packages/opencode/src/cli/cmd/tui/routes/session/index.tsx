@@ -179,78 +179,6 @@ function displayAgentMode(mode: string | undefined) {
   return mode?.toLowerCase() === "build" ? "Agent" : Locale.titlecase(mode ?? "agent")
 }
 
-function isChatGoblinFlagEnabled(value: string | undefined) {
-  const normalized = value?.trim().toLowerCase()
-  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
-}
-
-function TuiChatBottomGoblin(props: { theme: any }) {
-  const skinColor = RGBA.fromInts(154, 219, 53)
-  const vestColor = RGBA.fromInts(130, 80, 223)
-  const stashColor = props.theme.textMuted
-  const tokenColor = props.theme.warning
-  const [tick, setTick] = createSignal(0)
-
-  const idleFrame = ["S.S.T.", "GBG.T.", ".P.G.."]
-  const reachFrame = ["S.S..T", "GBGG.T", ".P.G.."]
-  const grabFrame = ["S.S...", "GBG.M.", ".P.G.."]
-  const stashFrame = ["S.S...", "GBGM..", ".P.G.."]
-  const frames = [
-    idleFrame,
-    idleFrame,
-    idleFrame,
-    idleFrame,
-    idleFrame,
-    idleFrame,
-    idleFrame,
-    reachFrame,
-    grabFrame,
-    stashFrame,
-    idleFrame,
-    idleFrame,
-    idleFrame,
-    idleFrame,
-  ]
-  const width = Math.max(...frames.flatMap((frame) => frame.map((row) => row.length)))
-
-  let timer: ReturnType<typeof setInterval> | undefined
-
-  onMount(() => {
-    timer = setInterval(() => setTick((value) => value + 1), 140)
-    timer?.unref?.()
-  })
-
-  onCleanup(() => {
-    if (timer) clearInterval(timer)
-  })
-
-  function renderRow(rowIndex: number) {
-    const frame = frames[tick() % frames.length] ?? frames[0] ?? []
-    const spriteRow = (frame[rowIndex] ?? "").padEnd(width, ".")
-    const cells: JSX.Element[] = []
-
-    for (const char of spriteRow) {
-      if (char === "G" || char === "S") cells.push(<text><span style={{ bg: skinColor }}> </span></text>)
-      else if (char === "P") cells.push(<text><span style={{ bg: vestColor }}> </span></text>)
-      else if (char === "M") cells.push(<text><span style={{ bg: stashColor }}> </span></text>)
-      else if (char === "T") cells.push(<text><span style={{ bg: tokenColor }}> </span></text>)
-      else cells.push(<text> </text>)
-    }
-
-    return cells
-  }
-
-  return (
-    <box flexDirection="column" alignItems="flex-start" width="100%" paddingLeft={2} flexShrink={0}>
-      {Array.from({ length: frames[0]?.length ?? 0 }, (_, rowIndex) => (
-        <box flexDirection="row" width={width}>
-          {renderRow(rowIndex)}
-        </box>
-      ))}
-    </box>
-  )
-}
-
 export function Session() {
   const route = useRouteData("session")
   const { navigate } = useRoute()
@@ -309,11 +237,6 @@ export function Session() {
     if (sidebarOpen()) return true
     if (sidebar() === "auto" && wide()) return true
     return false
-  })
-  const showBottomChatGoblin = createMemo(() => {
-    const bottom = isChatGoblinFlagEnabled(process.env.CODEGOBLIN_CHAT_BOTTOM_GOBLIN)
-    const sidebarGoblin = isChatGoblinFlagEnabled(process.env.CODEGOBLIN_CHAT_GOBLIN)
-    return bottom || (sidebarGoblin && !sidebarVisible())
   })
   const showTimestamps = createMemo(() => timestamps() === "show")
   const contentWidth = createMemo(() => dimensions().width - (sidebarVisible() ? SESSION_SIDEBAR_WIDTH : 0) - 4)
@@ -1334,9 +1257,6 @@ export function Session() {
                       right={<TuiPluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
                     />
                   </TuiPluginRuntime.Slot>
-                </Show>
-                <Show when={visible() && showBottomChatGoblin()}>
-                  <TuiChatBottomGoblin theme={theme} />
                 </Show>
               </box>
             </Show>
