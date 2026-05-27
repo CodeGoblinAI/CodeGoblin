@@ -23,6 +23,7 @@ Read in this pass:
 - `docs/SECURITY_NOTES.md`
 - `UPSTREAM.md`
 - `SECURITY.md`
+- Follow-up reference zip from work computer: `C:\Users\shawn\Downloads\drive-download-20260526T233138Z-3-001.zip`
 
 Key source/package files inspected:
 
@@ -55,6 +56,13 @@ Inspected with `git fetch origin --prune`, `git status --short --branch`, `git b
   - `origin`: `https://github.com/shawnisikli/CodeGoblin.git`
   - `upstream`: fetches `https://github.com/anomalyco/opencode.git`, push URL is `DISABLED`
 - Git identity on this machine: `xerox777777 <shawnxerxes@yahoo.com>`
+
+Follow-up after this file was created:
+
+- Handoff commit on feature branch: `c9c696910 chore(opencode): add CodeGoblin work-computer handoff`.
+- Feature branch pushed to `origin/feat/codegoblin-local-install`.
+- Fresh local `dev` was reset from `origin/dev`, feature branch was merged with merge commit `7113b9646 merge: CodeGoblin local install updates`, and `dev` was pushed to `origin/dev`.
+- Final repository status after merge/push was clean on `dev` tracking `origin/dev`.
 
 ## Feature branch commit clusters
 
@@ -92,6 +100,35 @@ This handoff pass adds:
 - README source-checkout instructions for `npm run build` and `npm run link:local` wrappers.
 - Small remaining visible auth/ACP rebrands in MCP callback/OAuth metadata and ACP auth labels.
 - This supplemental handoff document.
+
+## Work-computer zip findings
+
+The provided zip contained these docs from the work-computer branch context:
+
+- `NEXT_STEPS.md`
+- `OPENCODE_ARCHITECTURE_NOTES.md`
+- `PRIVATE_BACKEND_BOUNDARY.md`
+- `SECURITY_NOTES.md`
+- `KNOWN_ISSUES.md`
+- `IMPLEMENTATION_LOG.md`
+- `PROJECT_STATE.md`
+- `DECISIONS.md`
+
+After extraction to a temp directory and comparison against current repo docs, most differences were CRLF/LF line endings. The meaningful context not already captured in this handoff came from the older `PROJECT_STATE.md` home-model handoff section.
+
+Additional facts from that zip to preserve:
+
+- Work-computer workspace path seen in the zip: `C:\Users\SIsikli\CodeGoblin`.
+- Home-workstation workspace path: `C:\Users\shawn\OneDrive\Documents\coding stuff\CodeGoblin`.
+- At the time of that zip, the feature branch was `feat/codegoblin-local-install`; the latest pushed commit mentioned there was `123ee8bd1 fix(opencode): align CodeGoblin runtime labels`.
+- The branch had generated CodeGoblin tarballs with `packages/opencode/script/publish.ts --dry-run`, globally installed `codegoblin-windows-x64` plus the top-level `codegoblin` package, and verified `codegoblin --version` / `cg --version` as `0.0.0-feat-codegoblin-local-install-202605262106`.
+- The generated installer package exposes only `codegoblin` and `cg`; it should not claim or overwrite the upstream global `opencode` command. Official upstream `opencode-ai` should remain separate locally.
+- Public package names checked on 2026-05-26 were `codegoblin` and `codegoblin-windows-x64`; npm name checks returned 404 at that time.
+- Work-computer runtime smoke for `cg web --hostname 127.0.0.1 --port 43177 --print-logs` showed `CODEGOBLIN_SERVER_PASSWORD is not set; server is unsecured.` and did not show the old `OPENCODE_SERVER_PASSWORD` warning.
+- Installed help smokes for `cg run --help` and `cg attach --help` showed `CODEGOBLIN_SERVER_PASSWORD` / `CODEGOBLIN_SERVER_USERNAME` and no `OPENCODE_SERVER` text.
+- The installed TUI footer advertised `ctrl+g actions`; sending Ctrl+G opened the action flow. `ctrl+shift+g` remains an alias, but Windows terminals and many terminal stacks often collapse or do not transmit Ctrl+Shift+letter chords distinctly, so Ctrl+G is the reliable primary action-palette binding.
+- `packages/opencode/src/codegoblin/image-command.ts` tracks image credential source. For Google/Gemini, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY` can override connected Google auth; if a stale env key exists, CodeGoblin should say which key source was used and suggest updating/removing that env key and restarting.
+- Work-computer runtime verification used a deliberately invalid non-secret `GEMINI_API_KEY`; installed `cg image` returned a friendly `API_KEY_INVALID` explanation instead of dumping raw Gemini JSON.
 
 ## Important CodeGoblin-specific files
 
@@ -199,6 +236,7 @@ Windows troubleshooting:
 - Default Node `v20.11.0` is too old for Vite 7's embedded web build; prepend bundled Node as shown above.
 - If `dist\opencode-windows-x64\bin\opencode.exe` cannot be deleted, stop any running `codegoblin serve` / `codegoblin web` process first.
 - For hidden process smokes, prefer `%APPDATA%\npm\codegoblin.cmd`; `Start-Process -FilePath codegoblin` can open the PowerShell shim in Notepad.
+- If Gemini image generation fails even though connected Google auth looks valid, check stale local env vars first; `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY` can win before connected auth.
 - Do not run tests from repo root; the root `test` script intentionally exits.
 
 ## Image/model-routing behavior
@@ -227,6 +265,7 @@ TUI:
 - Session sidebar can show a token-goblin animation via `CODEGOBLIN_CHAT_GOBLIN`.
 - Prompt footer labels `ctx`, `spent`, and `hoard`; local hoard can read `CODEGOBLIN_TOKEN_HOARD_USD`, `CODEGOBLIN_DEEPSEEK_BALANCE_USD`, `CODEGOBLIN_DEEPSEEK_CREDITS_USD`, or `DEEPSEEK_BALANCE_USD`.
 - `/models`, `/themes`, `/goblin`, `/goblin-models`, `/goblin-usage`, and related slash/palette commands are registered in the TUI.
+- `ctrl+g` is the reliable primary action-palette binding; `ctrl+shift+g` remains an alias but is less reliable in Windows/terminal stacks.
 
 Web:
 
@@ -305,6 +344,18 @@ Current pass results on Windows, 2026-05-26:
    - `/` returned 200 and included `<title>CodeGoblin</title>`.
    - `/codegoblin-logo.png` returned 200 `image/png`.
    - `/favicon-96x96-v3.png` returned 200 `image/png`.
+- Follow-up zip inspection passed: the provided work-computer zip was extracted outside the repo, compared against current docs, and the extra non-duplicate handoff facts were folded into this file.
+
+Post-merge validation on fresh `dev`:
+
+- `git diff --check origin/dev..HEAD` passed before pushing the merge.
+- `bun run --cwd packages/opencode typecheck` passed.
+- `bun run --cwd packages/ui typecheck` passed.
+- `bun run --cwd packages/app typecheck` passed.
+- `bun --cwd packages/opencode test test/codegoblin/image-command.test.ts` passed: 4 tests, 0 failures.
+- `bun --cwd packages/app test src/components/prompt-input/submit.test.ts` passed as part of the app unit run: 337 tests, 0 failures.
+- `npm run build` passed on merged `dev` and produced smoke version `0.0.0-dev-202605262334`.
+- Linked command smoke passed on merged `dev`: `codegoblin --version`, bare `cg image ... --dry-run` warning, and `openai/gpt-image-1` dry-run.
 
 Reusable checklist:
 
@@ -373,9 +424,8 @@ Run targeted validation before pushing. Full monorepo pre-push may still fail on
 
 ## Next recommended pass
 
-1. Commit and push this handoff/install/auth-label pass.
-2. Run the full targeted validation checklist above, including packaged build and installed command smokes.
-3. Visually launch `codegoblin` in a real terminal and inspect TUI home, `/models`, `/goblin`, `/image`, pasted image input, and image loading/result cards.
-4. Live-test OpenAI GPT Image and Qwen/DashScope Wan with local keys that are never committed.
-5. Continue scoped rebrand in ACP docs/examples, desktop/provider upsell surfaces, localized strings, README expansion, and public attribution/license review docs.
-6. Decide later whether durable paths remain OpenCode-compatible or migrate to CodeGoblin-specific paths.
+1. Visually launch `codegoblin` in a real terminal and inspect TUI home, `/models`, `/goblin`, `/image`, pasted image input, Ctrl+G actions, and image loading/result cards.
+2. Live-test OpenAI GPT Image, Gemini image, xAI Grok Imagine, and Qwen/DashScope Wan with real local keys that are never committed.
+3. Specifically test stale/invalid Gemini env-key behavior if a local `GEMINI_API_KEY` exists; the user should get a friendly source-aware auth hint.
+4. Continue scoped rebrand in ACP docs/examples, desktop/provider upsell surfaces, localized strings, README expansion, and public attribution/license review docs.
+5. Decide later whether durable paths remain OpenCode-compatible or migrate to CodeGoblin-specific paths.
