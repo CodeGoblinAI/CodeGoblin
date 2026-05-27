@@ -88,7 +88,7 @@ function TuiSidebarCompanionGoblin(props: {
     ".GGGGGGGGGGGG.",
     ["..GGGBBGGBGG..", "..GGGBBGGBGGT.", "..GGGBBGGBT...", "..GGGBBGGBGG.."],
     ["..GGGBBGGBGG..", "..GGGGBWWBGG..", "..GGGGBBBGTT..", "..GGGBBGGBGG.."],
-    "....GGGGGG....",
+    "....GGGGGGG...",
   ]
 
   const menuHeadSlim: GoblinRow[] = [

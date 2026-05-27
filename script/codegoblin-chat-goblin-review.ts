@@ -221,8 +221,6 @@ const source = await Bun.file(sidebarPath).text()
 const sidebarCols = parseSidebarWidth(source)
 const variants = parseVariants(source)
 if (variants.length === 0) throw new Error("No chat goblin variants found")
-const originalVariants = variants.filter((variant) => Number(variant.id) <= 20)
-const menuBodyVariants = variants.filter((variant) => Number(variant.id) > 20)
 const focusBodyVariants = ["40", "30", "39"]
   .map((id) => variants.find((variant) => variant.id === id))
   .filter(Boolean) as ChatGoblinVariant[]
@@ -370,7 +368,7 @@ const html = `<!doctype html>
   <body>
     <header>
       <h1>CodeGoblin chat goblin review</h1>
-      <p>${variants.length} right-sidebar variants parsed from sidebar.tsx. Sprites below now render as deterministic SVG rectangles from the exact art arrays, with native sidebar width shown first.</p>
+      <p>Focused CodeGoblin review. Only the three body shapes we are actively comparing are shown below, rendered from the exact sidebar sprite data.</p>
     </header>
     <main>
       <h2 class="section-title">Native sidebar footprint</h2>
@@ -410,12 +408,9 @@ const html = `<!doctype html>
             })
           : "",
       ].join("")}</div>
-      <h2 class="section-title">Zoomed sprite frames</h2>
-      <p class="section-copy">These are the exact frame rectangles from the sidebar source, just enlarged for inspection.</p>
-      <h2 class="section-title">New menu-head/body variants (${menuBodyVariants.length})</h2>
-      <div class="grid new-menu-batch">${menuBodyVariants.map(renderVariant).join("")}</div>
-      <h2 class="section-title">Earlier sidebar experiments (${originalVariants.length})</h2>
-      <div class="grid">${originalVariants.map(renderVariant).join("")}</div>
+      <h2 class="section-title">Focused frame cycles</h2>
+      <p class="section-copy">Only the exact variants in play right now: 40, 30, and 39.</p>
+      <div class="grid">${focusBodyVariants.map(renderVariant).join("")}</div>
     </main>
   </body>
 </html>`
