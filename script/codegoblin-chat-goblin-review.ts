@@ -127,17 +127,18 @@ function escapeHtml(value: string) {
 }
 
 function terminalCell(char: string) {
-  if (char === ".") return '<span class="term empty">  </span>'
-  return `<span class="term ${char}">██</span>`
+  if (char === ".") return '<span class="term-cell empty"></span>'
+  return `<span class="term-cell ${char}"></span>`
 }
 
 function renderFrame(frame: string[], label: string) {
   const rows = normalizeFrame(frame)
-  const content = rows.map((row) => [...row].map(terminalCell).join("")).join("\n")
+  const width = rows[0]?.length ?? 0
+  const cells = rows.flatMap((row) => [...row].map(terminalCell)).join("")
 
   return `<div class="frame-block">
     <div class="frame-label">${escapeHtml(label)}</div>
-    <pre class="terminal-frame">${content}</pre>
+    <div class="terminal-grid" style="grid-template-columns: repeat(${width}, var(--logical-cell-w));">${cells}</div>
   </div>`
 }
 
@@ -158,7 +159,7 @@ function renderCompanionScene(
     <div class="ledger"><span>spend :</span><b>${escapeHtml(options.spend)}</b></div>
     <div class="ledger"><span>last&nbsp;&nbsp;:</span><b>${escapeHtml(options.last)}</b></div>
     <div class="companion-action">${escapeHtml(options.action)}</div>
-    <div class="companion-detail">terminal-faithful block preview · same filled/space mapping as the CLI</div>
+    <div class="companion-detail">CLI cell-ratio preview · one art cell = two terminal columns</div>
     <div class="frames">${renderFrame(variant.frames[options.frameIndex] ?? variant.frames[0] ?? [], `${variant.id}. ${variant.name}`)}</div>
   </section>`
 }
@@ -191,6 +192,10 @@ const html = `<!doctype html>
         --mouth: #000000;
         --token: #ffc45b;
         --teeth: #eaf7e7;
+        --terminal-col-w: 7px;
+        --terminal-row-h: 15px;
+        --logical-cell-w: calc(var(--terminal-col-w) * 2);
+        --logical-cell-h: var(--terminal-row-h);
       }
       body {
         margin: 0;
@@ -231,24 +236,29 @@ const html = `<!doctype html>
       .frames { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
       .frame-block { display: grid; gap: 5px; }
       .frame-label { color: var(--muted); font-size: 11px; }
-      .terminal-frame {
-        margin: 0;
+      .terminal-grid {
+        display: grid;
+        gap: 0;
+        width: max-content;
         padding: 8px;
         background: #020403;
         border: 1px solid #102414;
         border-radius: 8px;
-        font-family: Consolas, 'Cascadia Mono', 'Courier New', monospace;
-        font-size: 12px;
-        line-height: 1;
+        line-height: 0;
       }
-      .term.G { color: var(--skin); }
-      .term.S { color: var(--shadow); }
-      .term.P { color: var(--vest); }
-      .term.B { color: var(--mouth); }
-      .term.M { color: var(--shadow); }
-      .term.T { color: var(--token); }
-      .term.W { color: var(--teeth); }
-      .term.empty { color: transparent; }
+      .term-cell {
+        display: block;
+        width: var(--logical-cell-w);
+        height: var(--logical-cell-h);
+      }
+      .term-cell.G { background: var(--skin); }
+      .term-cell.S { background: var(--shadow); }
+      .term-cell.P { background: var(--vest); }
+      .term-cell.B { background: var(--mouth); }
+      .term-cell.M { background: var(--shadow); }
+      .term-cell.T { background: var(--token); }
+      .term-cell.W { background: var(--teeth); }
+      .term-cell.empty { background: transparent; }
       .companion-samples {
         margin-bottom: 18px;
       }
@@ -282,7 +292,7 @@ const html = `<!doctype html>
   <body>
     <header>
       <h1>CodeGoblin chat goblin review</h1>
-      <p>${variants.length} right-sidebar variants parsed from sidebar.tsx. Terminal-style rows now use the same filled/space mapping as the CLI. Top cards preview companion spend actions.</p>
+      <p>${variants.length} right-sidebar variants parsed from sidebar.tsx. Preview cells now use terminal geometry: each art cell is two terminal columns wide by one terminal row tall.</p>
     </header>
     <main>
       <h2 class="section-title">Companion spend action iterations</h2>
