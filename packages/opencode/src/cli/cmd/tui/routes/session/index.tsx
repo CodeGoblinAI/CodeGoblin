@@ -186,16 +186,16 @@ function isChatGoblinFlagEnabled(value: string | undefined) {
 
 function TuiChatBottomGoblin(props: { theme: any }) {
   const skinColor = RGBA.fromInts(154, 219, 53)
-  const shadowColor = RGBA.fromInts(120, 125, 135)
   const vestColor = RGBA.fromInts(130, 80, 223)
-  const eyeColor = props.theme.backgroundElement
+  const eyeColor = props.theme.text
+  const stashColor = props.theme.textMuted
   const tokenColor = props.theme.warning
   const [tick, setTick] = createSignal(0)
 
-  const idleFrame = ["..P...", "GBBGTT", "PPPG..", "G.G..."]
-  const reachFrame = ["..P...", "GBBGT.", "PPPGT.", ".GG..."]
-  const grabFrame = ["..P...", "GBBT..", "PPGT..", ".GG..."]
-  const stashFrame = ["..P...", "GBBG..", "PMGG..", "G.G..."]
+  const idleFrame = ["S.S.T.", "GBGAT.", ".P.G.."]
+  const reachFrame = ["S.S..T", "GBGAAT", ".P.G.."]
+  const grabFrame = ["S.S...", "GBGAM.", ".P.G.."]
+  const stashFrame = ["S.S...", "GBGM..", ".P.G.."]
   const frames = [
     idleFrame,
     idleFrame,
@@ -232,19 +232,21 @@ function TuiChatBottomGoblin(props: { theme: any }) {
 
     for (const char of spriteRow) {
       if (char === "G") {
-        cells.push(<text fg={skinColor}>██</text>)
+        cells.push(<text fg={skinColor}>o</text>)
       } else if (char === "P") {
-        cells.push(<text fg={vestColor}>██</text>)
+        cells.push(<text fg={vestColor}>v</text>)
       } else if (char === "B") {
-        cells.push(<text fg={eyeColor}>██</text>)
+        cells.push(<text fg={eyeColor}>•</text>)
       } else if (char === "M") {
-        cells.push(<text fg={props.theme.textMuted}>██</text>)
+        cells.push(<text fg={stashColor}>¤</text>)
       } else if (char === "S") {
-        cells.push(<text fg={shadowColor}>██</text>)
+        cells.push(<text fg={skinColor}>^</text>)
+      } else if (char === "A") {
+        cells.push(<text fg={skinColor}>-</text>)
       } else if (char === "T") {
-        cells.push(<text fg={tokenColor}>██</text>)
+        cells.push(<text fg={tokenColor}>•</text>)
       } else {
-        cells.push(<text>  </text>)
+        cells.push(<text> </text>)
       }
     }
 
@@ -252,9 +254,9 @@ function TuiChatBottomGoblin(props: { theme: any }) {
   }
 
   return (
-    <box flexDirection="column" alignItems="flex-end" width="100%" paddingRight={2} flexShrink={0}>
+    <box flexDirection="column" alignItems="flex-start" width="100%" paddingLeft={2} flexShrink={0}>
       {Array.from({ length: frames[0]?.length ?? 0 }, (_, rowIndex) => (
-        <box flexDirection="row" width={width * 2}>
+        <box flexDirection="row" width={width}>
           {renderRow(rowIndex)}
         </box>
       ))}

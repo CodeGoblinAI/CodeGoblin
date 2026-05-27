@@ -83,6 +83,16 @@ const chatGoblinVariantNames = {
   "08": "heavy jaw",
   "09": "sly nib",
   "10": "deluxe maw",
+  "11": "knife grin",
+  "12": "lantern bite",
+  "13": "hood profile",
+  "14": "wide tooth",
+  "15": "coin inhale",
+  "16": "imp yawn",
+  "17": "skullcap chew",
+  "18": "snout snap",
+  "19": "needle teeth",
+  "20": "clean mascot",
 } as const
 const chatGoblinVariantCount = Object.keys(chatGoblinVariantNames).length
 

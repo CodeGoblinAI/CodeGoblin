@@ -149,6 +149,106 @@ function TuiSidebarTokenGoblin(props: { theme: any }) {
       "..GGGGGGGGGG.....",
       "...G.G..G.G......",
     ]),
+    createChatGoblinVariant("11", "knife grin", [
+      "......S....S......",
+      "....SGGGGGGGS.....",
+      "...SGGBBGBBGGS....",
+      ["..SGGGBBBBBGGGT...", "..SGGGBBWWBGGTT...", "..SGGGBBBBBGTT....", "..SGGGBBWWBGGG...."],
+      [".SGGGGPPPGGGGT....", ".SGGGPPPPGGGGT....", ".SGGGPPPPGGGT.....", ".SGGGGPPPGGG......"],
+      "..SGG.PPP.GG......",
+      "...G..GG..G.......",
+      "..................",
+    ]),
+    createChatGoblinVariant("12", "lantern bite", [
+      "....S......S......",
+      "...SGGGGGGGGS.....",
+      ["..SGGBB..BBGG.....", "..SGGBB..BBGGT....", "..SGGBB..BBGT.....", "..SGGBB..BBGG....."],
+      [".SGGGGBBBBBGGT....", ".SGGGGBBWWBGGTT...", ".SGGGGBBBBBGTT....", ".SGGGGBBWWBGG....."],
+      ["SGGGPPPPPPGGTT....", "SGGGPPPPPGGGT.....", "SGGGPPPPGGG.......", "SGGGPPPGGG........"],
+      ".SGGPP..PPGG......",
+      "..GG....GG.......",
+      "..................",
+    ]),
+    createChatGoblinVariant("13", "hood profile", [
+      "......PSSSP.......",
+      "....PPGGGGGP......",
+      ["...PGGBBBGGGT.....", "...PGGBBBGGGTT....", "...PGGBBBGGTT.....", "...PGGBBBGGG......"],
+      ["..PGGGGBBBBBGTT...", "..PGGGGBBWWBGTT...", "..PGGGGBBBBBGT....", "..PGGGGBBWWBG....."],
+      ["..GGPPPPPPGGG.....", "..GGPPPPPGG.......", "..GGPPPPGG........", "..GGPPPGG........."],
+      "...GGPPPGG........",
+      "....G..G..........",
+      "..................",
+    ]),
+    createChatGoblinVariant("14", "wide tooth", [
+      "...S........S.....",
+      "..SGGGGGGGGGGS....",
+      [".SGGBB....BBGGS...", ".SGGBB....BBGGT...", ".SGGBB....BBGT....", ".SGGBB....BBGG...."],
+      ["SGGGGGBBBBBBGGT...", "SGGGGGBWWWWBGTT..", "SGGGGGBBBBBBGTT..", "SGGGGGBWWWWBGG..."],
+      [".SGGGPPPPPPGGG....", ".SGGGPPPPPGG......", ".SGGGPPPPGG.......", ".SGGGPPPGG........"],
+      "..SGGPP..PPG......",
+      "...GG......GG.....",
+      "..................",
+    ]),
+    createChatGoblinVariant("15", "coin inhale", [
+      ".....S..S.........",
+      "...SGGGGGGGS......",
+      ["..SGGBBBBGGT......", "..SGGBBBBGGTT.....", "..SGGBBBBGTT......", "..SGGBBBBGG......."],
+      [".SGGGGBBBBBGTT....", ".SGGGGBBWWBGGTT...", ".SGGGGBBBBBGGT....", ".SGGGGBBWWBGG....."],
+      ["SGGPPPPPPPGGGTT...", "SGGPPPPPPGGG......", "SGGPPPPPGGG.......", "SGGPPPPGG........."],
+      ".GGPPMMPPGG.......",
+      "..GG....GG........",
+      "..................",
+    ]),
+    createChatGoblinVariant("16", "imp yawn", [
+      "....S..SS..S......",
+      "..SGGGGGGGGGS.....",
+      [".SGGGBB..BBGGS....", ".SGGGBB..BBGGT....", ".SGGGBB..BBGT.....", ".SGGGBB..BBGG....."],
+      ["SGGGGGBBBBBGGTT...", "SGGGGBBWWBBGGTT...", "SGGGGGBBBBBGTT....", "SGGGGBBWWBBGG....."],
+      [".GGGPPPPPPGGG.....", ".GGGPPPPPGGG......", ".GGGPPPPGGG.......", ".GGGPPPGGG........"],
+      "..GGPP..PPGG......",
+      "...G......G.......",
+      "..................",
+    ]),
+    createChatGoblinVariant("17", "skullcap chew", [
+      ".....SSSSSS.......",
+      "...SSGGGGGGSS.....",
+      ["..SGGBBGBBGGGS....", "..SGGBBGBBGGTT....", "..SGGBBGBBGTT.....", "..SGGBBGBBGGG....."],
+      [".SGGGGBBBBBGTT....", ".SGGGGBBWWBGTT....", ".SGGGGBBBBBGT.....", ".SGGGGBBWWBG......"],
+      ["..GGGPPPPGGG......", "..GGPPPPGG........", "..GGPPPGG.........", "..GGPPGG.........."],
+      "...GGPMMGG........",
+      "....G..G..........",
+      "..................",
+    ]),
+    createChatGoblinVariant("18", "snout snap", [
+      "......S...........",
+      "....SGGGGGS.......",
+      ["...SGGBBBGGGTT....", "...SGGBBBGGGTTT...", "...SGGBBBGGTT.....", "...SGGBBBGGG......"],
+      ["..SGGGGBBBBBGTT...", "..SGGGGBBWWBGGTT..", "..SGGGGBBBBBGT....", "..SGGGGBBWWBG....."],
+      ["...GGPPPPPGGG.....", "...GGPPPPGG.......", "...GGPPPGG........", "...GGPPGG........."],
+      "....GGPMGG........",
+      ".....G..G.........",
+      "..................",
+    ]),
+    createChatGoblinVariant("19", "needle teeth", [
+      "....S........S....",
+      "..SGGGGGGGGGGS....",
+      [".SGGBBGBBGBBGS....", ".SGGBBGBBGBBGT....", ".SGGBBGBBGBBT.....", ".SGGBBGBBGBBG....."],
+      ["SGGGGGBBBBBGGTT...", "SGGGGBWBWBWGGTT...", "SGGGGGBBBBBGTT....", "SGGGGBWBWBWGG....."],
+      [".SGGPPPPPPGGG.....", ".SGGPPPPPGG.......", ".SGGPPPPGG........", ".SGGPPPGG........."],
+      "..SGGPMMPGG.......",
+      "...GG....GG.......",
+      "..................",
+    ]),
+    createChatGoblinVariant("20", "clean mascot", [
+      ".....S....S.......",
+      "...SGGGGGGGGS.....",
+      ["..SGGBB..BBGGS....", "..SGGBB..BBGGT....", "..SGGBB..BBGT.....", "..SGGBB..BBGG....."],
+      [".SGGGGBBBBBGGT....", ".SGGGGBBWWBGTT....", ".SGGGGBBBBBGT.....", ".SGGGGBBWWBGG....."],
+      ["..GGGPPPPPGGG.....", "..GGGPPPPGG.......", "..GGGPPPGG........", "..GGGGPGG........."],
+      "...GGPMMPGG.......",
+      "....G....G........",
+      "..................",
+    ]),
   ]
 
   function normalizeChatGoblinVariantId(value: string | undefined) {
@@ -201,6 +301,8 @@ function TuiSidebarTokenGoblin(props: { theme: any }) {
         cells.push(<text fg={eyeColor}>██</text>)
       } else if (char === "M") {
         cells.push(<text fg={props.theme.textMuted}>██</text>)
+      } else if (char === "W") {
+        cells.push(<text fg={props.theme.text}>██</text>)
       } else if (char === "T") {
         cells.push(<text fg={tokenColor}>██</text>)
       } else {
