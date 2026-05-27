@@ -374,7 +374,7 @@ const html = `<!doctype html>
     </header>
     <main>
       <h2 class="section-title">Native sidebar footprint</h2>
-      <p class="section-copy">Shape first: these cards show the goblin at the actual ${sidebarCols}-column sidebar width. Companion actions are not broken out here yet because they currently reuse one sprite sequence.</p>
+      <p class="section-copy">Shape first: these cards show the goblin at the actual ${sidebarCols}-column sidebar width. Native cards are showing frame 1, so you can compare them directly against a CLI run locked to frame 1.</p>
       <div class="grid companion-samples">${[
         focusBodyVariants[0]
           ? renderNativeSidebarScene(focusBodyVariants[0], {

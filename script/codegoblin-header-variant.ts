@@ -28,10 +28,12 @@ const rawVariant =
       arg !== "--runner-variant" &&
       arg !== "--chat-goblin" &&
       arg !== "--chat-goblin-variant" &&
+        arg !== "--chat-goblin-frame" &&
       arg !== "--companion-action" &&
       args[index - 1] !== "--runner-variant" &&
       args[index - 1] !== "--chat-goblin" &&
       args[index - 1] !== "--chat-goblin-variant" &&
+        args[index - 1] !== "--chat-goblin-frame" &&
       args[index - 1] !== "--companion-action" &&
       !arg.startsWith("--"),
   ) ?? "01"
@@ -47,11 +49,14 @@ const showChatGoblin =
   args.includes("chat-goblin") ||
   args.includes("companion") ||
   args.includes("--chat-goblin-variant") ||
+  args.includes("--chat-goblin-frame") ||
   args.includes("--companion-action") ||
   Boolean(getOptionValue("--chat-goblin")) ||
   Boolean(getOptionValue("--chat-goblin-variant")) ||
+  Boolean(getOptionValue("--chat-goblin-frame")) ||
   Boolean(getOptionValue("--companion-action"))
 const rawChatGoblinVariant = getOptionValue("--chat-goblin") ?? getOptionValue("--chat-goblin-variant") ?? "40"
+const rawChatGoblinFrame = getOptionValue("--chat-goblin-frame")
 const rawCompanionActionVariant = getOptionValue("--companion-action") ?? "01"
 const runnerVariantNames = {
   "01": "tiny classic",
@@ -183,6 +188,17 @@ if (
   process.exit(1)
 }
 
+const chatGoblinFrameNumeric = rawChatGoblinFrame === undefined ? undefined : Number(rawChatGoblinFrame.trim())
+
+if (
+  showChatGoblin &&
+  chatGoblinFrameNumeric !== undefined &&
+  (!Number.isInteger(chatGoblinFrameNumeric) || chatGoblinFrameNumeric < 1 || chatGoblinFrameNumeric > 4)
+) {
+  console.error(`Expected a chat goblin frame from 1 to 4, got: ${rawChatGoblinFrame}`)
+  process.exit(1)
+}
+
 const companionActionNumeric = Number(rawCompanionActionVariant.trim().replace(/^v/i, ""))
 
 if (
@@ -209,6 +225,9 @@ if (showChatGoblin) {
   console.log(
     `Chat sidebar goblin ${chatGoblinVariant} enabled (${chatGoblinVariantNames[chatGoblinVariant as keyof typeof chatGoblinVariantNames]}).`,
   )
+  if (chatGoblinFrameNumeric !== undefined) {
+    console.log(`Chat sidebar goblin frame ${chatGoblinFrameNumeric} locked for comparison.`)
+  }
   console.log(
     `Companion action ${companionActionVariant} enabled (${companionActionVariantNames[companionActionVariant as keyof typeof companionActionVariantNames]}).`,
   )
@@ -225,6 +244,7 @@ const child = Bun.spawn([process.execPath, "run", "--cwd", "packages/opencode", 
       ? {
           CODEGOBLIN_CHAT_GOBLIN: "1",
           CODEGOBLIN_CHAT_GOBLIN_VARIANT: chatGoblinVariant,
+          ...(chatGoblinFrameNumeric !== undefined ? { CODEGOBLIN_CHAT_GOBLIN_FRAME: String(chatGoblinFrameNumeric) } : {}),
           CODEGOBLIN_COMPANION_ACTION_VARIANT: companionActionVariant,
         }
       : {}),

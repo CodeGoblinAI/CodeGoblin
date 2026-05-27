@@ -464,8 +464,15 @@ function TuiSidebarCompanionGoblin(props: {
     return frames.map((frame) => Array.from({ length: height }, (_, rowIndex) => (frame[rowIndex] ?? "").padEnd(width, ".")))
   }
 
+  function normalizeChatGoblinFrame(value: string | undefined) {
+    const numeric = Number(value?.trim())
+    if (!Number.isInteger(numeric) || numeric < 1 || numeric > 4) return undefined
+    return numeric - 1
+  }
+
   const requestedVariantId = normalizeChatGoblinVariantId(process.env.CODEGOBLIN_CHAT_GOBLIN_VARIANT)
   const actionVariantId = normalizeCompanionActionVariant(process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT)
+  const requestedFrameIndex = normalizeChatGoblinFrame(process.env.CODEGOBLIN_CHAT_GOBLIN_FRAME)
   const usingFavoriteCycle = createMemo(() => ["04", "30", "39", "40"].includes(requestedVariantId))
   const actionAge = createMemo(() => {
     const start = actionStartTick()
@@ -534,7 +541,9 @@ function TuiSidebarCompanionGoblin(props: {
   function renderRow(rowIndex: number) {
     const currentFrames = frames()
     const currentWidth = width()
-    const frame = currentFrames[tick() % currentFrames.length] ?? currentFrames[0] ?? []
+    const animatedFrame = currentFrames[tick() % currentFrames.length] ?? currentFrames[0] ?? []
+    const fixedFrame = requestedFrameIndex !== undefined ? currentFrames[requestedFrameIndex] : undefined
+    const frame = fixedFrame ?? animatedFrame
     const spriteRow = frame[rowIndex] ?? "".padEnd(currentWidth, ".")
     const cells: JSX.Element[] = []
 
