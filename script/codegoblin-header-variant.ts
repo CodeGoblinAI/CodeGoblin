@@ -57,7 +57,9 @@ const showChatGoblin =
   Boolean(getOptionValue("--companion-action"))
 const rawChatGoblinVariant = getOptionValue("--chat-goblin") ?? getOptionValue("--chat-goblin-variant") ?? "40"
 const rawChatGoblinFrame = getOptionValue("--chat-goblin-frame")
-const rawCompanionActionVariant = getOptionValue("--companion-action") ?? "01"
+const showCompanionMode =
+  args.includes("companion") || args.includes("--companion-action") || Boolean(getOptionValue("--companion-action"))
+const rawCompanionActionVariant = getOptionValue("--companion-action") ?? (showCompanionMode ? "01" : undefined)
 const runnerVariantNames = {
   "01": "tiny classic",
   "02": "micro scout",
@@ -199,10 +201,12 @@ if (
   process.exit(1)
 }
 
-const companionActionNumeric = Number(rawCompanionActionVariant.trim().replace(/^v/i, ""))
+const companionActionNumeric = rawCompanionActionVariant
+  ? Number(rawCompanionActionVariant.trim().replace(/^v/i, ""))
+  : undefined
 
 if (
-  showChatGoblin &&
+  showCompanionMode &&
   (!Number.isInteger(companionActionNumeric) ||
     companionActionNumeric < 1 ||
     companionActionNumeric > companionActionVariantCount)
@@ -214,7 +218,7 @@ if (
 const variant = String(numeric).padStart(2, "0")
 const runnerVariant = String(runnerNumeric).padStart(2, "0")
 const chatGoblinVariant = String(chatGoblinNumeric).padStart(2, "0")
-const companionActionVariant = String(companionActionNumeric).padStart(2, "0")
+const companionActionVariant = companionActionNumeric ? String(companionActionNumeric).padStart(2, "0") : undefined
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
 console.log(`Starting CodeGoblin TUI header variant ${variant}...`)
@@ -228,9 +232,11 @@ if (showChatGoblin) {
   if (chatGoblinFrameNumeric !== undefined) {
     console.log(`Chat sidebar goblin frame ${chatGoblinFrameNumeric} locked for comparison.`)
   }
-  console.log(
-    `Companion action ${companionActionVariant} enabled (${companionActionVariantNames[companionActionVariant as keyof typeof companionActionVariantNames]}).`,
-  )
+  if (showCompanionMode && companionActionVariant) {
+    console.log(
+      `Companion action ${companionActionVariant} enabled (${companionActionVariantNames[companionActionVariant as keyof typeof companionActionVariantNames]}).`,
+    )
+  }
 }
 console.log("Press Ctrl+C to stop this variant before trying another one.\n")
 
@@ -243,9 +249,10 @@ const child = Bun.spawn([process.execPath, "run", "--cwd", "packages/opencode", 
     ...(showChatGoblin
       ? {
           CODEGOBLIN_CHAT_GOBLIN: "1",
+          CODEGOBLIN_CHAT_GOBLIN_MODE: showCompanionMode ? "companion" : "pinned",
           CODEGOBLIN_CHAT_GOBLIN_VARIANT: chatGoblinVariant,
           ...(chatGoblinFrameNumeric !== undefined ? { CODEGOBLIN_CHAT_GOBLIN_FRAME: String(chatGoblinFrameNumeric) } : {}),
-          CODEGOBLIN_COMPANION_ACTION_VARIANT: companionActionVariant,
+          ...(companionActionVariant ? { CODEGOBLIN_COMPANION_ACTION_VARIANT: companionActionVariant } : {}),
         }
       : {}),
   },
