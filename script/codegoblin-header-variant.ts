@@ -132,6 +132,12 @@ const companionActionVariantNames = {
   "03": "coin toss",
   "04": "total replace",
 } as const
+const companionActionPreviewSprites = {
+  "01": "30",
+  "02": "25",
+  "03": "39",
+  "04": "23",
+} as const
 const companionActionVariantCount = Object.keys(companionActionVariantNames).length
 
 if (args.includes("--list") || args.includes("list")) {
@@ -226,16 +232,24 @@ if (showRunner) {
   console.log(`Footer goblin runner ${runnerVariant} enabled (${runnerVariantNames[runnerVariant as keyof typeof runnerVariantNames]}).`)
 }
 if (showChatGoblin) {
-  console.log(
-    `Chat sidebar goblin ${chatGoblinVariant} enabled (${chatGoblinVariantNames[chatGoblinVariant as keyof typeof chatGoblinVariantNames]}).`,
-  )
-  if (chatGoblinFrameNumeric !== undefined) {
-    console.log(`Chat sidebar goblin frame ${chatGoblinFrameNumeric} locked for comparison.`)
-  }
   if (showCompanionMode && companionActionVariant) {
+    const companionActionSprite = companionActionPreviewSprites[companionActionVariant as keyof typeof companionActionPreviewSprites]
     console.log(
-      `Companion action ${companionActionVariant} enabled (${companionActionVariantNames[companionActionVariant as keyof typeof companionActionVariantNames]}).`,
+      `Companion idle sprite ${chatGoblinVariant} enabled (${chatGoblinVariantNames[chatGoblinVariant as keyof typeof chatGoblinVariantNames]}).`,
     )
+    console.log(
+      `Companion action ${companionActionVariant} enabled (${companionActionVariantNames[companionActionVariant as keyof typeof companionActionVariantNames]}; action sprite ${companionActionSprite} ${chatGoblinVariantNames[companionActionSprite as keyof typeof chatGoblinVariantNames]}).`,
+    )
+    if (chatGoblinFrameNumeric !== undefined) {
+      console.log(`Companion frame ${chatGoblinFrameNumeric} locked for comparison.`)
+    }
+  } else {
+    console.log(
+      `Chat sidebar goblin ${chatGoblinVariant} enabled (${chatGoblinVariantNames[chatGoblinVariant as keyof typeof chatGoblinVariantNames]}).`,
+    )
+    if (chatGoblinFrameNumeric !== undefined) {
+      console.log(`Chat sidebar goblin frame ${chatGoblinFrameNumeric} locked for comparison.`)
+    }
   }
 }
 console.log("Press Ctrl+C to stop this variant before trying another one.\n")
@@ -252,7 +266,12 @@ const child = Bun.spawn([process.execPath, "run", "--cwd", "packages/opencode", 
           CODEGOBLIN_CHAT_GOBLIN_MODE: showCompanionMode ? "companion" : "pinned",
           CODEGOBLIN_CHAT_GOBLIN_VARIANT: chatGoblinVariant,
           ...(chatGoblinFrameNumeric !== undefined ? { CODEGOBLIN_CHAT_GOBLIN_FRAME: String(chatGoblinFrameNumeric) } : {}),
-          ...(companionActionVariant ? { CODEGOBLIN_COMPANION_ACTION_VARIANT: companionActionVariant } : {}),
+          ...(showCompanionMode && companionActionVariant
+            ? {
+                CODEGOBLIN_COMPANION_ACTION_VARIANT: companionActionVariant,
+                CODEGOBLIN_COMPANION_PREVIEW: "1",
+              }
+            : {}),
         }
       : {}),
   },

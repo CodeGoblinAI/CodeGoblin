@@ -77,18 +77,15 @@ function TuiSidebarCompanionGoblin(props: {
     return "pinned" as const
   }
 
-  function companionIdleVariant(actionVariantId: string) {
+  function companionIdleVariant(baseVariantId: string) {
+    return baseVariantId
+  }
+
+  function companionActionVariant(actionVariantId: string) {
     if (actionVariantId === "02") return "25"
     if (actionVariantId === "03") return "39"
     if (actionVariantId === "04") return "23"
-    return "40"
-  }
-
-  function companionActionVariant(actionVariantId: string, age: number) {
-    if (actionVariantId === "02") return age < 6 ? "25" : "30"
-    if (actionVariantId === "03") return age < 6 ? "39" : "30"
-    if (actionVariantId === "04") return age < 6 ? "23" : "40"
-    return age < 6 ? "40" : "30"
+    return "30"
   }
 
   const menuHeadSmall: GoblinRow[] = [
@@ -497,21 +494,29 @@ function TuiSidebarCompanionGoblin(props: {
       (process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT !== undefined ? "companion" : "pinned"),
   )
   const requestedFrameIndex = normalizeChatGoblinFrame(process.env.CODEGOBLIN_CHAT_GOBLIN_FRAME)
+  const companionPreviewEnabled =
+    motionMode === "companion" && isChatGoblinEnabled(process.env.CODEGOBLIN_COMPANION_PREVIEW)
   const actionAge = createMemo(() => {
     const start = actionStartTick()
     if (start === undefined) return Number.POSITIVE_INFINITY
     return tick() - start
   })
-  const actionActive = createMemo(() => actionAge() >= 0 && actionAge() < 14)
+  const previewActionAge = createMemo(() => {
+    if (!companionPreviewEnabled) return Number.POSITIVE_INFINITY
+    const phase = tick() % 24
+    if (phase < 8 || phase >= 22) return Number.POSITIVE_INFINITY
+    return phase - 8
+  })
+  const effectiveActionAge = createMemo(() => {
+    const actualAge = actionAge()
+    if (actualAge >= 0 && actualAge < 14) return actualAge
+    return previewActionAge()
+  })
+  const actionActive = createMemo(() => effectiveActionAge() >= 0 && effectiveActionAge() < 14)
   const displayVariantId = createMemo(() => {
     if (motionMode === "pinned") return requestedVariantId
-    if (actionActive()) return companionActionVariant(actionVariantId, actionAge())
-    if (props.active) {
-      const idleVariant = companionIdleVariant(actionVariantId)
-      const alternateVariant = actionVariantId === "02" ? "30" : actionVariantId === "03" ? "30" : "40"
-      return tick() % 8 < 4 ? idleVariant : alternateVariant
-    }
-    return companionIdleVariant(actionVariantId)
+    if (actionActive()) return companionActionVariant(actionVariantId)
+    return companionIdleVariant(requestedVariantId)
   })
   const selectedVariant = createMemo(
     () =>
@@ -523,6 +528,23 @@ function TuiSidebarCompanionGoblin(props: {
   const width = createMemo(() => Math.max(...frames().flatMap((frame) => frame.map((row) => row.length))))
   const sessionSpendText = createMemo(() => money.format(Math.max(0, props.sessionCost)))
   const lastSpendText = createMemo(() => money.format(Math.max(0, lastSpend())))
+  const previewSpendValue = createMemo(() => {
+    if (!companionPreviewEnabled) return undefined
+    if (actionVariantId === "02") return 0.25
+    if (actionVariantId === "03") return 0.39
+    if (actionVariantId === "04") return Math.max(1.04, props.sessionCost)
+    return 0.14
+  })
+  const effectiveLastSpend = createMemo(() => {
+    if (lastSpend() > 0) return lastSpend()
+    if (actionActive()) return previewSpendValue()
+    return undefined
+  })
+  const effectiveLastSpendText = createMemo(() => {
+    const value = effectiveLastSpend()
+    if (value === undefined) return undefined
+    return money.format(Math.max(0, value))
+  })
   const companionHeadline = createMemo(() => {
     if (actionActive()) return "CodeGoblin adds spend"
     if (props.active) return "CodeGoblin is working"
@@ -530,7 +552,7 @@ function TuiSidebarCompanionGoblin(props: {
   })
   const actionText = createMemo(() => {
     if (!actionActive()) return props.active ? props.activityText : "ready with pockets empty"
-    const delta = `+${lastSpendText()}`
+    const delta = `+${effectiveLastSpendText() ?? lastSpendText()}`
     if (actionVariantId === "02") return `stamps ${delta} onto the spend slip`
     if (actionVariantId === "03") return `tosses ${delta} into the spend pile`
     if (actionVariantId === "04") return `replaces the total with ${sessionSpendText()}`
@@ -605,8 +627,8 @@ function TuiSidebarCompanionGoblin(props: {
         </box>
         <box flexDirection="row" gap={1}>
           <text fg={props.theme.textMuted}>last  :</text>
-          <text fg={lastSpend() > 0 ? spendColor : props.theme.textMuted}>
-            {lastSpend() > 0 ? `+${lastSpendText()}` : "waiting"}
+          <text fg={effectiveLastSpend() !== undefined ? spendColor : props.theme.textMuted}>
+            {effectiveLastSpendText() ? `+${effectiveLastSpendText()}` : "waiting"}
           </text>
         </box>
         <text fg={actionActive() ? spendColor : props.active ? props.theme.text : props.theme.textMuted} wrapMode="none">
