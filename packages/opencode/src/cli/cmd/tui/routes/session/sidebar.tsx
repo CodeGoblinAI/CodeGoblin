@@ -25,6 +25,7 @@ function TuiSidebarCompanionGoblin(props: {
   contextText: string
   sessionCost: number
   activityText: string
+  activityKind: "idle" | "thinking" | "image" | "audio"
 }) {
   const skinColor = RGBA.fromInts(154, 219, 53)
   const shadowColor = RGBA.fromInts(120, 125, 135)
@@ -73,6 +74,14 @@ function TuiSidebarCompanionGoblin(props: {
     const numeric = Number(cleaned)
     if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 4) return String(numeric).padStart(2, "0")
     return "01"
+  }
+
+  function normalizeCompanionActivity(value: string | undefined) {
+    const normalized = value?.trim().toLowerCase()
+    if (normalized === "thinking") return "thinking" as const
+    if (normalized === "image" || normalized === "image-progress") return "image" as const
+    if (normalized === "audio" || normalized === "audio-progress") return "audio" as const
+    return "idle" as const
   }
 
   function normalizeChatGoblinMode(value: string | undefined) {
@@ -655,6 +664,110 @@ function TuiSidebarCompanionGoblin(props: {
       ),
     ]),
   } as const
+  const companionActivityFrames = {
+    thinking: normalizeFrames([
+      createCompanionFrame(
+        ".............W....",
+        ...companionHeadWide,
+        "...GGPPGG........",
+        "..G.PPPP.G.......",
+        "....G..G....W....",
+        "...G....G..W.....",
+      ),
+      createCompanionFrame(
+        "............WW....",
+        ...companionHeadWide,
+        "...GGPPGG........",
+        "..G.PPPP.G..W....",
+        "....G..G.........",
+        "...G....G........",
+      ),
+      createCompanionFrame(
+        "...........WWW....",
+        ...companionHeadWide,
+        "...GGPPGG........",
+        "..G.PPPP.G.......",
+        "....G..G.........",
+        "...G....G........",
+      ),
+      createCompanionFrame(
+        "............WW....",
+        ...companionHeadWide,
+        "...GGPPGG........",
+        "..G.PPPP.G..W....",
+        "....G..G.........",
+        "...G....G........",
+      ),
+    ]),
+    image: normalizeFrames([
+      createCompanionFrame(
+        "..............W...",
+        ...companionHeadWide,
+        "...GGPPGG...WW....",
+        "..G.PPPP.G..WT....",
+        "....G..G....TW....",
+        "...G....G.........",
+      ),
+      createCompanionFrame(
+        ".............WT...",
+        ...companionHeadWide,
+        "...GGPPGG...WT....",
+        "..G.PPPP.G..TT....",
+        "....G..G....WW....",
+        "...G....G.........",
+      ),
+      createCompanionFrame(
+        "..............T...",
+        ...companionHeadWide,
+        "...GGPPGG..WTW....",
+        "..G.PPPP.G..WW....",
+        "....G..G....TT....",
+        "...G....G.........",
+      ),
+      createCompanionFrame(
+        ".............TW...",
+        ...companionHeadWide,
+        "...GGPPGG...WW....",
+        "..G.PPPP.G..TW....",
+        "....G..G....WT....",
+        "...G....G.........",
+      ),
+    ]),
+    audio: normalizeFrames([
+      createCompanionFrame(
+        ".............T....",
+        ...companionHeadWide,
+        "...GGPPGG....W....",
+        "..G.PPPP.G..WT....",
+        "....G..G....W.....",
+        "...G....G.........",
+      ),
+      createCompanionFrame(
+        "............WTW...",
+        ...companionHeadWide,
+        "...GGPPGG...WT....",
+        "..G.PPPP.G.WTW....",
+        "....G..G....WT....",
+        "...G....G.........",
+      ),
+      createCompanionFrame(
+        "...........TWTW...",
+        ...companionHeadWide,
+        "...GGPPGG..TWT....",
+        "..G.PPPP.G.WTW....",
+        "....G..G...TWT....",
+        "...G....G.........",
+      ),
+      createCompanionFrame(
+        "............WTW...",
+        ...companionHeadWide,
+        "...GGPPGG...WT....",
+        "..G.PPPP.G..WT....",
+        "....G..G....W.....",
+        "...G....G.........",
+      ),
+    ]),
+  } as const
 
   const requestedVariantId = normalizeChatGoblinVariantId(process.env.CODEGOBLIN_CHAT_GOBLIN_VARIANT)
   const actionVariantId = normalizeCompanionActionVariant(process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT)
@@ -665,13 +778,19 @@ function TuiSidebarCompanionGoblin(props: {
   const requestedFrameIndex = normalizeChatGoblinFrame(process.env.CODEGOBLIN_CHAT_GOBLIN_FRAME)
   const companionPreviewEnabled =
     motionMode === "companion" && isChatGoblinEnabled(process.env.CODEGOBLIN_COMPANION_PREVIEW)
+  const previewActionEnabled = companionPreviewEnabled && process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT !== undefined
+  const previewActivityKind = normalizeCompanionActivity(process.env.CODEGOBLIN_COMPANION_ACTIVITY)
+  const currentActivityKind = createMemo(() => {
+    if (companionPreviewEnabled && previewActivityKind !== "idle") return previewActivityKind
+    return props.activityKind
+  })
   const actionAge = createMemo(() => {
     const start = actionStartTick()
     if (start === undefined) return Number.POSITIVE_INFINITY
     return tick() - start
   })
   const previewActionAge = createMemo(() => {
-    if (!companionPreviewEnabled) return Number.POSITIVE_INFINITY
+    if (!previewActionEnabled) return Number.POSITIVE_INFINITY
     const phase = tick() % 24
     if (phase < 8 || phase >= 22) return Number.POSITIVE_INFINITY
     return phase - 8
@@ -693,6 +812,9 @@ function TuiSidebarCompanionGoblin(props: {
       if (actionActive()) {
         return companionActionFrames[actionVariantId as keyof typeof companionActionFrames] ?? companionIdleFrames
       }
+      if (currentActivityKind() !== "idle") {
+        return companionActivityFrames[currentActivityKind() as keyof typeof companionActivityFrames] ?? companionIdleFrames
+      }
       return companionIdleFrames
     }
     return normalizeFrames(selectedVariant().frames)
@@ -701,7 +823,7 @@ function TuiSidebarCompanionGoblin(props: {
   const sessionSpendText = createMemo(() => money.format(Math.max(0, props.sessionCost)))
   const lastSpendText = createMemo(() => money.format(Math.max(0, lastSpend())))
   const previewSpendValue = createMemo(() => {
-    if (!companionPreviewEnabled) return undefined
+    if (!previewActionEnabled) return undefined
     if (actionVariantId === "02") return 0.25
     if (actionVariantId === "03") return 0.39
     if (actionVariantId === "04") return Math.max(1.04, props.sessionCost)
@@ -717,13 +839,28 @@ function TuiSidebarCompanionGoblin(props: {
     if (value === undefined) return undefined
     return money.format(Math.max(0, value))
   })
+  const previewActivityText = createMemo(() => {
+    if (currentActivityKind() === "thinking") return "sorting thoughts into a reply"
+    if (currentActivityKind() === "image") return "painting pixels into place"
+    if (currentActivityKind() === "audio") return "mixing waveforms into audio"
+    return "ready with pockets empty"
+  })
   const companionHeadline = createMemo(() => {
     if (actionActive()) return "CodeGoblin adds spend"
+    if (currentActivityKind() === "thinking") return "CodeGoblin is thinking"
+    if (currentActivityKind() === "image") return "CodeGoblin paints pixels"
+    if (currentActivityKind() === "audio") return "CodeGoblin mixes audio"
     if (props.active) return "CodeGoblin is working"
     return "CodeGoblin companion"
   })
   const actionText = createMemo(() => {
-    if (!actionActive()) return props.active ? props.activityText : "ready with pockets empty"
+    if (!actionActive()) {
+      if (currentActivityKind() !== "idle") {
+        if (companionPreviewEnabled && previewActivityKind !== "idle") return previewActivityText()
+        return props.activityText
+      }
+      return props.active ? props.activityText : "ready with pockets empty"
+    }
     const delta = `+${effectiveLastSpendText() ?? lastSpendText()}`
     if (actionVariantId === "02") return `stamps ${delta} onto the spend slip`
     if (actionVariantId === "03") return `tosses ${delta} into the spend pile`
@@ -844,11 +981,17 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const companionUsage = createMemo(() => {
     const number = new Intl.NumberFormat("en-US")
     const cost = session()?.cost ?? 0
+    const assetState = latestCodeGoblinAssetState()
+    const activityKind = (() => {
+      if (assetState?.includes("image-progress")) return "image" as const
+      if (assetState?.includes("audio-progress")) return "audio" as const
+      if (pending()) return "thinking" as const
+      return "idle" as const
+    })()
     const last = messages().findLast(
       (item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0,
     )
     const activityText = (() => {
-      const assetState = latestCodeGoblinAssetState()
       if (assetState?.includes("image-progress")) return "painting an image"
       if (assetState?.includes("audio-progress")) return "mixing audio"
       if (pending()) return "thinking through the reply"
@@ -861,6 +1004,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
         contextText: pending() ? "tokens warming up" : "no token spend yet",
         sessionCost: cost,
         activityText,
+        activityKind,
       }
     }
 
@@ -876,6 +1020,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
           : `${number.format(tokens)} tokens tracked`,
       sessionCost: cost,
       activityText,
+      activityKind,
     }
   })
   const workspace = () => {
@@ -956,6 +1101,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
               contextText={companionUsage().contextText}
               sessionCost={companionUsage().sessionCost}
               activityText={companionUsage().activityText}
+              activityKind={companionUsage().activityKind}
             />
           </box>
         </Show>
