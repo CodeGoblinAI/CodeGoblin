@@ -122,21 +122,22 @@ function normalizeFrame(frame: string[]) {
   return frame.map((row) => row.padEnd(width, "."))
 }
 
-function cellClass(char: string) {
-  if (char === ".") return "cell empty"
-  return `cell ${char}`
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
+function terminalCell(char: string) {
+  if (char === ".") return '<span class="term empty">  </span>'
+  return `<span class="term ${char}">██</span>`
 }
 
 function renderFrame(frame: string[], label: string) {
   const rows = normalizeFrame(frame)
-  const width = rows[0]?.length ?? 0
-  const cells = rows
-    .flatMap((row) => [...row].map((char) => `<span class="${cellClass(char)}"></span>`))
-    .join("")
+  const content = rows.map((row) => [...row].map(terminalCell).join("")).join("\n")
 
   return `<div class="frame-block">
-    <div class="frame-label">${label}</div>
-    <div class="pixel-grid" style="grid-template-columns: repeat(${width}, var(--cell));">${cells}</div>
+    <div class="frame-label">${escapeHtml(label)}</div>
+    <pre class="terminal-frame">${content}</pre>
   </div>`
 }
 
@@ -147,23 +148,17 @@ function renderVariant(variant: ChatGoblinVariant) {
   </section>`
 }
 
-function renderBudgetMeter(visible: number, stable = visible, total = 12) {
-  return `<div class="budget-meter">${Array.from({ length: total }, (_, index) => {
-    if (index < visible) return '<span class="meter-cell full"></span>'
-    if (index < stable) return '<span class="meter-cell bite"></span>'
-    return '<span class="meter-cell empty"></span>'
-  }).join("")}</div>`
-}
-
-function renderBudgetScene(
+function renderCompanionScene(
   variant: ChatGoblinVariant,
-  options: { label: string; headline: string; detail: string; frameIndex: number; visible: number; stable?: number },
+  options: { label: string; headline: string; action: string; frameIndex: number; spend: string; last: string },
 ) {
-  return `<section class="card budget-scene">
-    <h2>${options.label}</h2>
-    <div class="budget-headline">${options.headline}</div>
-    ${renderBudgetMeter(options.visible, options.stable ?? options.visible)}
-    <div class="budget-detail">${options.detail}</div>
+  return `<section class="card companion-scene">
+    <h2>${escapeHtml(options.label)}</h2>
+    <div class="companion-headline">${escapeHtml(options.headline)}</div>
+    <div class="ledger"><span>spend :</span><b>${escapeHtml(options.spend)}</b></div>
+    <div class="ledger"><span>last&nbsp;&nbsp;:</span><b>${escapeHtml(options.last)}</b></div>
+    <div class="companion-action">${escapeHtml(options.action)}</div>
+    <div class="companion-detail">terminal-faithful block preview · same filled/space mapping as the CLI</div>
     <div class="frames">${renderFrame(variant.frames[options.frameIndex] ?? variant.frames[0] ?? [], `${variant.id}. ${variant.name}`)}</div>
   </section>`
 }
@@ -173,7 +168,7 @@ const variants = parseVariants(source)
 if (variants.length === 0) throw new Error("No chat goblin variants found")
 const originalVariants = variants.filter((variant) => Number(variant.id) <= 20)
 const menuBodyVariants = variants.filter((variant) => Number(variant.id) > 20)
-const favoriteBudgetVariants = ["40", "39", "30"]
+const favoriteCompanionVariants = ["40", "30", "39", "40"]
   .map((id) => variants.find((variant) => variant.id === id))
   .filter(Boolean) as ChatGoblinVariant[]
 
@@ -196,7 +191,6 @@ const html = `<!doctype html>
         --mouth: #000000;
         --token: #ffc45b;
         --teeth: #eaf7e7;
-        --cell: 8px;
       }
       body {
         margin: 0;
@@ -237,96 +231,100 @@ const html = `<!doctype html>
       .frames { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
       .frame-block { display: grid; gap: 5px; }
       .frame-label { color: var(--muted); font-size: 11px; }
-      .pixel-grid {
-        display: grid;
-        gap: 1px;
+      .terminal-frame {
+        margin: 0;
         padding: 8px;
         background: #020403;
         border: 1px solid #102414;
         border-radius: 8px;
+        font-family: Consolas, 'Cascadia Mono', 'Courier New', monospace;
+        font-size: 12px;
+        line-height: 1;
       }
-      .cell { width: var(--cell); height: var(--cell); background: transparent; }
-      .cell.G, .micro-char.G, .micro-char.S, .micro-char.A { background: var(--skin); color: var(--skin); }
-      .cell.S { background: var(--shadow); }
-      .cell.P, .micro-char.P { background: var(--vest); color: var(--vest); }
-      .cell.B { background: var(--mouth); }
-      .cell.M, .micro-char.M { background: var(--shadow); color: var(--shadow); }
-      .cell.T, .micro-char.T { background: var(--token); color: var(--token); }
-      .cell.W { background: var(--teeth); }
-      .empty { opacity: 0; }
-      .budget-samples {
+      .term.G { color: var(--skin); }
+      .term.S { color: var(--shadow); }
+      .term.P { color: var(--vest); }
+      .term.B { color: var(--mouth); }
+      .term.M { color: var(--shadow); }
+      .term.T { color: var(--token); }
+      .term.W { color: var(--teeth); }
+      .term.empty { color: transparent; }
+      .companion-samples {
         margin-bottom: 18px;
       }
-      .budget-scene {
+      .companion-scene {
         display: grid;
         gap: 10px;
       }
-      .budget-headline {
+      .companion-headline {
         color: #f0ffe9;
         font-size: 13px;
       }
-      .budget-detail {
+      .companion-detail {
         color: var(--muted);
         font-size: 12px;
       }
-      .budget-meter {
+      .ledger {
         display: flex;
-        gap: 4px;
-        padding: 8px 10px;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 6px 8px;
         border-radius: 10px;
         border: 1px solid #102414;
         background: #020403;
+        color: var(--muted);
       }
-      .meter-cell {
-        width: 16px;
-        height: 12px;
-        border-radius: 2px;
-        background: #1f3221;
-      }
-      .meter-cell.full {
-        background: var(--token);
-        box-shadow: 0 0 10px rgba(255, 196, 91, 0.25);
-      }
-      .meter-cell.bite {
-        background: #071409;
+      .ledger b, .companion-action {
+        color: var(--token);
       }
     </style>
   </head>
   <body>
     <header>
       <h1>CodeGoblin chat goblin review</h1>
-      <p>${variants.length} right-sidebar variants parsed from sidebar.tsx. Top cards preview the new budget-chewing direction with favorites 40, 39, and 30.</p>
+      <p>${variants.length} right-sidebar variants parsed from sidebar.tsx. Terminal-style rows now use the same filled/space mapping as the CLI. Top cards preview companion spend actions.</p>
     </header>
     <main>
-      <h2 class="section-title">Budget chewing preview</h2>
-      <div class="grid budget-samples">${[
-        favoriteBudgetVariants[0]
-          ? renderBudgetScene(favoriteBudgetVariants[0], {
-              label: "Idle stash · 40",
-              headline: "token stash",
-              detail: "18,200 tokens · 14% ctx · spent $0.0124",
+      <h2 class="section-title">Companion spend action iterations</h2>
+      <div class="grid companion-samples">${[
+        favoriteCompanionVariants[0]
+          ? renderCompanionScene(favoriteCompanionVariants[0], {
+              label: "01. pocket add",
+              headline: "CodeGoblin adds spend",
+              action: "pulls +$0.02 from his pocket",
               frameIndex: 0,
-              visible: 10,
+              spend: "$1.43",
+              last: "+$0.02",
             })
           : "",
-        favoriteBudgetVariants[1]
-          ? renderBudgetScene(favoriteBudgetVariants[1], {
-              label: "Chewing pass · 39",
-              headline: "goblin chewing budget",
-              detail: "18,200 tokens · 14% ctx · spent $0.0124",
+        favoriteCompanionVariants[1]
+          ? renderCompanionScene(favoriteCompanionVariants[1], {
+              label: "02. stamp spend",
+              headline: "CodeGoblin adds spend",
+              action: "stamps +$0.02 onto the spend slip",
               frameIndex: 1,
-              visible: 7,
-              stable: 10,
+              spend: "$1.43",
+              last: "+$0.02",
             })
           : "",
-        favoriteBudgetVariants[2]
-          ? renderBudgetScene(favoriteBudgetVariants[2], {
-              label: "Wide-mouth bite · 30",
-              headline: "goblin chewing budget",
-              detail: "18,200 tokens · 14% ctx · spent $0.0124",
-              frameIndex: 1,
-              visible: 8,
-              stable: 10,
+        favoriteCompanionVariants[2]
+          ? renderCompanionScene(favoriteCompanionVariants[2], {
+              label: "03. coin toss",
+              headline: "CodeGoblin adds spend",
+              action: "tosses +$0.02 into the spend pile",
+              frameIndex: 2,
+              spend: "$1.43",
+              last: "+$0.02",
+            })
+          : "",
+        favoriteCompanionVariants[3]
+          ? renderCompanionScene(favoriteCompanionVariants[3], {
+              label: "04. total replace",
+              headline: "CodeGoblin adds spend",
+              action: "replaces the total with $1.43",
+              frameIndex: 3,
+              spend: "$1.43",
+              last: "+$0.02",
             })
           : "",
       ].join("")}</div>

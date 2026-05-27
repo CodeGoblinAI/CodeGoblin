@@ -1,6 +1,6 @@
 import { useProject } from "@tui/context/project"
 import { useSync } from "@tui/context/sync"
-import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { useTheme } from "../../context/theme"
 import { useTuiConfig } from "../../context/tui-config"
 import { InstallationChannel, InstallationVersion } from "@opencode-ai/core/installation/version"
@@ -19,21 +19,28 @@ function isChatGoblinEnabled(value: string | undefined) {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
 }
 
-function TuiSidebarTokenGoblin(props: {
+function TuiSidebarCompanionGoblin(props: {
   theme: any
   active: boolean
   contextText: string
-  costText: string
-  remainingRatio: number
+  sessionCost: number
+  activityText: string
 }) {
   const skinColor = RGBA.fromInts(154, 219, 53)
   const shadowColor = RGBA.fromInts(120, 125, 135)
   const vestColor = RGBA.fromInts(130, 80, 223)
   const eyeColor = props.theme.backgroundElement
-  const tokenColor = props.theme.warning
-  const biteColor = props.theme.backgroundElement
+  const spendColor = props.theme.warning
   const [tick, setTick] = createSignal(0)
-  const budgetCells = 12
+  const [lastSpend, setLastSpend] = createSignal(0)
+  const [actionStartTick, setActionStartTick] = createSignal<number | undefined>()
+  const money = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  })
+  let previousSessionCost: number | undefined
 
   interface ChatGoblinVariant {
     id: string
@@ -55,6 +62,13 @@ function TuiSidebarTokenGoblin(props: {
       name,
       frames: Array.from({ length: 4 }, (_, frameIndex) => cycledRows.map((row) => row[frameIndex])),
     }
+  }
+
+  function normalizeCompanionActionVariant(value: string | undefined) {
+    const cleaned = value?.trim().replace(/^v/i, "")
+    const numeric = Number(cleaned)
+    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 4) return String(numeric).padStart(2, "0")
+    return "01"
   }
 
   const menuHeadSmall: GoblinRow[] = [
@@ -451,13 +465,23 @@ function TuiSidebarTokenGoblin(props: {
   }
 
   const requestedVariantId = normalizeChatGoblinVariantId(process.env.CODEGOBLIN_CHAT_GOBLIN_VARIANT)
-  const bitePattern = [0, 1, 2, 3, 2, 1]
+  const actionVariantId = normalizeCompanionActionVariant(process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT)
   const usingFavoriteCycle = createMemo(() => ["04", "30", "39", "40"].includes(requestedVariantId))
-  const biteDepth = createMemo(() => (props.active ? (bitePattern[tick() % bitePattern.length] ?? 0) : 0))
+  const actionAge = createMemo(() => {
+    const start = actionStartTick()
+    if (start === undefined) return Number.POSITIVE_INFINITY
+    return tick() - start
+  })
+  const actionActive = createMemo(() => actionAge() >= 0 && actionAge() < 14)
   const displayVariantId = createMemo(() => {
     if (!usingFavoriteCycle()) return requestedVariantId
-    if (!props.active) return "40"
-    return biteDepth() >= 2 ? "39" : "30"
+    if (actionActive()) {
+      if (actionAge() < 4) return "40"
+      if (actionAge() < 9) return "30"
+      return "39"
+    }
+    if (props.active) return tick() % 8 < 4 ? "40" : "30"
+    return "40"
   })
   const selectedVariant = createMemo(
     () =>
@@ -467,13 +491,21 @@ function TuiSidebarTokenGoblin(props: {
   )
   const frames = createMemo(() => normalizeFrames(selectedVariant().frames))
   const width = createMemo(() => Math.max(...frames().flatMap((frame) => frame.map((row) => row.length))))
-  const stableBudgetCells = createMemo(() => {
-    const ratio = Math.max(0, Math.min(1, props.remainingRatio))
-    if (ratio <= 0) return 0
-    return Math.max(1, Math.round(ratio * budgetCells))
+  const sessionSpendText = createMemo(() => money.format(Math.max(0, props.sessionCost)))
+  const lastSpendText = createMemo(() => money.format(Math.max(0, lastSpend())))
+  const companionHeadline = createMemo(() => {
+    if (actionActive()) return "CodeGoblin adds spend"
+    if (props.active) return "CodeGoblin is working"
+    return "CodeGoblin companion"
   })
-  const visibleBudgetCells = createMemo(() => Math.max(0, stableBudgetCells() - biteDepth()))
-  const budgetHeadline = createMemo(() => (props.active ? "goblin chewing budget" : "token stash"))
+  const actionText = createMemo(() => {
+    if (!actionActive()) return props.active ? props.activityText : "ready with pockets empty"
+    const delta = `+${lastSpendText()}`
+    if (actionVariantId === "02") return `stamps ${delta} onto the spend slip`
+    if (actionVariantId === "03") return `tosses ${delta} into the spend pile`
+    if (actionVariantId === "04") return `replaces the total with ${sessionSpendText()}`
+    return `pulls ${delta} from his pocket`
+  })
 
   let timer: ReturnType<typeof setInterval> | undefined
 
@@ -484,6 +516,19 @@ function TuiSidebarTokenGoblin(props: {
 
   onCleanup(() => {
     if (timer) clearInterval(timer)
+  })
+
+  createEffect(() => {
+    const current = Math.max(0, props.sessionCost)
+    if (previousSessionCost === undefined) {
+      previousSessionCost = current
+      return
+    }
+    const delta = current - previousSessionCost
+    previousSessionCost = current
+    if (delta <= 0.0000001) return
+    setLastSpend(delta)
+    setActionStartTick(tick())
   })
 
   function renderRow(rowIndex: number) {
@@ -507,7 +552,7 @@ function TuiSidebarTokenGoblin(props: {
       } else if (char === "W") {
         cells.push(<text fg={props.theme.text}>██</text>)
       } else if (char === "T") {
-        cells.push(<text fg={tokenColor}>██</text>)
+        cells.push(<text fg={spendColor}>██</text>)
       } else {
         cells.push(<text>  </text>)
       }
@@ -516,29 +561,27 @@ function TuiSidebarTokenGoblin(props: {
     return cells
   }
 
-  function renderBudgetMeter() {
-    const cells: JSX.Element[] = []
-    for (let index = 0; index < budgetCells; index++) {
-      if (index < visibleBudgetCells()) {
-        cells.push(<text fg={tokenColor}>██</text>)
-      } else if (index < stableBudgetCells()) {
-        cells.push(<text fg={biteColor}>▓▓</text>)
-      } else {
-        cells.push(<text fg={props.theme.border}>░░</text>)
-      }
-    }
-    return cells
-  }
-
   return (
     <box flexDirection="column" alignItems="center" paddingTop={1} paddingBottom={1} width="100%">
       <box flexDirection="column" gap={0} width="100%" paddingBottom={1}>
-        <text fg={props.active ? tokenColor : props.theme.text}>
-          <b>{budgetHeadline()}</b>
+        <text fg={actionActive() ? spendColor : props.theme.text}>
+          <b>{companionHeadline()}</b>
         </text>
-        <box flexDirection="row">{renderBudgetMeter()}</box>
+        <box flexDirection="row" gap={1}>
+          <text fg={props.theme.textMuted}>spend :</text>
+          <text fg={spendColor}>{sessionSpendText()}</text>
+        </box>
+        <box flexDirection="row" gap={1}>
+          <text fg={props.theme.textMuted}>last  :</text>
+          <text fg={lastSpend() > 0 ? spendColor : props.theme.textMuted}>
+            {lastSpend() > 0 ? `+${lastSpendText()}` : "waiting"}
+          </text>
+        </box>
+        <text fg={actionActive() ? spendColor : props.active ? props.theme.text : props.theme.textMuted} wrapMode="none">
+          {actionText()}
+        </text>
         <text fg={props.theme.textMuted} wrapMode="none">
-          {props.contextText} · {props.costText}
+          {props.contextText}
         </text>
       </box>
       {Array.from({ length: frames()[0]?.length ?? 0 }, (_, rowIndex) => (
@@ -559,24 +602,39 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const messages = createMemo(() => sync.data.message[props.sessionID] ?? [])
   const pending = createMemo(() => messages().findLast((item) => item.role === "assistant" && !item.time.completed)?.id)
   const showChatGoblin = createMemo(() => isChatGoblinEnabled(process.env.CODEGOBLIN_CHAT_GOBLIN))
-  const budgetUsage = createMemo(() => {
-    const money = new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 4,
-    })
+  const latestCodeGoblinAssetState = createMemo(() => {
+    let latest: string | undefined
+    for (const message of messages()) {
+      for (const part of sync.data.part[message.id] ?? []) {
+        const metadata = (part as { metadata?: Record<string, unknown> }).metadata
+        const raw = metadata?.codegoblin
+        if (!raw || typeof raw !== "object") continue
+        const kind = (raw as Record<string, unknown>).kind
+        if (typeof kind === "string") latest = kind
+      }
+    }
+    return latest
+  })
+  const companionUsage = createMemo(() => {
     const number = new Intl.NumberFormat("en-US")
     const cost = session()?.cost ?? 0
-    const costText = `spent ${money.format(cost)}`
     const last = messages().findLast(
       (item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0,
     )
+    const activityText = (() => {
+      const assetState = latestCodeGoblinAssetState()
+      if (assetState?.includes("image-progress")) return "painting an image"
+      if (assetState?.includes("audio-progress")) return "mixing audio"
+      if (pending()) return "thinking through the reply"
+      if (assetState?.includes("image-result")) return "image ready"
+      if (assetState?.includes("audio-result")) return "audio ready"
+      return "ready for the next prompt"
+    })()
     if (!last) {
       return {
-        contextText: pending() ? "warming up the token pile" : "full stash waiting",
-        costText,
-        remainingRatio: 1,
+        contextText: pending() ? "tokens warming up" : "no token spend yet",
+        sessionCost: cost,
+        activityText,
       }
     }
 
@@ -590,8 +648,8 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
         ratio !== undefined
           ? `${number.format(tokens)} tokens · ${Math.round(ratio * 100)}% ctx`
           : `${number.format(tokens)} tokens tracked`,
-      costText,
-      remainingRatio: ratio !== undefined ? Math.max(0, 1 - ratio) : 1,
+      sessionCost: cost,
+      activityText,
     }
   })
   const workspace = () => {
@@ -666,12 +724,12 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
 
         <Show when={showChatGoblin()}>
           <box flexShrink={0} paddingTop={1}>
-            <TuiSidebarTokenGoblin
+            <TuiSidebarCompanionGoblin
               theme={theme}
               active={Boolean(pending())}
-              contextText={budgetUsage().contextText}
-              costText={budgetUsage().costText}
-              remainingRatio={budgetUsage().remainingRatio}
+              contextText={companionUsage().contextText}
+              sessionCost={companionUsage().sessionCost}
+              activityText={companionUsage().activityText}
             />
           </box>
         </Show>

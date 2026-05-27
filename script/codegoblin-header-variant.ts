@@ -21,14 +21,18 @@ const rawVariant =
       arg !== "list" &&
       arg !== "list-runner" &&
       arg !== "list-chat-goblin" &&
+      arg !== "list-companion" &&
       arg !== "runner" &&
       arg !== "chat-goblin" &&
+      arg !== "companion" &&
       arg !== "--runner-variant" &&
       arg !== "--chat-goblin" &&
       arg !== "--chat-goblin-variant" &&
+      arg !== "--companion-action" &&
       args[index - 1] !== "--runner-variant" &&
       args[index - 1] !== "--chat-goblin" &&
       args[index - 1] !== "--chat-goblin-variant" &&
+      args[index - 1] !== "--companion-action" &&
       !arg.startsWith("--"),
   ) ?? "01"
 const showRunner =
@@ -41,10 +45,14 @@ const rawRunnerVariant = getOptionValue("--runner") ?? getOptionValue("--runner-
 const showChatGoblin =
   args.includes("--chat-goblin") ||
   args.includes("chat-goblin") ||
+  args.includes("companion") ||
   args.includes("--chat-goblin-variant") ||
+  args.includes("--companion-action") ||
   Boolean(getOptionValue("--chat-goblin")) ||
-  Boolean(getOptionValue("--chat-goblin-variant"))
+  Boolean(getOptionValue("--chat-goblin-variant")) ||
+  Boolean(getOptionValue("--companion-action"))
 const rawChatGoblinVariant = getOptionValue("--chat-goblin") ?? getOptionValue("--chat-goblin-variant") ?? "40"
+const rawCompanionActionVariant = getOptionValue("--companion-action") ?? "01"
 const runnerVariantNames = {
   "01": "tiny classic",
   "02": "micro scout",
@@ -111,6 +119,13 @@ const chatGoblinVariantNames = {
   "40": "menu clean body",
 } as const
 const chatGoblinVariantCount = Object.keys(chatGoblinVariantNames).length
+const companionActionVariantNames = {
+  "01": "pocket add",
+  "02": "stamp spend",
+  "03": "coin toss",
+  "04": "total replace",
+} as const
+const companionActionVariantCount = Object.keys(companionActionVariantNames).length
 
 if (args.includes("--list") || args.includes("list")) {
   for (let i = 1; i <= 47; i++) {
@@ -132,6 +147,14 @@ if (args.includes("--list-chat-goblin") || args.includes("list-chat-goblin")) {
   for (let i = 1; i <= chatGoblinVariantCount; i++) {
     const chatGoblinVariant = String(i).padStart(2, "0") as keyof typeof chatGoblinVariantNames
     console.log(`bun run dev:chat:goblin:${chatGoblinVariant}  # ${chatGoblinVariantNames[chatGoblinVariant]}`)
+  }
+  process.exit(0)
+}
+
+if (args.includes("--list-companion") || args.includes("list-companion")) {
+  for (let i = 1; i <= companionActionVariantCount; i++) {
+    const companionVariant = String(i).padStart(2, "0") as keyof typeof companionActionVariantNames
+    console.log(`bun run dev:companion:${companionVariant}  # ${companionActionVariantNames[companionVariant]}`)
   }
   process.exit(0)
 }
@@ -160,9 +183,22 @@ if (
   process.exit(1)
 }
 
+const companionActionNumeric = Number(rawCompanionActionVariant.trim().replace(/^v/i, ""))
+
+if (
+  showChatGoblin &&
+  (!Number.isInteger(companionActionNumeric) ||
+    companionActionNumeric < 1 ||
+    companionActionNumeric > companionActionVariantCount)
+) {
+  console.error(`Expected a companion action variant from 1 to ${companionActionVariantCount}, got: ${rawCompanionActionVariant}`)
+  process.exit(1)
+}
+
 const variant = String(numeric).padStart(2, "0")
 const runnerVariant = String(runnerNumeric).padStart(2, "0")
 const chatGoblinVariant = String(chatGoblinNumeric).padStart(2, "0")
+const companionActionVariant = String(companionActionNumeric).padStart(2, "0")
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
 console.log(`Starting CodeGoblin TUI header variant ${variant}...`)
@@ -173,6 +209,9 @@ if (showChatGoblin) {
   console.log(
     `Chat sidebar goblin ${chatGoblinVariant} enabled (${chatGoblinVariantNames[chatGoblinVariant as keyof typeof chatGoblinVariantNames]}).`,
   )
+  console.log(
+    `Companion action ${companionActionVariant} enabled (${companionActionVariantNames[companionActionVariant as keyof typeof companionActionVariantNames]}).`,
+  )
 }
 console.log("Press Ctrl+C to stop this variant before trying another one.\n")
 
@@ -182,7 +221,13 @@ const child = Bun.spawn([process.execPath, "run", "--cwd", "packages/opencode", 
     ...process.env,
     CODEGOBLIN_HEADER_VARIANT: variant,
     ...(showRunner ? { CODEGOBLIN_FOOTER_ANIMATION: "1", CODEGOBLIN_FOOTER_VARIANT: runnerVariant } : {}),
-    ...(showChatGoblin ? { CODEGOBLIN_CHAT_GOBLIN: "1", CODEGOBLIN_CHAT_GOBLIN_VARIANT: chatGoblinVariant } : {}),
+    ...(showChatGoblin
+      ? {
+          CODEGOBLIN_CHAT_GOBLIN: "1",
+          CODEGOBLIN_CHAT_GOBLIN_VARIANT: chatGoblinVariant,
+          CODEGOBLIN_COMPANION_ACTION_VARIANT: companionActionVariant,
+        }
+      : {}),
   },
   stdin: "inherit",
   stdout: "inherit",
