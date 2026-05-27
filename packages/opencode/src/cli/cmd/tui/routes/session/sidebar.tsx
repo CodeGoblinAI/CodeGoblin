@@ -71,6 +71,26 @@ function TuiSidebarCompanionGoblin(props: {
     return "01"
   }
 
+  function normalizeChatGoblinMode(value: string | undefined) {
+    const normalized = value?.trim().toLowerCase()
+    if (normalized === "companion") return "companion" as const
+    return "pinned" as const
+  }
+
+  function companionIdleVariant(actionVariantId: string) {
+    if (actionVariantId === "02") return "25"
+    if (actionVariantId === "03") return "39"
+    if (actionVariantId === "04") return "23"
+    return "40"
+  }
+
+  function companionActionVariant(actionVariantId: string, age: number) {
+    if (actionVariantId === "02") return age < 6 ? "25" : "30"
+    if (actionVariantId === "03") return age < 6 ? "39" : "30"
+    if (actionVariantId === "04") return age < 6 ? "23" : "40"
+    return age < 6 ? "40" : "30"
+  }
+
   const menuHeadSmall: GoblinRow[] = [
     "....GGGG....",
     "..GGGGGGGG..",
@@ -472,8 +492,11 @@ function TuiSidebarCompanionGoblin(props: {
 
   const requestedVariantId = normalizeChatGoblinVariantId(process.env.CODEGOBLIN_CHAT_GOBLIN_VARIANT)
   const actionVariantId = normalizeCompanionActionVariant(process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT)
+  const motionMode = normalizeChatGoblinMode(
+    process.env.CODEGOBLIN_CHAT_GOBLIN_MODE ??
+      (process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT !== undefined ? "companion" : "pinned"),
+  )
   const requestedFrameIndex = normalizeChatGoblinFrame(process.env.CODEGOBLIN_CHAT_GOBLIN_FRAME)
-  const usingFavoriteCycle = createMemo(() => ["04", "30", "39", "40"].includes(requestedVariantId))
   const actionAge = createMemo(() => {
     const start = actionStartTick()
     if (start === undefined) return Number.POSITIVE_INFINITY
@@ -481,14 +504,14 @@ function TuiSidebarCompanionGoblin(props: {
   })
   const actionActive = createMemo(() => actionAge() >= 0 && actionAge() < 14)
   const displayVariantId = createMemo(() => {
-    if (!usingFavoriteCycle()) return requestedVariantId
-    if (actionActive()) {
-      if (actionAge() < 4) return "40"
-      if (actionAge() < 9) return "30"
-      return "39"
+    if (motionMode === "pinned") return requestedVariantId
+    if (actionActive()) return companionActionVariant(actionVariantId, actionAge())
+    if (props.active) {
+      const idleVariant = companionIdleVariant(actionVariantId)
+      const alternateVariant = actionVariantId === "02" ? "30" : actionVariantId === "03" ? "30" : "40"
+      return tick() % 8 < 4 ? idleVariant : alternateVariant
     }
-    if (props.active) return tick() % 8 < 4 ? "40" : "30"
-    return "40"
+    return companionIdleVariant(actionVariantId)
   })
   const selectedVariant = createMemo(
     () =>
