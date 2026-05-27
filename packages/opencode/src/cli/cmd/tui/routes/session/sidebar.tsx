@@ -35,50 +35,50 @@ function TuiSidebarTokenGoblin(props: { theme: any }) {
       id: "01",
       name: "nibble pip",
       frames: [
-        ["..S....S....", ".SGGGGGGS...", "SGGGBBGGGT..", ".GGPPPPGGT..", "..GGPPGG....", ".G.G..G.....", "G...G......."],
-        ["..S....S....", ".SGGGGGGS...", "SGGGBBGGGT..", "..GGPPPGT...", "...GPPGG....", "..GG.G......", ".G..G......."],
-        ["..S....S....", ".SGGGGGGS...", "SGGGBBGT....", ".GGPPPPGG...", "..GGPPG.....", ".G.G..G.....", "G...G......."],
-        ["..S....S....", ".SGGGGGGS...", "SGGGBBGGG...", ".GGPPPPGG...", "..GPPPGG....", ".G.G..G.....", ".G...G......"],
+        ["....S..S.....", "...SGGGGS....", "..SGBBBBGT...", ".SGPPPPPGTT..", "..GGPPMPGG...", "...GPPPPG....", "..G.G..G.....", ".G...G..G...."],
+        ["....S..S.....", "...SGGGGS....", "..SGBBBBGGT..", "..GGPPPPPGT..", "...GGPMPGT...", "...GPPPGG....", "..G..GG......", ".G...G......."],
+        ["....S..S.....", "...SGGGGS....", "..SGBBBBT....", ".SGPPPPPGG...", "..GGPPMPGG...", "...GPPPPG....", "..G.G..G.....", ".G...G..G...."],
+        ["....S..S.....", "...SGGGGS....", "..SGBBBBG....", ".SGPPPPPGG...", "..GGPPMPGG...", "...GPPPGG....", "..G..GG......", ".G...G......."],
       ],
     },
     {
       id: "02",
       name: "crouch munch",
       frames: [
-        ["..P....P....", ".PGGGGGGP...", "PGGGBBGGGT..", "GGPPPPPGT...", "..GGPPGG....", ".GG..GG.....", "..G.G......."],
-        ["..P....P....", ".PGGGGGGP...", "PGGGBBGGGT..", ".GGPPPGT....", "...GPPGG....", "..G.G.G.....", ".G..G......."],
-        ["..P....P....", ".PGGGGGGP...", "PGGGBBGT....", ".GGPPPPGG...", "..GGPPG.....", ".GG..GG.....", "..G.G......."],
-        ["..P....P....", ".PGGGGGGP...", "PGGGBBGGG...", ".GGPPPPGG...", "..GPPPGG....", ".G.G..G.....", ".G...G......"],
+        ["...P..P......", "..PGGGGGP....", ".PGBBBBGGT...", "PGPPPPPPGTT..", ".GGPPMPPGG...", "..GGPPPPG....", "...G.G.G.....", "..G..G..G...."],
+        ["...P..P......", "..PGGGGGP....", ".PGBBBBGGTT..", ".GGPPPPPGT...", "..GGPMPGT....", "...GPPPGG....", "..G.G.G......", ".G..G........"],
+        ["...P..P......", "..PGGGGGP....", ".PGBBBBGT....", "PGPPPPPPGG...", ".GGPPMPPGG...", "..GGPPPPG....", "...G.G.G.....", "..G..G..G...."],
+        ["...P..P......", "..PGGGGGP....", ".PGBBBBGG....", "PGPPPPPPGG...", ".GGPPMPGG....", "..GPPPGGG....", "..G.G.G......", ".G...G......."],
       ],
     },
     {
       id: "03",
       name: "satchel chew",
       frames: [
-        ["...S........", "..SGGG......", ".SGBBGGTMM..", "SGPPPPGMM...", "..GGPPG.....", ".G.G..G.....", "G...G......."],
-        ["...S........", "..SGGG......", ".SGBBGGTMM..", "SGPPPGMMT...", "...GPPGG....", "..GG.G......", ".G..G......."],
-        ["...S........", "..SGGG......", ".SGBBGTMM...", "SGPPPPGMM...", "..GGPPG.....", ".G.G..G.....", "G...G......."],
-        ["...S........", "..SGGG......", ".SGBBGGMM...", "SGPPPPGMM...", "..GPPPG.....", ".G..GG......", ".G...G......"],
+        [".....S.......", "...SGGGS.....", "..SGBBBGTT...", ".SGPPPPGMM...", "..GGPPPGM....", "...GPPPG.....", "..G.G.G......", ".G..G..G....."],
+        [".....S.......", "...SGGGS.....", "..SGBBBGGT...", ".SGPPPPGMMT..", "...GPPPGM....", "..GGPGGG.....", "...G.G.......", "..G..G......."],
+        [".....S.......", "...SGGGS.....", "..SGBBBGT....", ".SGPPPPGMM...", "..GGPPPGM....", "...GPPPG.....", "..G.G.G......", ".G..G..G....."],
+        [".....S.......", "...SGGGS.....", "..SGBBBGG....", ".SGPPPPGMM...", "..GPPPPGM....", "...GPGGG.....", "..G..G.......", ".G...G......."],
       ],
     },
     {
       id: "04",
       name: "hood pip eater",
       frames: [
-        ["..P....P....", ".PGGGGGGP...", "PGGGBBGGGT..", "GGGPPPPGGT..", ".GGGPPGG....", "..G.G.G.....", ".G..G..G...."],
-        ["..P....P....", ".PGGGGGGP...", "PGGGBBGGGT..", ".GGPPPGGT...", "...GGPG.....", "..G.G.G.....", ".G..G......."],
-        ["..P....P....", ".PGGGGGGP...", "PGGGBBGT....", "GGGPPPPGG...", ".GGGPPG.....", "..GG.G......", ".G..G..G...."],
-        ["..P....P....", ".PGGGGGGP...", "PGGGBBGGG...", "GGGPPPPGG...", ".GGPPPGG....", "..G.G.G.....", ".G...G..G..."],
+        ["...P....P....", "..PGGGGGGP...", ".PGBBBBGGGT..", "PGGPPPPPGGT..", ".GGPPMPPGG...", "..GPPPPPG....", ".G.G..G.G....", "G...G..G....."],
+        ["...P....P....", "..PGGGGGGP...", ".PGBBBBGGTT..", "..GGPPPPGGT..", "...GGPMPGT...", "..GPPPPGG....", ".G..GG.G.....", "..G...G......"],
+        ["...P....P....", "..PGGGGGGP...", ".PGBBBBGT....", "PGGPPPPPGG...", ".GGPPMPPGG...", "..GPPPPPG....", ".G.G..G.G....", "G...G..G....."],
+        ["...P....P....", "..PGGGGGGP...", ".PGBBBBGG....", "PGGPPPPPGG...", ".GGPPMPPGG...", "..GPPPGGG....", ".G..GG.G.....", "..G...G......"],
       ],
     },
     {
       id: "05",
       name: "compact deluxe munch",
       frames: [
-        ["..S..S......", ".SGGGGGG....", "SGGBMBGGT...", ".GGPPPPGT...", "..GGPPGG....", ".G.G..G.....", "..G..G......"],
-        ["..S..S......", ".SGGGGGG....", "SGGBMBGGT...", "..GGPPGT....", "...GPPGG....", "..GG.G......", ".G..G......."],
-        ["..S..S......", ".SGGGGGG....", "SGGBMBGT....", ".GGPPPPGG...", "..GGPPG.....", ".G.G..G.....", "..G..G......"],
-        ["..S..S......", ".SGGGGGG....", "SGGBMBGG....", ".GGPPPPGG...", "..GPPPGG....", ".G.G..G.....", ".G...G......"],
+        ["..S..P..S....", ".SGGGGGGGS...", "SGBBBMBGGTT..", ".GGPPPPPGGT..", "..GGPMPPGG...", ".G.GPPPPG....", "..G.G.G.G....", "...G...G....."],
+        ["..S..P..S....", ".SGGGGGGGS...", "SGBBBMBGGT...", "..GGPPPPPGT..", "...GGPMPGT...", "..GGPPPGG....", "...G.G.G.....", "..G...G......"],
+        ["..S..P..S....", ".SGGGGGGGS...", "SGBBBMBGT....", ".GGPPPPPGG...", "..GGPMPPGG...", ".G.GPPPPG....", "..G.G.G.G....", "...G...G....."],
+        ["..S..P..S....", ".SGGGGGGGS...", "SGBBBMBGG....", ".GGPPPPPGG...", "..GPPMPPGG...", ".G.GPPPGG....", "..G..G.G.....", "...G..G......"],
       ],
     },
   ]
@@ -109,7 +109,7 @@ function TuiSidebarTokenGoblin(props: { theme: any }) {
   let timer: ReturnType<typeof setInterval> | undefined
 
   onMount(() => {
-    timer = setInterval(() => setTick((value) => value + 1), 180)
+    timer = setInterval(() => setTick((value) => value + 1), 220)
     timer?.unref?.()
   })
 

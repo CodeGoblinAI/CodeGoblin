@@ -192,18 +192,32 @@ function TuiChatBottomGoblin(props: { theme: any }) {
   const tokenColor = props.theme.warning
   const [tick, setTick] = createSignal(0)
 
+  const idleFrame = ["..P...", "GBBGTT", "PPPG..", "G.G..."]
+  const reachFrame = ["..P...", "GBBGT.", "PPPGT.", ".GG..."]
+  const grabFrame = ["..P...", "GBBT..", "PPGT..", ".GG..."]
+  const stashFrame = ["..P...", "GBBG..", "PMGG..", "G.G..."]
   const frames = [
-    ["..P....", ".PGGG..", "PGBBGT.", ".GPPGT.", ".G.G..."],
-    ["..P....", ".PGGG..", "PGBBGT.", "..GPGT.", "..GG..."],
-    ["..P....", ".PGGG..", "PGBBT..", ".GPPG..", ".G.G..."],
-    ["..P....", ".PGGG..", "PGBBG..", ".GPPG..", ".G.G..."],
+    idleFrame,
+    idleFrame,
+    idleFrame,
+    idleFrame,
+    idleFrame,
+    idleFrame,
+    idleFrame,
+    reachFrame,
+    grabFrame,
+    stashFrame,
+    idleFrame,
+    idleFrame,
+    idleFrame,
+    idleFrame,
   ]
   const width = Math.max(...frames.flatMap((frame) => frame.map((row) => row.length)))
 
   let timer: ReturnType<typeof setInterval> | undefined
 
   onMount(() => {
-    timer = setInterval(() => setTick((value) => value + 1), 180)
+    timer = setInterval(() => setTick((value) => value + 1), 140)
     timer?.unref?.()
   })
 
@@ -223,6 +237,8 @@ function TuiChatBottomGoblin(props: { theme: any }) {
         cells.push(<text fg={vestColor}>██</text>)
       } else if (char === "B") {
         cells.push(<text fg={eyeColor}>██</text>)
+      } else if (char === "M") {
+        cells.push(<text fg={props.theme.textMuted}>██</text>)
       } else if (char === "S") {
         cells.push(<text fg={shadowColor}>██</text>)
       } else if (char === "T") {
@@ -236,15 +252,12 @@ function TuiChatBottomGoblin(props: { theme: any }) {
   }
 
   return (
-    <box flexDirection="column" alignItems="center" width="100%" paddingTop={1} flexShrink={0}>
+    <box flexDirection="column" alignItems="flex-end" width="100%" paddingRight={2} flexShrink={0}>
       {Array.from({ length: frames[0]?.length ?? 0 }, (_, rowIndex) => (
-        <box flexDirection="row" width={(width + 2) * 2}>
+        <box flexDirection="row" width={width * 2}>
           {renderRow(rowIndex)}
         </box>
       ))}
-      <box flexDirection="row" width={(width + 2) * 2}>
-        <text fg={shadowColor}>{"▁".repeat((width + 2) * 2)}</text>
-      </box>
     </box>
   )
 }
