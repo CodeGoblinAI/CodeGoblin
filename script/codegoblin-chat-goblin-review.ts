@@ -11,6 +11,17 @@ interface ChatGoblinVariant {
   frames: string[][]
 }
 
+interface CompanionActionPreview {
+  id: string
+  name: string
+  summary: string
+  verdict: string
+  recommended?: boolean
+  note: string
+  idleFrames: string[][]
+  actionFrames: string[][]
+}
+
 const DEFAULT_SIDEBAR_COLS = 46
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -22,12 +33,23 @@ function cycle(row: GoblinRow): GoblinFrameCycle {
   return typeof row === "string" ? [row, row, row, row] : row
 }
 
+function staticRow(row: GoblinRow) {
+  return typeof row === "string" ? row : row[0]
+}
+
 function createFrames(rows: GoblinRow[]) {
   const cycledRows = rows.map(cycle)
   return Array.from({ length: 4 }, (_, frameIndex) => cycledRows.map((row) => row[frameIndex]))
 }
 
-function findMatchingBracket(source: string, start: number) {
+function normalizeFrames(frames: string[][]) {
+  if (frames.length === 0) return []
+  const height = Math.max(0, ...frames.map((frame) => frame.length))
+  const width = Math.max(0, ...frames.flatMap((frame) => frame.map((row) => row.length)))
+  return frames.map((frame) => Array.from({ length: height }, (_, rowIndex) => (frame[rowIndex] ?? "").padEnd(width, ".")))
+}
+
+function findMatchingDelimiter(source: string, start: number, open: string, close: string) {
   let depth = 0
   let quote: string | undefined
   let escaped = false
@@ -52,14 +74,26 @@ function findMatchingBracket(source: string, start: number) {
       quote = char
       continue
     }
-    if (char === "[") depth++
-    if (char === "]") {
+    if (char === open) depth++
+    if (char === close) {
       depth--
       if (depth === 0) return index
     }
   }
 
-  throw new Error("Could not find matching bracket while parsing chat goblin art")
+  throw new Error(`Could not find matching delimiter ${open}${close} while parsing chat goblin art`)
+}
+
+function findMatchingBracket(source: string, start: number) {
+  return findMatchingDelimiter(source, start, "[", "]")
+}
+
+function findMatchingBrace(source: string, start: number) {
+  return findMatchingDelimiter(source, start, "{", "}")
+}
+
+function findMatchingParen(source: string, start: number) {
+  return findMatchingDelimiter(source, start, "(", ")")
 }
 
 function parseVariants(source: string) {
@@ -119,8 +153,45 @@ function parseSharedRows(source: string, name: string) {
   return Function(`return ${source.slice(rowsStart, rowsEnd + 1)}`)() as GoblinRow[]
 }
 
+function createCompanionFrame(...rows: string[]) {
+  return rows
+}
+
+function parseCompanionIdleFrames(source: string, sharedRows: { menuHeadWide: GoblinRow[] }) {
+  const start = source.indexOf("const companionIdleFrames")
+  if (start === -1) return [] as string[][]
+  const assignmentStart = source.indexOf("=", start)
+  const exprStart = source.indexOf("normalizeFrames(", assignmentStart)
+  const parenStart = source.indexOf("(", exprStart)
+  const exprEnd = findMatchingParen(source, parenStart)
+  const expression = source.slice(exprStart, exprEnd + 1)
+  const companionHeadWide = sharedRows.menuHeadWide.map(staticRow)
+  return Function(
+    "companionHeadWide",
+    "createCompanionFrame",
+    "normalizeFrames",
+    `return ${expression}`,
+  )(companionHeadWide, createCompanionFrame, normalizeFrames) as string[][]
+}
+
+function parseCompanionActionFrames(source: string, sharedRows: { menuHeadWide: GoblinRow[] }) {
+  const start = source.indexOf("const companionActionFrames")
+  if (start === -1) return {} as Record<string, string[][]>
+  const assignmentStart = source.indexOf("=", start)
+  const objectStart = source.indexOf("{", assignmentStart)
+  const objectEnd = findMatchingBrace(source, objectStart)
+  const expression = source.slice(objectStart, objectEnd + 1)
+  const companionHeadWide = sharedRows.menuHeadWide.map(staticRow)
+  return Function(
+    "companionHeadWide",
+    "createCompanionFrame",
+    "normalizeFrames",
+    `return ${expression}`,
+  )(companionHeadWide, createCompanionFrame, normalizeFrames) as Record<string, string[][]>
+}
+
 function normalizeFrame(frame: string[]) {
-  const width = Math.max(...frame.map((row) => row.length))
+  const width = Math.max(0, ...frame.map((row) => row.length))
   return frame.map((row) => row.padEnd(width, "."))
 }
 
@@ -188,6 +259,19 @@ function renderVariant(variant: ChatGoblinVariant) {
   </section>`
 }
 
+function renderCompanionAction(preview: CompanionActionPreview) {
+  return `<section class="card ${preview.recommended ? "recommended" : ""}">
+    <h2>${preview.id}. ${escapeHtml(preview.name)}</h2>
+    <div class="companion-headline">${escapeHtml(preview.summary)}</div>
+    <div class="verdict-row"><span class="verdict-badge ${preview.recommended ? "is-recommended" : ""}">${escapeHtml(preview.verdict)}</span></div>
+    <p class="card-note">${escapeHtml(preview.note)}</p>
+    <div class="frames">
+      ${renderFrame(preview.idleFrames[0] ?? [], "idle")}
+      ${preview.actionFrames.map((frame, index) => renderFrame(frame, `action f${index + 1}`)).join("")}
+    </div>
+  </section>`
+}
+
 function renderNativeSidebarScene(
   variant: ChatGoblinVariant,
   options: {
@@ -221,16 +305,65 @@ const source = await Bun.file(sidebarPath).text()
 const sidebarCols = parseSidebarWidth(source)
 const variants = parseVariants(source)
 if (variants.length === 0) throw new Error("No chat goblin variants found")
+
+const companionSharedRows = {
+  menuHeadWide: parseSharedRows(source, "menuHeadWide"),
+}
+const companionIdleFrames = parseCompanionIdleFrames(source, companionSharedRows)
+const companionActionFrames = parseCompanionActionFrames(source, companionSharedRows)
 const focusBodyVariants = ["40", "30", "39"]
   .map((id) => variants.find((variant) => variant.id === id))
   .filter(Boolean) as ChatGoblinVariant[]
+const companionPreviews: CompanionActionPreview[] = [
+  {
+    id: "01",
+    name: "pocket add",
+    summary: "Base sprite 40 with a dedicated companion-only pocket-add motion.",
+    verdict: "placeholder / acceptable",
+    note:
+      "Not the current favorite, but usable as a temporary spend action. Production behavior should trigger only on real spend deltas, not on the dev preview loop.",
+    idleFrames: companionIdleFrames,
+    actionFrames: companionActionFrames["01"] ?? companionIdleFrames,
+  },
+  {
+    id: "02",
+    name: "stamp spend",
+    summary: "Dedicated stamp/receipt idea, but the read is still awkward and needs redesign.",
+    verdict: "needs redesign",
+    note:
+      "User feedback: animation 02 looks super weird right now. Keep it in preview coverage so future iterations can compare against it, but do not treat it as the target motion.",
+    idleFrames: companionIdleFrames,
+    actionFrames: companionActionFrames["02"] ?? companionIdleFrames,
+  },
+  {
+    id: "03",
+    name: "coin toss",
+    summary: "Best current companion action. This is the strongest reference for future activity work.",
+    verdict: "current best / reference",
+    recommended: true,
+    note:
+      "For now, the preferred direction is sprite 40 with animation 03. If another agent needs a working baseline, this is the visual reference to follow while better activity-specific motions are designed.",
+    idleFrames: companionIdleFrames,
+    actionFrames: companionActionFrames["03"] ?? companionIdleFrames,
+  },
+  {
+    id: "04",
+    name: "total replace",
+    summary: "Dedicated total-replace idea, but it currently reads weird and needs redesign.",
+    verdict: "needs redesign",
+    note:
+      "User feedback: animation 04 looks super weird right now. Keep it visible in the review so redesign work stays grounded in the current attempt rather than reinventing it blind.",
+    idleFrames: companionIdleFrames,
+    actionFrames: companionActionFrames["04"] ?? companionIdleFrames,
+  },
+]
 
 const html = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CodeGoblin chat goblin review</title>
+    <title>CodeGoblin goblin review</title>
     <style>
       :root {
         --bg: #050806;
@@ -285,6 +418,10 @@ const html = `<!doctype html>
         padding: 14px;
         box-shadow: 0 10px 35px rgba(0, 0, 0, 0.24);
       }
+      .card.recommended {
+        border-color: #3a7f2f;
+        box-shadow: 0 0 0 1px rgba(154, 219, 53, 0.22), 0 10px 35px rgba(0, 0, 0, 0.24);
+      }
       .card h2 { font-size: 14px; color: #f0ffe9; margin-bottom: 12px; }
       .frames { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
       .frame-block { display: grid; gap: 5px; }
@@ -309,6 +446,30 @@ const html = `<!doctype html>
       .companion-headline {
         color: #f0ffe9;
         font-size: 13px;
+      }
+      .verdict-row {
+        margin-top: 8px;
+      }
+      .verdict-badge {
+        display: inline-flex;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        border: 1px solid #24432a;
+        color: #d6f5d2;
+        background: #0b1b10;
+      }
+      .verdict-badge.is-recommended {
+        color: #0f2a10;
+        background: var(--skin);
+        border-color: #72a321;
+        font-weight: 700;
+      }
+      .card-note {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+        margin: 10px 0 0;
       }
       .section-copy {
         color: var(--muted);
@@ -367,8 +528,8 @@ const html = `<!doctype html>
   </head>
   <body>
     <header>
-      <h1>CodeGoblin chat goblin review</h1>
-      <p>Focused CodeGoblin review. Only the three body shapes we are actively comparing are shown below, rendered from the exact sidebar sprite data.</p>
+      <h1>CodeGoblin goblin review</h1>
+      <p>Focused CodeGoblin review. Chat body comparisons and companion actions below are rendered from the exact sidebar sprite data so the browser preview stays honest with the CLI.</p>
     </header>
     <main>
       <h2 class="section-title">Native sidebar footprint</h2>
@@ -409,8 +570,11 @@ const html = `<!doctype html>
           : "",
       ].join("")}</div>
       <h2 class="section-title">Focused frame cycles</h2>
-      <p class="section-copy">Only the exact variants in play right now: 40, 30, and 39.</p>
+      <p class="section-copy">Only the exact body variants in play right now: 40, 30, and 39.</p>
       <div class="grid">${focusBodyVariants.map(renderVariant).join("")}</div>
+      <h2 class="section-title">Companion action review</h2>
+      <p class="section-copy">Current direction: keep sprite 40 as the companion base and treat animation 03 as the best reference so far. Animations 02 and 04 are still weird and need redesign. Preview loops here are dev-only; production behavior should trigger action animation only on real events such as token burn/spend deltas, thinking, or image/audio generation states.</p>
+      <div class="grid">${companionPreviews.map(renderCompanionAction).join("")}</div>
     </main>
   </body>
 </html>`
