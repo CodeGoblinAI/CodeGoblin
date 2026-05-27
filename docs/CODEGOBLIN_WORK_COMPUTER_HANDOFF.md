@@ -1,6 +1,6 @@
 # CodeGoblin Work Computer Handoff
 
-Last updated: 2026-05-26.
+Last updated: 2026-05-27.
 
 This file supplements Shawn's local project brain at `C:\Users\shawn\.codex\skills\codegoblin-project-brain\SKILL.md`. It does **not** replace that skill. Future agents should read the project brain first, then this file, then the core repo docs listed below.
 
@@ -63,6 +63,17 @@ Follow-up after this file was created:
 - Feature branch pushed to `origin/feat/codegoblin-local-install`.
 - Fresh local `dev` was reset from `origin/dev`, feature branch was merged with merge commit `7113b9646 merge: CodeGoblin local install updates`, and `dev` was pushed to `origin/dev`.
 - Final repository status after merge/push was clean on `dev` tracking `origin/dev`.
+
+2026-05-27 dev update:
+
+- Local `dev` was reviewed and pushed to `origin/dev` through `35c27adc7 feat(codegoblin): add connect balances and model buckets`.
+- Pushed companion/sidebar commits include event-driven spend/activity animation work through `17b6a60a0 feat(codegoblin): add companion activity animations`.
+- `35c27adc7` adds the focused-chat `Ctrl+G` binding fix, ElevenLabs provider visibility in TUI/web `/connect`, selected-provider balance scoping, and model modality buckets in TUI/web model pickers.
+- GitHub remote author/committer for `35c27adc7` was verified as `shawnisikli <shawni627@gmail.com>`.
+- Normal push was blocked by the known unrelated Windows `@opencode-ai/enterprise` `custom-elements.d.ts` TS1128 pre-push failure; after targeted validation passed, `git push --no-verify origin dev` succeeded.
+- Local packaged rebuild produced `0.0.0-dev-202605272312`; `codegoblin --version` and `cg --version` both return that version.
+- Rebuilt web at `http://127.0.0.1:4096/` was browser-verified with page title `CodeGoblin`, CodeGoblin home copy, and Shawn's goblin logo mark.
+- Latest GitHub deploy run `26544182501` still fails because repo secrets/vars are empty, with `CLOUDFLARE_API_TOKEN` as the immediate hard blocker.
 
 ## Feature branch commit clusters
 
@@ -135,9 +146,12 @@ Additional facts from that zip to preserve:
 Core product layer:
 
 - `packages/opencode/src/codegoblin/brand.ts` — product constants, tagline, mascot text, disclaimer.
-- `packages/opencode/src/codegoblin/provider.ts` — optional `codegoblin` provider scaffold plus image-model catalog augmentation for OpenAI/Qwen image models.
+- `packages/opencode/src/codegoblin/provider.ts` — optional `codegoblin` provider scaffold plus image/audio model catalog augmentation for OpenAI/Qwen image models and ElevenLabs audio/connect visibility.
 - `packages/opencode/src/codegoblin/image-command.ts` — local image generation command, image-capable model gating, provider adapters, safe output paths, input image handling, key loading, and usage recording.
+- `packages/opencode/src/codegoblin/audio-command.ts` — local ElevenLabs audio generation helper with dry-run, safe output paths, `.env` loading, and friendly missing-key behavior.
+- `packages/opencode/src/codegoblin/balance.ts` — DeepSeek/Moonshot/manual hoard balance helper; provider-specific balances must be scoped to the selected provider/model.
 - `packages/opencode/src/cli/cmd/image.ts` — shell command `codegoblin image <prompt..>`.
+- `packages/opencode/src/cli/cmd/audio.ts` — shell command `codegoblin audio <text..>`.
 - `packages/opencode/src/server/routes/instance/httpapi/server.ts` — local `POST /codegoblin/image` and `POST /codegoblin/open-output` routes, chat persistence, output-path validation.
 
 Install/package layer:
@@ -155,8 +169,11 @@ TUI/web/UX layer:
 - `packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx` — TUI prompt interception for `/image`, natural image prompts, pasted image input, token-hoard footer, and text-model image warnings.
 - `packages/opencode/src/cli/cmd/tui/app.tsx` — TUI app commands, terminal title, `/goblin*` commands, model/theme/help dialogs.
 - `packages/opencode/src/cli/cmd/tui/routes/session/sidebar.tsx` — sidebar footer fallback and optional token goblin.
+- `packages/opencode/src/cli/cmd/tui/component/dialog-provider.tsx` — TUI `/connect`; ElevenLabs should be visible as a popular/API-key provider.
+- `packages/opencode/src/cli/cmd/tui/component/dialog-model.tsx` — TUI model picker; currently buckets Text, Image, and Voice & audio models.
 - `packages/app/src/components/prompt-input/submit.ts` — web prompt interception and optimistic image job messages.
 - `packages/app/src/components/codegoblin-logo.tsx` — web logo mark from `/codegoblin-logo.png`.
+- `packages/app/src/components/dialog-select-provider.tsx` and `packages/app/src/components/dialog-select-model.tsx` — web provider/model selection; keep ElevenLabs and model-bucket behavior in parity with TUI.
 - `packages/ui/src/components/message-part.tsx` — web/TUI image job card rendering from `metadata.codegoblin`.
 
 Brand assets:
@@ -263,9 +280,14 @@ TUI:
 - Home route renders a CodeGoblin header with many selectable variants via `CODEGOBLIN_HEADER_VARIANT`.
 - Optional footer runner animation is gated by `CODEGOBLIN_FOOTER_ANIMATION` and runner variant env vars.
 - Session sidebar can show a token-goblin animation via `CODEGOBLIN_CHAT_GOBLIN`.
-- Prompt footer labels `ctx`, `spent`, and `hoard`; local hoard can read `CODEGOBLIN_TOKEN_HOARD_USD`, `CODEGOBLIN_DEEPSEEK_BALANCE_USD`, `CODEGOBLIN_DEEPSEEK_CREDITS_USD`, or `DEEPSEEK_BALANCE_USD`.
+- Session sidebar companion guidance: preserve sprite 40/menu clean body and the fixed `menuHeadWide` cheek/right-eye shape. Animation 03 is the current best spend reference; preview loops are dev-only and production animation should be driven by real spend, thinking, image, audio, and result signals.
+- Prompt footer labels `ctx`, `spent`, and selected provider balance/hoard. Local hoard can read `CODEGOBLIN_TOKEN_HOARD_USD`, and provider balances can read `CODEGOBLIN_DEEPSEEK_BALANCE_USD`, `CODEGOBLIN_DEEPSEEK_CREDITS_USD`, `DEEPSEEK_BALANCE_USD`, `CODEGOBLIN_MOONSHOT_BALANCE_USD`, `MOONSHOT_BALANCE_USD`, or `KIMI_BALANCE_USD`.
+- Do **not** show DeepSeek/Moonshot/Kimi provider balances when unrelated providers such as Gemini are selected. Provider balances are scoped to the active provider/model and must not be hardcoded in source.
 - `/models`, `/themes`, `/goblin`, `/goblin-models`, `/goblin-usage`, and related slash/palette commands are registered in the TUI.
 - `ctrl+g` is the reliable primary action-palette binding; `ctrl+shift+g` remains an alias but is less reliable in Windows/terminal stacks.
+- The focused chat prompt now registers a high-priority `command.palette.show` binding on the textarea target so `Ctrl+G` should work while typing in chat.
+- `/connect` should include ElevenLabs, and API-key fallback auth can store `ELEVENLABS_API_KEY` credentials.
+- TUI model picker groups by Text models, Image models, and Voice & audio models.
 
 Web:
 
@@ -273,6 +295,7 @@ Web:
 - Prompt submit intercepts `/image` and image-looking prompts when an image model is selected.
 - Web image jobs create optimistic user/progress messages, persist server results, and show provider/model/output path.
 - Settings > General includes `Auto-approve image generation`.
+- Web provider/model pickers mirror the TUI changes: ElevenLabs appears in connect, and model selection groups Text, Image, and Voice & audio models.
 
 Limitations:
 
@@ -357,6 +380,20 @@ Post-merge validation on fresh `dev`:
 - `npm run build` passed on merged `dev` and produced smoke version `0.0.0-dev-202605262334`.
 - Linked command smoke passed on merged `dev`: `codegoblin --version`, bare `cg image ... --dry-run` warning, and `openai/gpt-image-1` dry-run.
 
+2026-05-27 validation on `dev`:
+
+- `git diff --check` passed.
+- `bun --cwd packages/opencode test test/codegoblin/balance.test.ts test/codegoblin/provider.test.ts` passed: 9 tests, 0 failures.
+- `bun --cwd packages/opencode test test/config/tui.test.ts --test-name-pattern Ctrl` passed, including `keeps Ctrl+G dedicated to the action palette in sessions`.
+- `bun run --cwd packages/opencode typecheck` passed.
+- `bun run --cwd packages/app typecheck` passed.
+- `bun run review:chat:goblins` generated the companion review page successfully.
+- `bun run --cwd packages/opencode build --single --skip-install` passed after stopping stale web/server processes; smoke version `0.0.0-dev-202605272312`.
+- `codegoblin --version` and `cg --version` both returned `0.0.0-dev-202605272312`.
+- Rebuilt local web at `http://127.0.0.1:4096/` returned HTTP 200, `/codegoblin-logo.png` returned HTTP 200, and browser snapshot/screenshot showed the CodeGoblin home with the goblin logo mark.
+- `origin/dev` was pushed to `35c27adc7`; remote commit author/committer were verified as `shawnisikli <shawni627@gmail.com>`.
+- Latest deploy workflow still failed because GitHub secrets/vars are missing. The log showed empty `CLOUDFLARE_API_TOKEN`, PlanetScale, Stripe, Honeycomb, Sentry envs, then Cloudflare initialization failure.
+
 Reusable checklist:
 
 Targeted validation from package directories:
@@ -401,6 +438,8 @@ Then check:
 
 ## Merge/push guidance
 
+As of 2026-05-27, local `dev` and `origin/dev` are aligned at `35c27adc7`. No separate companion branch remains to merge; the reviewed companion/sidebar commits are already on `dev`.
+
 If merging feature branch to `dev`, do not use stale local `dev` directly. Use:
 
 ```powershell
@@ -424,8 +463,10 @@ Run targeted validation before pushing. Full monorepo pre-push may still fail on
 
 ## Next recommended pass
 
-1. Visually launch `codegoblin` in a real terminal and inspect TUI home, `/models`, `/goblin`, `/image`, pasted image input, Ctrl+G actions, and image loading/result cards.
-2. Live-test OpenAI GPT Image, Gemini image, xAI Grok Imagine, and Qwen/DashScope Wan with real local keys that are never committed.
-3. Specifically test stale/invalid Gemini env-key behavior if a local `GEMINI_API_KEY` exists; the user should get a friendly source-aware auth hint.
-4. Continue scoped rebrand in ACP docs/examples, desktop/provider upsell surfaces, localized strings, README expansion, and public attribution/license review docs.
-5. Decide later whether durable paths remain OpenCode-compatible or migrate to CodeGoblin-specific paths.
+1. Configure GitHub deploy secrets/vars directly in terminal or GitHub UI. Start with `CLOUDFLARE_API_TOKEN`; do not paste secret values into chat.
+2. Visually launch `codegoblin` in a real terminal and inspect TUI home, focused chat `Ctrl+G` actions, `/connect` ElevenLabs, `/models` buckets, `/goblin`, `/image`, pasted image input, and image/audio loading/result cards.
+3. Verify balance scoping by switching Gemini/DeepSeek/Moonshot/Kimi models; unrelated providers must not show DeepSeek/Moonshot balances.
+4. Live-test OpenAI GPT Image, Gemini image, xAI Grok Imagine, Qwen/DashScope Wan, and ElevenLabs audio with real local keys that are never committed.
+5. Specifically test stale/invalid Gemini env-key behavior if a local `GEMINI_API_KEY` exists; the user should get a friendly source-aware auth hint.
+6. Continue scoped rebrand in ACP docs/examples, desktop/provider upsell surfaces, localized strings, README expansion, and public attribution/license review docs.
+7. Decide later whether durable paths remain OpenCode-compatible or migrate to CodeGoblin-specific paths.
