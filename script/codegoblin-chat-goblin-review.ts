@@ -11,6 +11,8 @@ interface ChatGoblinVariant {
   frames: string[][]
 }
 
+const DEFAULT_SIDEBAR_COLS = 46
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const sidebarPath = join(repoRoot, "packages/opencode/src/cli/cmd/tui/routes/session/sidebar.tsx")
 const outputDir = join(repoRoot, "codegoblin-generated")
@@ -122,23 +124,60 @@ function normalizeFrame(frame: string[]) {
   return frame.map((row) => row.padEnd(width, "."))
 }
 
+function parseSidebarWidth(source: string) {
+  const match = source.match(/export const SESSION_SIDEBAR_WIDTH = (\d+)/)
+  return Number(match?.[1] ?? DEFAULT_SIDEBAR_COLS)
+}
+
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 }
 
-function terminalCell(char: string) {
-  if (char === ".") return '<span class="term-cell empty"></span>'
-  return `<span class="term-cell ${char}"></span>`
+function fillForChar(char: string) {
+  if (char === "G") return "#9adb35"
+  if (char === "S") return "#777d87"
+  if (char === "P") return "#8250df"
+  if (char === "B") return "#000000"
+  if (char === "M") return "#777d87"
+  if (char === "T") return "#ffc45b"
+  if (char === "W") return "#eaf7e7"
+  return undefined
+}
+
+function renderSprite(frame: string[], className?: string) {
+  const rows = normalizeFrame(frame)
+  const width = rows[0]?.length ?? 0
+  const height = rows.length
+  const rects = rows
+    .flatMap((row, rowIndex) =>
+      [...row].flatMap((char, colIndex) => {
+        const fill = fillForChar(char)
+        if (!fill) return []
+        return [`<rect x="${colIndex * 2}" y="${rowIndex}" width="2" height="1" fill="${fill}" />`]
+      }),
+    )
+    .join("")
+  const classes = ["sprite-svg", className].filter(Boolean).join(" ")
+
+  return `<svg
+    class="${classes}"
+    viewBox="0 0 ${width * 2} ${height}"
+    style="width: calc(${width} * var(--logical-cell-w)); height: calc(${height} * var(--logical-cell-h));"
+    xmlns="http://www.w3.org/2000/svg"
+    shape-rendering="crispEdges"
+    preserveAspectRatio="xMidYMid meet"
+    aria-hidden="true"
+  >${rects}</svg>`
 }
 
 function renderFrame(frame: string[], label: string) {
   const rows = normalizeFrame(frame)
   const width = rows[0]?.length ?? 0
-  const cells = rows.flatMap((row) => [...row].map(terminalCell)).join("")
+  const height = rows.length
 
   return `<div class="frame-block">
-    <div class="frame-label">${escapeHtml(label)}</div>
-    <div class="terminal-grid" style="grid-template-columns: repeat(${width}, var(--logical-cell-w));">${cells}</div>
+    <div class="frame-label">${escapeHtml(label)} · ${width * 2} cols × ${height} rows</div>
+    <div class="sprite-frame">${renderSprite(rows)}</div>
   </div>`
 }
 
@@ -149,27 +188,42 @@ function renderVariant(variant: ChatGoblinVariant) {
   </section>`
 }
 
-function renderCompanionScene(
+function renderNativeSidebarScene(
   variant: ChatGoblinVariant,
-  options: { label: string; headline: string; action: string; frameIndex: number; spend: string; last: string },
+  options: {
+    label: string
+    detail: string
+    frameIndex: number
+    spend: string
+    last: string
+    status: string
+    context: string
+  },
 ) {
+  const frame = variant.frames[options.frameIndex] ?? variant.frames[0] ?? []
   return `<section class="card companion-scene">
     <h2>${escapeHtml(options.label)}</h2>
-    <div class="companion-headline">${escapeHtml(options.headline)}</div>
-    <div class="ledger"><span>spend :</span><b>${escapeHtml(options.spend)}</b></div>
-    <div class="ledger"><span>last&nbsp;&nbsp;:</span><b>${escapeHtml(options.last)}</b></div>
-    <div class="companion-action">${escapeHtml(options.action)}</div>
-    <div class="companion-detail">CLI cell-ratio preview · one art cell = two terminal columns</div>
-    <div class="frames">${renderFrame(variant.frames[options.frameIndex] ?? variant.frames[0] ?? [], `${variant.id}. ${variant.name}`)}</div>
+    <div class="companion-headline">${escapeHtml(options.detail)}</div>
+    <div class="native-sidebar">
+      <div class="native-sidebar-copy">
+        <div class="native-sidebar-title">CodeGoblin companion</div>
+        <div class="native-sidebar-row"><span>spend :</span><b>${escapeHtml(options.spend)}</b></div>
+        <div class="native-sidebar-row"><span>last&nbsp;&nbsp;:</span><b>${escapeHtml(options.last)}</b></div>
+        <div class="native-sidebar-status">${escapeHtml(options.status)}</div>
+        <div class="native-sidebar-context">${escapeHtml(options.context)}</div>
+      </div>
+      <div class="native-sidebar-sprite">${renderSprite(frame, "native-sprite")}</div>
+    </div>
   </section>`
 }
 
 const source = await Bun.file(sidebarPath).text()
+const sidebarCols = parseSidebarWidth(source)
 const variants = parseVariants(source)
 if (variants.length === 0) throw new Error("No chat goblin variants found")
 const originalVariants = variants.filter((variant) => Number(variant.id) <= 20)
 const menuBodyVariants = variants.filter((variant) => Number(variant.id) > 20)
-const favoriteCompanionVariants = ["40", "30", "39", "40"]
+const focusBodyVariants = ["40", "30", "39"]
   .map((id) => variants.find((variant) => variant.id === id))
   .filter(Boolean) as ChatGoblinVariant[]
 
@@ -196,6 +250,7 @@ const html = `<!doctype html>
         --terminal-row-h: 15px;
         --logical-cell-w: calc(var(--terminal-col-w) * 2);
         --logical-cell-h: var(--terminal-row-h);
+        --sidebar-cols: ${sidebarCols};
       }
       body {
         margin: 0;
@@ -236,29 +291,16 @@ const html = `<!doctype html>
       .frames { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
       .frame-block { display: grid; gap: 5px; }
       .frame-label { color: var(--muted); font-size: 11px; }
-      .terminal-grid {
-        display: grid;
-        gap: 0;
-        width: max-content;
+      .sprite-frame {
+        display: inline-flex;
         padding: 8px;
         background: #020403;
         border: 1px solid #102414;
         border-radius: 8px;
-        line-height: 0;
       }
-      .term-cell {
+      .sprite-svg {
         display: block;
-        width: var(--logical-cell-w);
-        height: var(--logical-cell-h);
       }
-      .term-cell.G { background: var(--skin); }
-      .term-cell.S { background: var(--shadow); }
-      .term-cell.P { background: var(--vest); }
-      .term-cell.B { background: var(--mouth); }
-      .term-cell.M { background: var(--shadow); }
-      .term-cell.T { background: var(--token); }
-      .term-cell.W { background: var(--teeth); }
-      .term-cell.empty { background: transparent; }
       .companion-samples {
         margin-bottom: 18px;
       }
@@ -270,74 +312,106 @@ const html = `<!doctype html>
         color: #f0ffe9;
         font-size: 13px;
       }
-      .companion-detail {
+      .section-copy {
         color: var(--muted);
         font-size: 12px;
+        margin: -2px 0 12px;
       }
-      .ledger {
+      .native-sidebar {
         display: flex;
+        flex-direction: column;
         justify-content: space-between;
-        gap: 12px;
-        padding: 6px 8px;
-        border-radius: 10px;
+        width: calc(var(--terminal-col-w) * var(--sidebar-cols));
+        min-height: calc(var(--terminal-row-h) * 24);
+        box-sizing: border-box;
+        padding: calc(var(--terminal-row-h) * 0.75) calc(var(--terminal-col-w) * 2);
+        border-radius: 12px;
         border: 1px solid #102414;
         background: #020403;
+      }
+      .native-sidebar-copy {
+        display: grid;
+        gap: 2px;
+        font-size: 13px;
+        line-height: 1.25;
+      }
+      .native-sidebar-title {
+        color: #f0ffe9;
+        font-weight: 700;
+        margin-bottom: 2px;
+      }
+      .native-sidebar-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
         color: var(--muted);
       }
-      .ledger b, .companion-action {
+      .native-sidebar-row b {
         color: var(--token);
+      }
+      .native-sidebar-status {
+        color: var(--token);
+        margin-top: 2px;
+      }
+      .native-sidebar-context {
+        color: var(--muted);
+      }
+      .native-sidebar-sprite {
+        display: flex;
+        justify-content: center;
+        align-items: flex-end;
+        padding-top: calc(var(--terminal-row-h) * 1.5);
+      }
+      .native-sprite {
+        flex: 0 0 auto;
       }
     </style>
   </head>
   <body>
     <header>
       <h1>CodeGoblin chat goblin review</h1>
-      <p>${variants.length} right-sidebar variants parsed from sidebar.tsx. Preview cells now use terminal geometry: each art cell is two terminal columns wide by one terminal row tall.</p>
+      <p>${variants.length} right-sidebar variants parsed from sidebar.tsx. Sprites below now render as deterministic SVG rectangles from the exact art arrays, with native sidebar width shown first.</p>
     </header>
     <main>
-      <h2 class="section-title">Companion spend action iterations</h2>
+      <h2 class="section-title">Native sidebar footprint</h2>
+      <p class="section-copy">Shape first: these cards show the goblin at the actual ${sidebarCols}-column sidebar width. Companion actions are not broken out here yet because they currently reuse one sprite sequence.</p>
       <div class="grid companion-samples">${[
-        favoriteCompanionVariants[0]
-          ? renderCompanionScene(favoriteCompanionVariants[0], {
-              label: "01. pocket add",
-              headline: "CodeGoblin adds spend",
-              action: "pulls +$0.02 from his pocket",
+        focusBodyVariants[0]
+          ? renderNativeSidebarScene(focusBodyVariants[0], {
+              label: "40. menu clean body",
+              detail: "baseline body at native sidebar size",
               frameIndex: 0,
-              spend: "$1.43",
-              last: "+$0.02",
+              spend: "$0.00",
+              last: "waiting",
+              status: "ready with pockets empty",
+              context: "16,615 tokens · 8% ctx",
             })
           : "",
-        favoriteCompanionVariants[1]
-          ? renderCompanionScene(favoriteCompanionVariants[1], {
-              label: "02. stamp spend",
-              headline: "CodeGoblin adds spend",
-              action: "stamps +$0.02 onto the spend slip",
-              frameIndex: 1,
-              spend: "$1.43",
-              last: "+$0.02",
+        focusBodyVariants[1]
+          ? renderNativeSidebarScene(focusBodyVariants[1], {
+              label: "30. menu wide arms",
+              detail: "same sidebar footprint, alternate body shape",
+              frameIndex: 0,
+              spend: "$0.00",
+              last: "waiting",
+              status: "ready with pockets empty",
+              context: "16,615 tokens · 8% ctx",
             })
           : "",
-        favoriteCompanionVariants[2]
-          ? renderCompanionScene(favoriteCompanionVariants[2], {
-              label: "03. coin toss",
-              headline: "CodeGoblin adds spend",
-              action: "tosses +$0.02 into the spend pile",
-              frameIndex: 2,
-              spend: "$1.43",
-              last: "+$0.02",
-            })
-          : "",
-        favoriteCompanionVariants[3]
-          ? renderCompanionScene(favoriteCompanionVariants[3], {
-              label: "04. total replace",
-              headline: "CodeGoblin adds spend",
-              action: "replaces the total with $1.43",
-              frameIndex: 3,
-              spend: "$1.43",
-              last: "+$0.02",
+        focusBodyVariants[2]
+          ? renderNativeSidebarScene(focusBodyVariants[2], {
+              label: "39. menu token lunge",
+              detail: "forward-leaning body candidate at native scale",
+              frameIndex: 0,
+              spend: "$0.00",
+              last: "waiting",
+              status: "ready with pockets empty",
+              context: "16,615 tokens · 8% ctx",
             })
           : "",
       ].join("")}</div>
+      <h2 class="section-title">Zoomed sprite frames</h2>
+      <p class="section-copy">These are the exact frame rectangles from the sidebar source, just enlarged for inspection.</p>
       <h2 class="section-title">New menu-head/body variants (${menuBodyVariants.length})</h2>
       <div class="grid new-menu-batch">${menuBodyVariants.map(renderVariant).join("")}</div>
       <h2 class="section-title">Earlier sidebar experiments (${originalVariants.length})</h2>
