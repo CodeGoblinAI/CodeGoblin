@@ -49,6 +49,7 @@ export const CodeGoblinBalance = {
   },
   configured: configuredBalances,
   formatFooter,
+  selectedBalanceProvider,
   parseDeepSeekBalance,
   parseMoonshotBalance,
 }
@@ -151,15 +152,30 @@ function parseMoonshotBalance(value: unknown) {
   return { amount, unit: stringValue(data?.currency)?.toUpperCase() ?? "USD" }
 }
 
-function formatFooter(input: { balances?: readonly CodeGoblinBalanceEntry[]; spent?: number }) {
+function selectedBalanceProvider(input: { providerID?: string; modelID?: string }) {
+  const providerID = input.providerID?.toLowerCase()
+  const modelID = input.modelID?.toLowerCase()
+  if (providerID === "deepseek" || modelID?.includes("deepseek")) return "deepseek" as const
+  if (providerID === "moonshot" || providerID === "kimi" || modelID?.includes("moonshot") || modelID?.includes("kimi")) {
+    return "moonshot" as const
+  }
+}
+
+function formatFooter(input: {
+  balances?: readonly CodeGoblinBalanceEntry[]
+  spent?: number
+  providerID?: string
+  modelID?: string
+}) {
   const balances = input.balances ?? []
-  const providerBalances = balances.filter((entry) => entry.provider !== "hoard")
-  if (providerBalances.length) {
-    return `hoard ${providerBalances.map((entry) => `${entry.label} ${formatAmount(entry.amount, entry.unit)}`).join(" · ")}`
+  const selected = selectedBalanceProvider(input)
+  if (selected) {
+    const providerBalance = balances.find((entry) => entry.provider === selected)
+    if (providerBalance) return `${providerBalance.label} ${formatAmount(providerBalance.amount, providerBalance.unit)} left`
+    return
   }
   const hoard = balances.find((entry) => entry.provider === "hoard")
   if (hoard) return `hoard ${formatAmount(Math.max(0, hoard.amount - (input.spent ?? 0)), hoard.unit)} left`
-  return "hoard local"
 }
 
 async function loadLocalEnv(root: string) {

@@ -11,6 +11,7 @@ export const popularProviders = [
   "github-copilot",
   "openai",
   "google",
+  "elevenlabs",
   "openrouter",
   "vercel",
 ]

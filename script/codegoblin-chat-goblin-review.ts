@@ -30,6 +30,12 @@ interface CompanionActivityPreview {
   frames: string[][]
 }
 
+interface CompanionActivityVariantDefinition {
+  name: string
+  summary: string
+  frames: string[][]
+}
+
 const DEFAULT_SIDEBAR_COLS = 46
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -198,9 +204,9 @@ function parseCompanionActionFrames(source: string, sharedRows: { menuHeadWide: 
   )(companionHeadWide, createCompanionFrame, normalizeFrames) as Record<string, string[][]>
 }
 
-function parseCompanionActivityFrames(source: string, sharedRows: { menuHeadWide: GoblinRow[] }) {
-  const start = source.indexOf("const companionActivityFrames")
-  if (start === -1) return {} as Record<string, string[][]>
+function parseCompanionActivityVariantCatalog(source: string, sharedRows: { menuHeadWide: GoblinRow[] }) {
+  const start = source.indexOf("const companionActivityVariantCatalog")
+  if (start === -1) return {} as Record<string, Record<string, CompanionActivityVariantDefinition>>
   const assignmentStart = source.indexOf("=", start)
   const objectStart = source.indexOf("{", assignmentStart)
   const objectEnd = findMatchingBrace(source, objectStart)
@@ -211,7 +217,7 @@ function parseCompanionActivityFrames(source: string, sharedRows: { menuHeadWide
     "createCompanionFrame",
     "normalizeFrames",
     `return ${expression}`,
-  )(companionHeadWide, createCompanionFrame, normalizeFrames) as Record<string, string[][]>
+  )(companionHeadWide, createCompanionFrame, normalizeFrames) as Record<string, Record<string, CompanionActivityVariantDefinition>>
 }
 
 function normalizeFrame(frame: string[]) {
@@ -297,8 +303,8 @@ function renderCompanionAction(preview: CompanionActionPreview) {
 }
 
 function renderCompanionActivity(preview: CompanionActivityPreview) {
-  return `<section class="card ${preview.id === "thinking" ? "recommended" : ""}">
-    <h2>${escapeHtml(preview.name)}</h2>
+  return `<section class="card">
+    <h2>${escapeHtml(preview.id)}. ${escapeHtml(preview.name)}</h2>
     <div class="companion-headline">${escapeHtml(preview.summary)}</div>
     <p class="card-note">${escapeHtml(preview.note)}</p>
     <div class="frames">${preview.frames.map((frame, index) => renderFrame(frame, `f${index + 1}`)).join("")}</div>
@@ -344,7 +350,7 @@ const companionSharedRows = {
 }
 const companionIdleFrames = parseCompanionIdleFrames(source, companionSharedRows)
 const companionActionFrames = parseCompanionActionFrames(source, companionSharedRows)
-const companionActivityFrames = parseCompanionActivityFrames(source, companionSharedRows)
+const companionActivityVariantCatalog = parseCompanionActivityVariantCatalog(source, companionSharedRows)
 const focusBodyVariants = ["40", "30", "39"]
   .map((id) => variants.find((variant) => variant.id === id))
   .filter(Boolean) as ChatGoblinVariant[]
@@ -391,32 +397,29 @@ const companionPreviews: CompanionActionPreview[] = [
     actionFrames: companionActionFrames["04"] ?? companionIdleFrames,
   },
 ]
-const companionActivityPreviews: CompanionActivityPreview[] = [
-  {
-    id: "thinking",
-    name: "thinking",
-    summary: "Ongoing reply-planning loop for real pending/thinking state.",
-    note:
-      "This should run only while the assistant is actually thinking or pending — not as a permanent background loop outside that state.",
-    frames: companionActivityFrames.thinking ?? companionIdleFrames,
-  },
-  {
-    id: "image",
-    name: "image generation",
-    summary: "Dedicated painting/pixel activity for image-progress work.",
-    note:
-      "Use this only during real image-generation progress. It should not replace the spend burst; it is a separate ongoing activity family.",
-    frames: companionActivityFrames.image ?? companionIdleFrames,
-  },
-  {
-    id: "audio",
-    name: "audio generation",
-    summary: "Dedicated waveform/sound-loop activity for audio-progress work.",
-    note:
-      "Use this only during real audio-generation progress. It should stay event-driven by runtime state, not by the dev preview loop alone.",
-    frames: companionActivityFrames.audio ?? companionIdleFrames,
-  },
-]
+const companionActivityNotes = {
+  thinking:
+    "Thinking candidates should only run during real pending/thinking state — not as a permanent background loop outside that state.",
+  image:
+    "Image candidates should only run during real image-generation progress. They should not replace the short spend burst.",
+  audio:
+    "Audio candidates should only run during real audio-generation progress. They should stay event-driven by runtime state, not by the dev preview loop alone.",
+} as const
+const companionActivityLabels = {
+  thinking: "thinking",
+  image: "image generation",
+  audio: "audio generation",
+} as const
+const companionActivityPreviews: CompanionActivityPreview[] = Object.entries(companionActivityVariantCatalog).flatMap(
+  ([kind, variants]) =>
+    Object.entries(variants).map(([variantId, preview]) => ({
+      id: `${companionActivityLabels[kind as keyof typeof companionActivityLabels]} ${variantId}`,
+      name: preview.name,
+      summary: preview.summary,
+      note: companionActivityNotes[kind as keyof typeof companionActivityNotes],
+      frames: preview.frames,
+    })),
+)
 
 const html = `<!doctype html>
 <html lang="en">
@@ -636,7 +639,7 @@ const html = `<!doctype html>
       <p class="section-copy">Current direction: keep sprite 40 as the companion base and treat animation 03 as the best reference so far. Animations 02 and 04 are still weird and need redesign. Preview loops here are dev-only; production behavior should trigger action animation only on real events such as token burn/spend deltas, thinking, or image/audio generation states.</p>
       <div class="grid">${companionPreviews.map(renderCompanionAction).join("")}</div>
       <h2 class="section-title">Companion activity review</h2>
-      <p class="section-copy">These are the ongoing activity families for non-spend work. They are intended for real runtime states like thinking, image progress, and audio progress — not as a replacement for the short spend-burst animation.</p>
+      <p class="section-copy">These are the ongoing activity candidate grids for non-spend work. They are intended for real runtime states like thinking, image progress, and audio progress — not as a replacement for the short spend-burst animation. None of these are final; this section exists so we can compare a bunch of options before promoting one into the main runtime path.</p>
       <div class="grid">${companionActivityPreviews.map(renderCompanionActivity).join("")}</div>
     </main>
   </body>

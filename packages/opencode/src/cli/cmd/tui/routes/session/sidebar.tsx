@@ -76,6 +76,14 @@ function TuiSidebarCompanionGoblin(props: {
     return "01"
   }
 
+  function normalizeCompanionActivityVariant(value: string | undefined) {
+    const cleaned = value?.trim().replace(/^v/i, "")
+    const numeric = Number(cleaned)
+    if (numeric === 2) return "02"
+    if (numeric === 3) return "03"
+    return "01"
+  }
+
   function normalizeCompanionActivity(value: string | undefined) {
     const normalized = value?.trim().toLowerCase()
     if (normalized === "thinking") return "thinking" as const
@@ -664,113 +672,354 @@ function TuiSidebarCompanionGoblin(props: {
       ),
     ]),
   } as const
-  const companionActivityFrames = {
-    thinking: normalizeFrames([
-      createCompanionFrame(
-        ".............W....",
-        ...companionHeadWide,
-        "...GGPPGG........",
-        "..G.PPPP.G.......",
-        "....G..G....W....",
-        "...G....G..W.....",
-      ),
-      createCompanionFrame(
-        "............WW....",
-        ...companionHeadWide,
-        "...GGPPGG........",
-        "..G.PPPP.G..W....",
-        "....G..G.........",
-        "...G....G........",
-      ),
-      createCompanionFrame(
-        "...........WWW....",
-        ...companionHeadWide,
-        "...GGPPGG........",
-        "..G.PPPP.G.......",
-        "....G..G.........",
-        "...G....G........",
-      ),
-      createCompanionFrame(
-        "............WW....",
-        ...companionHeadWide,
-        "...GGPPGG........",
-        "..G.PPPP.G..W....",
-        "....G..G.........",
-        "...G....G........",
-      ),
-    ]),
-    image: normalizeFrames([
-      createCompanionFrame(
-        "..............W...",
-        ...companionHeadWide,
-        "...GGPPGG...WW....",
-        "..G.PPPP.G..WT....",
-        "....G..G....TW....",
-        "...G....G.........",
-      ),
-      createCompanionFrame(
-        ".............WT...",
-        ...companionHeadWide,
-        "...GGPPGG...WT....",
-        "..G.PPPP.G..TT....",
-        "....G..G....WW....",
-        "...G....G.........",
-      ),
-      createCompanionFrame(
-        "..............T...",
-        ...companionHeadWide,
-        "...GGPPGG..WTW....",
-        "..G.PPPP.G..WW....",
-        "....G..G....TT....",
-        "...G....G.........",
-      ),
-      createCompanionFrame(
-        ".............TW...",
-        ...companionHeadWide,
-        "...GGPPGG...WW....",
-        "..G.PPPP.G..TW....",
-        "....G..G....WT....",
-        "...G....G.........",
-      ),
-    ]),
-    audio: normalizeFrames([
-      createCompanionFrame(
-        ".............T....",
-        ...companionHeadWide,
-        "...GGPPGG....W....",
-        "..G.PPPP.G..WT....",
-        "....G..G....W.....",
-        "...G....G.........",
-      ),
-      createCompanionFrame(
-        "............WTW...",
-        ...companionHeadWide,
-        "...GGPPGG...WT....",
-        "..G.PPPP.G.WTW....",
-        "....G..G....WT....",
-        "...G....G.........",
-      ),
-      createCompanionFrame(
-        "...........TWTW...",
-        ...companionHeadWide,
-        "...GGPPGG..TWT....",
-        "..G.PPPP.G.WTW....",
-        "....G..G...TWT....",
-        "...G....G.........",
-      ),
-      createCompanionFrame(
-        "............WTW...",
-        ...companionHeadWide,
-        "...GGPPGG...WT....",
-        "..G.PPPP.G..WT....",
-        "....G..G....W.....",
-        "...G....G.........",
-      ),
-    ]),
+  const companionActivityVariantCatalog = {
+    thinking: {
+      "01": {
+        name: "thought pips",
+        summary: "three tiny thought lights rise over the goblin's shoulder",
+        frames: normalizeFrames([
+          createCompanionFrame(
+            ".............W....",
+            ...companionHeadWide,
+            "...GGPPGG........",
+            "..G.PPPP.G.......",
+            "....G..G....W....",
+            "...G....G..W.....",
+          ),
+          createCompanionFrame(
+            "............WW....",
+            ...companionHeadWide,
+            "...GGPPGG........",
+            "..G.PPPP.G..W....",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            "...........W.W....",
+            ...companionHeadWide,
+            "...GGPPGG........",
+            "..G.PPPP.G.......",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            "............WW....",
+            ...companionHeadWide,
+            "...GGPPGG........",
+            "..G.PPPP.G..W....",
+            "....G..G.........",
+            "...G....G........",
+          ),
+        ]),
+      },
+      "02": {
+        name: "chin spark",
+        summary: "a little idea spark flickers near the face while one hand lifts",
+        frames: normalizeFrames([
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG...W....",
+            "..G.PPWP.G..T....",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            ".............W....",
+            ...companionHeadWide,
+            "...GGPPGG..WT....",
+            "..G.PPWP.G..W....",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            "............WT....",
+            ...companionHeadWide,
+            "...GGPPGG...T....",
+            "..G.PPWP.G..W....",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            ".............W....",
+            ...companionHeadWide,
+            "...GGPPGG..W.....",
+            "..G.PPWP.G..T....",
+            "....G..G.........",
+            "...G....G........",
+          ),
+        ]),
+      },
+      "03": {
+        name: "idea lantern",
+        summary: "a brighter hanging idea-light pulses above the goblin",
+        frames: normalizeFrames([
+          createCompanionFrame(
+            ".............W....",
+            ...companionHeadWide,
+            "...GGPPGG...W....",
+            "..G.PPPP.G..W....",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            "............WT....",
+            ...companionHeadWide,
+            "...GGPPGG...T....",
+            "..G.PPPP.G..W....",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            ".............T....",
+            ...companionHeadWide,
+            "...GGPPGG..WT....",
+            "..G.PPPP.G..T....",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            "............TW....",
+            ...companionHeadWide,
+            "...GGPPGG...W....",
+            "..G.PPPP.G..T....",
+            "....G..G.........",
+            "...G....G........",
+          ),
+        ]),
+      },
+    },
+    image: {
+      "01": {
+        name: "brush dabs",
+        summary: "a little cluster of paint dabs flickers beside the body",
+        frames: normalizeFrames([
+          createCompanionFrame(
+            "..............W...",
+            ...companionHeadWide,
+            "...GGPPGG...WW....",
+            "..G.PPPP.G..WT....",
+            "....G..G....TW....",
+            "...G....G.........",
+          ),
+          createCompanionFrame(
+            ".............WT...",
+            ...companionHeadWide,
+            "...GGPPGG...WT....",
+            "..G.PPPP.G..TT....",
+            "....G..G....WW....",
+            "...G....G.........",
+          ),
+          createCompanionFrame(
+            "..............T...",
+            ...companionHeadWide,
+            "...GGPPGG..WTW....",
+            "..G.PPPP.G..WW....",
+            "....G..G....TT....",
+            "...G....G.........",
+          ),
+          createCompanionFrame(
+            ".............TW...",
+            ...companionHeadWide,
+            "...GGPPGG...WW....",
+            "..G.PPPP.G..TW....",
+            "....G..G....WT....",
+            "...G....G.........",
+          ),
+        ]),
+      },
+      "02": {
+        name: "pixel canvas",
+        summary: "a tiny square canvas builds one block at a time to the right",
+        frames: normalizeFrames([
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG....WW...",
+            "..G.PPPP.G........",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG...WWTT..",
+            "..G.PPPP.G...WW...",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG...WWTT..",
+            "..G.PPPP.G...TTWW.",
+            "....G..G....WWTT..",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG...WTTW..",
+            "..G.PPPP.G...TWWT.",
+            "....G..G....WWTT..",
+            "...G....G........",
+          ),
+        ]),
+      },
+      "03": {
+        name: "frame sparkle",
+        summary: "a little picture frame outline flashes with a bright center spark",
+        frames: normalizeFrames([
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG...W..W..",
+            "..G.PPPP.G..W..W..",
+            "....G..G....W..W..",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG...WTTW..",
+            "..G.PPPP.G..W..W..",
+            "....G..G....WTTW..",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG...WWWW..",
+            "..G.PPPP.G..WTTW..",
+            "....G..G....WWWW..",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG...WTTW..",
+            "..G.PPPP.G..W..W..",
+            "....G..G....WTTW..",
+            "...G....G........",
+          ),
+        ]),
+      },
+    },
+    audio: {
+      "01": {
+        name: "pulse bars",
+        summary: "stacked sound bars bounce beside the goblin",
+        frames: normalizeFrames([
+          createCompanionFrame(
+            ".............T....",
+            ...companionHeadWide,
+            "...GGPPGG....W....",
+            "..G.PPPP.G..WT....",
+            "....G..G....W.....",
+            "...G....G.........",
+          ),
+          createCompanionFrame(
+            "............WTW...",
+            ...companionHeadWide,
+            "...GGPPGG...WT....",
+            "..G.PPPP.G.WTW....",
+            "....G..G....WT....",
+            "...G....G.........",
+          ),
+          createCompanionFrame(
+            "...........TWTW...",
+            ...companionHeadWide,
+            "...GGPPGG..TWT....",
+            "..G.PPPP.G.WTW....",
+            "....G..G...TWT....",
+            "...G....G.........",
+          ),
+          createCompanionFrame(
+            "............WTW...",
+            ...companionHeadWide,
+            "...GGPPGG...WT....",
+            "..G.PPPP.G..WT....",
+            "....G..G....W.....",
+            "...G....G.........",
+          ),
+        ]),
+      },
+      "02": {
+        name: "echo rings",
+        summary: "sound ripples flare above the goblin in widening rings",
+        frames: normalizeFrames([
+          createCompanionFrame(
+            ".............W....",
+            ...companionHeadWide,
+            "...GGPPGG........",
+            "..G.PPPP.G.......",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            "............WTW...",
+            ...companionHeadWide,
+            "...GGPPGG....W....",
+            "..G.PPPP.G.......",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            "...........WTTTW..",
+            ...companionHeadWide,
+            "...GGPPGG...WT....",
+            "..G.PPPP.G.......",
+            "....G..G.........",
+            "...G....G........",
+          ),
+          createCompanionFrame(
+            "............WTW...",
+            ...companionHeadWide,
+            "...GGPPGG....W....",
+            "..G.PPPP.G.......",
+            "....G..G.........",
+            "...G....G........",
+          ),
+        ]),
+      },
+      "03": {
+        name: "mixer sliders",
+        summary: "small control sliders hop between levels to the right",
+        frames: normalizeFrames([
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG...W.T...",
+            "..G.PPPP.G..W.T...",
+            "....G..G....W.....",
+            "...G....G.........",
+          ),
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG...WT....",
+            "..G.PPPP.G..WTT...",
+            "....G..G....W.....",
+            "...G....G.........",
+          ),
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG....T.W..",
+            "..G.PPPP.G..TT.W..",
+            "....G..G.....W....",
+            "...G....G.........",
+          ),
+          createCompanionFrame(
+            ...companionHeadWide,
+            "...GGPPGG...WT....",
+            "..G.PPPP.G..W.T...",
+            "....G..G....W.....",
+            "...G....G.........",
+          ),
+        ]),
+      },
+    },
   } as const
+  const companionActivityDefaultVariants = {
+    thinking: "01",
+    image: "01",
+    audio: "01",
+  } as const
+  type CompanionActivityKey = keyof typeof companionActivityVariantCatalog
+  type CompanionActivityVariantKey = "01" | "02" | "03"
 
   const requestedVariantId = normalizeChatGoblinVariantId(process.env.CODEGOBLIN_CHAT_GOBLIN_VARIANT)
   const actionVariantId = normalizeCompanionActionVariant(process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT)
+  const activityVariantId = normalizeCompanionActivityVariant(process.env.CODEGOBLIN_COMPANION_ACTIVITY_VARIANT)
   const motionMode = normalizeChatGoblinMode(
     process.env.CODEGOBLIN_CHAT_GOBLIN_MODE ??
       (process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT !== undefined ? "companion" : "pinned"),
@@ -807,13 +1056,19 @@ function TuiSidebarCompanionGoblin(props: {
       chatGoblinVariants.find((variant) => variant.id === "40") ??
       chatGoblinVariants[0],
   )
-  const frames = createMemo(() => {
+  const frames = createMemo<string[][]>(() => {
     if (motionMode === "companion") {
       if (actionActive()) {
         return companionActionFrames[actionVariantId as keyof typeof companionActionFrames] ?? companionIdleFrames
       }
-      if (currentActivityKind() !== "idle") {
-        return companionActivityFrames[currentActivityKind() as keyof typeof companionActivityFrames] ?? companionIdleFrames
+      const kind = currentActivityKind()
+      if (kind !== "idle") {
+        const variants = companionActivityVariantCatalog[kind satisfies CompanionActivityKey]
+        const variantId: CompanionActivityVariantKey =
+          companionPreviewEnabled && previewActivityKind !== "idle"
+            ? activityVariantId
+            : companionActivityDefaultVariants[kind]
+        return variants[variantId].frames ?? companionIdleFrames
       }
       return companionIdleFrames
     }

@@ -16,6 +16,20 @@ import { useLanguage } from "@/context/language"
 const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "opencode" && (!cost || cost.input === 0)
 
+const MODEL_BUCKET_ORDER = ["Text models", "Image models", "Voice & audio models", "Other models"]
+
+function modelBucket(model: { id: string; name?: string; family?: string; capabilities?: any }) {
+  const haystack = `${model.id} ${model.name ?? ""} ${model.family ?? ""}`.toLowerCase()
+  if (model.capabilities?.output?.audio || model.capabilities?.input?.audio || /\b(tts|voice|audio|music|elevenlabs)\b/.test(haystack)) {
+    return "Voice & audio models"
+  }
+  if (model.capabilities?.output?.image || model.capabilities?.input?.image || /\b(image|img|wan|gpt-image|dall-e|imagine)\b/.test(haystack)) {
+    return "Image models"
+  }
+  if (model.capabilities?.output?.text || model.capabilities?.input?.text) return "Text models"
+  return "Other models"
+}
+
 type ModelState = ReturnType<typeof useLocal>["model"]
 
 const ModelList: Component<{
@@ -43,15 +57,17 @@ const ModelList: Component<{
       key={(x) => `${x.provider.id}:${x.id}`}
       items={models}
       current={model.current()}
-      filterKeys={["provider.name", "name", "id"]}
+      filterKeys={["provider.name", "name", "id", "family"]}
       sortBy={(a, b) => a.name.localeCompare(b.name)}
-      groupBy={(x) => x.provider.name}
+      groupBy={modelBucket}
       sortGroupsBy={(a, b) => {
-        const aProvider = a.items[0].provider.id
-        const bProvider = b.items[0].provider.id
+        const bucketOrder = MODEL_BUCKET_ORDER.indexOf(a.category) - MODEL_BUCKET_ORDER.indexOf(b.category)
+        if (bucketOrder !== 0) return bucketOrder
+        const aProvider = a.items[0]?.provider.id ?? ""
+        const bProvider = b.items[0]?.provider.id ?? ""
         if (popularProviders.includes(aProvider) && !popularProviders.includes(bProvider)) return -1
         if (!popularProviders.includes(aProvider) && popularProviders.includes(bProvider)) return 1
-        return popularProviders.indexOf(aProvider) - popularProviders.indexOf(bProvider)
+        return aProvider.localeCompare(bProvider)
       }}
       itemWrapper={(item, node) => (
         <Tooltip
@@ -73,6 +89,7 @@ const ModelList: Component<{
       {(i) => (
         <div class="w-full flex items-center gap-x-2 text-13-regular">
           <span class="truncate">{i.name}</span>
+          <span class="shrink-0 text-text-muted">{i.provider.name}</span>
           <Show when={isFree(i.provider.id, i.cost)}>
             <Tag>{language.t("model.tag.free")}</Tag>
           </Show>

@@ -9,6 +9,32 @@ import { DialogVariant } from "./dialog-variant"
 import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
 
+const MODEL_BUCKET_ORDER = ["Text models", "Image models", "Voice & audio models", "Other models"]
+
+function modelBucket(modelID: string, info: { family?: string; name?: string; capabilities?: any }) {
+  const haystack = `${modelID} ${info.name ?? ""} ${info.family ?? ""}`.toLowerCase()
+  if (info.capabilities?.output?.audio || info.capabilities?.input?.audio || /\b(tts|voice|audio|music|elevenlabs)\b/.test(haystack)) {
+    return "Voice & audio models"
+  }
+  if (info.capabilities?.output?.image || info.capabilities?.input?.image || /\b(image|img|wan|gpt-image|dall-e|imagine)\b/.test(haystack)) {
+    return "Image models"
+  }
+  if (info.capabilities?.output?.text || info.capabilities?.input?.text) return "Text models"
+  return "Other models"
+}
+
+function modelCategory(providerName: string, modelID: string, info: { family?: string; name?: string; capabilities?: any }) {
+  return `${modelBucket(modelID, info)} · ${providerName}`
+}
+
+function sortModelCategories(a: string, b: string) {
+  const [aBucket, aProvider = ""] = a.split(" · ")
+  const [bBucket, bProvider = ""] = b.split(" · ")
+  const order = MODEL_BUCKET_ORDER.indexOf(aBucket) - MODEL_BUCKET_ORDER.indexOf(bBucket)
+  if (order !== 0) return order
+  return aProvider.localeCompare(bProvider)
+}
+
 export function DialogModel(props: { providerID?: string }) {
   const local = useLocal()
   const sync = useSync()
@@ -39,7 +65,7 @@ export function DialogModel(props: { providerID?: string }) {
             value: { providerID: provider.id, modelID: model.id },
             title: model.name ?? item.modelID,
             description: provider.name,
-            category,
+            category: `${category} · ${modelBucket(model.id, model)}`,
             disabled: provider.id === "opencode" && model.id.includes("-nano"),
             footer: model.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
             onSelect: () => {
@@ -76,7 +102,7 @@ export function DialogModel(props: { providerID?: string }) {
             description: favorites.some((item) => item.providerID === provider.id && item.modelID === model)
               ? "(Favorite)"
               : undefined,
-            category: connected() ? provider.name : undefined,
+            category: connected() ? modelCategory(provider.name, model, info) : modelBucket(model, info),
             disabled: provider.id === "opencode" && model.includes("-nano"),
             footer: info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
             onSelect() {
@@ -112,12 +138,15 @@ export function DialogModel(props: { providerID?: string }) {
 
     if (needle) {
       return [
-        ...fuzzysort.go(needle, providerOptions, { keys: ["title", "category"] }).map((x) => x.obj),
+        ...fuzzysort.go(needle, providerOptions, { keys: ["title", "category", "description"] }).map((x) => x.obj),
         ...fuzzysort.go(needle, popularProviders, { keys: ["title"] }).map((x) => x.obj),
       ]
     }
 
-    return [...favoriteOptions, ...recentOptions, ...providerOptions, ...popularProviders]
+    return [...favoriteOptions, ...recentOptions, ...providerOptions, ...popularProviders].sort((a, b) => {
+      if (!a.category || !b.category) return 0
+      return sortModelCategories(a.category, b.category)
+    })
   })
 
   const provider = createMemo(() =>

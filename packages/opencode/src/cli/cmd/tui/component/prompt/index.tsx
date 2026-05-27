@@ -60,7 +60,14 @@ import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { useArgs } from "@tui/context/args"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { type WorkspaceStatus } from "../workspace-label"
-import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
+import {
+  COMMAND_PALETTE_COMMAND,
+  OPENCODE_BASE_MODE,
+  useBindings,
+  useCommandShortcut,
+  useLeaderActive,
+  useOpencodeKeymap,
+} from "../../keymap"
 import { useTuiConfig } from "../../context/tui-config"
 import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
 import { CodeGoblinBalance } from "@/codegoblin/balance"
@@ -367,8 +374,15 @@ export function Prompt(props: PromptProps) {
   })
 
   const tokenHoard = createMemo(() => {
+    if (!props.sessionID) return
     const spent = props.sessionID ? (sync.session.get(props.sessionID)?.cost ?? 0) : 0
-    return CodeGoblinBalance.formatFooter({ balances: balanceState()?.balances, spent })
+    const selected = local.model.current()
+    return CodeGoblinBalance.formatFooter({
+      balances: balanceState()?.balances,
+      spent,
+      providerID: selected?.providerID,
+      modelID: selected?.modelID,
+    })
   })
 
   const [store, setStore] = createStore<{
@@ -881,6 +895,15 @@ export function Prompt(props: PromptProps) {
       target: inputTarget,
       enabled: inputTarget() !== undefined && !props.disabled,
       bindings: tuiConfig.keybinds.get("prompt.paste"),
+    }
+  })
+
+  useBindings(() => {
+    return {
+      target: inputTarget,
+      enabled: inputTarget() !== undefined && !props.disabled,
+      priority: 100,
+      bindings: tuiConfig.keybinds.gather("prompt.palette", [COMMAND_PALETTE_COMMAND]),
     }
   })
 

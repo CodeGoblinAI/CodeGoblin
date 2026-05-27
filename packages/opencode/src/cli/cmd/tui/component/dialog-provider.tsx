@@ -23,6 +23,7 @@ const PROVIDER_PRIORITY: Record<string, number> = {
   "github-copilot": 3,
   anthropic: 4,
   google: 5,
+  elevenlabs: 6,
 }
 
 const CUSTOM_PROVIDER_OPTION_VALUE = "__opencode_custom_provider__"
@@ -58,6 +59,7 @@ export function providerOptions(list: { id: string; name: string }[]): ProviderO
           opencode: "(Upstream hosted)",
           anthropic: "(API key)",
           openai: "(ChatGPT Plus/Pro or API key)",
+          elevenlabs: "(Voice, TTS, and music API key)",
           "opencode-go": "Upstream subscription provider",
         }[provider.id],
         category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Providers",

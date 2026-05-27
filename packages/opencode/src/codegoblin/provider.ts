@@ -80,6 +80,13 @@ export const CodeGoblinProvider = {
   },
 } as const
 
+export const ElevenLabsProvider = {
+  id: ProviderID.make("elevenlabs"),
+  name: "ElevenLabs",
+  env: ["ELEVENLABS_API_KEY", "CODEGOBLIN_ELEVENLABS_API_KEY"],
+  baseURL: "https://api.elevenlabs.io/v1",
+} as const
+
 function model(id: keyof typeof CodeGoblinProvider.models): Model {
   const item = CodeGoblinProvider.models[id]
   return {
@@ -155,6 +162,20 @@ export function codeGoblinProviderInfo(): Info {
   }
 }
 
+export function elevenLabsProviderInfo(): Info {
+  return {
+    id: ElevenLabsProvider.id,
+    name: ElevenLabsProvider.name,
+    source: "custom",
+    env: [...ElevenLabsProvider.env],
+    options: {
+      baseURL: ElevenLabsProvider.baseURL,
+      name: "elevenlabs",
+    },
+    models: {},
+  }
+}
+
 export function augmentImageModelCatalog(catalog: Record<string, Info>) {
   addImageModel(catalog, "openai", "gpt-image-1", {
     name: "GPT Image 1",
@@ -191,6 +212,7 @@ export function augmentImageModelCatalog(catalog: Record<string, Info>) {
 }
 
 export function augmentAudioModelCatalog(catalog: Record<string, Info>) {
+  ensureAudioProvider(catalog, "elevenlabs")
   addAudioModel(catalog, "elevenlabs", "eleven_multilingual_v2", {
     name: "ElevenLabs Text to Speech",
     family: "elevenlabs",
@@ -206,6 +228,16 @@ export function augmentAudioModelCatalog(catalog: Record<string, Info>) {
     family: "elevenlabs",
     apiURL: "https://api.elevenlabs.io/v1",
   })
+}
+
+function ensureAudioProvider(catalog: Record<string, Info>, providerID: "elevenlabs") {
+  catalog[providerID] ??= elevenLabsProviderInfo()
+  const provider = catalog[providerID]
+  for (const env of ElevenLabsProvider.env) {
+    if (!provider.env.includes(env)) provider.env.push(env)
+  }
+  provider.options.baseURL ??= ElevenLabsProvider.baseURL
+  provider.options.name ??= "elevenlabs"
 }
 
 function addImageModel(

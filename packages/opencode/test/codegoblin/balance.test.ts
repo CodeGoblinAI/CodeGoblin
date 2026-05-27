@@ -4,13 +4,19 @@ import path from "path"
 import { CodeGoblinBalance } from "@/codegoblin/balance"
 
 describe("CodeGoblin balance display", () => {
-  test("formats DeepSeek and Moonshot manual balances without rounding away small credits", () => {
+  test("formats only the selected provider balance without rounding away small credits", () => {
     const balances = CodeGoblinBalance.configured({
       CODEGOBLIN_DEEPSEEK_BALANCE_USD: "2.12",
       CODEGOBLIN_MOONSHOT_BALANCE_USD: "2.22376",
     })
 
-    expect(CodeGoblinBalance.formatFooter({ balances })).toBe("hoard deepseek $2.12 · moon $2.22376")
+    expect(CodeGoblinBalance.formatFooter({ balances, providerID: "deepseek", modelID: "deepseek-chat" })).toBe(
+      "deepseek $2.12 left",
+    )
+    expect(CodeGoblinBalance.formatFooter({ balances, providerID: "google", modelID: "gemini-2.5-pro" })).toBeUndefined()
+    expect(CodeGoblinBalance.formatFooter({ balances, providerID: "moonshot", modelID: "kimi-k2" })).toBe(
+      "moon $2.22376 left",
+    )
   })
 
   test("ignores invalid manual balances instead of surfacing a giant error", () => {
@@ -20,7 +26,16 @@ describe("CodeGoblin balance display", () => {
     })
 
     expect(balances).toEqual([])
-    expect(CodeGoblinBalance.formatFooter({ balances })).toBe("hoard local")
+    expect(CodeGoblinBalance.formatFooter({ balances })).toBeUndefined()
+  })
+
+  test("keeps generic hoard fallback local when no provider-specific balance is selected", () => {
+    const balances = CodeGoblinBalance.configured({
+      CODEGOBLIN_TOKEN_HOARD_USD: "5",
+      CODEGOBLIN_DEEPSEEK_BALANCE_USD: "2.12",
+    })
+
+    expect(CodeGoblinBalance.formatFooter({ balances, spent: 1.25 })).toBe("hoard $3.75 left")
   })
 
   test("parses live DeepSeek balance responses", () => {

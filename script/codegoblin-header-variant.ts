@@ -30,12 +30,14 @@ const rawVariant =
       arg !== "--chat-goblin-variant" &&
         arg !== "--chat-goblin-frame" &&
       arg !== "--companion-activity" &&
+      arg !== "--companion-activity-variant" &&
       arg !== "--companion-action" &&
       args[index - 1] !== "--runner-variant" &&
       args[index - 1] !== "--chat-goblin" &&
       args[index - 1] !== "--chat-goblin-variant" &&
         args[index - 1] !== "--chat-goblin-frame" &&
       args[index - 1] !== "--companion-activity" &&
+      args[index - 1] !== "--companion-activity-variant" &&
       args[index - 1] !== "--companion-action" &&
       !arg.startsWith("--"),
   ) ?? "01"
@@ -53,15 +55,18 @@ const showChatGoblin =
   args.includes("--chat-goblin-variant") ||
   args.includes("--chat-goblin-frame") ||
   args.includes("--companion-activity") ||
+  args.includes("--companion-activity-variant") ||
   args.includes("--companion-action") ||
   Boolean(getOptionValue("--chat-goblin")) ||
   Boolean(getOptionValue("--chat-goblin-variant")) ||
   Boolean(getOptionValue("--chat-goblin-frame")) ||
   Boolean(getOptionValue("--companion-activity")) ||
+  Boolean(getOptionValue("--companion-activity-variant")) ||
   Boolean(getOptionValue("--companion-action"))
 const rawChatGoblinVariant = getOptionValue("--chat-goblin") ?? getOptionValue("--chat-goblin-variant") ?? "40"
 const rawChatGoblinFrame = getOptionValue("--chat-goblin-frame")
 const rawCompanionActivity = getOptionValue("--companion-activity")
+const rawCompanionActivityVariant = getOptionValue("--companion-activity-variant")
 const showCompanionMode =
   args.includes("companion") ||
   args.includes("--companion-action") ||
@@ -147,6 +152,23 @@ const companionActivityNames = {
   image: "paint image",
   audio: "mix audio",
 } as const
+const companionActivityVariantNames = {
+  thinking: {
+    "01": "thought pips",
+    "02": "chin spark",
+    "03": "idea lantern",
+  },
+  image: {
+    "01": "brush dabs",
+    "02": "pixel canvas",
+    "03": "frame sparkle",
+  },
+  audio: {
+    "01": "pulse bars",
+    "02": "echo rings",
+    "03": "mixer sliders",
+  },
+} as const
 const companionActionVariantCount = Object.keys(companionActionVariantNames).length
 
 if (args.includes("--list") || args.includes("list")) {
@@ -182,6 +204,9 @@ if (args.includes("--list-companion") || args.includes("list-companion")) {
   console.log("\n# activity previews")
   for (const [activity, label] of Object.entries(companionActivityNames)) {
     console.log(`bun run dev:companion:${activity}  # ${label}`)
+    for (const [variantId, variantLabel] of Object.entries(companionActivityVariantNames[activity as keyof typeof companionActivityVariantNames])) {
+      console.log(`bun run dev:companion:${activity}:${variantId}  # ${variantLabel}`)
+    }
   }
   process.exit(0)
 }
@@ -225,6 +250,9 @@ const companionActionNumeric = rawCompanionActionVariant
   ? Number(rawCompanionActionVariant.trim().replace(/^v/i, ""))
   : undefined
 const companionActivity = rawCompanionActivity?.trim().toLowerCase() as keyof typeof companionActivityNames | undefined
+const companionActivityVariantNumeric = rawCompanionActivityVariant
+  ? Number(rawCompanionActivityVariant.trim().replace(/^v/i, ""))
+  : undefined
 
 if (
   showCompanionMode &&
@@ -244,10 +272,22 @@ if (companionActivity && !(companionActivity in companionActivityNames)) {
   process.exit(1)
 }
 
+if (
+  companionActivity &&
+  rawCompanionActivityVariant !== undefined &&
+  (!Number.isInteger(companionActivityVariantNumeric) || companionActivityVariantNumeric < 1 || companionActivityVariantNumeric > 3)
+) {
+  console.error(`Expected a companion activity variant from 1 to 3, got: ${rawCompanionActivityVariant}`)
+  process.exit(1)
+}
+
 const variant = String(numeric).padStart(2, "0")
 const runnerVariant = String(runnerNumeric).padStart(2, "0")
 const chatGoblinVariant = String(chatGoblinNumeric).padStart(2, "0")
 const companionActionVariant = companionActionNumeric ? String(companionActionNumeric).padStart(2, "0") : undefined
+const companionActivityVariant = companionActivity
+  ? String(companionActivityVariantNumeric ?? 1).padStart(2, "0")
+  : undefined
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
 console.log(`Starting CodeGoblin TUI header variant ${variant}...`)
@@ -269,7 +309,9 @@ if (showChatGoblin) {
     console.log(
       `Companion base sprite ${chatGoblinVariant} enabled (${chatGoblinVariantNames[chatGoblinVariant as keyof typeof chatGoblinVariantNames]}).`,
     )
-    console.log(`Companion activity preview enabled (${companionActivityNames[companionActivity]}).`)
+    console.log(
+      `Companion activity preview enabled (${companionActivityNames[companionActivity]}; variant ${companionActivityVariant} ${companionActivityVariantNames[companionActivity][companionActivityVariant as keyof (typeof companionActivityVariantNames)[typeof companionActivity]]}).`,
+    )
     if (chatGoblinFrameNumeric !== undefined) {
       console.log(`Companion frame ${chatGoblinFrameNumeric} locked for comparison.`)
     }
@@ -300,6 +342,7 @@ const child = Bun.spawn([process.execPath, "run", "--cwd", "packages/opencode", 
             ? {
                 ...(companionActionVariant ? { CODEGOBLIN_COMPANION_ACTION_VARIANT: companionActionVariant } : {}),
                 ...(companionActivity ? { CODEGOBLIN_COMPANION_ACTIVITY: companionActivity } : {}),
+                ...(companionActivityVariant ? { CODEGOBLIN_COMPANION_ACTIVITY_VARIANT: companionActivityVariant } : {}),
                 CODEGOBLIN_COMPANION_PREVIEW: "1",
               }
             : {}),
