@@ -132,12 +132,6 @@ const companionActionVariantNames = {
   "03": "coin toss",
   "04": "total replace",
 } as const
-const companionActionPreviewSprites = {
-  "01": "30",
-  "02": "25",
-  "03": "39",
-  "04": "23",
-} as const
 const companionActionVariantCount = Object.keys(companionActionVariantNames).length
 
 if (args.includes("--list") || args.includes("list")) {
@@ -233,12 +227,11 @@ if (showRunner) {
 }
 if (showChatGoblin) {
   if (showCompanionMode && companionActionVariant) {
-    const companionActionSprite = companionActionPreviewSprites[companionActionVariant as keyof typeof companionActionPreviewSprites]
     console.log(
-      `Companion idle sprite ${chatGoblinVariant} enabled (${chatGoblinVariantNames[chatGoblinVariant as keyof typeof chatGoblinVariantNames]}).`,
+      `Companion base sprite ${chatGoblinVariant} enabled (${chatGoblinVariantNames[chatGoblinVariant as keyof typeof chatGoblinVariantNames]}).`,
     )
     console.log(
-      `Companion action ${companionActionVariant} enabled (${companionActionVariantNames[companionActionVariant as keyof typeof companionActionVariantNames]}; action sprite ${companionActionSprite} ${chatGoblinVariantNames[companionActionSprite as keyof typeof chatGoblinVariantNames]}).`,
+      `Companion action ${companionActionVariant} enabled (${companionActionVariantNames[companionActionVariant as keyof typeof companionActionVariantNames]}; dedicated companion animation).`,
     )
     if (chatGoblinFrameNumeric !== undefined) {
       console.log(`Companion frame ${chatGoblinFrameNumeric} locked for comparison.`)

@@ -55,6 +55,10 @@ function TuiSidebarCompanionGoblin(props: {
     return typeof row === "string" ? [row, row, row, row] : row
   }
 
+  function staticRow(row: GoblinRow) {
+    return typeof row === "string" ? row : row[0]
+  }
+
   function createChatGoblinVariant(id: string, name: string, rows: GoblinRow[]): ChatGoblinVariant {
     const cycledRows = rows.map(cycle)
     return {
@@ -75,17 +79,6 @@ function TuiSidebarCompanionGoblin(props: {
     const normalized = value?.trim().toLowerCase()
     if (normalized === "companion") return "companion" as const
     return "pinned" as const
-  }
-
-  function companionIdleVariant(baseVariantId: string) {
-    return baseVariantId
-  }
-
-  function companionActionVariant(actionVariantId: string) {
-    if (actionVariantId === "02") return "25"
-    if (actionVariantId === "03") return "39"
-    if (actionVariantId === "04") return "23"
-    return "30"
   }
 
   const menuHeadSmall: GoblinRow[] = [
@@ -487,6 +480,182 @@ function TuiSidebarCompanionGoblin(props: {
     return numeric - 1
   }
 
+  function createCompanionFrame(...rows: string[]) {
+    return rows
+  }
+
+  const companionHeadWide = menuHeadWide.map(staticRow)
+  const companionIdleFrames = normalizeFrames([
+    createCompanionFrame(
+      ...companionHeadWide,
+      "...GGPPGG...",
+      "..G.PPPP.G..",
+      "....G..G....",
+      "...G....G...",
+    ),
+    createCompanionFrame(
+      ...companionHeadWide,
+      "...GGPPGG...",
+      "..G.PPPP.G..",
+      "....G..G....",
+      "...G....G...",
+    ),
+    createCompanionFrame(
+      ...companionHeadWide,
+      "...GGPPGG...",
+      "..G.PPPP.G..",
+      "....G..G....",
+      "...G....G...",
+    ),
+    createCompanionFrame(
+      ...companionHeadWide,
+      "...GGPPGG...",
+      "..G.PPPP.G..",
+      "....G..G....",
+      "...G....G...",
+    ),
+  ])
+  const companionActionFrames = {
+    "01": normalizeFrames([
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGPPGG..T.",
+        "..G.PPPP.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGPPGGT...",
+        "..G.PPPP.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGPPTGG...",
+        "..G.PPPP.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGTPPGG...",
+        "..G.PPPP.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+    ]),
+    "02": normalizeFrames([
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGWWGG...",
+        "..G.WWWW.G..",
+        "....GT.G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGWWGG...",
+        "..G.WWTW.G..",
+        "....GT.G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGWWGG...",
+        "..G.WTTW.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGWWGG...",
+        "..G.TTTT.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+    ]),
+    "03": normalizeFrames([
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGPPGG..T.",
+        "..G.PPPP.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        ".....GGGG.....",
+        "...GGGGGGGG..T",
+        "G..GGGGGGGG..G",
+        ".GGGGGGGGGGGG.",
+        "..GGGBBGGBGG..",
+        "..GGGBBGGBGG..",
+        "....GGGGGGG...",
+        "...GGPPGG....",
+        "..G.PPPP.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        "....TGGGG.....",
+        "...GGGGGGGG...",
+        "G..GGGGGGGG..G",
+        ".GGGGGGGGGGGG.",
+        "..GGGBBGGBGG..",
+        "..GGGBBGGBGG..",
+        "....GGGGGGG...",
+        "...GGPPGG....",
+        "..G.PPPP.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        ".....GGGG.....",
+        "T..GGGGGGGG...",
+        "G..GGGGGGGG..G",
+        ".GGGGGGGGGGGG.",
+        "..GGGBBGGBGG..",
+        "..GGGBBGGBGG..",
+        "....GGGGGGG...",
+        "...GGPPGG....",
+        "..G.PPPP.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+    ]),
+    "04": normalizeFrames([
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGWWGG...",
+        "..G.WWWW.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGWWGG...",
+        "..G.WTTW.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGTTGG...",
+        "..G.TTTT.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+      createCompanionFrame(
+        ...companionHeadWide,
+        "...GGWWGG...",
+        "..G.TTTT.G..",
+        "....G..G....",
+        "...G....G...",
+      ),
+    ]),
+  } as const
+
   const requestedVariantId = normalizeChatGoblinVariantId(process.env.CODEGOBLIN_CHAT_GOBLIN_VARIANT)
   const actionVariantId = normalizeCompanionActionVariant(process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT)
   const motionMode = normalizeChatGoblinMode(
@@ -513,18 +682,21 @@ function TuiSidebarCompanionGoblin(props: {
     return previewActionAge()
   })
   const actionActive = createMemo(() => effectiveActionAge() >= 0 && effectiveActionAge() < 14)
-  const displayVariantId = createMemo(() => {
-    if (motionMode === "pinned") return requestedVariantId
-    if (actionActive()) return companionActionVariant(actionVariantId)
-    return companionIdleVariant(requestedVariantId)
-  })
   const selectedVariant = createMemo(
     () =>
-      chatGoblinVariants.find((variant) => variant.id === displayVariantId()) ??
+      chatGoblinVariants.find((variant) => variant.id === requestedVariantId) ??
       chatGoblinVariants.find((variant) => variant.id === "40") ??
       chatGoblinVariants[0],
   )
-  const frames = createMemo(() => normalizeFrames(selectedVariant().frames))
+  const frames = createMemo(() => {
+    if (motionMode === "companion") {
+      if (actionActive()) {
+        return companionActionFrames[actionVariantId as keyof typeof companionActionFrames] ?? companionIdleFrames
+      }
+      return companionIdleFrames
+    }
+    return normalizeFrames(selectedVariant().frames)
+  })
   const width = createMemo(() => Math.max(...frames().flatMap((frame) => frame.map((row) => row.length))))
   const sessionSpendText = createMemo(() => money.format(Math.max(0, props.sessionCost)))
   const lastSpendText = createMemo(() => money.format(Math.max(0, lastSpend())))
