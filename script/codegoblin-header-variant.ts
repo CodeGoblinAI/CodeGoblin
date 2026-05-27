@@ -73,11 +73,16 @@ const runnerVariantNames = {
 } as const
 const runnerVariantCount = Object.keys(runnerVariantNames).length
 const chatGoblinVariantNames = {
-  "01": "nibble pip",
-  "02": "crouch munch",
-  "03": "satchel chew",
-  "04": "hood pip eater",
-  "05": "compact deluxe munch",
+  "01": "gate snap",
+  "02": "long-ear gulp",
+  "03": "hood maw",
+  "04": "token chomper",
+  "05": "cave grinner",
+  "06": "bat-ear chew",
+  "07": "crown crunch",
+  "08": "heavy jaw",
+  "09": "sly nib",
+  "10": "deluxe maw",
 } as const
 const chatGoblinVariantCount = Object.keys(chatGoblinVariantNames).length
 

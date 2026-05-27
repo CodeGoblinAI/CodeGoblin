@@ -11,6 +11,8 @@ import type { JSX } from "@opentui/solid"
 import { getScrollAcceleration } from "../../util/scroll"
 import { WorkspaceLabel } from "../../component/workspace-label"
 
+export const SESSION_SIDEBAR_WIDTH = 46
+
 function isChatGoblinEnabled(value: string | undefined) {
   const normalized = value?.trim().toLowerCase()
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
@@ -30,57 +32,123 @@ function TuiSidebarTokenGoblin(props: { theme: any }) {
     frames: string[][]
   }
 
+  type GoblinFrameCycle = [string, string, string, string]
+  type GoblinRow = string | GoblinFrameCycle
+
+  function cycle(row: GoblinRow): GoblinFrameCycle {
+    return typeof row === "string" ? [row, row, row, row] : row
+  }
+
+  function createChatGoblinVariant(id: string, name: string, rows: GoblinRow[]): ChatGoblinVariant {
+    const cycledRows = rows.map(cycle)
+    return {
+      id,
+      name,
+      frames: Array.from({ length: 4 }, (_, frameIndex) => cycledRows.map((row) => row[frameIndex])),
+    }
+  }
+
   const chatGoblinVariants: ChatGoblinVariant[] = [
-    {
-      id: "01",
-      name: "nibble pip",
-      frames: [
-        ["....S..S.....", "...SGGGGS....", "..SGBBBBGT...", ".SGPPPPPGTT..", "..GGPPMPGG...", "...GPPPPG....", "..G.G..G.....", ".G...G..G...."],
-        ["....S..S.....", "...SGGGGS....", "..SGBBBBGGT..", "..GGPPPPPGT..", "...GGPMPGT...", "...GPPPGG....", "..G..GG......", ".G...G......."],
-        ["....S..S.....", "...SGGGGS....", "..SGBBBBT....", ".SGPPPPPGG...", "..GGPPMPGG...", "...GPPPPG....", "..G.G..G.....", ".G...G..G...."],
-        ["....S..S.....", "...SGGGGS....", "..SGBBBBG....", ".SGPPPPPGG...", "..GGPPMPGG...", "...GPPPGG....", "..G..GG......", ".G...G......."],
-      ],
-    },
-    {
-      id: "02",
-      name: "crouch munch",
-      frames: [
-        ["...P..P......", "..PGGGGGP....", ".PGBBBBGGT...", "PGPPPPPPGTT..", ".GGPPMPPGG...", "..GGPPPPG....", "...G.G.G.....", "..G..G..G...."],
-        ["...P..P......", "..PGGGGGP....", ".PGBBBBGGTT..", ".GGPPPPPGT...", "..GGPMPGT....", "...GPPPGG....", "..G.G.G......", ".G..G........"],
-        ["...P..P......", "..PGGGGGP....", ".PGBBBBGT....", "PGPPPPPPGG...", ".GGPPMPPGG...", "..GGPPPPG....", "...G.G.G.....", "..G..G..G...."],
-        ["...P..P......", "..PGGGGGP....", ".PGBBBBGG....", "PGPPPPPPGG...", ".GGPPMPGG....", "..GPPPGGG....", "..G.G.G......", ".G...G......."],
-      ],
-    },
-    {
-      id: "03",
-      name: "satchel chew",
-      frames: [
-        [".....S.......", "...SGGGS.....", "..SGBBBGTT...", ".SGPPPPGMM...", "..GGPPPGM....", "...GPPPG.....", "..G.G.G......", ".G..G..G....."],
-        [".....S.......", "...SGGGS.....", "..SGBBBGGT...", ".SGPPPPGMMT..", "...GPPPGM....", "..GGPGGG.....", "...G.G.......", "..G..G......."],
-        [".....S.......", "...SGGGS.....", "..SGBBBGT....", ".SGPPPPGMM...", "..GGPPPGM....", "...GPPPG.....", "..G.G.G......", ".G..G..G....."],
-        [".....S.......", "...SGGGS.....", "..SGBBBGG....", ".SGPPPPGMM...", "..GPPPPGM....", "...GPGGG.....", "..G..G.......", ".G...G......."],
-      ],
-    },
-    {
-      id: "04",
-      name: "hood pip eater",
-      frames: [
-        ["...P....P....", "..PGGGGGGP...", ".PGBBBBGGGT..", "PGGPPPPPGGT..", ".GGPPMPPGG...", "..GPPPPPG....", ".G.G..G.G....", "G...G..G....."],
-        ["...P....P....", "..PGGGGGGP...", ".PGBBBBGGTT..", "..GGPPPPGGT..", "...GGPMPGT...", "..GPPPPGG....", ".G..GG.G.....", "..G...G......"],
-        ["...P....P....", "..PGGGGGGP...", ".PGBBBBGT....", "PGGPPPPPGG...", ".GGPPMPPGG...", "..GPPPPPG....", ".G.G..G.G....", "G...G..G....."],
-        ["...P....P....", "..PGGGGGGP...", ".PGBBBBGG....", "PGGPPPPPGG...", ".GGPPMPPGG...", "..GPPPGGG....", ".G..GG.G.....", "..G...G......"],
-      ],
-    },
-    {
-      id: "05",
-      name: "compact deluxe munch",
-      frames: [
-        ["..S..P..S....", ".SGGGGGGGS...", "SGBBBMBGGTT..", ".GGPPPPPGGT..", "..GGPMPPGG...", ".G.GPPPPG....", "..G.G.G.G....", "...G...G....."],
-        ["..S..P..S....", ".SGGGGGGGS...", "SGBBBMBGGT...", "..GGPPPPPGT..", "...GGPMPGT...", "..GGPPPGG....", "...G.G.G.....", "..G...G......"],
-        ["..S..P..S....", ".SGGGGGGGS...", "SGBBBMBGT....", ".GGPPPPPGG...", "..GGPMPPGG...", ".G.GPPPPG....", "..G.G.G.G....", "...G...G....."],
-        ["..S..P..S....", ".SGGGGGGGS...", "SGBBBMBGG....", ".GGPPPPPGG...", "..GPPMPPGG...", ".G.GPPPGG....", "..G..G.G.....", "...G..G......"],
-      ],
-    },
+    createChatGoblinVariant("01", "gate snap", [
+      ".....S..S........",
+      "...SGGGGGS.......",
+      ["..SGGGBBBGGS.....", "..SGGGBBBGGT.....", "..SGGGBBBGT......", "..SGGGBBBGG......"],
+      [".SGGGGGGGGGGT....", ".SGGGGGPPPGGT....", ".SGGGGPPPPGTT....", ".SGGGGGPPGGG....."],
+      ["SGGPPPMMMMPGGTT..", "SGGPPPMMMMPPGG...", "SGGPPPMMMMPGG....", "SGGPPPMMMPPGG...."],
+      [".GGPPPPPPPGGG....", ".GGPPPPPPGGG.....", ".GGPPPPPPGGG.....", ".GGPPPPPGGG......"],
+      "..GGGGGGGGG......",
+      "...G..GG..G......",
+    ]),
+    createChatGoblinVariant("02", "long-ear gulp", [
+      "...S......S......",
+      "..SGGGGGGGS......",
+      [".SGGGGBBBGGS.....", ".SGGGGBBBGGT.....", ".SGGGGBBBGT......", ".SGGGGBBBGG......"],
+      ["SGGGGGGGGGGGT....", "SGGGGGPPPGGGT....", "SGGGGPPPPGGTT....", "SGGGGGPPPGGG....."],
+      ["GGPPPPMMMMPGGTT..", "GGPPPPMMMMPPGG...", "GGPPPPMMMMPGG....", "GGPPPPMMMPPGG...."],
+      [".GGPPPPPPPGGG....", ".GGPPPPPPGGG.....", ".GGPPPPPPGGG.....", ".GGPPPPPGGG......"],
+      "..GGGGGGGG.......",
+      ".G...GG...G......",
+    ]),
+    createChatGoblinVariant("03", "hood maw", [
+      "....PSSSSP.......",
+      "..PPGGGGGGP......",
+      [".PGGGBBBBGGP.....", ".PGGGBBBBGGT.....", ".PGGGBBBBGT......", ".PGGGBBBBGG......"],
+      ["SGGGGGGGGGGTT....", "SGGGGGPPPGGTT....", "SGGGGPPPPGTT.....", "SGGGGGPPGGG......"],
+      ["GGPPPPMMMMPGG....", "GGPPPPMMMMPPG....", "GGPPPPMMMMPGG....", "GGPPPPMMMPPG....."],
+      [".GGPPPPPPPGG.....", ".GGPPPPPPGG......", ".GGPPPPPPGG......", ".GGPPPPPGGG......"],
+      "..GGGGGGGG.......",
+      "...G..GG.........",
+    ]),
+    createChatGoblinVariant("04", "token chomper", [
+      ".....SPS.........",
+      "...SGGGGGPS......",
+      ["..SGGGBBBGGS.....", "..SGGGBBBGGTT....", "..SGGGBBBGTT.....", "..SGGGBBBGGG....."],
+      [".SGGGGGGGGGGTT...", ".SGGGGGPPPGGTT...", ".SGGGGPPPPGTT....", ".SGGGGGPPGGG....."],
+      ["SGGPPPMMMMPGGTT..", "SGGPPPMMMMPPGG...", "SGGPPPMMMMPGG....", "SGGPPPMMMPPGG...."],
+      [".GGPPPPPPPGGG....", ".GGPPPPPPGGG.....", ".GGPPPPPPGGG.....", ".GGPPPPPGGG......"],
+      "..GGGGGGGGG......",
+      "...G.G..G.G......",
+    ]),
+    createChatGoblinVariant("05", "cave grinner", [
+      "....SSSS.........",
+      "..SSGGGGGS.......",
+      [".SGGGGBBBGGS.....", ".SGGGGBBBGGT.....", ".SGGGGBBBGT......", ".SGGGGBBBGG......"],
+      ["SGGGGGMMMMGGTT...", "SGGGGGPPMMGGTT...", "SGGGGPPPMMGTT....", "SGGGGGPMMGGG....."],
+      ["GGPPPPPPPPGG.....", "GGPPPPPPPPGG.....", "GGPPPPPPPGGG.....", "GGPPPPPPGGG......"],
+      [".GGPPPPPPGG......", ".GGPPPPPGG.......", ".GGPPPPPGGG......", ".GGPPPPGGG......."],
+      "..GGGGGGGG.......",
+      "...G..GG.........",
+    ]),
+    createChatGoblinVariant("06", "bat-ear chew", [
+      "..S..S..S..S.....",
+      ".SGGGGGGGGGS.....",
+      ["SGGGGBBBBGGGS....", "SGGGGBBBBGGTT....", "SGGGGBBBBGTT.....", "SGGGGBBBBGGG....."],
+      ["GGGGGGGGGGGGTT...", "GGGGGGPPPGGGTT...", "GGGGGPPPPGGTT....", "GGGGGGPPPGGG....."],
+      ["SGPPPPMMMMPGGT...", "SGPPPPMMMMPPGG...", "SGPPPPMMMMPGG....", "SGPPPPMMMPPGG...."],
+      [".GGPPPPPPGGG.....", ".GGPPPPPPGG......", ".GGPPPPPPGGG.....", ".GGPPPPPGGG......"],
+      "..GGGGGGGG.......",
+      "...G.G..G........",
+    ]),
+    createChatGoblinVariant("07", "crown crunch", [
+      "....SPSPS........",
+      "..SGGGGGGGS......",
+      [".SGGGBBBBGGS.....", ".SGGGBBBBGGT.....", ".SGGGBBBBGT......", ".SGGGBBBBGG......"],
+      ["SGGGGGGGGGGGT....", "SGGGGGPPPGGGT....", "SGGGGPPPPGGTT....", "SGGGGGPPPGGG....."],
+      ["GGPPPMMMMPGGTT...", "GGPPPMMMMPPGG....", "GGPPPMMMMPGG.....", "GGPPPMMMPPGG....."],
+      [".GGPPPPPPPGG.....", ".GGPPPPPPGG......", ".GGPPPPPPGG......", ".GGPPPPPGGG......"],
+      "..GGGGGGGGG......",
+      "...G..GG.........",
+    ]),
+    createChatGoblinVariant("08", "heavy jaw", [
+      ".....SSS.........",
+      "...SGGGGGGS......",
+      ["..SGGGBBBBGGS....", "..SGGGBBBBGGT....", "..SGGGBBBBGTT....", "..SGGGBBBBGGG...."],
+      [".SGGGGGGGGGGGT...", ".SGGGGGPPPGGGTT...", ".SGGGGPPPPGGTT...", ".SGGGGGPPPGGGG..."],
+      ["GGPPPPMMMMPPGGTT.", "GGPPPPMMMMPPGG...", "GGPPPPMMMMPPG....", "GGPPPPMMMMPPG...."],
+      [".GGPPPPPPPPGG....", ".GGPPPPPPPGG.....", ".GGPPPPPPPGGG....", ".GGPPPPPPGGG....."],
+      "..GGGGGGGGGG.....",
+      "...GG...GG.......",
+    ]),
+    createChatGoblinVariant("09", "sly nib", [
+      "......S..S.......",
+      "...SSGGGGGGS.....",
+      ["..SGGGGBBBGG.....", "..SGGGGBBBGGT....", "..SGGGGBBBGT.....", "..SGGGGBBBGG....."],
+      [".SGGGGGGGGGTT....", ".SGGGGGPPPGGT....", ".SGGGGPPPPGTT....", ".SGGGGGPPGGG....."],
+      ["SGGPPPMMMPPGGT...", "SGGPPPMMMPPGG....", "SGGPPPMMMPGG.....", "SGGPPPMMMPPG....."],
+      [".GGPPPPPPGGG.....", ".GGPPPPPPGG......", ".GGPPPPPPGGG.....", ".GGPPPPPGGG......"],
+      "..GGGGGGGG.......",
+      "...G...G.........",
+    ]),
+    createChatGoblinVariant("10", "deluxe maw", [
+      "...SP....PS......",
+      "..SGGGGGGGGS.....",
+      [".SGGGBBBBGGGS....", ".SGGGBBBBGGTT....", ".SGGGBBBBGTT.....", ".SGGGBBBBGGG....."],
+      ["SGGGGGGGGGGGTT...", "SGGGGGPPPGGGTT...", "SGGGGPPPPGGTT....", "SGGGGGPPPGGGG...."],
+      ["GGPPPPMMMMPGGTT..", "GGPPPPMMMMPPGG...", "GGPPPPMMMMPGG....", "GGPPPPMMMPPGG...."],
+      [".GGPPPPPPPGGG....", ".GGPPPPPPGGG.....", ".GGPPPPPPGGG.....", ".GGPPPPPGGG......"],
+      "..GGGGGGGGGG.....",
+      "...G.G..G.G......",
+    ]),
   ]
 
   function normalizeChatGoblinVariantId(value: string | undefined) {
@@ -109,7 +177,7 @@ function TuiSidebarTokenGoblin(props: { theme: any }) {
   let timer: ReturnType<typeof setInterval> | undefined
 
   onMount(() => {
-    timer = setInterval(() => setTick((value) => value + 1), 220)
+    timer = setInterval(() => setTick((value) => value + 1), 200)
     timer?.unref?.()
   })
 
@@ -172,7 +240,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     <Show when={session()}>
       <box
         backgroundColor={theme.backgroundPanel}
-        width={42}
+        width={SESSION_SIDEBAR_WIDTH}
         height="100%"
         paddingTop={1}
         paddingBottom={1}
