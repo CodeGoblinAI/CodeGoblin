@@ -164,6 +164,30 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
     const sessionStatus = yield* SessionStatus.Service
+    yield* router.add("GET", "/codegoblin/output-image", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const output = new URL(request.url, "http://localhost").searchParams.get("output") ?? ""
+        const image = yield* Effect.promise(async () => {
+          try {
+            return await readCodeGoblinOutputImage(route.directory, output)
+          } catch (error) {
+            return {
+              ok: false as const,
+              message: error instanceof Error ? error.message : "Could not read CodeGoblin output image.",
+            }
+          }
+        })
+        if (!image.ok) return HttpServerResponse.jsonUnsafe(image, { status: 404 })
+        return HttpServerResponse.raw(image.body, {
+          headers: new Headers({
+            "cache-control": "no-store",
+            "content-type": image.mime,
+            "x-content-type-options": "nosniff",
+          }),
+        })
+      }),
+    )
     yield* router.add("POST", "/codegoblin/open-output", (request) =>
       Effect.gen(function* () {
         const route = yield* WorkspaceRouteContext
@@ -343,6 +367,37 @@ export async function openCodeGoblinOutput(
     ok: true as const,
     opened: openerTarget,
   }
+}
+
+export async function readCodeGoblinOutputImage(root: string, output: string) {
+  if (!output.trim()) throw new Error("CodeGoblin output path is required.")
+
+  const rootPath = path.resolve(root)
+  const target = path.resolve(rootPath, output)
+  const rel = path.relative(rootPath, target)
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("CodeGoblin output path must stay inside the current project directory.")
+  }
+
+  const stat = await fs.stat(target).catch(() => undefined)
+  if (!stat || !stat.isFile()) throw new Error("CodeGoblin output image does not exist yet.")
+
+  const mime = imageMimeType(target)
+  if (!mime) throw new Error("CodeGoblin output is not a supported image file.")
+
+  return {
+    ok: true as const,
+    body: await fs.readFile(target),
+    mime,
+  }
+}
+
+function imageMimeType(file: string) {
+  const ext = path.extname(file).toLowerCase()
+  if (ext === ".png") return "image/png"
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg"
+  if (ext === ".webp") return "image/webp"
+  if (ext === ".gif") return "image/gif"
 }
 
 function createCodeGoblinImageMessages(input: {

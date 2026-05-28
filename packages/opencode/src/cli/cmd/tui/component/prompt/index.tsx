@@ -1236,12 +1236,12 @@ export function Prompt(props: PromptProps) {
         modelID: selectedModel.modelID,
         outputImage: selectedModelInfo?.capabilities?.output?.image,
       }) &&
-      !CodeGoblinImageCommand.looksLikeImageIntent(trimmed)
+      CodeGoblinImageCommand.looksLikeCasualText(trimmed)
     ) {
       toast.show({
         variant: "warning",
         message:
-          "An image model is selected, but this does not look like an image request. Include generate/draw/edit so CodeGoblin does not spend image credits by accident.",
+          "An image model is selected. Switch to a text model for casual chat, or describe the image you want CodeGoblin to make.",
         duration: 9000,
       })
       return false

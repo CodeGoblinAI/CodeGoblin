@@ -96,6 +96,7 @@ export const CodeGoblinImageCommand = {
   describe: describeImage,
   shouldRoutePromptToImage,
   looksLikeImageIntent,
+  looksLikeCasualText,
   isImageModelSelection,
   async usageSummary(cwd: string) {
     return usageSummary(cwd)
@@ -736,11 +737,15 @@ function shouldRoutePromptToImage(input: {
   modelID?: string
   outputImage?: boolean
 }) {
-  return isImageModelSelection(input) && looksLikeImageIntent(input.prompt)
+  return isImageModelSelection(input) && !looksLikeCasualText(input.prompt)
 }
 
 function looksLikeImageIntent(prompt: string) {
-  return /\b(create|generate|make|draw|render|design|edit|change|transform|paint)\b.{0,100}\b(image|picture|photo|logo|mascot|illustration|avatar|icon|cat|dog|horse|goblin|red|style)\b/i.test(prompt)
+  return /\b(create|generate|make|draw|render|design|edit|change|transform|paint)\b.{0,100}\b(image|picture|photo|logo|mascot|illustration|avatar|icon|cat|dog|horse|goblin|car|flames?|red|style)\b/i.test(prompt)
+}
+
+function looksLikeCasualText(prompt: string) {
+  return /^(hi|hii+|hello|hey|yo|sup|thanks?|thank you|ok|okay|yes|no|how are you\??|what'?s up\??)[\s.!?]*$/i.test(prompt.trim())
 }
 
 async function loadLocalEnv(root: string, keyFile?: string) {

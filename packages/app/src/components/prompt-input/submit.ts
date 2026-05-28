@@ -54,9 +54,12 @@ const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? 
 const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
 
 const imageIntent = (text: string) =>
-  /\b(create|generate|make|draw|render|design|edit|change|transform|paint)\b.{0,100}\b(image|picture|photo|logo|mascot|illustration|avatar|icon|cat|dog|horse|goblin|red|style)\b/i.test(
+  /\b(create|generate|make|draw|render|design|edit|change|transform|paint)\b.{0,100}\b(image|picture|photo|logo|mascot|illustration|avatar|icon|cat|dog|horse|goblin|car|flames?|red|style)\b/i.test(
     text,
   )
+
+const casualText = (text: string) =>
+  /^(hi|hii+|hello|hey|yo|sup|thanks?|thank you|ok|okay|yes|no|how are you\??|what'?s up\??)[\s.!?]*$/i.test(text.trim())
 
 const imageModelSelected = (model: { id: string; provider: { id: string }; capabilities?: any }) => {
   if (model.capabilities?.output?.image) return true
@@ -83,14 +86,21 @@ const legacyImageAutoApprove = () => {
   }
 }
 
-const confirmImageGeneration = (provider: string, model: string, text: string, autoApprove: boolean) => {
-  if (autoApprove || legacyImageAutoApprove()) return true
+type ConfirmImageGenerationInput = {
+  provider: string
+  model: string
+  text: string
+  autoApprove: boolean
+}
+
+const fallbackConfirmImageGeneration = (input: ConfirmImageGenerationInput) => {
+  if (input.autoApprove || legacyImageAutoApprove()) return true
   if (typeof globalThis.confirm !== "function") return false
   return globalThis.confirm(
     [
-      `Generate an image with ${provider}/${model}?`,
+      `Generate an image with ${input.provider}/${input.model}?`,
       "",
-      text.slice(0, 240),
+      input.text.slice(0, 240),
       "",
       "Turn on Auto-approve image generation in Settings > General to skip this confirmation.",
     ].join("\n"),
@@ -252,6 +262,7 @@ type PromptSubmitInput = {
   onQueue?: (draft: FollowupDraft) => void
   onAbort?: () => void
   onSubmit?: () => void
+  confirmImageGeneration?: (input: ConfirmImageGenerationInput) => Promise<boolean> | boolean
 }
 
 type CommentItem = {
@@ -379,6 +390,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       const isImageSlash = trimmed.startsWith("/image")
       const selectedImageModel = imageModelSelected(currentModel)
       const looksLikeImageRequest = imageIntent(trimmed)
+      if (!isImageSlash && selectedImageModel && casualText(trimmed)) {
+        showToast({
+          title: "Image model selected",
+          description: "Switch to a text model for casual chat, or describe the image you want CodeGoblin to make.",
+        })
+        return
+      }
       if (!isImageSlash && looksLikeImageRequest && !selectedImageModel) {
         showToast({
           title: "Select an image model",
@@ -387,24 +405,15 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         })
         return
       }
-      if (!isImageSlash && selectedImageModel && !looksLikeImageRequest) {
-        showToast({
-          title: "Confirm image generation",
-          description:
-            "An image model is selected, but this does not look like an image request. Include generate/draw/edit so CodeGoblin does not spend image credits by accident.",
-        })
-        return
-      }
       if (
         !isImageSlash &&
         selectedImageModel &&
-        looksLikeImageRequest &&
-        !confirmImageGeneration(
-          currentModel.provider.id,
-          currentModel.id,
-          trimmed,
-          settings.permissions.imageGenerationAutoApprove(),
-        )
+        !(await (input.confirmImageGeneration ?? fallbackConfirmImageGeneration)({
+          provider: currentModel.provider.id,
+          model: currentModel.id,
+          text: trimmed,
+          autoApprove: settings.permissions.imageGenerationAutoApprove(),
+        }))
       ) {
         showToast({
           title: "Image generation not sent",
@@ -541,8 +550,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       const trimmed = text.trimStart()
       const isImageSlash = trimmed.startsWith("/image")
       const selectedImageModel = imageModelSelected(currentModel)
-      const looksLikeImageRequest = imageIntent(trimmed)
-      if (isImageSlash || (selectedImageModel && looksLikeImageRequest)) {
+      if (isImageSlash || selectedImageModel) {
         const activeServer = server.current
         const headers: Record<string, string> = {
           "content-type": "application/json",

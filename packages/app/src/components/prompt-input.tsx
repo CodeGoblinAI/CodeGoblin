@@ -30,6 +30,7 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
 import { Button } from "@opencode-ai/ui/button"
+import { Dialog } from "@opencode-ai/ui/dialog"
 import { DockShellForm, DockTray } from "@opencode-ai/ui/dock-surface"
 import { Icon } from "@opencode-ai/ui/icon"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
@@ -1094,6 +1095,55 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return permission.isAutoAccepting(id, sdk.directory)
   })
 
+  const confirmImageGeneration = (input: { provider: string; model: string; text: string; autoApprove: boolean }) => {
+    if (input.autoApprove) return true
+    return new Promise<boolean>((resolve) => {
+      let settled = false
+      const done = (value: boolean) => {
+        if (settled) return
+        settled = true
+        dialog.close()
+        resolve(value)
+      }
+      dialog.show(
+        () => (
+          <Dialog
+            title="Generate image?"
+            description="CodeGoblin will use the selected image model and may spend image credits."
+            action={
+              <Button variant="ghost" size="normal" onClick={() => done(false)}>
+                Not now
+              </Button>
+            }
+          >
+            <div class="flex flex-col gap-4 text-13-regular text-text-base">
+              <div class="rounded-md border border-border-base bg-surface-raised px-3 py-2">
+                <div class="text-12-medium uppercase tracking-wide text-text-muted">Model</div>
+                <div class="mt-1 font-medium text-text-strong">{input.provider}/{input.model}</div>
+              </div>
+              <div class="rounded-md border border-border-base bg-surface-raised px-3 py-2">
+                <div class="text-12-medium uppercase tracking-wide text-text-muted">Prompt</div>
+                <div class="mt-1 whitespace-pre-wrap text-text-base">{input.text.slice(0, 320)}</div>
+              </div>
+              <div class="flex items-center justify-end gap-2">
+                <Button variant="ghost" size="normal" onClick={() => done(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" size="normal" onClick={() => done(true)}>
+                  Generate image
+                </Button>
+              </div>
+              <div class="text-12-regular text-text-muted">
+                Turn on Auto-approve image generation in Settings &gt; General to skip this confirmation.
+              </div>
+            </div>
+          </Dialog>
+        ),
+        () => done(false),
+      )
+    })
+  }
+
   const { abort, handleSubmit } = createPromptSubmit({
     info,
     imageAttachments,
@@ -1116,6 +1166,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onQueue: props.onQueue,
     onAbort: props.onAbort,
     onSubmit: props.onSubmit,
+    confirmImageGeneration,
   })
 
   const handleKeyDown = (event: KeyboardEvent) => {

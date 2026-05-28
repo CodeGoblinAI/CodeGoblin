@@ -1526,6 +1526,15 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
     return "Image generated"
   })
   const model = createMemo(() => [props.meta.provider, props.meta.model].filter(Boolean).join("/"))
+  const previewURL = createMemo(() => {
+    if (status() !== "done") return
+    if (!props.meta.output) return
+    const params = new URLSearchParams({
+      directory: data.directory,
+      output: props.meta.output,
+    })
+    return `/codegoblin/output-image?${params.toString()}`
+  })
   const detail = createMemo(() => {
     const output = props.meta.output
     return props.text
@@ -1662,6 +1671,13 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
               </Tooltip>
             </div>
           </div>
+        )}
+      </Show>
+      <Show when={previewURL()}>
+        {(url) => (
+          <a data-slot="codegoblin-image-preview" href={url()} target="_blank" rel="noreferrer">
+            <img src={url()} alt="Generated CodeGoblin image" loading="lazy" />
+          </a>
         )}
       </Show>
       <Show when={status() === "error" && retryRequest()}>

@@ -14,6 +14,7 @@ import { useArgs } from "./args"
 import { useSDK } from "./sdk"
 import { RGBA } from "@opentui/core"
 import { Filesystem } from "@/util/filesystem"
+import { isChatSelectableModel } from "@/codegoblin/model-bucket"
 
 export function parseModel(model: string) {
   const [providerID, ...rest] = model.split("/")
@@ -32,7 +33,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     function isModelValid(model: { providerID: string; modelID: string }) {
       const provider = sync.data.provider.find((x) => x.id === model.providerID)
-      return !!provider?.models[model.modelID]
+      const info = provider?.models[model.modelID]
+      return !!info && isChatSelectableModel(info)
     }
 
     function getFirstValidModel(...modelFns: (() => { providerID: string; modelID: string } | undefined)[]) {
@@ -190,8 +192,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         const provider = sync.data.provider[0]
         if (!provider) return undefined
         const defaultModel = sync.data.provider_default[provider.id]
-        const firstModel = Object.values(provider.models)[0]
-        const model = defaultModel ?? firstModel?.id
+        const firstModel = Object.values(provider.models).find(isChatSelectableModel)
+        const model = defaultModel && isModelValid({ providerID: provider.id, modelID: defaultModel }) ? defaultModel : firstModel?.id
         if (!model) return undefined
         return {
           providerID: provider.id,

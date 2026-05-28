@@ -31,6 +31,26 @@ describe("CodeGoblin image command model routing", () => {
     }
   })
 
+  test("routes descriptive prompts through a selected image model", () => {
+    expect(
+      CodeGoblinImageCommand.shouldRoutePromptToImage({
+        prompt: "car with flames",
+        providerID: "xai",
+        modelID: "grok-imagine-image-quality",
+      }),
+    ).toBe(true)
+  })
+
+  test("does not route casual chat through a selected image model", () => {
+    expect(
+      CodeGoblinImageCommand.shouldRoutePromptToImage({
+        prompt: "hi",
+        providerID: "openai",
+        modelID: "gpt-image-1",
+      }),
+    ).toBe(false)
+  })
+
   test("rejects explicit non-image provider selection instead of defaulting", async () => {
     const result = await CodeGoblinImageCommand.generate({
       prompt: "generate an image of a horse",

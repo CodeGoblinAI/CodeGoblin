@@ -12,23 +12,10 @@ import { List } from "@opencode-ai/ui/list"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { ModelTooltip } from "./model-tooltip"
 import { useLanguage } from "@/context/language"
+import { isChatSelectableModel, MODEL_BUCKET_ORDER, modelBucket } from "@/utils/model-buckets"
 
 const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "opencode" && (!cost || cost.input === 0)
-
-const MODEL_BUCKET_ORDER = ["Text models", "Image models", "Voice & audio models", "Other models"]
-
-function modelBucket(model: { id: string; name?: string; family?: string; capabilities?: any }) {
-  const haystack = `${model.id} ${model.name ?? ""} ${model.family ?? ""}`.toLowerCase()
-  if (model.capabilities?.output?.audio || model.capabilities?.input?.audio || /\b(tts|voice|audio|music|elevenlabs)\b/.test(haystack)) {
-    return "Voice & audio models"
-  }
-  if (model.capabilities?.output?.image || model.capabilities?.input?.image || /\b(image|img|wan|gpt-image|dall-e|imagine)\b/.test(haystack)) {
-    return "Image models"
-  }
-  if (model.capabilities?.output?.text || model.capabilities?.input?.text) return "Text models"
-  return "Other models"
-}
 
 type ModelState = ReturnType<typeof useLocal>["model"]
 
@@ -46,6 +33,7 @@ const ModelList: Component<{
     model
       .list()
       .filter((m) => model.visible({ modelID: m.id, providerID: m.provider.id }))
+        .filter(isChatSelectableModel)
       .filter((m) => (props.provider ? m.provider.id === props.provider : true)),
   )
 
@@ -61,7 +49,7 @@ const ModelList: Component<{
       sortBy={(a, b) => a.name.localeCompare(b.name)}
       groupBy={modelBucket}
       sortGroupsBy={(a, b) => {
-        const bucketOrder = MODEL_BUCKET_ORDER.indexOf(a.category) - MODEL_BUCKET_ORDER.indexOf(b.category)
+        const bucketOrder = bucketIndex(a.category) - bucketIndex(b.category)
         if (bucketOrder !== 0) return bucketOrder
         const aProvider = a.items[0]?.provider.id ?? ""
         const bProvider = b.items[0]?.provider.id ?? ""
@@ -100,6 +88,11 @@ const ModelList: Component<{
       )}
     </List>
   )
+}
+
+function bucketIndex(category: string) {
+  const index = MODEL_BUCKET_ORDER.indexOf(category as (typeof MODEL_BUCKET_ORDER)[number])
+  return index >= 0 ? index : MODEL_BUCKET_ORDER.length
 }
 
 type ModelSelectorTriggerProps = Omit<ComponentProps<typeof Kobalte.Trigger>, "as" | "ref">

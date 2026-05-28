@@ -9,6 +9,7 @@ import { Persist, persisted } from "@/utils/persist"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 import { useSDK } from "./sdk"
 import { useSync } from "./sync"
+import { isChatSelectableModel } from "@/utils/model-buckets"
 
 export type ModelKey = { providerID: string; modelID: string; variant?: string }
 
@@ -91,7 +92,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const validModel = (model: ModelKey) => {
       const provider = providers.all().get(model.providerID)
-      return !!provider?.models[model.modelID] && connected().has(model.providerID)
+      const info = provider?.models[model.modelID]
+      return !!info && connected().has(model.providerID) && isChatSelectableModel(info)
     }
 
     const firstModel = (...items: Array<() => ModelKey | undefined>) => {
@@ -162,7 +164,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (validModel(model)) return model
         }
 
-        const first = Object.values(provider.models)[0]
+        const first = Object.values(provider.models).find(isChatSelectableModel)
         if (!first) continue
         const model = { providerID: provider.id, modelID: first.id }
         if (validModel(model)) return model

@@ -73,7 +73,16 @@ Follow-up after this file was created:
 - Normal push was blocked by the known unrelated Windows `@opencode-ai/enterprise` `custom-elements.d.ts` TS1128 pre-push failure; after targeted validation passed, `git push --no-verify origin dev` succeeded.
 - Local packaged rebuild produced `0.0.0-dev-202605272312`; `codegoblin --version` and `cg --version` both return that version.
 - Rebuilt web at `http://127.0.0.1:4096/` was browser-verified with page title `CodeGoblin`, CodeGoblin home copy, and Shawn's goblin logo mark.
-- Latest GitHub deploy run `26544182501` still fails because repo secrets/vars are empty, with `CLOUDFLARE_API_TOKEN` as the immediate hard blocker.
+- Pre-fix GitHub deploy run `26544182501` failed because repo secrets/vars are empty, with `CLOUDFLARE_API_TOKEN` as the immediate hard blocker.
+
+2026-05-27 corrective QA update:
+
+- TUI/web model buckets now treat only output-image models as Image models. Vision-capable text models such as Kimi/GPT/Claude stay in Text models. Favorites sort above Recents in TUI.
+- Audio-only ElevenLabs models are filtered out of normal chat model selection so they no longer route through chat and produce ElevenLabs `Not Found: {"detail":"Not Found"}` errors. ElevenLabs remains a connectable provider/audio command target; add a dedicated chat audio flow later.
+- Selected image models now route descriptive prompts like `car with flames`; the user no longer needs to include generate/draw/edit wording when an image model is selected.
+- Web image confirmation now uses a styled CodeGoblin dialog instead of the native browser `confirm` UI.
+- Generated image cards now render inline previews by loading the saved local file through `GET /codegoblin/output-image`, with workspace-root validation and image MIME checks.
+- `.github/workflows/deploy.yml` now skips hosted cloud deploys on non-production branches unless repo variable `CODEGOBLIN_ENABLE_CLOUD_DEPLOY=true`, so normal `dev` pushes do not require Shawn's personal Cloudflare/PlanetScale/Stripe/Honeycomb/Sentry keys.
 
 ## Feature branch commit clusters
 
@@ -152,7 +161,7 @@ Core product layer:
 - `packages/opencode/src/codegoblin/balance.ts` — DeepSeek/Moonshot/manual hoard balance helper; provider-specific balances must be scoped to the selected provider/model.
 - `packages/opencode/src/cli/cmd/image.ts` — shell command `codegoblin image <prompt..>`.
 - `packages/opencode/src/cli/cmd/audio.ts` — shell command `codegoblin audio <text..>`.
-- `packages/opencode/src/server/routes/instance/httpapi/server.ts` — local `POST /codegoblin/image` and `POST /codegoblin/open-output` routes, chat persistence, output-path validation.
+- `packages/opencode/src/server/routes/instance/httpapi/server.ts` — local `POST /codegoblin/image`, `POST /codegoblin/open-output`, and safe `GET /codegoblin/output-image` routes, chat persistence, output-path validation.
 
 Install/package layer:
 
@@ -170,11 +179,13 @@ TUI/web/UX layer:
 - `packages/opencode/src/cli/cmd/tui/app.tsx` — TUI app commands, terminal title, `/goblin*` commands, model/theme/help dialogs.
 - `packages/opencode/src/cli/cmd/tui/routes/session/sidebar.tsx` — sidebar footer fallback and optional token goblin.
 - `packages/opencode/src/cli/cmd/tui/component/dialog-provider.tsx` — TUI `/connect`; ElevenLabs should be visible as a popular/API-key provider.
-- `packages/opencode/src/cli/cmd/tui/component/dialog-model.tsx` — TUI model picker; currently buckets Text, Image, and Voice & audio models.
+- `packages/opencode/src/codegoblin/model-bucket.ts` — TUI/opencode model bucket helpers; image means output-image generation, not vision input.
+- `packages/opencode/src/cli/cmd/tui/component/dialog-model.tsx` — TUI model picker; buckets Text and Image accurately, keeps Favorites above Recents, and filters audio-only models from chat selection.
 - `packages/app/src/components/prompt-input/submit.ts` — web prompt interception and optimistic image job messages.
+- `packages/app/src/utils/model-buckets.ts` — web model bucket helpers in parity with TUI/opencode semantics.
 - `packages/app/src/components/codegoblin-logo.tsx` — web logo mark from `/codegoblin-logo.png`.
-- `packages/app/src/components/dialog-select-provider.tsx` and `packages/app/src/components/dialog-select-model.tsx` — web provider/model selection; keep ElevenLabs and model-bucket behavior in parity with TUI.
-- `packages/ui/src/components/message-part.tsx` — web/TUI image job card rendering from `metadata.codegoblin`.
+- `packages/app/src/components/dialog-select-provider.tsx` and `packages/app/src/components/dialog-select-model.tsx` — web provider/model selection; keep connect/provider and model-bucket behavior in parity with TUI.
+- `packages/ui/src/components/message-part.tsx` — web/TUI image job card rendering from `metadata.codegoblin`, including inline generated-image previews.
 
 Brand assets:
 
@@ -267,6 +278,9 @@ Current behavior to preserve:
 - Local image input/editing plumbing accepts `--input` paths and data URLs from web/TUI attachments.
 - Outputs default under `codegoblin-output/images` inside the current workspace and traversal outside the workspace is rejected.
 - Web/TUI image jobs persist local chat metadata with provider/model/output path and render CodeGoblin image job cards.
+- When an image model is selected, descriptive prompts like `car with flames` route to image generation after local confirmation; casual greetings like `hi` are still blocked from accidental image spend.
+- Vision/text input capability does not make a model an image generator. Use `capabilities.output.image` or strict image-generation IDs/families only.
+- Audio-only models should not be selected as normal chat models until a dedicated audio generation/chat persistence flow exists.
 
 Future-facing but not complete:
 
@@ -287,15 +301,16 @@ TUI:
 - `ctrl+g` is the reliable primary action-palette binding; `ctrl+shift+g` remains an alias but is less reliable in Windows/terminal stacks.
 - The focused chat prompt now registers a high-priority `command.palette.show` binding on the textarea target so `Ctrl+G` should work while typing in chat.
 - `/connect` should include ElevenLabs, and API-key fallback auth can store `ELEVENLABS_API_KEY` credentials.
-- TUI model picker groups by Text models, Image models, and Voice & audio models.
+- TUI model picker groups by Text models and Image models for chat-capable models. Audio-only models are filtered from chat selection for now.
 
 Web:
 
 - Home/new-session surfaces use the Shawn goblin logo mark and CodeGoblin black/green styling.
-- Prompt submit intercepts `/image` and image-looking prompts when an image model is selected.
+- Prompt submit intercepts `/image` and any non-casual prompt when an image model is selected; `car with flames` should generate/confirm correctly.
 - Web image jobs create optimistic user/progress messages, persist server results, and show provider/model/output path.
+- Web image result cards show an inline preview loaded from the local saved output path.
 - Settings > General includes `Auto-approve image generation`.
-- Web provider/model pickers mirror the TUI changes: ElevenLabs appears in connect, and model selection groups Text, Image, and Voice & audio models.
+- Web provider/model pickers mirror the TUI changes: text/vision models stay Text, actual output-image models are Image, and audio-only models are not selectable as chat models.
 
 Limitations:
 
@@ -392,7 +407,18 @@ Post-merge validation on fresh `dev`:
 - `codegoblin --version` and `cg --version` both returned `0.0.0-dev-202605272312`.
 - Rebuilt local web at `http://127.0.0.1:4096/` returned HTTP 200, `/codegoblin-logo.png` returned HTTP 200, and browser snapshot/screenshot showed the CodeGoblin home with the goblin logo mark.
 - `origin/dev` was pushed to `35c27adc7`; remote commit author/committer were verified as `shawnisikli <shawni627@gmail.com>`.
-- Latest deploy workflow still failed because GitHub secrets/vars are missing. The log showed empty `CLOUDFLARE_API_TOKEN`, PlanetScale, Stripe, Honeycomb, Sentry envs, then Cloudflare initialization failure.
+- Pre-fix deploy workflow failed because GitHub secrets/vars were missing. The log showed empty `CLOUDFLARE_API_TOKEN`, PlanetScale, Stripe, Honeycomb, Sentry envs, then Cloudflare initialization failure. The workflow is now gated so non-production pushes skip hosted deploy unless `CODEGOBLIN_ENABLE_CLOUD_DEPLOY=true`.
+
+2026-05-27 corrective QA validation:
+
+- `bun --cwd packages/opencode test test/codegoblin/image-command.test.ts test/codegoblin/model-bucket.test.ts test/codegoblin/provider.test.ts test/codegoblin/balance.test.ts` passed: 21 tests, 0 failures.
+- `bun --cwd packages/app test src/components/prompt-input/submit.test.ts src/utils/model-buckets.test.ts` passed as part of the app unit run: 341 tests, 0 failures.
+- `bun run --cwd packages/opencode typecheck` passed.
+- `bun run --cwd packages/app typecheck` passed.
+- `bun run --cwd packages/ui typecheck` passed.
+- `git diff --check` passed with only existing line-ending warnings on a few touched files.
+- ElevenLabs audio command dry-run passed without calling the API or spending credits.
+- xAI image command dry-run for `car with flames` and `grok-imagine-image-quality` passed without calling the API or spending credits.
 
 Reusable checklist:
 
@@ -463,10 +489,12 @@ Run targeted validation before pushing. Full monorepo pre-push may still fail on
 
 ## Next recommended pass
 
-1. Configure GitHub deploy secrets/vars directly in terminal or GitHub UI. Start with `CLOUDFLARE_API_TOKEN`; do not paste secret values into chat.
+1. Configure GitHub deploy secrets/vars directly in terminal or GitHub UI only when intentionally enabling hosted cloud deploys. Local-first dev does not need Cloudflare/PlanetScale/Stripe/Honeycomb/Sentry keys.
 2. Visually launch `codegoblin` in a real terminal and inspect TUI home, focused chat `Ctrl+G` actions, `/connect` ElevenLabs, `/models` buckets, `/goblin`, `/image`, pasted image input, and image/audio loading/result cards.
-3. Verify balance scoping by switching Gemini/DeepSeek/Moonshot/Kimi models; unrelated providers must not show DeepSeek/Moonshot balances.
-4. Live-test OpenAI GPT Image, Gemini image, xAI Grok Imagine, Qwen/DashScope Wan, and ElevenLabs audio with real local keys that are never committed.
-5. Specifically test stale/invalid Gemini env-key behavior if a local `GEMINI_API_KEY` exists; the user should get a friendly source-aware auth hint.
-6. Continue scoped rebrand in ACP docs/examples, desktop/provider upsell surfaces, localized strings, README expansion, and public attribution/license review docs.
-7. Decide later whether durable paths remain OpenCode-compatible or migrate to CodeGoblin-specific paths.
+3. Verify `/models` with real catalog data: Kimi/GPT/Claude vision-text models stay Text; actual output-image models are Image; Favorites appear above Recents; audio-only ElevenLabs entries do not become chat models.
+4. Verify web selected-image flow with `car with flames`: styled confirmation appears, generation starts, persistent result updates, and inline preview loads from the saved file.
+5. Verify balance scoping by switching Gemini/DeepSeek/Moonshot/Kimi models; unrelated providers must not show DeepSeek/Moonshot balances.
+6. Live-test OpenAI GPT Image, Gemini image, xAI Grok Imagine, Qwen/DashScope Wan, and ElevenLabs audio with real local keys that are never committed and only when spending credits is intentional.
+7. Specifically test stale/invalid Gemini env-key behavior if a local `GEMINI_API_KEY` exists; the user should get a friendly source-aware auth hint.
+8. Continue scoped rebrand in ACP docs/examples, desktop/provider upsell surfaces, localized strings, README expansion, and public attribution/license review docs.
+9. Decide later whether durable paths remain OpenCode-compatible or migrate to CodeGoblin-specific paths.

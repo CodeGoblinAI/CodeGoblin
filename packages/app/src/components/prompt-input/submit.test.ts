@@ -594,6 +594,46 @@ describe("prompt submit worktree selection", () => {
     expect(promptResetCount).toBe(1)
   })
 
+  test("routes descriptive prompts through the selected image model", async () => {
+    params = { id: "session-1" }
+    selectedModel = { id: "grok-imagine-image-quality", provider: { id: "xai" } }
+    promptValue = [{ type: "text", content: "car with flames", start: 0, end: "car with flames".length }]
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+    await submit.handleSubmit(event)
+
+    expect(confirmPrompts).toHaveLength(1)
+    expect(confirmPrompts[0]).toContain("Generate an image with xai/grok-imagine-image-quality")
+    expect(fetchRequests).toHaveLength(1)
+    expect(fetchRequests[0]).toMatchObject({
+      url: "http://localhost:4096/codegoblin/image",
+      body: {
+        prompt: "car with flames",
+        provider: "xai",
+        model: "grok-imagine-image-quality",
+        requireImageModel: true,
+      },
+    })
+    expect(promptResetCount).toBe(1)
+  })
+
   test("does not send casual text to a selected image model", async () => {
     params = { id: "session-1" }
     selectedModel = { id: "gpt-image-1", provider: { id: "openai" } }

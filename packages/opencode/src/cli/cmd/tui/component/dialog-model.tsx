@@ -8,32 +8,7 @@ import { createDialogProviderOptions, DialogProvider } from "./dialog-provider"
 import { DialogVariant } from "./dialog-variant"
 import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
-
-const MODEL_BUCKET_ORDER = ["Text models", "Image models", "Voice & audio models", "Other models"]
-
-function modelBucket(modelID: string, info: { family?: string; name?: string; capabilities?: any }) {
-  const haystack = `${modelID} ${info.name ?? ""} ${info.family ?? ""}`.toLowerCase()
-  if (info.capabilities?.output?.audio || info.capabilities?.input?.audio || /\b(tts|voice|audio|music|elevenlabs)\b/.test(haystack)) {
-    return "Voice & audio models"
-  }
-  if (info.capabilities?.output?.image || info.capabilities?.input?.image || /\b(image|img|wan|gpt-image|dall-e|imagine)\b/.test(haystack)) {
-    return "Image models"
-  }
-  if (info.capabilities?.output?.text || info.capabilities?.input?.text) return "Text models"
-  return "Other models"
-}
-
-function modelCategory(providerName: string, modelID: string, info: { family?: string; name?: string; capabilities?: any }) {
-  return `${modelBucket(modelID, info)} · ${providerName}`
-}
-
-function sortModelCategories(a: string, b: string) {
-  const [aBucket, aProvider = ""] = a.split(" · ")
-  const [bBucket, bProvider = ""] = b.split(" · ")
-  const order = MODEL_BUCKET_ORDER.indexOf(aBucket) - MODEL_BUCKET_ORDER.indexOf(bBucket)
-  if (order !== 0) return order
-  return aProvider.localeCompare(bProvider)
-}
+import { isChatSelectableModel, modelBucket, modelCategory, sortModelCategories } from "@/codegoblin/model-bucket"
 
 export function DialogModel(props: { providerID?: string }) {
   const local = useLocal()
@@ -59,6 +34,7 @@ export function DialogModel(props: { providerID?: string }) {
         if (!provider) return []
         const model = provider.models[item.modelID]
         if (!model) return []
+        if (!isChatSelectableModel(model)) return []
         return [
           {
             key: item,
@@ -96,6 +72,7 @@ export function DialogModel(props: { providerID?: string }) {
           entries(),
           filter(([_, info]) => info.status !== "deprecated"),
           filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
+          filter(([_, info]) => isChatSelectableModel(info)),
           map(([model, info]) => ({
             value: { providerID: provider.id, modelID: model },
             title: info.name ?? model,
