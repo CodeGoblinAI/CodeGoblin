@@ -20,6 +20,15 @@ export type AudioVoiceSettings = {
   speed?: number
 }
 
+export type AudioVoiceOption = {
+  id: string
+  name: string
+  category?: string
+  description?: string
+  previewUrl?: string
+  labels?: Record<string, string>
+}
+
 type GenerateInput = {
   text: string
   output?: string
@@ -47,6 +56,9 @@ const DEFAULT_OUTPUT_FORMAT = "mp3_44100_128"
 export const CodeGoblinAudioCommand = {
   async generate(input: GenerateInput): Promise<AudioCommandResult> {
     return generateAudio(input)
+  },
+  async voices(input: Pick<GenerateInput, "cwd" | "keyFile">) {
+    return listVoices(input)
   },
   describe(input: GenerateInput) {
     const root = path.resolve(input.cwd || process.cwd())
@@ -146,6 +158,33 @@ async function generateAudio(input: GenerateInput): Promise<AudioCommandResult> 
   }
 }
 
+async function listVoices(input: Pick<GenerateInput, "cwd" | "keyFile">) {
+  const root = path.resolve(input.cwd || process.cwd())
+  const key = await findAudioKey(await loadLocalEnv(root, input.keyFile))
+  if (!key) {
+    return {
+      ok: false as const,
+      voices: [] as AudioVoiceOption[],
+      message:
+        "No ElevenLabs key found. Set ELEVENLABS_API_KEY or CODEGOBLIN_ELEVENLABS_API_KEY locally, or connect the ElevenLabs provider, then retry.",
+    }
+  }
+
+  const response = await fetchElevenLabsVoices(key.value)
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      voices: [] as AudioVoiceOption[],
+      message: response.message,
+    }
+  }
+
+  return {
+    ok: true as const,
+    voices: response.voices,
+  }
+}
+
 function safeOutputPath(root: string, output?: string) {
   const target = path.resolve(root, output || path.join(DEFAULT_DIR, `${timestamp()}.mp3`))
   const rel = path.relative(root, target)
@@ -181,20 +220,63 @@ function configuredVoice(input: Pick<GenerateInput, "voice">, env: Env) {
 
 async function findAccountGeneratedVoice(apiKey?: string) {
   if (!apiKey) return
-  const response = await fetch("https://api.elevenlabs.io/v2/voices?page_size=50", {
+  const response = await fetchElevenLabsVoices(apiKey)
+  if (!response.ok) return
+  return response.voices
+    .filter((item) => item.category === "generated")
+    .map((item) => item.id)
+    .find((item) => Boolean(item))
+}
+
+async function fetchElevenLabsVoices(apiKey: string) {
+  const response = await fetch("https://api.elevenlabs.io/v2/voices?page_size=100", {
     headers: {
       "xi-api-key": apiKey,
     },
   }).catch(() => undefined)
-  if (!response?.ok) return
+  if (!response) {
+    return {
+      ok: false as const,
+      voices: [] as AudioVoiceOption[],
+      message: "Could not reach ElevenLabs voices API.",
+    }
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "")
+    return {
+      ok: false as const,
+      voices: [] as AudioVoiceOption[],
+      message: `ElevenLabs voices request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 220)}` : ""}`,
+    }
+  }
+
   const data = (await response.json().catch(() => undefined)) as { voices?: unknown } | undefined
-  const voices = Array.isArray(data?.voices) ? data.voices : []
-  return voices
-    .map((item) => (item && typeof item === "object" ? (item as Record<string, unknown>) : undefined))
-    .filter((item): item is Record<string, unknown> => Boolean(item))
-    .filter((item) => item.category === "generated")
-    .map((item) => (typeof item.voice_id === "string" ? item.voice_id : undefined))
-    .find((item): item is string => Boolean(item))
+  return {
+    ok: true as const,
+    voices: (Array.isArray(data?.voices) ? data.voices : [])
+      .map((item) => (item && typeof item === "object" ? toAudioVoiceOption(item as Record<string, unknown>) : undefined))
+      .filter((item): item is AudioVoiceOption => Boolean(item)),
+  }
+}
+
+function toAudioVoiceOption(input: Record<string, unknown>) {
+  if (typeof input.voice_id !== "string") return
+  const labels =
+    input.labels && typeof input.labels === "object"
+      ? Object.fromEntries(
+          Object.entries(input.labels as Record<string, unknown>).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string",
+          ),
+        )
+      : undefined
+  return {
+    id: input.voice_id,
+    name: typeof input.name === "string" && input.name.trim() ? input.name : input.voice_id,
+    ...(typeof input.category === "string" ? { category: input.category } : {}),
+    ...(typeof input.description === "string" ? { description: input.description } : {}),
+    ...(typeof input.preview_url === "string" ? { previewUrl: input.preview_url } : {}),
+    ...(labels && Object.keys(labels).length > 0 ? { labels } : {}),
+  } satisfies AudioVoiceOption
 }
 
 function normalizeVoiceSettings(settings?: AudioVoiceSettings) {

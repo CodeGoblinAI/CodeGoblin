@@ -228,6 +228,19 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         })
       }),
     )
+    yield* router.add("GET", "/codegoblin/audio/voices", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const url = new URL(request.url, "http://localhost")
+        const result = yield* Effect.promise(() =>
+          CodeGoblinAudioCommand.voices({
+            cwd: route.directory,
+            keyFile: url.searchParams.get("keyFile") ?? undefined,
+          }),
+        )
+        return HttpServerResponse.jsonUnsafe(result, { status: result.ok ? 200 : 400 })
+      }),
+    )
     yield* router.add("POST", "/codegoblin/open-output", (request) =>
       Effect.gen(function* () {
         const route = yield* WorkspaceRouteContext

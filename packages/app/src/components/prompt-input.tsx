@@ -27,6 +27,7 @@ import {
 } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
+import { useServer } from "@/context/server"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
 import { Button } from "@opencode-ai/ui/button"
@@ -70,6 +71,7 @@ import { useQueries } from "@tanstack/solid-query"
 import { useQueryOptions } from "@/context/global-sync"
 import { pathKey } from "@/utils/path-key"
 import { getFilename } from "@opencode-ai/core/util/path"
+import { authTokenFromCredentials } from "@/utils/server"
 
 interface PromptInputProps {
   class?: string
@@ -84,6 +86,15 @@ interface PromptInputProps {
   onQueue?: (draft: FollowupDraft) => void
   onAbort?: () => void
   onSubmit?: () => void
+}
+
+type AudioVoiceOption = {
+  id: string
+  name: string
+  category?: string
+  description?: string
+  previewUrl?: string
+  labels?: Record<string, string>
 }
 
 const EXAMPLES = [
@@ -119,6 +130,7 @@ const CREATE_WORKTREE = "create"
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
+  const server = useServer()
   const queryOptions = useQueryOptions()
 
   const sync = useSync()
@@ -1186,6 +1198,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const confirmAudioGeneration = (input: { provider: string; model: string; text: string }) => {
     return new Promise<AudioGenerationSettings | false>((resolve) => {
       const [audio, setAudio] = createStore(loadAudioSettings())
+      const [voiceOptions, setVoiceOptions] = createSignal<AudioVoiceOption[]>([])
+      const [voiceStatus, setVoiceStatus] = createSignal(
+        input.provider.toLowerCase().includes("elevenlabs") ? "Loading ElevenLabs speakers…" : "",
+      )
       let settled = false
       const done = (value: AudioGenerationSettings | false) => {
         if (settled) return
@@ -1198,6 +1214,31 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         setAudio("voiceSettings", key, value as never)
       }
       const numberValue = (value: string) => Number.parseFloat(value)
+      const voiceLabel = (voice: AudioVoiceOption) =>
+        [voice.name, voice.category, voice.labels?.accent, voice.labels?.gender].filter(Boolean).join(" · ")
+      const loadVoices = async () => {
+        if (!input.provider.toLowerCase().includes("elevenlabs")) return
+        const activeServer = server.current
+        const headers: Record<string, string> = {
+          "x-opencode-directory": sdk.directory,
+        }
+        if (activeServer?.http.password) {
+          headers.authorization = `Basic ${authTokenFromCredentials({
+            username: activeServer.http.username,
+            password: activeServer.http.password,
+          })}`
+        }
+        const result = (await fetch(`${sdk.url}/codegoblin/audio/voices`, { headers }).then((response) =>
+          response.json().then((body) => ({ response, body })).catch(() => ({ response, body: undefined })),
+        )) as { response: Response; body?: { ok?: boolean; voices?: AudioVoiceOption[]; message?: string } }
+        if (!result.response.ok || !result.body?.ok) {
+          setVoiceStatus(result.body?.message ?? "Could not load ElevenLabs speakers. You can still paste a voice ID.")
+          return
+        }
+        setVoiceOptions(result.body.voices ?? [])
+        setVoiceStatus(result.body.voices?.length ? "" : "No ElevenLabs speakers found. You can still paste a voice ID.")
+      }
+      void loadVoices().catch(() => setVoiceStatus("Could not load ElevenLabs speakers. You can still paste a voice ID."))
       dialog.show(
         () => (
           <Dialog
@@ -1216,13 +1257,26 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   <span class="font-mono text-12-regular text-text-strong">{input.provider}/{input.model}</span>
                 </label>
                 <label class="flex flex-col gap-1">
-                  <span class="text-12-medium uppercase tracking-wide text-text-muted">Voice ID</span>
+                  <span class="text-12-medium uppercase tracking-wide text-text-muted">Speaker</span>
+                  <select
+                    class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
+                    value={voiceOptions().some((voice) => voice.id === audio.voice) ? audio.voice : ""}
+                    onChange={(event) => setAudio("voice", event.currentTarget.value)}
+                  >
+                    <option value="">Auto-pick generated voice</option>
+                    {voiceOptions().map((voice) => (
+                      <option value={voice.id}>{voiceLabel(voice)}</option>
+                    ))}
+                  </select>
                   <input
                     class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 font-mono text-12-regular text-text-strong outline-none"
-                    placeholder="auto-select generated voice"
+                    placeholder="or paste a voice ID"
                     value={audio.voice}
                     onInput={(event) => setAudio("voice", event.currentTarget.value.trim())}
                   />
+                  <Show when={voiceStatus()}>
+                    <span class="text-11-regular text-text-muted">{voiceStatus()}</span>
+                  </Show>
                 </label>
                 <label class="flex flex-col gap-1">
                   <span class="text-12-medium uppercase tracking-wide text-text-muted">Format</span>

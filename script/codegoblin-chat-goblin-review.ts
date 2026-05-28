@@ -340,6 +340,32 @@ function renderNativeSidebarScene(
   </section>`
 }
 
+function renderNativeCompanionScene(options: {
+  label: string
+  detail: string
+  frame: string[]
+  title: string
+  spend: string
+  last: string
+  status: string
+  context: string
+}) {
+  return `<section class="card companion-scene">
+    <h2>${escapeHtml(options.label)}</h2>
+    <div class="companion-headline">${escapeHtml(options.detail)}</div>
+    <div class="native-sidebar">
+      <div class="native-sidebar-copy">
+        <div class="native-sidebar-title">${escapeHtml(options.title)}</div>
+        <div class="native-sidebar-row"><span>spend :</span><b>${escapeHtml(options.spend)}</b></div>
+        <div class="native-sidebar-row"><span>last&nbsp;&nbsp;:</span><b>${escapeHtml(options.last)}</b></div>
+        <div class="native-sidebar-status">${escapeHtml(options.status)}</div>
+        <div class="native-sidebar-context">${escapeHtml(options.context)}</div>
+      </div>
+      <div class="native-sidebar-sprite">${renderSprite(options.frame, "native-sprite")}</div>
+    </div>
+  </section>`
+}
+
 const source = await Bun.file(sidebarPath).text()
 const sidebarCols = parseSidebarWidth(source)
 const variants = parseVariants(source)
@@ -420,6 +446,68 @@ const companionActivityPreviews: CompanionActivityPreview[] = Object.entries(com
       frames: preview.frames,
     })),
 )
+const finalRuntimeCompanionScenes = [
+  renderNativeCompanionScene({
+    label: "Final runtime · idle",
+    detail: "Header variant 09 stays the default home art; the sidebar companion rests as sprite 40 with the corrected menuHeadWide shape.",
+    frame: companionIdleFrames[0] ?? [],
+    title: "CodeGoblin companion",
+    spend: "$0.00",
+    last: "waiting",
+    status: "ready with pockets empty",
+    context: "idle until a real runtime signal arrives",
+  }),
+  renderNativeCompanionScene({
+    label: "Final runtime · spend delta",
+    detail: "Animation 03 is the real spend burst and only starts when session cost increases.",
+    frame: companionActionFrames["03"]?.[1] ?? companionIdleFrames[0] ?? [],
+    title: "CodeGoblin adds spend",
+    spend: "$0.39",
+    last: "+$0.39",
+    status: "tosses +$0.39 into the spend pile",
+    context: "trigger: actual session cost delta",
+  }),
+  renderNativeCompanionScene({
+    label: "Final runtime · token delta",
+    detail: "Free/local models still get the same chosen burn animation when tokens increase but spend stays flat.",
+    frame: companionActionFrames["03"]?.[2] ?? companionIdleFrames[0] ?? [],
+    title: "CodeGoblin burns tokens",
+    spend: "$0.00",
+    last: "+1,248 tokens",
+    status: "tosses +1,248 tokens into the token burn pile",
+    context: "trigger: actual session token delta",
+  }),
+  renderNativeCompanionScene({
+    label: "Final runtime · pending reply",
+    detail: "Thinking animation is tied to a real incomplete assistant message, not a background loop.",
+    frame: companionActivityVariantCatalog.thinking?.["01"]?.frames[1] ?? companionIdleFrames[0] ?? [],
+    title: "CodeGoblin is thinking",
+    spend: "$0.39",
+    last: "+$0.39",
+    status: "thinking through the reply",
+    context: "trigger: pending assistant reply",
+  }),
+  renderNativeCompanionScene({
+    label: "Final runtime · image progress",
+    detail: "Image animation is tied to live codegoblin image-progress metadata.",
+    frame: companionActivityVariantCatalog.image?.["01"]?.frames[1] ?? companionIdleFrames[0] ?? [],
+    title: "CodeGoblin paints pixels",
+    spend: "$0.39",
+    last: "+$0.39",
+    status: "painting an image",
+    context: "trigger: image-progress message part",
+  }),
+  renderNativeCompanionScene({
+    label: "Final runtime · audio progress",
+    detail: "Audio animation is tied to live codegoblin audio-progress metadata.",
+    frame: companionActivityVariantCatalog.audio?.["01"]?.frames[1] ?? companionIdleFrames[0] ?? [],
+    title: "CodeGoblin mixes audio",
+    spend: "$0.39",
+    last: "+$0.39",
+    status: "mixing audio",
+    context: "trigger: audio-progress message part",
+  }),
+]
 
 const html = `<!doctype html>
 <html lang="en">
@@ -632,11 +720,14 @@ const html = `<!doctype html>
             })
           : "",
       ].join("")}</div>
+          <h2 class="section-title">Final runtime behavior</h2>
+          <p class="section-copy">Chosen behavior: home header variant 09, sidebar sprite 40/menuHeadWide shape, companion mode by default, animation 03 for real spend/token-burn deltas, and no production preview loop. The scenes below are rendered from the same frame data the CLI uses.</p>
+          <div class="grid companion-samples">${finalRuntimeCompanionScenes.join("")}</div>
       <h2 class="section-title">Focused frame cycles</h2>
       <p class="section-copy">Only the exact body variants in play right now: 40, 30, and 39.</p>
       <div class="grid">${focusBodyVariants.map(renderVariant).join("")}</div>
       <h2 class="section-title">Companion action review</h2>
-      <p class="section-copy">Current direction: keep sprite 40 as the companion base and treat animation 03 as the best reference so far. Animations 02 and 04 are still weird and need redesign. Preview loops here are dev-only; production behavior should trigger action animation only on real events such as token burn/spend deltas, thinking, or image/audio generation states.</p>
+          <p class="section-copy">Chosen runtime: keep sprite 40 as the companion base and use animation 03 as the real spend/token-burn burst. Animations 02 and 04 are still weird and need redesign. Preview loops here are dev-only; production behavior triggers action animation only on actual cost/token deltas.</p>
       <div class="grid">${companionPreviews.map(renderCompanionAction).join("")}</div>
       <h2 class="section-title">Companion activity review</h2>
       <p class="section-copy">These are the ongoing activity candidate grids for non-spend work. They are intended for real runtime states like thinking, image progress, and audio progress — not as a replacement for the short spend-burst animation. None of these are final; this section exists so we can compare a bunch of options before promoting one into the main runtime path.</p>

@@ -17,11 +17,12 @@ type Args = {
   textNormalization?: "auto" | "on" | "off"
   languageTextNormalization?: boolean
   keyFile?: string
+  listVoices?: boolean
   dryRun?: boolean
 }
 
 export const AudioCommand = {
-  command: "audio <text..>",
+  command: "audio [text..]",
   describe: "generate audio with ElevenLabs and save it locally",
   builder: (yargs) =>
     yargs
@@ -87,12 +88,39 @@ export const AudioCommand = {
         describe: "optional local env file containing ELEVENLABS_API_KEY or CODEGOBLIN_ELEVENLABS_API_KEY",
         type: "string",
       })
+      .option("list-voices", {
+        describe: "list ElevenLabs speakers/voice IDs available to this account",
+        type: "boolean",
+      })
       .option("dry-run", {
         describe: "validate path/model setup without calling ElevenLabs",
         type: "boolean",
       }),
   handler: async (args) => {
     const text = (args.text ?? []).join(" ").trim()
+    if (args.listVoices) {
+      const result = await CodeGoblinAudioCommand.voices({ cwd: process.cwd(), keyFile: args.keyFile })
+      if (!result.ok) {
+        console.error(result.message)
+        process.exitCode = 1
+        return
+      }
+      for (const voice of result.voices) {
+        console.log(
+          [
+            voice.id,
+            voice.name,
+            voice.category,
+            voice.labels?.accent,
+            voice.labels?.gender,
+            voice.description,
+          ]
+            .filter(Boolean)
+            .join("\t"),
+        )
+      }
+      return
+    }
     if (!text) {
       console.error('Usage: codegoblin audio "text to speak" --output codegoblin-output/audio/demo.mp3')
       process.exitCode = 1

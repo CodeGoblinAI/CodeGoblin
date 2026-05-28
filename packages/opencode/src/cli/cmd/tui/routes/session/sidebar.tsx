@@ -6,6 +6,16 @@ import { useTuiConfig } from "../../context/tui-config"
 import { InstallationChannel, InstallationVersion } from "@opencode-ai/core/installation/version"
 import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
+import {
+  codeGoblinCompanionActionVariant,
+  codeGoblinCompanionActivity,
+  codeGoblinCompanionActivityVariant,
+  codeGoblinCompanionBurnDelta,
+  codeGoblinCompanionMode,
+  codeGoblinCompanionVisible,
+  codeGoblinFlagEnabled,
+  type CodeGoblinCompanionBurn,
+} from "@/codegoblin/companion"
 import { RGBA } from "@opentui/core"
 import type { JSX } from "@opentui/solid"
 
@@ -14,16 +24,12 @@ import { WorkspaceLabel } from "../../component/workspace-label"
 
 export const SESSION_SIDEBAR_WIDTH = 46
 
-function isChatGoblinEnabled(value: string | undefined) {
-  const normalized = value?.trim().toLowerCase()
-  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
-}
-
 function TuiSidebarCompanionGoblin(props: {
   theme: any
   active: boolean
   contextText: string
   sessionCost: number
+  sessionTokens: number
   activityText: string
   activityKind: "idle" | "thinking" | "image" | "audio"
 }) {
@@ -33,7 +39,7 @@ function TuiSidebarCompanionGoblin(props: {
   const eyeColor = props.theme.backgroundElement
   const spendColor = props.theme.warning
   const [tick, setTick] = createSignal(0)
-  const [lastSpend, setLastSpend] = createSignal(0)
+  const [lastBurn, setLastBurn] = createSignal<CodeGoblinCompanionBurn | undefined>()
   const [actionStartTick, setActionStartTick] = createSignal<number | undefined>()
   const money = new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -41,7 +47,9 @@ function TuiSidebarCompanionGoblin(props: {
     minimumFractionDigits: 2,
     maximumFractionDigits: 4,
   })
+  const number = new Intl.NumberFormat("en-US")
   let previousSessionCost: number | undefined
+  let previousSessionTokens: number | undefined
 
   interface ChatGoblinVariant {
     id: string
@@ -67,35 +75,6 @@ function TuiSidebarCompanionGoblin(props: {
       name,
       frames: Array.from({ length: 4 }, (_, frameIndex) => cycledRows.map((row) => row[frameIndex])),
     }
-  }
-
-  function normalizeCompanionActionVariant(value: string | undefined) {
-    const cleaned = value?.trim().replace(/^v/i, "")
-    const numeric = Number(cleaned)
-    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 4) return String(numeric).padStart(2, "0")
-    return "01"
-  }
-
-  function normalizeCompanionActivityVariant(value: string | undefined) {
-    const cleaned = value?.trim().replace(/^v/i, "")
-    const numeric = Number(cleaned)
-    if (numeric === 2) return "02"
-    if (numeric === 3) return "03"
-    return "01"
-  }
-
-  function normalizeCompanionActivity(value: string | undefined) {
-    const normalized = value?.trim().toLowerCase()
-    if (normalized === "thinking") return "thinking" as const
-    if (normalized === "image" || normalized === "image-progress") return "image" as const
-    if (normalized === "audio" || normalized === "audio-progress") return "audio" as const
-    return "idle" as const
-  }
-
-  function normalizeChatGoblinMode(value: string | undefined) {
-    const normalized = value?.trim().toLowerCase()
-    if (normalized === "companion") return "companion" as const
-    return "pinned" as const
   }
 
   const menuHeadSmall: GoblinRow[] = [
@@ -482,7 +461,7 @@ function TuiSidebarCompanionGoblin(props: {
     if (Number.isInteger(numeric) && numeric >= 1 && numeric <= chatGoblinVariants.length) {
       return String(numeric).padStart(2, "0")
     }
-    return "04"
+    return "40"
   }
 
   function normalizeFrames(frames: string[][]) {
@@ -1018,17 +997,14 @@ function TuiSidebarCompanionGoblin(props: {
   type CompanionActivityVariantKey = "01" | "02" | "03"
 
   const requestedVariantId = normalizeChatGoblinVariantId(process.env.CODEGOBLIN_CHAT_GOBLIN_VARIANT)
-  const actionVariantId = normalizeCompanionActionVariant(process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT)
-  const activityVariantId = normalizeCompanionActivityVariant(process.env.CODEGOBLIN_COMPANION_ACTIVITY_VARIANT)
-  const motionMode = normalizeChatGoblinMode(
-    process.env.CODEGOBLIN_CHAT_GOBLIN_MODE ??
-      (process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT !== undefined ? "companion" : "pinned"),
-  )
+  const actionVariantId = codeGoblinCompanionActionVariant(process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT)
+  const activityVariantId = codeGoblinCompanionActivityVariant(process.env.CODEGOBLIN_COMPANION_ACTIVITY_VARIANT)
+  const motionMode = codeGoblinCompanionMode(process.env.CODEGOBLIN_CHAT_GOBLIN_MODE)
   const requestedFrameIndex = normalizeChatGoblinFrame(process.env.CODEGOBLIN_CHAT_GOBLIN_FRAME)
   const companionPreviewEnabled =
-    motionMode === "companion" && isChatGoblinEnabled(process.env.CODEGOBLIN_COMPANION_PREVIEW)
+    motionMode === "companion" && codeGoblinFlagEnabled(process.env.CODEGOBLIN_COMPANION_PREVIEW)
   const previewActionEnabled = companionPreviewEnabled && process.env.CODEGOBLIN_COMPANION_ACTION_VARIANT !== undefined
-  const previewActivityKind = normalizeCompanionActivity(process.env.CODEGOBLIN_COMPANION_ACTIVITY)
+  const previewActivityKind = codeGoblinCompanionActivity(process.env.CODEGOBLIN_COMPANION_ACTIVITY)
   const currentActivityKind = createMemo(() => {
     if (companionPreviewEnabled && previewActivityKind !== "idle") return previewActivityKind
     return props.activityKind
@@ -1076,23 +1052,37 @@ function TuiSidebarCompanionGoblin(props: {
   })
   const width = createMemo(() => Math.max(...frames().flatMap((frame) => frame.map((row) => row.length))))
   const sessionSpendText = createMemo(() => money.format(Math.max(0, props.sessionCost)))
-  const lastSpendText = createMemo(() => money.format(Math.max(0, lastSpend())))
-  const previewSpendValue = createMemo(() => {
+  const lastBurnText = createMemo(() => {
+    const burn = lastBurn()
+    if (!burn) return undefined
+    if (burn.kind === "spend") return money.format(Math.max(0, burn.amount))
+    return `${number.format(Math.max(0, burn.amount))} tokens`
+  })
+  const previewBurnAmount = createMemo(() => {
     if (!previewActionEnabled) return undefined
     if (actionVariantId === "02") return 0.25
     if (actionVariantId === "03") return 0.39
     if (actionVariantId === "04") return Math.max(1.04, props.sessionCost)
     return 0.14
   })
-  const effectiveLastSpend = createMemo(() => {
-    if (lastSpend() > 0) return lastSpend()
-    if (actionActive()) return previewSpendValue()
+  const effectiveBurn = createMemo(() => {
+    const burn = lastBurn()
+    if (burn) return burn
+    if (actionActive()) {
+      const previewAmount = previewBurnAmount()
+      if (previewAmount === undefined) return undefined
+      return {
+        kind: "spend",
+        amount: previewAmount,
+      } as const
+    }
     return undefined
   })
-  const effectiveLastSpendText = createMemo(() => {
-    const value = effectiveLastSpend()
-    if (value === undefined) return undefined
-    return money.format(Math.max(0, value))
+  const effectiveBurnText = createMemo(() => {
+    const burn = effectiveBurn()
+    if (!burn) return undefined
+    if (burn.kind === "spend") return money.format(Math.max(0, burn.amount))
+    return `${number.format(Math.max(0, burn.amount))} tokens`
   })
   const previewActivityText = createMemo(() => {
     if (currentActivityKind() === "thinking") return "sorting thoughts into a reply"
@@ -1101,7 +1091,7 @@ function TuiSidebarCompanionGoblin(props: {
     return "ready with pockets empty"
   })
   const companionHeadline = createMemo(() => {
-    if (actionActive()) return "CodeGoblin adds spend"
+    if (actionActive()) return effectiveBurn()?.kind === "tokens" ? "CodeGoblin burns tokens" : "CodeGoblin adds spend"
     if (currentActivityKind() === "thinking") return "CodeGoblin is thinking"
     if (currentActivityKind() === "image") return "CodeGoblin paints pixels"
     if (currentActivityKind() === "audio") return "CodeGoblin mixes audio"
@@ -1116,7 +1106,9 @@ function TuiSidebarCompanionGoblin(props: {
       }
       return props.active ? props.activityText : "ready with pockets empty"
     }
-    const delta = `+${effectiveLastSpendText() ?? lastSpendText()}`
+    const burn = effectiveBurn()
+    const delta = `+${effectiveBurnText() ?? lastBurnText() ?? "$0.00"}`
+    if (burn?.kind === "tokens") return `tosses ${delta} into the token burn pile`
     if (actionVariantId === "02") return `stamps ${delta} onto the spend slip`
     if (actionVariantId === "03") return `tosses ${delta} into the spend pile`
     if (actionVariantId === "04") return `replaces the total with ${sessionSpendText()}`
@@ -1136,14 +1128,22 @@ function TuiSidebarCompanionGoblin(props: {
 
   createEffect(() => {
     const current = Math.max(0, props.sessionCost)
-    if (previousSessionCost === undefined) {
+    const currentTokens = Math.max(0, props.sessionTokens)
+    if (previousSessionCost === undefined || previousSessionTokens === undefined) {
       previousSessionCost = current
+      previousSessionTokens = currentTokens
       return
     }
-    const delta = current - previousSessionCost
+    const burn = codeGoblinCompanionBurnDelta({
+      previousCost: previousSessionCost,
+      currentCost: current,
+      previousTokens: previousSessionTokens,
+      currentTokens,
+    })
     previousSessionCost = current
-    if (delta <= 0.0000001) return
-    setLastSpend(delta)
+    previousSessionTokens = currentTokens
+    if (!burn) return
+    setLastBurn(burn)
     setActionStartTick(tick())
   })
 
@@ -1191,8 +1191,8 @@ function TuiSidebarCompanionGoblin(props: {
         </box>
         <box flexDirection="row" gap={1}>
           <text fg={props.theme.textMuted}>last  :</text>
-          <text fg={effectiveLastSpend() !== undefined ? spendColor : props.theme.textMuted}>
-            {effectiveLastSpendText() ? `+${effectiveLastSpendText()}` : "waiting"}
+          <text fg={effectiveBurn() !== undefined ? spendColor : props.theme.textMuted}>
+            {effectiveBurnText() ? `+${effectiveBurnText()}` : "waiting"}
           </text>
         </box>
         <text fg={actionActive() ? spendColor : props.active ? props.theme.text : props.theme.textMuted} wrapMode="none">
@@ -1219,7 +1219,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const session = createMemo(() => sync.session.get(props.sessionID))
   const messages = createMemo(() => sync.data.message[props.sessionID] ?? [])
   const pending = createMemo(() => messages().findLast((item) => item.role === "assistant" && !item.time.completed)?.id)
-  const showChatGoblin = createMemo(() => isChatGoblinEnabled(process.env.CODEGOBLIN_CHAT_GOBLIN))
+  const showChatGoblin = createMemo(() => codeGoblinCompanionVisible(process.env.CODEGOBLIN_CHAT_GOBLIN))
   const latestCodeGoblinAssetState = createMemo(() => {
     let latest: string | undefined
     for (const message of messages()) {
@@ -1243,9 +1243,13 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
       if (pending()) return "thinking" as const
       return "idle" as const
     })()
-    const last = messages().findLast(
-      (item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0,
+    const assistantMessages = messages().filter((item): item is AssistantMessage => item.role === "assistant")
+    const sessionTokens = assistantMessages.reduce(
+      (total, item) =>
+        total + item.tokens.input + item.tokens.output + item.tokens.reasoning + item.tokens.cache.read + item.tokens.cache.write,
+      0,
     )
+    const last = assistantMessages.findLast((item) => item.tokens.output > 0)
     const activityText = (() => {
       if (assetState?.includes("image-progress")) return "painting an image"
       if (assetState?.includes("audio-progress")) return "mixing audio"
@@ -1258,6 +1262,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
       return {
         contextText: pending() ? "tokens warming up" : "no token spend yet",
         sessionCost: cost,
+        sessionTokens,
         activityText,
         activityKind,
       }
@@ -1274,6 +1279,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
           ? `${number.format(tokens)} tokens · ${Math.round(ratio * 100)}% ctx`
           : `${number.format(tokens)} tokens tracked`,
       sessionCost: cost,
+      sessionTokens,
       activityText,
       activityKind,
     }
@@ -1352,9 +1358,10 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
           <box flexShrink={0} paddingTop={1}>
             <TuiSidebarCompanionGoblin
               theme={theme}
-              active={Boolean(pending())}
+              active={Boolean(pending()) || companionUsage().activityKind !== "idle"}
               contextText={companionUsage().contextText}
               sessionCost={companionUsage().sessionCost}
+              sessionTokens={companionUsage().sessionTokens}
               activityText={companionUsage().activityText}
               activityKind={companionUsage().activityKind}
             />

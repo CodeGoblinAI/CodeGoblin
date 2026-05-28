@@ -667,6 +667,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         const requestText = text.trim()
         const plannedOutput = defaultAudioOutput(audioSettings.outputFormat)
         const plannedOutputDisplay = displayImageOutput(sessionDirectory, plannedOutput)
+        const requestedVoice = audioSettings.voice || "auto-generated account voice"
         const optimisticUser: Message = {
           id: userMessageID,
           sessionID: session.id,
@@ -719,7 +720,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
                 type: "text",
                 text: [
                   `CodeGoblin is generating audio with ${currentModel.provider.id}/${currentModel.id}.`,
-                  `Voice: ${audioSettings.voice}`,
+                  `Voice: ${requestedVoice}`,
                   `Format: ${audioSettings.outputFormat}`,
                   plannedOutputDisplay ? `Saving to: ${plannedOutputDisplay}` : "The final output path will stay in this chat.",
                 ].join("\n"),
@@ -729,7 +730,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
                     provider: currentModel.provider.id,
                     model: currentModel.id,
                     output: plannedOutputDisplay,
-                    voice: audioSettings.voice,
+                    voice: audioSettings.voice || undefined,
                     outputFormat: audioSettings.outputFormat,
                   },
                 },
@@ -763,7 +764,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             output: plannedOutput,
             provider: currentModel.provider.id,
             model: currentModel.id,
-            voice: audioSettings.voice,
+            voice: audioSettings.voice || undefined,
             outputFormat: audioSettings.outputFormat,
             voiceSettings: audioSettings.voiceSettings,
             languageCode: audioSettings.languageCode,

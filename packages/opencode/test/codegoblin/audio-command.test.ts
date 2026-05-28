@@ -148,7 +148,7 @@ describe("CodeGoblin audio command", () => {
 
       expect(result.ok).toBe(true)
       expect(result.voice).toBe("generated_voice")
-      expect(requests[0]?.url).toBe("https://api.elevenlabs.io/v2/voices?page_size=50")
+      expect(requests[0]?.url).toBe("https://api.elevenlabs.io/v2/voices?page_size=100")
       expect(requests[1]?.url).toContain("/v1/text-to-speech/generated_voice?")
     } finally {
       globalThis.fetch = previousFetch
@@ -156,6 +156,57 @@ describe("CodeGoblin audio command", () => {
       else process.env.ELEVENLABS_VOICE_ID = previousVoice
       if (previousCodeGoblinVoice === undefined) delete process.env.CODEGOBLIN_ELEVENLABS_VOICE_ID
       else process.env.CODEGOBLIN_ELEVENLABS_VOICE_ID = previousCodeGoblinVoice
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("lists ElevenLabs speakers for settings UI", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codegoblin-audio-voices-"))
+    await writeFile(path.join(root, ".env"), "ELEVENLABS_API_KEY=test-eleven-key\n")
+    const previousFetch = globalThis.fetch
+    const previousKey = process.env.ELEVENLABS_API_KEY
+    const previousCodeGoblinKey = process.env.CODEGOBLIN_ELEVENLABS_API_KEY
+    delete process.env.ELEVENLABS_API_KEY
+    delete process.env.CODEGOBLIN_ELEVENLABS_API_KEY
+    const requests: { url: string; init?: RequestInit }[] = []
+    globalThis.fetch = (async (url, init) => {
+      requests.push({ url: url.toString(), init })
+      return Response.json({
+        voices: [
+          {
+            voice_id: "generated_voice",
+            name: "Goblin Narrator",
+            category: "generated",
+            description: "raspy but friendly",
+            preview_url: "https://example.com/preview.mp3",
+            labels: { accent: "american", gender: "neutral", ignored: 42 },
+          },
+          { name: "missing id" },
+        ],
+      })
+    }) as typeof fetch
+    try {
+      const result = await CodeGoblinAudioCommand.voices({ cwd: root })
+
+      expect(result.ok).toBe(true)
+      expect(requests[0]?.url).toBe("https://api.elevenlabs.io/v2/voices?page_size=100")
+      expect(new Headers(requests[0]!.init?.headers).get("xi-api-key")).toBe("test-eleven-key")
+      expect(result.voices).toEqual([
+        {
+          id: "generated_voice",
+          name: "Goblin Narrator",
+          category: "generated",
+          description: "raspy but friendly",
+          previewUrl: "https://example.com/preview.mp3",
+          labels: { accent: "american", gender: "neutral" },
+        },
+      ])
+    } finally {
+      globalThis.fetch = previousFetch
+      if (previousKey === undefined) delete process.env.ELEVENLABS_API_KEY
+      else process.env.ELEVENLABS_API_KEY = previousKey
+      if (previousCodeGoblinKey === undefined) delete process.env.CODEGOBLIN_ELEVENLABS_API_KEY
+      else process.env.CODEGOBLIN_ELEVENLABS_API_KEY = previousCodeGoblinKey
       await rm(root, { recursive: true, force: true })
     }
   })
