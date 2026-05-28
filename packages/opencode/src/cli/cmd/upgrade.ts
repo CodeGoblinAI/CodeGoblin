@@ -5,12 +5,13 @@ import { Installation } from "../../installation"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 
 export const UpgradeCommand = {
-  command: "upgrade [target]",
-  describe: "upgrade CodeGoblin to the latest or a specific version",
+  command: "update [target]",
+  aliases: ["upgrade"],
+  describe: "update CodeGoblin to the latest or a specific version",
   builder: (yargs: Argv) => {
     return yargs
       .positional("target", {
-        describe: "version to upgrade to, for ex '0.1.48' or 'v0.1.48'",
+        describe: "version to update to, for ex '0.1.48' or 'v0.1.48'",
         type: "string",
       })
       .option("method", {
@@ -24,7 +25,7 @@ export const UpgradeCommand = {
     UI.empty()
     UI.println(UI.logo("  "))
     UI.empty()
-    prompts.intro("Upgrade")
+    prompts.intro("Update CodeGoblin")
     const detectedMethod = await Installation.method()
     const method = (args.method as Installation.Method) ?? detectedMethod
     if (method === "unknown") {
@@ -46,17 +47,17 @@ export const UpgradeCommand = {
     const target = args.target ? args.target.replace(/^v/, "") : await Installation.latest()
 
     if (InstallationVersion === target) {
-      prompts.log.warn(`CodeGoblin upgrade skipped: ${target} is already installed`)
+      prompts.log.warn(`CodeGoblin update skipped: ${target} is already installed`)
       prompts.outro("Done")
       return
     }
 
     prompts.log.info(`From ${InstallationVersion} → ${target}`)
     const spinner = prompts.spinner()
-    spinner.start("Upgrading...")
+    spinner.start("Updating...")
     const err = await Installation.upgrade(method, target).catch((err) => err)
     if (err) {
-      spinner.stop("Upgrade failed", 1)
+      spinner.stop("Update failed", 1)
       if (err instanceof Installation.UpgradeFailedError) {
         // necessary because choco only allows install/upgrade in elevated terminals
         if (method === "choco" && err.stderr.includes("not running from an elevated command shell")) {
@@ -68,7 +69,7 @@ export const UpgradeCommand = {
       prompts.outro("Done")
       return
     }
-    spinner.stop("Upgrade complete")
+    spinner.stop("Update complete")
     prompts.outro("Done")
   },
 }

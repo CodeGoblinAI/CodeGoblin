@@ -50,7 +50,7 @@ export const GlobalApi = HttpApi.make("global").add(
         OpenApi.annotations({
           identifier: "global.health",
           summary: "Get health",
-          description: "Get health information about the OpenCode server.",
+          description: "Get health information about the CodeGoblin server.",
         }),
       ),
       HttpApiEndpoint.get("event", GlobalPaths.event, {

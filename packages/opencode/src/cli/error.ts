@@ -47,7 +47,7 @@ export function FormatError(input: unknown): string | undefined {
   // MCPFailed: { name: string }
   if (NamedError.hasName(input, "MCPFailed")) {
     const data = isRecord(input) && isRecord(input.data) ? stringField(input.data, "name") : undefined
-    return `MCP server "${data}" failed. Note, CodeGoblin inherits OpenCode MCP authentication limits for now.`
+    return `MCP server "${data}" failed. Note, CodeGoblin still uses the legacy MCP authentication bridge for now.`
   }
 
   // AccountServiceError, AccountTransportError: TaggedErrorClass
@@ -65,7 +65,7 @@ export function FormatError(input: unknown): string | undefined {
       `Model not found: ${stringField(providerModelNotFound, "providerID")}/${stringField(providerModelNotFound, "modelID")}`,
       ...(suggestions.length ? ["Did you mean: " + suggestions.join(", ")] : []),
       `Try: \`codegoblin models\` to list available models`,
-      `Or check your config (opencode.json) provider/model names`,
+      `Or check your CodeGoblin config (opencode.json) provider/model names`,
     ].join("\n")
   }
 
