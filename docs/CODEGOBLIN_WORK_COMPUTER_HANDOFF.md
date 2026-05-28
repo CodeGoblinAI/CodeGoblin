@@ -77,6 +77,7 @@ Follow-up after this file was created:
 
 2026-05-27 corrective QA update:
 
+- Corrective QA fixes were pushed to `origin/dev` as `b3e30eca0 fix(codegoblin): correct generation model routing`; the deploy preflight reorder was then pushed as `358562866 ci: skip disabled hosted deploys before setup`.
 - TUI/web model buckets now treat only output-image models as Image models. Vision-capable text models such as Kimi/GPT/Claude stay in Text models. Favorites sort above Recents in TUI.
 - Audio-only ElevenLabs models are filtered out of normal chat model selection so they no longer route through chat and produce ElevenLabs `Not Found: {"detail":"Not Found"}` errors. ElevenLabs remains a connectable provider/audio command target; add a dedicated chat audio flow later.
 - Selected image models now route descriptive prompts like `car with flames`; the user no longer needs to include generate/draw/edit wording when an image model is selected.
@@ -464,7 +465,7 @@ Then check:
 
 ## Merge/push guidance
 
-As of 2026-05-27, local `dev` and `origin/dev` are aligned at `35c27adc7`. No separate companion branch remains to merge; the reviewed companion/sidebar commits are already on `dev`.
+As of 2026-05-27, local `dev` and `origin/dev` are aligned at `358562866`. No separate companion branch remains to merge; the reviewed companion/sidebar commits and corrective QA fixes are already on `dev`.
 
 If merging feature branch to `dev`, do not use stale local `dev` directly. Use:
 
