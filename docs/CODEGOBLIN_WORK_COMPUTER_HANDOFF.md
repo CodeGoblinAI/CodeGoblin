@@ -2,6 +2,10 @@
 
 Last updated: 2026-05-27.
 
+Newest continuation note:
+
+- `docs/WORK_COMPUTER_CONTINUATION_2026-05-28.md` — latest ElevenLabs/audio/web/TUI continuation snapshot, validations, commit, and next steps.
+
 This file supplements Shawn's local project brain at `C:\Users\shawn\.codex\skills\codegoblin-project-brain\SKILL.md`. It does **not** replace that skill. Future agents should read the project brain first, then this file, then the core repo docs listed below.
 
 ## Product north star
