@@ -59,7 +59,7 @@ import {
   type PromptHistoryStoredEntry,
   promptLength,
 } from "./prompt-input/history"
-import { createPromptSubmit, type FollowupDraft } from "./prompt-input/submit"
+import { createPromptSubmit, type AudioGenerationSettings, type FollowupDraft } from "./prompt-input/submit"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
@@ -1095,6 +1095,44 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return permission.isAutoAccepting(id, sdk.directory)
   })
 
+  const defaultAudioSettings = (): AudioGenerationSettings => ({
+    voice: "",
+    outputFormat: "mp3_44100_128",
+    voiceSettings: {
+      stability: 0.5,
+      similarityBoost: 0.75,
+      style: 0,
+      speed: 1,
+      useSpeakerBoost: true,
+    },
+    textNormalization: "auto",
+  })
+
+  const loadAudioSettings = (): AudioGenerationSettings => {
+    if (typeof window === "undefined") return defaultAudioSettings()
+    try {
+      const saved = JSON.parse(window.localStorage.getItem("codegoblin.audio.settings") ?? "{}")
+      const defaults = defaultAudioSettings()
+      return {
+        ...defaults,
+        ...saved,
+        voiceSettings: {
+          ...defaults.voiceSettings,
+          ...(saved.voiceSettings ?? {}),
+        },
+      }
+    } catch {
+      return defaultAudioSettings()
+    }
+  }
+
+  const saveAudioSettings = (settings: AudioGenerationSettings) => {
+    if (typeof window === "undefined") return
+    try {
+      window.localStorage.setItem("codegoblin.audio.settings", JSON.stringify(settings))
+    } catch {}
+  }
+
   const confirmImageGeneration = (input: { provider: string; model: string; text: string; autoApprove: boolean }) => {
     if (input.autoApprove) return true
     return new Promise<boolean>((resolve) => {
@@ -1109,7 +1147,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         () => (
           <Dialog
             title="Generate image?"
-            description="CodeGoblin will use the selected image model and may spend image credits."
+            description="Review the selected image model before CodeGoblin spends image credits."
             action={
               <Button variant="ghost" size="normal" onClick={() => done(false)}>
                 Not now
@@ -1117,13 +1155,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             }
           >
             <div class="flex flex-col gap-4 text-13-regular text-text-base">
-              <div class="rounded-md border border-border-base bg-surface-raised px-3 py-2">
-                <div class="text-12-medium uppercase tracking-wide text-text-muted">Model</div>
-                <div class="mt-1 font-medium text-text-strong">{input.provider}/{input.model}</div>
+              <div class="rounded-lg border border-border-base bg-surface-raised px-4 py-3">
+                <div class="text-12-medium uppercase tracking-wide text-text-muted">Image model</div>
+                <div class="mt-1 font-mono text-12-regular text-text-strong">{input.provider}/{input.model}</div>
+                <div class="mt-2 text-12-regular text-text-muted">Output stays local in this chat.</div>
               </div>
-              <div class="rounded-md border border-border-base bg-surface-raised px-3 py-2">
+              <div class="rounded-lg border border-border-base bg-surface-raised px-4 py-3">
                 <div class="text-12-medium uppercase tracking-wide text-text-muted">Prompt</div>
-                <div class="mt-1 whitespace-pre-wrap text-text-base">{input.text.slice(0, 320)}</div>
+                <div class="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap text-text-base">{input.text.slice(0, 500)}</div>
               </div>
               <div class="flex items-center justify-end gap-2">
                 <Button variant="ghost" size="normal" onClick={() => done(false)}>
@@ -1135,6 +1174,130 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               </div>
               <div class="text-12-regular text-text-muted">
                 Turn on Auto-approve image generation in Settings &gt; General to skip this confirmation.
+              </div>
+            </div>
+          </Dialog>
+        ),
+        () => done(false),
+      )
+    })
+  }
+
+  const confirmAudioGeneration = (input: { provider: string; model: string; text: string }) => {
+    return new Promise<AudioGenerationSettings | false>((resolve) => {
+      const [audio, setAudio] = createStore(loadAudioSettings())
+      let settled = false
+      const done = (value: AudioGenerationSettings | false) => {
+        if (settled) return
+        settled = true
+        if (value) saveAudioSettings(value)
+        dialog.close()
+        resolve(value)
+      }
+      const setVoiceSetting = (key: keyof AudioGenerationSettings["voiceSettings"], value: number | boolean) => {
+        setAudio("voiceSettings", key, value as never)
+      }
+      const numberValue = (value: string) => Number.parseFloat(value)
+      dialog.show(
+        () => (
+          <Dialog
+            title="Generate audio?"
+            description="Tune the ElevenLabs request before CodeGoblin spends audio credits."
+            action={
+              <Button variant="ghost" size="normal" onClick={() => done(false)}>
+                Not now
+              </Button>
+            }
+          >
+            <div class="flex flex-col gap-4 text-13-regular text-text-base">
+              <div class="grid gap-3 rounded-lg border border-border-base bg-surface-raised px-4 py-3 sm:grid-cols-2">
+                <label class="flex flex-col gap-1">
+                  <span class="text-12-medium uppercase tracking-wide text-text-muted">Model</span>
+                  <span class="font-mono text-12-regular text-text-strong">{input.provider}/{input.model}</span>
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-12-medium uppercase tracking-wide text-text-muted">Voice ID</span>
+                  <input
+                    class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 font-mono text-12-regular text-text-strong outline-none"
+                    placeholder="auto-select generated voice"
+                    value={audio.voice}
+                    onInput={(event) => setAudio("voice", event.currentTarget.value.trim())}
+                  />
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-12-medium uppercase tracking-wide text-text-muted">Format</span>
+                  <select
+                    class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
+                    value={audio.outputFormat}
+                    onChange={(event) => setAudio("outputFormat", event.currentTarget.value)}
+                  >
+                    <option value="mp3_44100_128">MP3 44.1kHz 128kbps</option>
+                    <option value="mp3_22050_32">MP3 22.05kHz 32kbps</option>
+                    <option value="mp3_44100_192">MP3 44.1kHz 192kbps</option>
+                    <option value="wav_44100">WAV 44.1kHz</option>
+                    <option value="pcm_16000">PCM 16kHz</option>
+                    <option value="ulaw_8000">μ-law 8kHz</option>
+                  </select>
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-12-medium uppercase tracking-wide text-text-muted">Text normalization</span>
+                  <select
+                    class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
+                    value={audio.textNormalization ?? "auto"}
+                    onChange={(event) => setAudio("textNormalization", event.currentTarget.value as "auto" | "on" | "off")}
+                  >
+                    <option value="auto">Auto</option>
+                    <option value="on">On</option>
+                    <option value="off">Off</option>
+                  </select>
+                </label>
+              </div>
+              <div class="grid gap-3 rounded-lg border border-border-base bg-surface-raised px-4 py-3 sm:grid-cols-2">
+                <label class="flex flex-col gap-1">
+                  <span class="text-12-medium text-text-muted">Stability · {audio.voiceSettings.stability.toFixed(2)}</span>
+                  <input type="range" min="0" max="1" step="0.01" value={audio.voiceSettings.stability} onInput={(event) => setVoiceSetting("stability", numberValue(event.currentTarget.value))} />
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-12-medium text-text-muted">Similarity · {audio.voiceSettings.similarityBoost.toFixed(2)}</span>
+                  <input type="range" min="0" max="1" step="0.01" value={audio.voiceSettings.similarityBoost} onInput={(event) => setVoiceSetting("similarityBoost", numberValue(event.currentTarget.value))} />
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-12-medium text-text-muted">Style · {audio.voiceSettings.style.toFixed(2)}</span>
+                  <input type="range" min="0" max="1" step="0.01" value={audio.voiceSettings.style} onInput={(event) => setVoiceSetting("style", numberValue(event.currentTarget.value))} />
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-12-medium text-text-muted">Speed · {audio.voiceSettings.speed.toFixed(2)}</span>
+                  <input type="range" min="0.7" max="1.2" step="0.01" value={audio.voiceSettings.speed} onInput={(event) => setVoiceSetting("speed", numberValue(event.currentTarget.value))} />
+                </label>
+                <label class="flex items-center gap-2 text-12-regular text-text-base">
+                  <input type="checkbox" checked={audio.voiceSettings.useSpeakerBoost} onChange={(event) => setVoiceSetting("useSpeakerBoost", event.currentTarget.checked)} />
+                  Speaker boost
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-12-medium text-text-muted">Language code</span>
+                  <input
+                    class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
+                    placeholder="optional, e.g. en"
+                    value={audio.languageCode ?? ""}
+                    onInput={(event) => setAudio("languageCode", event.currentTarget.value.trim() || undefined)}
+                  />
+                </label>
+              </div>
+              <div class="rounded-lg border border-border-base bg-surface-raised px-4 py-3">
+                <div class="text-12-medium uppercase tracking-wide text-text-muted">Text</div>
+                <div class="mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap text-text-base">{input.text.slice(0, 500)}</div>
+              </div>
+              <div class="flex items-center justify-end gap-2">
+                <Button variant="ghost" size="normal" onClick={() => done(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" size="normal" onClick={() => done({ ...audio, voiceSettings: { ...audio.voiceSettings } })}>
+                  Generate audio
+                </Button>
+              </div>
+              <div class="text-12-regular text-text-muted">
+                Leave Voice ID blank to auto-pick a generated voice from your ElevenLabs account. Use Connect provider or
+                the parent `.env` for the API key.
               </div>
             </div>
           </Dialog>
@@ -1167,6 +1330,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onAbort: props.onAbort,
     onSubmit: props.onSubmit,
     confirmImageGeneration,
+    confirmAudioGeneration,
   })
 
   const handleKeyDown = (event: KeyboardEvent) => {

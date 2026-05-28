@@ -93,6 +93,7 @@ import { errorLayer } from "./middleware/error"
 import { fenceLayer } from "./middleware/fence"
 import { schemaErrorLayer } from "./middleware/schema-error"
 import { CodeGoblinImageCommand, type ImageInput } from "@/codegoblin/image-command"
+import { CodeGoblinAudioCommand, type AudioVoiceSettings } from "@/codegoblin/audio-command"
 import { Process } from "@/util/process"
 
 type CodeGoblinImagePersist = {
@@ -106,6 +107,21 @@ type CodeGoblinImagePersist = {
   variant?: string
   routeDirectory: string
   plannedOutput?: string
+}
+
+type CodeGoblinAudioPersist = {
+  sessionID: SessionID
+  userMessageID: MessageID
+  assistantMessageID: MessageID
+  assistantPartID: PartID
+  agent: string
+  providerID: string
+  modelID: string
+  variant?: string
+  routeDirectory: string
+  plannedOutput?: string
+  voice?: string
+  outputFormat?: string
 }
 
 export const context = Context.makeUnsafe<unknown>(new Map())
@@ -188,6 +204,30 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         })
       }),
     )
+    yield* router.add("GET", "/codegoblin/output-audio", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const output = new URL(request.url, "http://localhost").searchParams.get("output") ?? ""
+        const audio = yield* Effect.promise(async () => {
+          try {
+            return await readCodeGoblinOutputAudio(route.directory, output)
+          } catch (error) {
+            return {
+              ok: false as const,
+              message: error instanceof Error ? error.message : "Could not read CodeGoblin output audio.",
+            }
+          }
+        })
+        if (!audio.ok) return HttpServerResponse.jsonUnsafe(audio, { status: 404 })
+        return HttpServerResponse.raw(audio.body, {
+          headers: new Headers({
+            "cache-control": "no-store",
+            "content-type": audio.mime,
+            "x-content-type-options": "nosniff",
+          }),
+        })
+      }),
+    )
     yield* router.add("POST", "/codegoblin/open-output", (request) =>
       Effect.gen(function* () {
         const route = yield* WorkspaceRouteContext
@@ -212,6 +252,102 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           }
         })
         return HttpServerResponse.jsonUnsafe(opened, { status: opened.ok ? 200 : 400 })
+      }),
+    )
+    yield* router.add("POST", "/codegoblin/audio", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const text = yield* Effect.orDie(request.text)
+        let body: any
+        try {
+          body = text ? JSON.parse(text) : {}
+        } catch {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Invalid JSON body." }, { status: 400 })
+        }
+
+        const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : ""
+        if (!prompt) return HttpServerResponse.jsonUnsafe({ ok: false, message: "Audio text is required." }, { status: 400 })
+
+        const agent = typeof body?.agent === "string" && body.agent.trim() ? body.agent.trim() : "Agent"
+        const variant = typeof body?.variant === "string" ? body.variant : undefined
+        const requestProvider = typeof body?.provider === "string" ? body.provider : "elevenlabs"
+        const requestModel = typeof body?.model === "string" ? body.model : undefined
+        const voiceSettings = parseAudioVoiceSettings(body?.voiceSettings)
+
+        let preview: ReturnType<typeof CodeGoblinAudioCommand.describe>
+        try {
+          preview = CodeGoblinAudioCommand.describe({
+            text: prompt,
+            cwd: route.directory,
+            output: typeof body?.output === "string" ? body.output : undefined,
+            model: requestModel,
+            voice: typeof body?.voice === "string" ? body.voice : undefined,
+            outputFormat: typeof body?.outputFormat === "string" ? body.outputFormat : undefined,
+          })
+        } catch (error) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: error instanceof Error ? error.message : "Audio output path is invalid." },
+            { status: 400 },
+          )
+        }
+
+        const persist = typeof body?.sessionID === "string"
+          ? yield* createCodeGoblinAudioMessages({
+              session,
+              sessionStatus,
+              sessionID: SessionID.make(body.sessionID),
+              messageID: typeof body?.messageID === "string" ? MessageID.make(body.messageID) : undefined,
+              userPartID: typeof body?.userPartID === "string" ? PartID.make(body.userPartID) : undefined,
+              assistantMessageID:
+                typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
+              assistantPartID: typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
+              agent,
+              providerID: requestProvider,
+              modelID: preview.model,
+              variant,
+              routeDirectory: route.directory,
+              input: prompt,
+              plannedOutput: preview.output,
+              voice: preview.voice,
+              outputFormat: preview.outputFormat,
+            })
+          : undefined
+
+        const result = yield* Effect.promise(async () => {
+          try {
+            return await CodeGoblinAudioCommand.generate({
+              text: prompt,
+              cwd: route.directory,
+              output: typeof body?.output === "string" ? body.output : undefined,
+              model: requestModel,
+              voice: typeof body?.voice === "string" ? body.voice : undefined,
+              outputFormat: typeof body?.outputFormat === "string" ? body.outputFormat : undefined,
+              voiceSettings,
+              languageCode: typeof body?.languageCode === "string" ? body.languageCode : undefined,
+              seed: typeof body?.seed === "number" ? body.seed : undefined,
+              applyTextNormalization:
+                body?.textNormalization === "auto" || body?.textNormalization === "on" || body?.textNormalization === "off"
+                  ? body.textNormalization
+                  : undefined,
+              applyLanguageTextNormalization:
+                typeof body?.languageTextNormalization === "boolean" ? body.languageTextNormalization : undefined,
+              keyFile: typeof body?.keyFile === "string" ? body.keyFile : undefined,
+            })
+          } catch (error) {
+            return {
+              ok: false,
+              message: error instanceof Error ? error.message : "CodeGoblin audio generation failed.",
+            }
+          }
+        })
+
+        if (persist) {
+          yield* finishCodeGoblinAudioMessages({ session, sessionStatus, persist, result })
+        }
+
+        return HttpServerResponse.jsonUnsafe(persist ? { ...result, sessionID: persist.sessionID } : result, {
+          status: result.ok ? 200 : 400,
+        })
       }),
     )
     yield* router.add("POST", "/codegoblin/image", (request) =>
@@ -392,12 +528,54 @@ export async function readCodeGoblinOutputImage(root: string, output: string) {
   }
 }
 
+export async function readCodeGoblinOutputAudio(root: string, output: string) {
+  if (!output.trim()) throw new Error("CodeGoblin output path is required.")
+
+  const rootPath = path.resolve(root)
+  const target = path.resolve(rootPath, output)
+  const rel = path.relative(rootPath, target)
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("CodeGoblin output path must stay inside the current project directory.")
+  }
+
+  const stat = await fs.stat(target).catch(() => undefined)
+  if (!stat || !stat.isFile()) throw new Error("CodeGoblin output audio does not exist yet.")
+
+  return {
+    ok: true as const,
+    body: await fs.readFile(target),
+    mime: audioMimeType(target),
+  }
+}
+
 function imageMimeType(file: string) {
   const ext = path.extname(file).toLowerCase()
   if (ext === ".png") return "image/png"
   if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg"
   if (ext === ".webp") return "image/webp"
   if (ext === ".gif") return "image/gif"
+}
+
+function audioMimeType(file: string) {
+  const ext = path.extname(file).toLowerCase()
+  if (ext === ".wav") return "audio/wav"
+  if (ext === ".pcm") return "application/octet-stream"
+  if (ext === ".ulaw" || ext === ".mulaw") return "audio/basic"
+  return "audio/mpeg"
+}
+
+function parseAudioVoiceSettings(value: unknown): AudioVoiceSettings | undefined {
+  if (!value || typeof value !== "object") return
+  const input = value as Record<string, unknown>
+  const result: AudioVoiceSettings = {
+    stability: typeof input.stability === "number" ? input.stability : undefined,
+    similarityBoost: typeof input.similarityBoost === "number" ? input.similarityBoost : undefined,
+    style: typeof input.style === "number" ? input.style : undefined,
+    speed: typeof input.speed === "number" ? input.speed : undefined,
+    useSpeakerBoost: typeof input.useSpeakerBoost === "boolean" ? input.useSpeakerBoost : undefined,
+  }
+  if (Object.values(result).every((item) => item === undefined)) return
+  return result
 }
 
 function createCodeGoblinImageMessages(input: {
@@ -562,6 +740,179 @@ function finishCodeGoblinImageMessages(input: {
       variant: input.persist.variant,
       path: { cwd: input.persist.routeDirectory, root: input.persist.routeDirectory },
       cost: input.result.cost ?? 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      modelID,
+      providerID,
+      time: { created: Date.now(), completed: Date.now() },
+      sessionID: input.persist.sessionID,
+    } as MessageV2.Assistant)
+    yield* input.sessionStatus.set(input.persist.sessionID, { type: "idle" })
+  })
+}
+
+function createCodeGoblinAudioMessages(input: {
+  session: Session.Interface
+  sessionStatus: SessionStatus.Interface
+  sessionID: SessionID
+  messageID?: MessageID
+  userPartID?: PartID
+  assistantMessageID?: MessageID
+  assistantPartID?: PartID
+  agent: string
+  providerID: string
+  modelID: string
+  variant?: string
+  routeDirectory: string
+  input: string
+  plannedOutput?: string
+  voice?: string
+  outputFormat?: string
+}) {
+  return Effect.gen(function* () {
+    const userMessageID = input.messageID ?? MessageID.ascending()
+    const userPartID = input.userPartID ?? PartID.ascending()
+    const assistantMessageID = input.assistantMessageID ?? MessageID.ascending()
+    const assistantPartID = input.assistantPartID ?? PartID.ascending()
+    const now = Date.now()
+    yield* input.sessionStatus.set(input.sessionID, { type: "busy" })
+    yield* input.session.updateMessage({
+      id: userMessageID,
+      role: "user",
+      sessionID: input.sessionID,
+      time: { created: now },
+      agent: input.agent,
+      model: {
+        providerID: input.providerID,
+        modelID: input.modelID,
+        variant: input.variant,
+      },
+    } as MessageV2.User)
+    yield* input.session.updatePart({
+      id: userPartID,
+      sessionID: input.sessionID,
+      messageID: userMessageID,
+      type: "text",
+      text: input.input,
+      metadata: {
+        codegoblin: {
+          kind: "audio-request",
+        },
+      },
+    } as MessageV2.TextPart)
+    yield* input.session.updateMessage({
+      id: assistantMessageID,
+      parentID: userMessageID,
+      role: "assistant",
+      mode: input.agent,
+      agent: input.agent,
+      variant: input.variant,
+      path: { cwd: input.routeDirectory, root: input.routeDirectory },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      modelID: input.modelID,
+      providerID: input.providerID,
+      time: { created: Date.now() },
+      sessionID: input.sessionID,
+    } as MessageV2.Assistant)
+    yield* input.session.updatePart({
+      id: assistantPartID,
+      sessionID: input.sessionID,
+      messageID: assistantMessageID,
+      type: "text",
+      text: [
+        `CodeGoblin is generating audio with ${input.providerID}/${input.modelID}.`,
+        input.voice ? `Voice: ${input.voice}` : undefined,
+        input.outputFormat ? `Format: ${input.outputFormat}` : undefined,
+        input.plannedOutput ? `Saving to: ${input.plannedOutput}` : undefined,
+        "This chat message will update when the audio finishes.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      metadata: {
+        codegoblin: {
+          kind: "audio-progress",
+          output: input.plannedOutput,
+          provider: input.providerID,
+          model: input.modelID,
+          voice: input.voice,
+          outputFormat: input.outputFormat,
+        },
+      },
+    } as MessageV2.TextPart)
+    return {
+      sessionID: input.sessionID,
+      userMessageID,
+      assistantMessageID,
+      assistantPartID,
+      agent: input.agent,
+      providerID: input.providerID,
+      modelID: input.modelID,
+      variant: input.variant,
+      routeDirectory: input.routeDirectory,
+      plannedOutput: input.plannedOutput,
+      voice: input.voice,
+      outputFormat: input.outputFormat,
+    } satisfies CodeGoblinAudioPersist
+  })
+}
+
+function finishCodeGoblinAudioMessages(input: {
+  session: Session.Interface
+  sessionStatus: SessionStatus.Interface
+  persist: CodeGoblinAudioPersist
+  result: Awaited<ReturnType<typeof CodeGoblinAudioCommand.generate>>
+}) {
+  return Effect.gen(function* () {
+    const providerID = input.result.provider ?? input.persist.providerID
+    const modelID = input.result.model ?? input.persist.modelID
+    const output = input.result.output ?? input.persist.plannedOutput
+    const voice = input.result.voice ?? input.persist.voice
+    const outputFormat = input.result.outputFormat ?? input.persist.outputFormat
+    const text = input.result.ok
+      ? [
+          "Audio generated.",
+          `Model: ${providerID}/${modelID}`,
+          voice ? `Voice: ${voice}` : undefined,
+          outputFormat ? `Format: ${outputFormat}` : undefined,
+          output ? `Saved to: ${output}` : undefined,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : [
+          `Audio generation failed with ${providerID}/${modelID}.`,
+          voice ? `Voice: ${voice}` : undefined,
+          output ? `Planned output: ${output}` : undefined,
+          input.result.message,
+        ]
+          .filter(Boolean)
+          .join("\n")
+
+    yield* input.session.updatePart({
+      id: input.persist.assistantPartID,
+      sessionID: input.persist.sessionID,
+      messageID: input.persist.assistantMessageID,
+      type: "text",
+      text,
+      metadata: {
+        codegoblin: {
+          kind: input.result.ok ? "audio-result" : "audio-error",
+          output,
+          provider: providerID,
+          model: modelID,
+          voice,
+          outputFormat,
+        },
+      },
+    } as MessageV2.TextPart)
+    yield* input.session.updateMessage({
+      id: input.persist.assistantMessageID,
+      parentID: input.persist.userMessageID,
+      role: "assistant",
+      mode: input.persist.agent,
+      agent: input.persist.agent,
+      variant: input.persist.variant,
+      path: { cwd: input.persist.routeDirectory, root: input.persist.routeDirectory },
+      cost: 0,
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
       modelID,
       providerID,

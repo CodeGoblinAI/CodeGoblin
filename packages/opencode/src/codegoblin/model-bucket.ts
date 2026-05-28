@@ -26,6 +26,10 @@ export function isAudioOnlyModel(info: BucketModelInfo) {
 }
 
 export function isChatSelectableModel(info: BucketModelInfo) {
+  return info.capabilities?.output?.audio === true || info.capabilities?.output?.image === true || info.capabilities?.output?.text === true || info.capabilities?.input?.text === true
+}
+
+export function isDefaultChatModel(info: BucketModelInfo) {
   return !isAudioOnlyModel(info)
 }
 

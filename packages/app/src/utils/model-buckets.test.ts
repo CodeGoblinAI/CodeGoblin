@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { isChatSelectableModel, modelBucket } from "./model-buckets"
+import { isChatSelectableModel, isDefaultChatModel, modelBucket } from "./model-buckets"
 
 describe("web model buckets", () => {
   test("keeps vision-capable text models out of image generation buckets", () => {
@@ -29,16 +29,17 @@ describe("web model buckets", () => {
     ).toBe("Image models")
   })
 
-  test("does not allow audio-only models as chat selections", () => {
-    expect(
-      isChatSelectableModel({
-        id: "eleven_multilingual_v2",
-        family: "elevenlabs",
-        capabilities: {
-          input: { text: true },
-          output: { audio: true },
-        },
-      }),
-    ).toBe(false)
+  test("allows audio-only models as dedicated selections but not chat defaults", () => {
+    const model = {
+      id: "eleven_multilingual_v2",
+      family: "elevenlabs",
+      capabilities: {
+        input: { text: true },
+        output: { audio: true },
+      },
+    }
+    expect(isChatSelectableModel(model)).toBe(true)
+    expect(isDefaultChatModel(model)).toBe(false)
+    expect(modelBucket(model)).toBe("Voice & audio models")
   })
 })

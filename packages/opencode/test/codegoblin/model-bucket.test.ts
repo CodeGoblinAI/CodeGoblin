@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { isChatSelectableModel, modelBucket, sortModelCategories } from "@/codegoblin/model-bucket"
+import { isChatSelectableModel, isDefaultChatModel, modelBucket, sortModelCategories } from "@/codegoblin/model-bucket"
 
 describe("CodeGoblin model buckets", () => {
   test("keeps vision-capable text models in text buckets", () => {
@@ -27,16 +27,16 @@ describe("CodeGoblin model buckets", () => {
     ).toBe("Image models")
   })
 
-  test("filters audio-only models from chat selection", () => {
-    expect(
-      isChatSelectableModel({
-        family: "elevenlabs",
-        capabilities: {
-          input: { text: true },
-          output: { audio: true },
-        },
-      }),
-    ).toBe(false)
+  test("allows audio-only models as dedicated selections but not chat defaults", () => {
+    const model = {
+      family: "elevenlabs",
+      capabilities: {
+        input: { text: true },
+        output: { audio: true },
+      },
+    }
+    expect(isChatSelectableModel(model)).toBe(true)
+    expect(isDefaultChatModel(model)).toBe(false)
   })
 
   test("sorts favorites before recents and regular buckets", () => {

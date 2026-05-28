@@ -14,7 +14,7 @@ import { useArgs } from "./args"
 import { useSDK } from "./sdk"
 import { RGBA } from "@opentui/core"
 import { Filesystem } from "@/util/filesystem"
-import { isChatSelectableModel } from "@/codegoblin/model-bucket"
+import { isDefaultChatModel } from "@/codegoblin/model-bucket"
 
 export function parseModel(model: string) {
   const [providerID, ...rest] = model.split("/")
@@ -34,7 +34,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     function isModelValid(model: { providerID: string; modelID: string }) {
       const provider = sync.data.provider.find((x) => x.id === model.providerID)
       const info = provider?.models[model.modelID]
-      return !!info && isChatSelectableModel(info)
+      return !!info
+    }
+
+    function isDefaultModelValid(model: { providerID: string; modelID: string }) {
+      const provider = sync.data.provider.find((x) => x.id === model.providerID)
+      const info = provider?.models[model.modelID]
+      return !!info && isDefaultChatModel(info)
     }
 
     function getFirstValidModel(...modelFns: (() => { providerID: string; modelID: string } | undefined)[]) {
@@ -175,7 +181,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
         if (sync.data.config.model) {
           const { providerID, modelID } = parseModel(sync.data.config.model)
-          if (isModelValid({ providerID, modelID })) {
+          if (isDefaultModelValid({ providerID, modelID })) {
             return {
               providerID,
               modelID,
@@ -184,7 +190,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         }
 
         for (const item of modelStore.recent) {
-          if (isModelValid(item)) {
+          if (isDefaultModelValid(item)) {
             return item
           }
         }
@@ -192,8 +198,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         const provider = sync.data.provider[0]
         if (!provider) return undefined
         const defaultModel = sync.data.provider_default[provider.id]
-        const firstModel = Object.values(provider.models).find(isChatSelectableModel)
-        const model = defaultModel && isModelValid({ providerID: provider.id, modelID: defaultModel }) ? defaultModel : firstModel?.id
+        const firstModel = Object.values(provider.models).find(isDefaultChatModel)
+        const model = defaultModel && isDefaultModelValid({ providerID: provider.id, modelID: defaultModel }) ? defaultModel : firstModel?.id
         if (!model) return undefined
         return {
           providerID: provider.id,

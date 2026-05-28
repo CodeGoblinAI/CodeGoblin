@@ -758,16 +758,9 @@ async function loadLocalEnv(root: string, keyFile?: string) {
   ].filter((item): item is string => Boolean(item))
   for (const file of files) {
     const resolved = path.resolve(root, file)
-    if (
-      !resolved.startsWith(root) &&
-      file !== process.env.CODEGOBLIN_ENV_FILE &&
-      file !== process.env.CODEGOBLIN_GEMINI_ENV_FILE &&
-      file !== keyFile
-    )
-      continue
     const text = await fs.readFile(resolved, "utf8").catch(() => "")
     for (const line of text.split(/\r?\n/)) {
-      const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line)
+      const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line)
       if (!match) continue
       if (match[1] in env && env[match[1]]) continue
       env[match[1]] = unquoteEnv(match[2])

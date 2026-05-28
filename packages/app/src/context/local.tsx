@@ -9,7 +9,7 @@ import { Persist, persisted } from "@/utils/persist"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 import { useSDK } from "./sdk"
 import { useSync } from "./sync"
-import { isChatSelectableModel } from "@/utils/model-buckets"
+import { isDefaultChatModel } from "@/utils/model-buckets"
 
 export type ModelKey = { providerID: string; modelID: string; variant?: string }
 
@@ -93,7 +93,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const validModel = (model: ModelKey) => {
       const provider = providers.all().get(model.providerID)
       const info = provider?.models[model.modelID]
-      return !!info && connected().has(model.providerID) && isChatSelectableModel(info)
+      return !!info && connected().has(model.providerID)
+    }
+
+    const validDefaultModel = (model: ModelKey) => {
+      const provider = providers.all().get(model.providerID)
+      const info = provider?.models[model.modelID]
+      return !!info && connected().has(model.providerID) && isDefaultChatModel(info)
     }
 
     const firstModel = (...items: Array<() => ModelKey | undefined>) => {
@@ -146,12 +152,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       if (!sync.data.config.model) return
       const [providerID, modelID] = sync.data.config.model.split("/")
       const model = { providerID, modelID }
-      if (validModel(model)) return model
+      if (validDefaultModel(model)) return model
     }
 
     const recentModel = () => {
       for (const item of models.recent.list()) {
-        if (validModel(item)) return item
+        if (validDefaultModel(item)) return item
       }
     }
 
@@ -161,10 +167,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         const configured = defaults[provider.id]
         if (configured) {
           const model = { providerID: provider.id, modelID: configured }
-          if (validModel(model)) return model
+          if (validDefaultModel(model)) return model
         }
 
-        const first = Object.values(provider.models).find(isChatSelectableModel)
+        const first = Object.values(provider.models).find(isDefaultChatModel)
         if (!first) continue
         const model = { providerID: provider.id, modelID: first.id }
         if (validModel(model)) return model

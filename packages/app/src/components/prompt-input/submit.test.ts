@@ -25,11 +25,20 @@ const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
 const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
 const syncedDirectories: string[] = []
+type TestModel = {
+  id: string
+  provider: { id: string }
+  family?: string
+  capabilities?: {
+    input?: Record<string, boolean | undefined>
+    output?: Record<string, boolean | undefined>
+  }
+}
 
 let params: { id?: string } = {}
 let selected = "/repo/worktree-a"
 let variant: string | undefined
-let selectedModel = { id: "model", provider: { id: "provider" } }
+let selectedModel: TestModel = { id: "model", provider: { id: "provider" } }
 let imageGenerationAutoApprove = false
 let promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 let promptResetCount = 0
@@ -88,6 +97,7 @@ beforeAll(async () => {
   }))
 
   mock.module("@opencode-ai/core/util/encode", () => ({
+    base64Decode: (value: string) => value,
     base64Encode: (value: string) => value,
   }))
 
@@ -592,6 +602,114 @@ describe("prompt submit worktree selection", () => {
     expect(confirmPrompts).toHaveLength(0)
     expect(fetchRequests).toHaveLength(1)
     expect(promptResetCount).toBe(1)
+  })
+
+  test("routes selected audio models through CodeGoblin audio generation", async () => {
+    params = { id: "session-1" }
+    selectedModel = {
+      id: "eleven_multilingual_v2",
+      provider: { id: "elevenlabs" },
+      family: "elevenlabs",
+      capabilities: {
+        input: { text: true },
+        output: { audio: true },
+      },
+    }
+    promptValue = [{ type: "text", content: "read this with goblin swagger", start: 0, end: 29 }]
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+      confirmAudioGeneration: (input) => {
+        expect(input).toMatchObject({
+          provider: "elevenlabs",
+          model: "eleven_multilingual_v2",
+          text: "read this with goblin swagger",
+        })
+        return {
+          voice: "voice_test",
+          outputFormat: "mp3_22050_32",
+          voiceSettings: {
+            stability: 0.4,
+            similarityBoost: 0.8,
+            style: 0.1,
+            speed: 1.05,
+            useSpeakerBoost: false,
+          },
+          languageCode: "en",
+          textNormalization: "auto",
+        }
+      },
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+    await submit.handleSubmit(event)
+
+    expect(confirmPrompts).toHaveLength(0)
+    expect(promptResetCount).toBe(1)
+    expect(optimistic).toHaveLength(2)
+    expect(optimistic[0]).toMatchObject({
+      directory: "/repo/main",
+      sessionID: "session-1",
+      message: {
+        role: "user",
+        model: { providerID: "elevenlabs", modelID: "eleven_multilingual_v2" },
+      },
+    })
+    expect(optimistic[1]).toMatchObject({
+      directory: "/repo/main",
+      sessionID: "session-1",
+      message: {
+        role: "assistant",
+        providerID: "elevenlabs",
+        modelID: "eleven_multilingual_v2",
+      },
+    })
+    expect((optimistic[1]?.parts?.[0] as any)?.metadata).toMatchObject({
+      codegoblin: {
+        kind: "audio-progress",
+        provider: "elevenlabs",
+        model: "eleven_multilingual_v2",
+        voice: "voice_test",
+        outputFormat: "mp3_22050_32",
+      },
+    })
+    expect(fetchRequests).toHaveLength(1)
+    expect(fetchRequests[0]).toMatchObject({
+      url: "http://localhost:4096/codegoblin/audio",
+      body: {
+        sessionID: "session-1",
+        prompt: "read this with goblin swagger",
+        output: expect.stringMatching(/^codegoblin-output\/audio\/.+\.mp3$/),
+        provider: "elevenlabs",
+        model: "eleven_multilingual_v2",
+        voice: "voice_test",
+        outputFormat: "mp3_22050_32",
+        voiceSettings: {
+          stability: 0.4,
+          similarityBoost: 0.8,
+          style: 0.1,
+          speed: 1.05,
+          useSpeakerBoost: false,
+        },
+        languageCode: "en",
+        textNormalization: "auto",
+      },
+    })
+    expect(fetchRequests[0]?.body.messageID).toBe(optimistic[0]?.message.id)
+    expect(fetchRequests[0]?.body.assistantMessageID).toBe(optimistic[1]?.message.id)
   })
 
   test("routes descriptive prompts through the selected image model", async () => {

@@ -1065,6 +1065,18 @@ export function Prompt(props: PromptProps) {
     return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
   }
 
+  function codeGoblinAutoApproveAudio() {
+    const raw = process.env.CODEGOBLIN_AUDIO_AUTO_APPROVE ?? process.env.CODEGOBLIN_AUTO_AUDIO
+    const normalized = raw?.trim().toLowerCase()
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
+  }
+
+  function isAudioModelSelection(input: { providerID: string; modelID: string; family?: string; outputAudio?: boolean }) {
+    if (input.outputAudio) return true
+    const raw = `${input.providerID} ${input.modelID} ${input.family ?? ""}`.toLowerCase()
+    return raw.includes("elevenlabs") || raw.includes("text-to-speech") || raw.includes("tts")
+  }
+
   async function confirmImplicitImageGeneration(input: { providerID: string; modelID: string; prompt: string }) {
     if (codeGoblinAutoApproveImages()) return true
     const ok = await DialogConfirm.show(
@@ -1082,7 +1094,31 @@ export function Prompt(props: PromptProps) {
     return ok === true
   }
 
-  async function ensureSessionForImage(agent: { name: string }, selectedModel: { providerID: string; modelID: string }, variant?: string) {
+  async function confirmAudioGeneration(input: { providerID: string; modelID: string; prompt: string }) {
+    if (codeGoblinAutoApproveAudio()) return true
+    const ok = await DialogConfirm.show(
+      dialog,
+      "Generate Audio?",
+      [
+        `Use ${input.providerID}/${input.modelID} for this audio request?`,
+        "",
+        Locale.truncate(input.prompt, 220),
+        "",
+        "The voice auto-selects a generated ElevenLabs voice when no voice is configured.",
+        "Use `cg audio --help` for full audio settings.",
+        "Set CODEGOBLIN_AUDIO_AUTO_APPROVE=1 to skip this confirmation.",
+      ].join("\n"),
+      "not now",
+    )
+    return ok === true
+  }
+
+  async function ensureSessionForImage(
+    agent: { name: string },
+    selectedModel: { providerID: string; modelID: string },
+    variant?: string,
+    kind = "image",
+  ) {
     if (props.sessionID) return props.sessionID
     const workspace = workspaceSelection()
     const workspaceID = iife(() => {
@@ -1102,7 +1138,7 @@ export function Prompt(props: PromptProps) {
     })
     if (res.error || !res.data) {
       toast.show({
-        message: "Creating a session for image generation failed.",
+        message: `Creating a session for ${kind} generation failed.`,
         variant: "error",
       })
       return
@@ -1130,6 +1166,22 @@ export function Prompt(props: PromptProps) {
       | undefined
     if (!response.ok || !result?.ok) {
       throw new Error(result?.message ?? "CodeGoblin image command failed.")
+    }
+    return result
+  }
+
+  async function postCodeGoblinAudio(body: Record<string, unknown>) {
+    const response = await sdk.fetch(`${sdk.url}/codegoblin/audio`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-opencode-directory": project.instance.directory() || process.cwd(),
+      },
+      body: JSON.stringify(body),
+    })
+    const result = (await response.json().catch(() => undefined)) as { ok?: boolean; message?: string } | undefined
+    if (!response.ok || !result?.ok) {
+      throw new Error(result?.message ?? "CodeGoblin audio command failed.")
     }
     return result
   }
@@ -1229,6 +1281,72 @@ export function Prompt(props: PromptProps) {
     }
     const selectedProvider = sync.data.provider.find((item) => item.id === selectedModel.providerID)
     const selectedModelInfo = selectedProvider?.models[selectedModel.modelID]
+    if (
+      store.mode !== "shell" &&
+      isAudioModelSelection({
+        providerID: selectedModel.providerID,
+        modelID: selectedModel.modelID,
+        family: selectedModelInfo?.family,
+        outputAudio: selectedModelInfo?.capabilities?.output?.audio,
+      })
+    ) {
+      const currentMode = store.mode
+      if (currentImageInputs().length > 0) {
+        toast.show({
+          variant: "warning",
+          message: "Audio generation uses text only right now. Remove image attachments or switch models.",
+          duration: 9000,
+        })
+        return false
+      }
+      try {
+        const confirmed = await confirmAudioGeneration({
+          providerID: selectedModel.providerID,
+          modelID: selectedModel.modelID,
+          prompt: trimmed,
+        })
+        if (!confirmed) return false
+        const sessionID = await ensureSessionForImage(agent, selectedModel, variant, "audio")
+        if (!sessionID) return false
+        const submitted = store.prompt.input
+        finishLocalSubmit(currentMode)
+        toast.show({
+          variant: "info",
+          message: `CodeGoblin is generating audio with ${selectedModel.providerID}/${selectedModel.modelID}. The output path will stay in chat.`,
+          duration: 4000,
+        })
+        void postCodeGoblinAudio({
+          sessionID,
+          agent: agent.name,
+          variant,
+          prompt: submitted.trim(),
+          provider: selectedModel.providerID,
+          model: selectedModel.modelID,
+        })
+          .then((result) => {
+            toast.show({
+              variant: "success",
+              message: result.message ?? "CodeGoblin saved the audio locally.",
+              duration: 7000,
+            })
+          })
+          .catch((error) => {
+            toast.show({
+              variant: "error",
+              message: error instanceof Error ? error.message : "CodeGoblin audio command failed.",
+              duration: 9000,
+            })
+          })
+        return true
+      } catch (error) {
+        toast.show({
+          variant: "error",
+          message: error instanceof Error ? error.message : "CodeGoblin audio command failed.",
+          duration: 9000,
+        })
+        return false
+      }
+    }
     if (
       store.mode !== "shell" &&
       CodeGoblinImageCommand.isImageModelSelection({

@@ -250,7 +250,8 @@
   }
 }
 
-[data-component="codegoblin-image-status"] {
+[data-component="codegoblin-image-status"],
+[data-component="codegoblin-audio-status"] {
   width: min(100%, 720px);
   border: 1px solid color-mix(in srgb, var(--border-success-selected) 55%, var(--border-weak-base));
   border-left: 4px solid var(--border-success-selected);
@@ -265,7 +266,8 @@
   box-shadow: 0 10px 30px color-mix(in srgb, var(--surface-success-strong) 10%, transparent);
 }
 
-[data-component="codegoblin-image-status"][data-status="error"] {
+[data-component="codegoblin-image-status"][data-status="error"],
+[data-component="codegoblin-audio-status"][data-status="error"] {
   border-color: color-mix(in srgb, var(--border-critical-selected) 55%, var(--border-weak-base));
   border-left-color: var(--border-critical-selected);
   background:
@@ -273,7 +275,8 @@
     var(--background-stronger);
 }
 
-[data-slot="codegoblin-image-header"] {
+[data-slot="codegoblin-image-header"],
+[data-slot="codegoblin-audio-header"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -281,7 +284,8 @@
   min-width: 0;
 }
 
-[data-slot="codegoblin-image-title"] {
+[data-slot="codegoblin-image-title"],
+[data-slot="codegoblin-audio-title"] {
   min-width: 0;
   display: inline-flex;
   align-items: center;
@@ -290,14 +294,16 @@
   font-weight: var(--font-weight-medium);
 }
 
-[data-slot="codegoblin-image-model"] {
+[data-slot="codegoblin-image-model"],
+[data-slot="codegoblin-audio-model"] {
   flex: 0 0 auto;
   color: var(--text-weak);
   font-size: 12px;
   font-family: var(--font-family-mono);
 }
 
-[data-slot="codegoblin-image-output"] {
+[data-slot="codegoblin-image-output"],
+[data-slot="codegoblin-audio-output"] {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -309,19 +315,22 @@
   border: 1px solid var(--border-weak-base);
 }
 
-[data-slot="codegoblin-image-output-actions"] {
+[data-slot="codegoblin-image-output-actions"],
+[data-slot="codegoblin-audio-output-actions"] {
   display: inline-flex;
   align-items: center;
   gap: 2px;
 }
 
-[data-slot="codegoblin-image-output-label"] {
+[data-slot="codegoblin-image-output-label"],
+[data-slot="codegoblin-audio-output-label"] {
   color: var(--text-weak);
   font-size: 12px;
   white-space: nowrap;
 }
 
-[data-slot="codegoblin-image-output"] code {
+[data-slot="codegoblin-image-output"] code,
+[data-slot="codegoblin-audio-output"] code {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -329,6 +338,11 @@
   color: var(--text-strong);
   font-size: 12px;
   font-family: var(--font-family-mono);
+}
+
+[data-slot="codegoblin-audio-player"] {
+  width: 100%;
+  border-radius: 8px;
 }
 
 [data-slot="codegoblin-image-preview"] {
@@ -360,7 +374,8 @@
   line-height: 1.35;
 }
 
-[data-slot="codegoblin-image-detail"] {
+[data-slot="codegoblin-image-detail"],
+[data-slot="codegoblin-audio-detail"] {
   color: var(--text-weak);
   white-space: pre-wrap;
   overflow-wrap: anywhere;

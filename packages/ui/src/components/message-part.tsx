@@ -1453,6 +1453,15 @@ type CodeGoblinImageMeta = {
   output?: string
 }
 
+type CodeGoblinAudioMeta = {
+  kind: "audio-progress" | "audio-result" | "audio-error"
+  provider?: string
+  model?: string
+  output?: string
+  voice?: string
+  outputFormat?: string
+}
+
 function codeGoblinImageMeta(metadata: Record<string, unknown> | undefined): CodeGoblinImageMeta | undefined {
   const raw = metadata?.codegoblin
   if (!raw || typeof raw !== "object") return
@@ -1464,6 +1473,22 @@ function codeGoblinImageMeta(metadata: Record<string, unknown> | undefined): Cod
     provider: typeof value.provider === "string" ? value.provider : undefined,
     model: typeof value.model === "string" ? value.model : undefined,
     output: typeof value.output === "string" ? value.output : undefined,
+  }
+}
+
+function codeGoblinAudioMeta(metadata: Record<string, unknown> | undefined): CodeGoblinAudioMeta | undefined {
+  const raw = metadata?.codegoblin
+  if (!raw || typeof raw !== "object") return
+  const value = raw as Record<string, unknown>
+  const kind = value.kind
+  if (kind !== "audio-progress" && kind !== "audio-result" && kind !== "audio-error") return
+  return {
+    kind,
+    provider: typeof value.provider === "string" ? value.provider : undefined,
+    model: typeof value.model === "string" ? value.model : undefined,
+    output: typeof value.output === "string" ? value.output : undefined,
+    voice: typeof value.voice === "string" ? value.voice : undefined,
+    outputFormat: typeof value.outputFormat === "string" ? value.outputFormat : undefined,
   }
 }
 
@@ -1721,12 +1746,178 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
   )
 }
 
+function CodeGoblinAudioStatus(props: { meta: CodeGoblinAudioMeta; text: string }) {
+  const data = useData()
+  const [copied, setCopied] = createSignal(false)
+  const [opened, setOpened] = createSignal<"idle" | "opening" | "done" | "error">("idle")
+  const status = createMemo(() => {
+    if (props.meta.kind === "audio-progress") return "running"
+    if (props.meta.kind === "audio-error") return "error"
+    return "done"
+  })
+  const title = createMemo(() => {
+    if (status() === "running") return "CodeGoblin is generating audio"
+    if (status() === "error") return "Audio generation failed"
+    return "Audio generated"
+  })
+  const model = createMemo(() => [props.meta.provider, props.meta.model].filter(Boolean).join("/"))
+  const previewURL = createMemo(() => {
+    if (status() !== "done") return
+    if (!props.meta.output) return
+    const params = new URLSearchParams({
+      directory: data.directory,
+      output: props.meta.output,
+    })
+    return `/codegoblin/output-audio?${params.toString()}`
+  })
+  const detail = createMemo(() => {
+    const output = props.meta.output
+    return props.text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => {
+        if (!line) return false
+        if (line.startsWith("CodeGoblin is generating audio")) return false
+        if (line.startsWith("This chat message will update")) return false
+        if (line.startsWith("Audio generated")) return false
+        if (line.startsWith("Audio generation failed")) return false
+        if (line.startsWith("Model:")) return false
+        if (line.startsWith("Voice:")) return false
+        if (line.startsWith("Format:")) return false
+        if (line.startsWith("Saved to:")) return false
+        if (line.startsWith("Saving to:")) return false
+        if (line.startsWith("Planned output:")) return false
+        if (output && line.includes(output)) return false
+        return true
+      })
+      .join("\n")
+  })
+
+  const copyOutput = async () => {
+    if (!props.meta.output) return
+    if (await writeClipboard(props.meta.output)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  const codeGoblinRequest = async (url: string, body: Record<string, unknown>) => {
+    const response = await fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "content-type": "application/json",
+        "x-opencode-directory": data.directory,
+      },
+      body: JSON.stringify(body),
+    })
+    const json = await response.json().catch(() => undefined)
+    if (!response.ok || json?.ok === false) {
+      throw new Error(typeof json?.message === "string" ? json.message : "CodeGoblin request failed.")
+    }
+    return json
+  }
+
+  const openOutputFolder = async () => {
+    const output = props.meta.output
+    if (!output || opened() === "opening") return
+    setOpened("opening")
+    try {
+      await codeGoblinRequest("/codegoblin/open-output", { output, mode: "folder" })
+      setOpened("done")
+      setTimeout(() => setOpened("idle"), 2000)
+    } catch {
+      setOpened("error")
+      setTimeout(() => setOpened("idle"), 2500)
+    }
+  }
+
+  return (
+    <div data-component="codegoblin-audio-status" data-status={status()}>
+      <div data-slot="codegoblin-audio-header">
+        <div data-slot="codegoblin-audio-title">
+          <Show when={status() === "running"}>
+            <Spinner />
+          </Show>
+          <span>{title()}</span>
+        </div>
+        <Show when={model()}>
+          <span data-slot="codegoblin-audio-model">{model()}</span>
+        </Show>
+      </div>
+      <Show when={props.meta.output}>
+        {(output) => (
+          <div data-slot="codegoblin-audio-output">
+            <span data-slot="codegoblin-audio-output-label">
+              {status() === "error" ? "Planned output" : "Saved to"}
+            </span>
+            <code>{output()}</code>
+            <div data-slot="codegoblin-audio-output-actions">
+              <Tooltip value={copied() ? "Copied path" : "Copy output path"} placement="top" gutter={4}>
+                <IconButton
+                  icon={copied() ? "check" : "copy"}
+                  size="normal"
+                  variant="ghost"
+                  aria-label={copied() ? "Copied path" : "Copy output path"}
+                  onClick={copyOutput}
+                  onMouseDown={(e) => e.preventDefault()}
+                />
+              </Tooltip>
+              <Tooltip
+                value={
+                  opened() === "done"
+                    ? "Opened folder"
+                    : opened() === "error"
+                      ? "Folder not available"
+                      : "Open output folder"
+                }
+                placement="top"
+                gutter={4}
+              >
+                <IconButton
+                  icon={opened() === "done" ? "check" : "folder"}
+                  size="normal"
+                  variant="ghost"
+                  aria-label="Open output folder"
+                  disabled={opened() === "opening"}
+                  onClick={openOutputFolder}
+                  onMouseDown={(e) => e.preventDefault()}
+                />
+              </Tooltip>
+            </div>
+          </div>
+        )}
+      </Show>
+      <Show when={previewURL()}>
+        {(url) => (
+          <audio data-slot="codegoblin-audio-player" controls preload="metadata" src={url()}>
+            <a href={url()} target="_blank" rel="noreferrer">
+              Open generated audio
+            </a>
+          </audio>
+        )}
+      </Show>
+      <Show when={props.meta.voice || props.meta.outputFormat}>
+        <div data-slot="codegoblin-audio-detail">
+          {[props.meta.voice ? `Voice: ${props.meta.voice}` : undefined, props.meta.outputFormat ? `Format: ${props.meta.outputFormat}` : undefined]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+      </Show>
+      <Show when={detail()}>
+        {(value) => <div data-slot="codegoblin-audio-detail">{value()}</div>}
+      </Show>
+    </div>
+  )
+}
+
 PART_MAPPING["text"] = function TextPartDisplay(props) {
   const data = useData()
   const i18n = useI18n()
   const numfmt = createMemo(() => new Intl.NumberFormat(i18n.locale()))
   const part = () => props.part as TextPart
   const imageStatus = createMemo(() => codeGoblinImageMeta(part().metadata))
+  const audioStatus = createMemo(() => codeGoblinAudioMeta(part().metadata))
   const interrupted = createMemo(
     () =>
       props.message.role === "assistant" && (props.message as AssistantMessage).error?.name === "MessageAbortedError",
@@ -1806,8 +1997,15 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
           <Show
             when={imageStatus()}
             fallback={
-              <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
-                <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
+              <Show
+                when={audioStatus()}
+                fallback={
+                  <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
+                    <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
+                  </Show>
+                }
+              >
+                {(status) => <CodeGoblinAudioStatus meta={status()} text={text()} />}
               </Show>
             }
           >

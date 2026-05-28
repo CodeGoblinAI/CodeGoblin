@@ -77,6 +77,12 @@ const imageModelSelected = (model: { id: string; provider: { id: string }; capab
   )
 }
 
+const audioModelSelected = (model: { id: string; provider: { id: string }; family?: string; capabilities?: any }) => {
+  if (model.capabilities?.output?.audio) return true
+  const raw = `${model.provider.id}/${model.id} ${model.family ?? ""}`.toLowerCase()
+  return raw.includes("elevenlabs") || raw.includes("text-to-speech") || raw.includes("tts")
+}
+
 const legacyImageAutoApprove = () => {
   if (typeof window === "undefined") return false
   try {
@@ -93,6 +99,41 @@ type ConfirmImageGenerationInput = {
   autoApprove: boolean
 }
 
+export type AudioGenerationSettings = {
+  voice: string
+  outputFormat: string
+  voiceSettings: {
+    stability: number
+    similarityBoost: number
+    style: number
+    speed: number
+    useSpeakerBoost: boolean
+  }
+  languageCode?: string
+  seed?: number
+  textNormalization?: "auto" | "on" | "off"
+  languageTextNormalization?: boolean
+}
+
+type ConfirmAudioGenerationInput = {
+  provider: string
+  model: string
+  text: string
+}
+
+const defaultAudioSettings = (): AudioGenerationSettings => ({
+  voice: "",
+  outputFormat: "mp3_44100_128",
+  voiceSettings: {
+    stability: 0.5,
+    similarityBoost: 0.75,
+    style: 0,
+    speed: 1,
+    useSpeakerBoost: true,
+  },
+  textNormalization: "auto",
+})
+
 const fallbackConfirmImageGeneration = (input: ConfirmImageGenerationInput) => {
   if (input.autoApprove || legacyImageAutoApprove()) return true
   if (typeof globalThis.confirm !== "function") return false
@@ -107,7 +148,34 @@ const fallbackConfirmImageGeneration = (input: ConfirmImageGenerationInput) => {
   )
 }
 
+const fallbackConfirmAudioGeneration = (input: ConfirmAudioGenerationInput) => {
+  if (typeof globalThis.confirm !== "function") return false
+  if (
+    !globalThis.confirm(
+      [
+        `Generate audio with ${input.provider}/${input.model}?`,
+        "",
+        input.text.slice(0, 240),
+        "",
+        "CodeGoblin will use your ElevenLabs key and save the audio locally.",
+      ].join("\n"),
+    )
+  )
+    return false
+  return defaultAudioSettings()
+}
+
 const defaultImageOutput = () => `codegoblin-output/images/${new Date().toISOString().replace(/[:.]/g, "-")}.png`
+
+const audioExtension = (outputFormat: string | undefined) => {
+  if (outputFormat?.startsWith("wav_")) return "wav"
+  if (outputFormat?.startsWith("pcm_")) return "pcm"
+  if (outputFormat?.startsWith("ulaw_")) return "ulaw"
+  return "mp3"
+}
+
+const defaultAudioOutput = (outputFormat: string | undefined) =>
+  `codegoblin-output/audio/${new Date().toISOString().replace(/[:.]/g, "-")}.${audioExtension(outputFormat)}`
 
 const slashImageOutput = (input: string) => {
   const match = /(?:^|\s)--output(?:=|\s+)(?:"([^"]+)"|'([^']+)'|(\S+))/i.exec(input)
@@ -263,6 +331,7 @@ type PromptSubmitInput = {
   onAbort?: () => void
   onSubmit?: () => void
   confirmImageGeneration?: (input: ConfirmImageGenerationInput) => Promise<boolean> | boolean
+  confirmAudioGeneration?: (input: ConfirmAudioGenerationInput) => Promise<AudioGenerationSettings | false> | AudioGenerationSettings | false
 }
 
 type CommentItem = {
@@ -385,19 +454,44 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    let audioSettings: AudioGenerationSettings | undefined
+
     if (mode === "normal") {
       const trimmed = text.trimStart()
       const isImageSlash = trimmed.startsWith("/image")
+      const selectedAudioModel = audioModelSelected(currentModel)
       const selectedImageModel = imageModelSelected(currentModel)
       const looksLikeImageRequest = imageIntent(trimmed)
-      if (!isImageSlash && selectedImageModel && casualText(trimmed)) {
+      if (selectedAudioModel) {
+        if (images.length > 0) {
+          showToast({
+            title: "Audio model selected",
+            description: "Audio generation uses text only right now. Remove image attachments or switch models.",
+          })
+          return
+        }
+        const confirmed = await (input.confirmAudioGeneration ?? fallbackConfirmAudioGeneration)({
+          provider: currentModel.provider.id,
+          model: currentModel.id,
+          text: trimmed,
+        })
+        if (!confirmed) {
+          showToast({
+            title: "Audio generation not sent",
+            description: "CodeGoblin did not spend ElevenLabs credits.",
+          })
+          return
+        }
+        audioSettings = confirmed
+      }
+      if (!selectedAudioModel && !isImageSlash && selectedImageModel && casualText(trimmed)) {
         showToast({
           title: "Image model selected",
           description: "Switch to a text model for casual chat, or describe the image you want CodeGoblin to make.",
         })
         return
       }
-      if (!isImageSlash && looksLikeImageRequest && !selectedImageModel) {
+      if (!selectedAudioModel && !isImageSlash && looksLikeImageRequest && !selectedImageModel) {
         showToast({
           title: "Select an image model",
           description:
@@ -406,6 +500,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         return
       }
       if (
+        !selectedAudioModel &&
         !isImageSlash &&
         selectedImageModel &&
         !(await (input.confirmImageGeneration ?? fallbackConfirmImageGeneration)({
@@ -549,7 +644,160 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     if (mode === "normal") {
       const trimmed = text.trimStart()
       const isImageSlash = trimmed.startsWith("/image")
+      const selectedAudioModel = audioModelSelected(currentModel)
       const selectedImageModel = imageModelSelected(currentModel)
+      if (selectedAudioModel && audioSettings) {
+        const activeServer = server.current
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+          "x-opencode-directory": sessionDirectory,
+        }
+        if (activeServer?.http.password) {
+          headers.authorization = `Basic ${authTokenFromCredentials({
+            username: activeServer.http.username,
+            password: activeServer.http.password,
+          })}`
+        }
+
+        const userMessageID = Identifier.ascending("message")
+        const userPartID = Identifier.ascending("part")
+        const assistantMessageID = Identifier.ascending("message")
+        const assistantPartID = Identifier.ascending("part")
+        const now = Date.now()
+        const requestText = text.trim()
+        const plannedOutput = defaultAudioOutput(audioSettings.outputFormat)
+        const plannedOutputDisplay = displayImageOutput(sessionDirectory, plannedOutput)
+        const optimisticUser: Message = {
+          id: userMessageID,
+          sessionID: session.id,
+          role: "user",
+          time: { created: now },
+          agent,
+          model: { ...model, variant },
+        }
+        const optimisticAssistant: Message = {
+          id: assistantMessageID,
+          parentID: userMessageID,
+          sessionID: session.id,
+          role: "assistant",
+          mode: agent,
+          agent,
+          variant,
+          providerID: currentModel.provider.id,
+          modelID: currentModel.id,
+          path: { cwd: sessionDirectory, root: sessionDirectory },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now + 1 },
+        } as Message
+        batch(() => {
+          const [, setDirectoryStore] = globalSync.child(sessionDirectory)
+          setDirectoryStore("session_status", session.id, { type: "busy" })
+          sync.session.optimistic.add({
+            directory: sessionDirectory,
+            sessionID: session.id,
+            message: optimisticUser,
+            parts: [
+              {
+                id: userPartID,
+                sessionID: session.id,
+                messageID: userMessageID,
+                type: "text",
+                text: requestText,
+              } as Part,
+            ],
+          })
+          sync.session.optimistic.add({
+            directory: sessionDirectory,
+            sessionID: session.id,
+            message: optimisticAssistant,
+            parts: [
+              {
+                id: assistantPartID,
+                sessionID: session.id,
+                messageID: assistantMessageID,
+                type: "text",
+                text: [
+                  `CodeGoblin is generating audio with ${currentModel.provider.id}/${currentModel.id}.`,
+                  `Voice: ${audioSettings.voice}`,
+                  `Format: ${audioSettings.outputFormat}`,
+                  plannedOutputDisplay ? `Saving to: ${plannedOutputDisplay}` : "The final output path will stay in this chat.",
+                ].join("\n"),
+                metadata: {
+                  codegoblin: {
+                    kind: "audio-progress",
+                    provider: currentModel.provider.id,
+                    model: currentModel.id,
+                    output: plannedOutputDisplay,
+                    voice: audioSettings.voice,
+                    outputFormat: audioSettings.outputFormat,
+                  },
+                },
+              } as Part,
+            ],
+          })
+        })
+        clearInput()
+        clearContext()
+        showToast({
+          title: "Audio generation started",
+          description: `CodeGoblin is using ${currentModel.provider.id}/${currentModel.id}. The audio will stay local.`,
+        })
+
+        setTimeout(() => {
+          void sync.session.sync?.(session.id, { force: true })
+        }, 500)
+
+        fetch(`${sdk.url}/codegoblin/audio`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            sessionID: session.id,
+            messageID: userMessageID,
+            userPartID,
+            assistantMessageID,
+            assistantPartID,
+            agent,
+            variant,
+            prompt: requestText,
+            output: plannedOutput,
+            provider: currentModel.provider.id,
+            model: currentModel.id,
+            voice: audioSettings.voice,
+            outputFormat: audioSettings.outputFormat,
+            voiceSettings: audioSettings.voiceSettings,
+            languageCode: audioSettings.languageCode,
+            seed: audioSettings.seed,
+            textNormalization: audioSettings.textNormalization,
+            languageTextNormalization: audioSettings.languageTextNormalization,
+          }),
+        })
+          .then(async (response) => {
+            const result = (await response.json().catch(() => undefined)) as { ok?: boolean; message?: string } | undefined
+            void sync.session.sync?.(session.id, { force: true })
+            if (!response.ok || !result?.ok) {
+              showToast({
+                title: "Audio generation failed",
+                description: "The details were written to the chat.",
+              })
+              return
+            }
+            showToast({
+              title: "Audio generated",
+              description: "The saved file path was written to the chat.",
+            })
+          })
+          .catch((err) => {
+            const [, setDirectoryStore] = globalSync.child(sessionDirectory)
+            setDirectoryStore("session_status", session.id, { type: "idle" })
+            void sync.session.sync?.(session.id, { force: true })
+            showToast({
+              title: "Audio generation failed",
+              description: errorMessage(err),
+            })
+          })
+        return
+      }
       if (isImageSlash || selectedImageModel) {
         const activeServer = server.current
         const headers: Record<string, string> = {
