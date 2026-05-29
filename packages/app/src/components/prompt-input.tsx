@@ -1250,7 +1250,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               </Button>
             }
           >
-            <div class="flex flex-col gap-4 text-13-regular text-text-base">
+            <div class="flex h-full flex-col gap-4 text-13-regular text-text-base">
+              <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1 pb-1">
               <div class="grid gap-3 rounded-lg border border-border-base bg-surface-raised px-4 py-3 sm:grid-cols-2">
                 <label class="flex flex-col gap-1">
                   <span class="text-12-medium uppercase tracking-wide text-text-muted">Model</span>
@@ -1341,7 +1342,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 <div class="text-12-medium uppercase tracking-wide text-text-muted">Text</div>
                 <div class="mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap text-text-base">{input.text.slice(0, 500)}</div>
               </div>
-              <div class="flex items-center justify-end gap-2">
+              </div>
+              <div class="flex flex-shrink-0 items-center justify-end gap-2 border-t border-border-base px-1 pt-3">
                 <Button variant="ghost" size="normal" onClick={() => done(false)}>
                   Cancel
                 </Button>
@@ -1349,7 +1351,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   Generate audio
                 </Button>
               </div>
-              <div class="text-12-regular text-text-muted">
+              <div class="flex-shrink-0 px-1 text-12-regular text-text-muted">
                 Leave Voice ID blank to auto-pick a generated voice from your ElevenLabs account. Use Connect provider or
                 the parent `.env` for the API key.
               </div>

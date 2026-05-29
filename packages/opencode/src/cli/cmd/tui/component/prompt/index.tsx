@@ -307,6 +307,18 @@ export function Prompt(props: PromptProps) {
     onCleanup(() => clearInterval(timer))
   })
 
+  // Refresh the live provider balance shortly after a response finishes so the
+  // footer reflects usage promptly instead of waiting for the periodic refresh.
+  let lastStatusType: string | undefined
+  createEffect(() => {
+    const type = status().type
+    if (lastStatusType && lastStatusType !== "idle" && type === "idle") {
+      const timer = setTimeout(() => void balanceActions.refetch(), 1500)
+      onCleanup(() => clearTimeout(timer))
+    }
+    lastStatusType = type
+  })
+
   function promptModelWarning() {
     toast.show({
       variant: "warning",

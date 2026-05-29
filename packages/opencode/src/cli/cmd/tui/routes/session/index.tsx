@@ -1643,6 +1643,31 @@ function codeGoblinImageMeta(metadata: Record<string, unknown> | undefined): Cod
   }
 }
 
+type CodeGoblinAudioMeta = {
+  kind: "audio-progress" | "audio-result" | "audio-error"
+  provider?: string
+  model?: string
+  output?: string
+  voice?: string
+  outputFormat?: string
+}
+
+function codeGoblinAudioMeta(metadata: Record<string, unknown> | undefined): CodeGoblinAudioMeta | undefined {
+  const raw = metadata?.codegoblin
+  if (!raw || typeof raw !== "object") return
+  const value = raw as Record<string, unknown>
+  const kind = value.kind
+  if (kind !== "audio-progress" && kind !== "audio-result" && kind !== "audio-error") return
+  return {
+    kind,
+    provider: typeof value.provider === "string" ? value.provider : undefined,
+    model: typeof value.model === "string" ? value.model : undefined,
+    output: typeof value.output === "string" ? value.output : undefined,
+    voice: typeof value.voice === "string" ? value.voice : undefined,
+    outputFormat: typeof value.outputFormat === "string" ? value.outputFormat : undefined,
+  }
+}
+
 async function openCodeGoblinOutputFromTui(input: {
   sdk: ReturnType<typeof useSDK>
   project: ReturnType<typeof useProject>
@@ -1772,14 +1797,121 @@ function CodeGoblinImageStatusPart(props: { part: TextPart }) {
   )
 }
 
+function CodeGoblinAudioStatusPart(props: { part: TextPart }) {
+  const { theme } = useTheme()
+  const sdk = useSDK()
+  const project = useProject()
+  const toast = useToast()
+  const renderer = useRenderer()
+  const [hover, setHover] = createSignal(false)
+  const meta = createMemo(() => codeGoblinAudioMeta(props.part.metadata))
+  const status = createMemo(() => {
+    const kind = meta()?.kind
+    if (kind === "audio-progress") return "running"
+    if (kind === "audio-error") return "error"
+    return "done"
+  })
+  const model = createMemo(() => [meta()?.provider, meta()?.model].filter(Boolean).join("/"))
+  const title = createMemo(() => {
+    if (status() === "running") return "CodeGoblin is generating audio"
+    if (status() === "error") return "Audio generation failed"
+    return "Audio generated"
+  })
+  const detail = createMemo(() =>
+    props.part.text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => {
+        const output = meta()?.output
+        if (!line) return false
+        if (line.startsWith("CodeGoblin is generating audio")) return false
+        if (line.startsWith("This chat message will update")) return false
+        if (line.startsWith("Audio generated")) return false
+        if (line.startsWith("Audio generation failed")) return false
+        if (line.startsWith("Model:")) return false
+        if (line.startsWith("Voice:")) return false
+        if (line.startsWith("Format:")) return false
+        if (line.startsWith("Saved to:")) return false
+        if (line.startsWith("Saving to:")) return false
+        if (line.startsWith("Planned output:")) return false
+        if (output && line.includes(output)) return false
+        return true
+      })
+      .join("\n"),
+  )
+  return (
+    <Show when={meta()}>
+      {(audio) => (
+        <box
+          id={"text-" + props.part.id}
+          paddingLeft={2}
+          paddingRight={2}
+          paddingTop={1}
+          paddingBottom={1}
+          marginTop={1}
+          marginLeft={3}
+          flexShrink={0}
+          flexDirection="column"
+          border={["left"]}
+          borderColor={status() === "error" ? theme.error : theme.primary}
+          backgroundColor={theme.backgroundPanel}
+          onMouseOver={() => setHover(true)}
+          onMouseOut={() => setHover(false)}
+          onMouseUp={() => {
+            if (renderer.getSelection()?.getSelectedText()) return
+            const output = audio().output
+            if (!output || status() === "running") return
+            void openCodeGoblinOutputFromTui({ sdk, project, toast, output, mode: "open" })
+          }}
+          customBorderChars={SplitBorder.customBorderChars}
+          gap={1}
+        >
+          <box flexDirection="row" gap={1} flexShrink={0}>
+            <Show
+              when={status() === "running"}
+              fallback={<text fg={status() === "error" ? theme.error : theme.primary}>{title()}</text>}
+            >
+              <Spinner color={theme.primary}>{title()}</Spinner>
+            </Show>
+            <Show when={model()}>
+              {(value) => <text fg={theme.textMuted}>{value()}</text>}
+            </Show>
+          </box>
+          <Show when={audio().voice || audio().outputFormat}>
+            <text fg={theme.textMuted} wrapMode="word">
+              {[audio().voice ? `Voice: ${audio().voice}` : undefined, audio().outputFormat ? `Format: ${audio().outputFormat}` : undefined]
+                .filter(Boolean)
+                .join("  ·  ")}
+            </text>
+          </Show>
+          <Show when={audio().output}>
+            {(output) => (
+              <text fg={theme.text} wrapMode="word">
+                <span style={{ fg: theme.textMuted }}>{status() === "error" ? "Planned output: " : "Saved to: "}</span>
+                {output()}
+              </text>
+            )}
+          </Show>
+          <Show when={detail()}>
+            {(value) => <text fg={theme.textMuted}>{value()}</text>}
+          </Show>
+          <Show when={audio().output && status() !== "running"}>
+            <text fg={hover() ? theme.text : theme.textMuted}>click to play · command palette can reveal in Explorer</text>
+          </Show>
+        </box>
+      )}
+    </Show>
+  )
+}
+
 function TextPart(props: { last: boolean; part: TextPart; message: AssistantMessage }) {
   const ctx = use()
   const { theme, syntax } = useTheme()
   const imageMeta = createMemo(() => codeGoblinImageMeta(props.part.metadata))
+  const audioMeta = createMemo(() => codeGoblinAudioMeta(props.part.metadata))
   return (
     <Show when={props.part.text.trim()}>
-      <Show
-        when={imageMeta()}
+      <Switch
         fallback={
           <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
             <markdown
@@ -1795,8 +1927,13 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
           </box>
         }
       >
-        <CodeGoblinImageStatusPart part={props.part} />
-      </Show>
+        <Match when={imageMeta()}>
+          <CodeGoblinImageStatusPart part={props.part} />
+        </Match>
+        <Match when={audioMeta()}>
+          <CodeGoblinAudioStatusPart part={props.part} />
+        </Match>
+      </Switch>
     </Show>
   )
 }
