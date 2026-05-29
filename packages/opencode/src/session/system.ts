@@ -15,6 +15,7 @@ import type { Provider } from "@/provider/provider"
 import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
+import { buildMemoryContext } from "@/codegoblin/memory-context"
 
 export function provider(model: Provider.Model) {
   if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
@@ -35,6 +36,7 @@ export function provider(model: Provider.Model) {
 export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
+  readonly memory: (input: { sessionID?: string; query?: string }) => Effect.Effect<string | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
@@ -74,6 +76,17 @@ export const layer = Layer.effect(
           // version of them here and a less verbose version in tool description, rather than vice versa.
           Skill.fmt(list, { verbose: true }),
         ].join("\n")
+      }),
+
+      // CodeGoblin durable memory: recall pinned/recent user, project, and
+      // session facts and freeze them into the prompt as authoritative context.
+      memory: Effect.fn("SystemPrompt.memory")(function* (input: { sessionID?: string; query?: string }) {
+        const ctx = yield* InstanceState.context
+        return buildMemoryContext({
+          projectID: ctx.project.id,
+          sessionID: input.sessionID,
+          query: input.query,
+        })
       }),
     })
   }),

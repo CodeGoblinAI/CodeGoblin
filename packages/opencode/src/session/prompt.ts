@@ -1416,13 +1416,20 @@ export const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            const [skills, env, instructions, modelMsgs] = yield* Effect.all([
+            const memoryQuery = lastUserMsg?.parts
+              .filter((p) => p.type === "text" && !p.synthetic && p.text.trim())
+              .map((p) => (p as { text: string }).text)
+              .join(" ")
+              .slice(0, 500)
+
+            const [skills, env, instructions, memory, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
               instruction.system().pipe(Effect.orDie),
+              sys.memory({ sessionID, query: memoryQuery }),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
-            const system = [...env, ...instructions, ...(skills ? [skills] : [])]
+            const system = [...env, ...instructions, ...(skills ? [skills] : []), ...(memory ? [memory] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
