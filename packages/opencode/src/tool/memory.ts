@@ -62,7 +62,7 @@ function formatEntry(entry: CodeGoblinMemoryEntry): string {
   return `${entry.id} (${entry.scope})${pin}: ${entry.content}${tags}`
 }
 
-export const MemoryTool = Tool.define<typeof Parameters, Metadata>(
+export const MemoryTool = Tool.define<typeof Parameters, Metadata, never>(
   "memory",
   Effect.gen(function* () {
     return {

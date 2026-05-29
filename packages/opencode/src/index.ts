@@ -32,6 +32,7 @@ import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
 import { MemoryCommand } from "./cli/cmd/memory"
 import { OpenCommand } from "./cli/cmd/open"
+import { MarketCommand } from "./cli/cmd/market"
 import { AudioCommand } from "./cli/cmd/audio"
 import { ImageCommand } from "./cli/cmd/image"
 import path from "path"
@@ -190,6 +191,7 @@ const cli = yargs(args)
   .command(DbCommand)
   .command(MemoryCommand)
   .command(OpenCommand)
+  .command(MarketCommand)
   .fail((msg, err) => {
     if (
       msg?.startsWith("Unknown argument") ||
