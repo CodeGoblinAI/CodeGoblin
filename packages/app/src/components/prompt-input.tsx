@@ -1217,7 +1217,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       const voiceLabel = (voice: AudioVoiceOption) =>
         [voice.name, voice.category, voice.labels?.accent, voice.labels?.gender].filter(Boolean).join(" · ")
       const loadVoices = async () => {
-        if (!input.provider.toLowerCase().includes("elevenlabs")) return
+        const provider = input.provider.toLowerCase()
+        const supportsVoices = provider.includes("elevenlabs") || provider.includes("google")
+        if (!supportsVoices) return
+        const providerLabel = provider.includes("google") ? "Google" : "ElevenLabs"
         const activeServer = server.current
         const headers: Record<string, string> = {
           "x-opencode-directory": sdk.directory,
@@ -1228,17 +1231,18 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             password: activeServer.http.password,
           })}`
         }
-        const result = (await fetch(`${sdk.url}/codegoblin/audio/voices`, { headers }).then((response) =>
+        const voicesUrl = `${sdk.url}/codegoblin/audio/voices?provider=${encodeURIComponent(input.provider)}`
+        const result = (await fetch(voicesUrl, { headers }).then((response) =>
           response.json().then((body) => ({ response, body })).catch(() => ({ response, body: undefined })),
         )) as { response: Response; body?: { ok?: boolean; voices?: AudioVoiceOption[]; message?: string } }
         if (!result.response.ok || !result.body?.ok) {
-          setVoiceStatus(result.body?.message ?? "Could not load ElevenLabs speakers. You can still paste a voice ID.")
+          setVoiceStatus(result.body?.message ?? `Could not load ${providerLabel} speakers. You can still paste a voice ID.`)
           return
         }
         setVoiceOptions(result.body.voices ?? [])
-        setVoiceStatus(result.body.voices?.length ? "" : "No ElevenLabs speakers found. You can still paste a voice ID.")
+        setVoiceStatus(result.body.voices?.length ? "" : `No ${providerLabel} speakers found. You can still paste a voice ID.`)
       }
-      void loadVoices().catch(() => setVoiceStatus("Could not load ElevenLabs speakers. You can still paste a voice ID."))
+      void loadVoices().catch(() => setVoiceStatus("Could not load speakers. You can still paste a voice ID."))
       dialog.show(
         () => (
           <Dialog

@@ -95,6 +95,7 @@ import { fenceLayer } from "./middleware/fence"
 import { schemaErrorLayer } from "./middleware/schema-error"
 import { CodeGoblinImageCommand, type ImageInput } from "@/codegoblin/image-command"
 import { CodeGoblinAudioCommand, type AudioVoiceSettings } from "@/codegoblin/audio-command"
+import { Market } from "@/codegoblin/market"
 import { Process } from "@/util/process"
 
 type CodeGoblinImagePersist = {
@@ -242,6 +243,38 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           }),
         )
         return HttpServerResponse.jsonUnsafe(result, { status: result.ok ? 200 : 400 })
+      }),
+    )
+    yield* router.add("GET", "/codegoblin/market", (request) =>
+      Effect.gen(function* () {
+        const url = new URL(request.url, "http://localhost")
+        const kind = url.searchParams.get("kind") ?? undefined
+        const entries = Market.list(kind ? { kind: kind as any } : undefined)
+        return HttpServerResponse.jsonUnsafe({ ok: true, entries }, { status: 200 })
+      }),
+    )
+    yield* router.add("POST", "/codegoblin/market/install", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const text = yield* Effect.orDie(request.text)
+        let body: any
+        try {
+          body = text ? JSON.parse(text) : {}
+        } catch {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Invalid JSON body." }, { status: 400 })
+        }
+        const id = typeof body?.id === "string" ? body.id : ""
+        const entry = id ? Market.get(id) : undefined
+        if (!entry) return HttpServerResponse.jsonUnsafe({ ok: false, message: "Unknown market entry." }, { status: 404 })
+        const installed = yield* Effect.promise(async () => {
+          try {
+            const configPath = await Market.addToConfig(entry, route.directory)
+            return { ok: true as const, configPath, name: entry.id, config: entry.mcp }
+          } catch (error) {
+            return { ok: false as const, message: error instanceof Error ? error.message : "Could not add to config." }
+          }
+        })
+        return HttpServerResponse.jsonUnsafe(installed, { status: installed.ok ? 200 : 400 })
       }),
     )
     yield* router.add("POST", "/codegoblin/open-output", (request) =>

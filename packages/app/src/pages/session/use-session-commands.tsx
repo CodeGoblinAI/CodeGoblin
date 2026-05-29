@@ -272,6 +272,12 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     })
   }
 
+  const chooseMarket = () => {
+    void import("@/components/dialog-market").then((x) => {
+      dialog.show(() => <x.DialogMarket />)
+    })
+  }
+
   const toggleAutoAccept = () => {
     const sessionID = params.id
     if (sessionID) permission.toggleAutoAccept(sessionID, sdk.directory)
@@ -554,6 +560,13 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       description: "Browse, pin, archive, and add CodeGoblin memories",
       slash: "memory",
       onSelect: chooseMemory,
+    }),
+    codegoblinCommand({
+      id: "codegoblin.market",
+      title: "Market",
+      description: "Add, connect, authenticate, or disconnect MCP servers",
+      slash: "market",
+      onSelect: chooseMarket,
     }),
   ]
 
