@@ -79,10 +79,9 @@ import {
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
 import { CodeGoblinBrand } from "@/codegoblin/brand"
-import { codeGoblinProviderSummary } from "@/codegoblin/provider"
-import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
 import { DialogImageSettings, DialogAudioSettings } from "./codegoblin/dialog-media-settings"
 import { DialogMarket } from "./codegoblin/dialog-market"
+import { DialogGoblinHub } from "./codegoblin/dialog-goblin-hub"
 
 const appBindingCommands = [
   "command.palette.show",
@@ -111,11 +110,7 @@ const appBindingCommands = [
   "provider.connect",
   "console.org.switch",
   "opencode.status",
-  "codegoblin.status",
-  "codegoblin.balance",
-  "codegoblin.models",
-  "codegoblin.usage",
-  "codegoblin.theme",
+  "codegoblin.hub",
   "theme.switch",
   "theme.switch_mode",
   "theme.mode.lock",
@@ -659,68 +654,14 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         category: "System",
       },
       {
-        name: "codegoblin.status",
-        title: "CodeGoblin status",
+        // Single hub entry replaces the previously fragmented goblin status/balance/models/usage/identity
+        // palette commands. Old slash names are kept as aliases so muscle memory still resolves here.
+        name: "codegoblin.hub",
+        title: "CodeGoblin",
         slashName: "goblin",
-        slashAliases: ["codegoblin"],
+        slashAliases: ["codegoblin", "goblin-balance", "goblin-models", "goblin-usage", "goblin-identity"],
         run: () => {
-          dialog.replace(() => (
-            <DialogAlert
-              title={CodeGoblinBrand.product}
-              message={`${CodeGoblinBrand.mascot}\n${CodeGoblinBrand.tagline}\n\nImage prompts route to local files when an image model is selected. Try: create an image of a cat. Outputs land under codegoblin-output/images unless you pass --output.\n\nThe goblin eats token spend and writes the receipt to codegoblin-output/usage.json.\n\n${CodeGoblinBrand.disclaimer}`}
-            />
-          ))
-        },
-        category: "CodeGoblin",
-      },
-      {
-        name: "codegoblin.balance",
-        title: "CodeGoblin hosted balance",
-        slashName: "goblin-balance",
-        slashAliases: ["goblin balance"],
-        run: () => {
-          dialog.replace(() => (
-            <DialogAlert
-              title="CodeGoblin Balance"
-              message="Hosted wallet balance is scaffolded only. Future endpoint: GET /v1/me/balance. No hosted subscription secrets or pricing logic are committed."
-            />
-          ))
-        },
-        category: "CodeGoblin",
-      },
-      {
-        name: "codegoblin.models",
-        title: "CodeGoblin hosted models",
-        slashName: "goblin-models",
-        slashAliases: ["goblin models"],
-        run: () => {
-          dialog.replace(() => <DialogAlert title="CodeGoblin Models" message={codeGoblinProviderSummary()} />)
-        },
-        category: "CodeGoblin",
-      },
-      {
-        name: "codegoblin.usage",
-        title: "CodeGoblin usage",
-        slashName: "goblin-usage",
-        slashAliases: ["goblin usage"],
-        run: async () => {
-          const summary = await CodeGoblinImageCommand.usageSummary(project.instance.directory() || process.cwd())
-          dialog.replace(() => <DialogAlert title="Goblin Hoard" message={summary} />)
-        },
-        category: "CodeGoblin",
-      },
-      {
-        name: "codegoblin.theme",
-        title: "CodeGoblin theme identity",
-        slashName: "goblin-identity",
-        slashAliases: ["goblin art", "goblin theme", "codegoblin theme"],
-        run: () => {
-          dialog.replace(() => (
-            <DialogAlert
-              title="CodeGoblin Identity"
-              message="CodeGoblin theme identity shows the product look: custom wordmark, green/black default TUI palette, CG terminal title, and local usage hoard. /themes opens the actual theme picker."
-            />
-          ))
+          dialog.replace(() => <DialogGoblinHub />)
         },
         category: "CodeGoblin",
       },
