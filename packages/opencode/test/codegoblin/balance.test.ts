@@ -11,12 +11,33 @@ describe("CodeGoblin balance display", () => {
     })
 
     expect(CodeGoblinBalance.formatFooter({ balances, providerID: "deepseek", modelID: "deepseek-chat" })).toBe(
-      "deepseek $2.12 left",
+      "deepseek $2.12 left · manual",
     )
     expect(CodeGoblinBalance.formatFooter({ balances, providerID: "google", modelID: "gemini-2.5-pro" })).toBeUndefined()
     expect(CodeGoblinBalance.formatFooter({ balances, providerID: "moonshot", modelID: "kimi-k2" })).toBe(
-      "moon $2.22376 left",
+      "moon $2.22376 left · manual",
     )
+  })
+
+  test("tags live balances and falls back to a running spend estimate", () => {
+    const live = [
+      {
+        provider: "deepseek" as const,
+        label: "deepseek",
+        amount: 2.12,
+        unit: "USD",
+        source: "deepseek API",
+        live: true,
+      },
+    ]
+
+    expect(CodeGoblinBalance.formatFooter({ balances: live, providerID: "deepseek", modelID: "deepseek-chat" })).toBe(
+      "deepseek $2.12 left · live",
+    )
+    // Provider with no balance endpoint shows a running session-spend estimate.
+    expect(
+      CodeGoblinBalance.formatFooter({ balances: live, providerID: "google", modelID: "gemini-2.5-flash-image", spent: 0.039 }),
+    ).toBe("~$0.039 spent")
   })
 
   test("ignores invalid manual balances instead of surfacing a giant error", () => {
@@ -35,7 +56,7 @@ describe("CodeGoblin balance display", () => {
       CODEGOBLIN_DEEPSEEK_BALANCE_USD: "2.12",
     })
 
-    expect(CodeGoblinBalance.formatFooter({ balances, spent: 1.25 })).toBe("hoard $3.75 left")
+    expect(CodeGoblinBalance.formatFooter({ balances, spent: 1.25 })).toBe("hoard $3.75 left · manual")
   })
 
   test("parses live DeepSeek balance responses", () => {

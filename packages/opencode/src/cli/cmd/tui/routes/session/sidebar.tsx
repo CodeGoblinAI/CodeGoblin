@@ -1235,7 +1235,6 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   })
   const companionUsage = createMemo(() => {
     const number = new Intl.NumberFormat("en-US")
-    const cost = session()?.cost ?? 0
     const assetState = latestCodeGoblinAssetState()
     const activityKind = (() => {
       if (assetState?.includes("image-progress")) return "image" as const
@@ -1248,6 +1247,12 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
       (total, item) =>
         total + item.tokens.input + item.tokens.output + item.tokens.reasoning + item.tokens.cache.read + item.tokens.cache.write,
       0,
+    )
+    // Spend must include image/audio generation, whose cost lives on synthetic assistant
+    // messages and is not always folded back into session.cost.
+    const cost = Math.max(
+      session()?.cost ?? 0,
+      assistantMessages.reduce((total, item) => total + Math.max(0, item.cost ?? 0), 0),
     )
     const last = assistantMessages.findLast((item) => item.tokens.output > 0)
     const activityText = (() => {

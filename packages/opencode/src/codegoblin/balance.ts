@@ -171,11 +171,17 @@ function formatFooter(input: {
   const selected = selectedBalanceProvider(input)
   if (selected) {
     const providerBalance = balances.find((entry) => entry.provider === selected)
-    if (providerBalance) return `${providerBalance.label} ${formatAmount(providerBalance.amount, providerBalance.unit)} left`
+    if (providerBalance) {
+      const tag = providerBalance.live ? "live" : "manual"
+      return `${providerBalance.label} ${formatAmount(providerBalance.amount, providerBalance.unit)} left · ${tag}`
+    }
+    // No balance endpoint for this provider: fall back to a running session-spend estimate.
+    if (input.spent !== undefined && input.spent > 0) return `~${formatAmount(input.spent, "USD")} spent`
     return
   }
   const hoard = balances.find((entry) => entry.provider === "hoard")
-  if (hoard) return `hoard ${formatAmount(Math.max(0, hoard.amount - (input.spent ?? 0)), hoard.unit)} left`
+  if (hoard) return `hoard ${formatAmount(Math.max(0, hoard.amount - (input.spent ?? 0)), hoard.unit)} left · manual`
+  if (input.spent !== undefined && input.spent > 0) return `~${formatAmount(input.spent, "USD")} spent`
 }
 
 async function loadLocalEnv(root: string) {

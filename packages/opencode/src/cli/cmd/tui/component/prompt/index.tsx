@@ -365,6 +365,19 @@ export function Prompt(props: PromptProps) {
     return messages.findLast((m): m is UserMessage => m.role === "user")
   })
 
+  // Total session spend including image/audio generation, whose cost lives on synthetic
+  // assistant messages and is not always folded back into session.cost.
+  const sessionSpend = createMemo(() => {
+    if (!props.sessionID) return 0
+    const session = sync.session.get(props.sessionID)
+    const msg = sync.data.message[props.sessionID] ?? []
+    const messageCost = msg.reduce(
+      (total, item) => total + (item.role === "assistant" ? Math.max(0, item.cost ?? 0) : 0),
+      0,
+    )
+    return Math.max(session?.cost ?? 0, messageCost)
+  })
+
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const session = sync.session.get(props.sessionID)
@@ -378,20 +391,18 @@ export function Prompt(props: PromptProps) {
 
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
-    const cost = session?.cost ?? 0
     return {
       context: pct ? `ctx ${Locale.number(tokens)} (${pct})` : `ctx ${Locale.number(tokens)}`,
-      cost: `spent ${money.format(cost)}`,
+      cost: `spent ${money.format(sessionSpend())}`,
     }
   })
 
   const tokenHoard = createMemo(() => {
     if (!props.sessionID) return
-    const spent = props.sessionID ? (sync.session.get(props.sessionID)?.cost ?? 0) : 0
     const selected = local.model.current()
     return CodeGoblinBalance.formatFooter({
       balances: balanceState()?.balances,
-      spent,
+      spent: sessionSpend(),
       providerID: selected?.providerID,
       modelID: selected?.modelID,
     })
