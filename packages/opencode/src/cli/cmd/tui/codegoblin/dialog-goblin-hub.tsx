@@ -4,11 +4,35 @@ import { useDialog } from "@tui/ui/dialog"
 import { CodeGoblinBrand } from "@/codegoblin/brand"
 import { codeGoblinProviderSummary } from "@/codegoblin/provider"
 import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
+import { CodeGoblinBalance } from "@/codegoblin/balance"
 import { useProject } from "@tui/context/project"
+import { DialogMemory } from "./dialog-memory"
+import { DialogMarket } from "./dialog-market"
+import { DialogImageSettings, DialogAudioSettings } from "./dialog-media-settings"
 
-type HubEntry = "status" | "usage" | "models" | "balance" | "identity"
+type HubEntry = "memory" | "market" | "media-image" | "media-audio" | "status" | "usage" | "models" | "balance" | "identity"
 
 const ENTRIES: DialogSelectOption<HubEntry>[] = [
+  {
+    title: "Memory",
+    description: "Browse, pin, archive, and add CodeGoblin memories",
+    value: "memory",
+  },
+  {
+    title: "Market",
+    description: "Add, connect, authenticate, or disconnect MCP servers",
+    value: "market",
+  },
+  {
+    title: "Image settings",
+    description: "Default image model, size, and output format",
+    value: "media-image",
+  },
+  {
+    title: "Audio settings",
+    description: "Provider, voice, and output format for audio",
+    value: "media-audio",
+  },
   {
     title: "Status & about",
     description: "What CodeGoblin is and how it routes image/audio prompts",
@@ -26,7 +50,7 @@ const ENTRIES: DialogSelectOption<HubEntry>[] = [
   },
   {
     title: "Balance",
-    description: "Hosted wallet balance (scaffolded)",
+    description: "Live provider balances (deepseek/moonshot) or manual fallback",
     value: "balance",
   },
   {
@@ -45,6 +69,22 @@ export function DialogGoblinHub() {
       title={CodeGoblinBrand.product}
       options={ENTRIES}
       onSelect={async (option) => {
+        if (option.value === "memory") {
+          dialog.replace(() => <DialogMemory />)
+          return
+        }
+        if (option.value === "market") {
+          dialog.replace(() => <DialogMarket />)
+          return
+        }
+        if (option.value === "media-image") {
+          dialog.replace(() => <DialogImageSettings />)
+          return
+        }
+        if (option.value === "media-audio") {
+          dialog.replace(() => <DialogAudioSettings />)
+          return
+        }
         if (option.value === "status") {
           dialog.replace(() => (
             <DialogAlert
@@ -64,12 +104,10 @@ export function DialogGoblinHub() {
           return
         }
         if (option.value === "balance") {
-          dialog.replace(() => (
-            <DialogAlert
-              title="CodeGoblin Balance"
-              message="Hosted wallet balance is scaffolded only. Future endpoint: GET /v1/me/balance. No hosted subscription secrets or pricing logic are committed."
-            />
-          ))
+          const result = await CodeGoblinBalance.resolve({ cwd: project.instance.directory() || process.cwd() }).catch(
+            () => undefined,
+          )
+          dialog.replace(() => <DialogAlert title="CodeGoblin Balance" message={formatBalanceMessage(result)} />)
           return
         }
         dialog.replace(() => (
@@ -82,3 +120,29 @@ export function DialogGoblinHub() {
     />
   )
 }
+
+function formatBalanceMessage(
+  result: Awaited<ReturnType<typeof CodeGoblinBalance.resolve>> | undefined,
+): string {
+  if (!result) return "Could not resolve balances right now. No hosted balance numbers are fabricated."
+  const lines: string[] = []
+  if (result.balances.length === 0) {
+    lines.push(
+      "No provider balances are configured. Set a provider API key (DEEPSEEK_API_KEY / MOONSHOT_API_KEY) for live balances,",
+      "or set a manual fallback (CODEGOBLIN_DEEPSEEK_BALANCE_USD / CODEGOBLIN_MOONSHOT_BALANCE_USD / CODEGOBLIN_TOKEN_HOARD_USD).",
+      "No balance numbers are invented when nothing is configured.",
+    )
+  } else {
+    for (const entry of result.balances) {
+      const tag = entry.live ? "live" : "manual"
+      const amount = entry.unit === "USD" ? `$${entry.amount.toFixed(2)}` : `${entry.amount} ${entry.unit}`
+      lines.push(`${entry.label}: ${amount} · ${tag} (${entry.source})`)
+    }
+  }
+  if (result.errors.length > 0) {
+    lines.push("", "Notes:")
+    for (const error of result.errors) lines.push(`• ${error.provider}: ${error.message}`)
+  }
+  return lines.join("\n")
+}
+
