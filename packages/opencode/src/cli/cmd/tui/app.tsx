@@ -82,6 +82,7 @@ import { CodeGoblinBrand } from "@/codegoblin/brand"
 import { DialogImageSettings, DialogAudioSettings } from "./codegoblin/dialog-media-settings"
 import { DialogMarket } from "./codegoblin/dialog-market"
 import { DialogGoblinHub } from "./codegoblin/dialog-goblin-hub"
+import { DialogMemory } from "./codegoblin/dialog-memory"
 
 const appBindingCommands = [
   "command.palette.show",
@@ -111,6 +112,7 @@ const appBindingCommands = [
   "console.org.switch",
   "opencode.status",
   "codegoblin.hub",
+  "codegoblin.memory",
   "theme.switch",
   "theme.switch_mode",
   "theme.mode.lock",
@@ -662,6 +664,16 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         slashAliases: ["codegoblin", "goblin-balance", "goblin-models", "goblin-usage", "goblin-identity"],
         run: () => {
           dialog.replace(() => <DialogGoblinHub />)
+        },
+        category: "CodeGoblin",
+      },
+      {
+        name: "codegoblin.memory",
+        title: "CodeGoblin memory",
+        slashName: "memory",
+        slashAliases: ["memories", "goblin-memory"],
+        run: () => {
+          dialog.replace(() => <DialogMemory />)
         },
         category: "CodeGoblin",
       },
