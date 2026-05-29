@@ -1351,6 +1351,7 @@ export function Prompt(props: PromptProps) {
           ...iife(() => {
             const audioSettings = readAudioSettings(kv)
             return {
+              ...(audioSettings.provider ? { provider: audioSettings.provider } : {}),
               ...(audioSettings.voice ? { voice: audioSettings.voice } : {}),
               ...(audioSettings.format ? { outputFormat: audioSettings.format } : {}),
             }

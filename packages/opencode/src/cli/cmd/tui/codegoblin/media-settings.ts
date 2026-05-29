@@ -1,10 +1,7 @@
-// KV-backed defaults for CodeGoblin /image and /audio generation. These keys
-// live in the TUI KV store (Global.Path.state/kv.json) so the user's preferred
-// output directory, voice, and format persist across sessions.
-
 export const MediaSettingsKeys = {
   imageOutputDir: "codegoblin_image_output_dir",
   imageAutoApprove: "codegoblin_image_auto_approve",
+  audioProvider: "codegoblin_audio_provider",
   audioVoice: "codegoblin_audio_voice",
   audioFormat: "codegoblin_audio_format",
   audioAutoApprove: "codegoblin_audio_auto_approve",
@@ -13,12 +10,12 @@ export const MediaSettingsKeys = {
 export const MediaSettingsDefaults = {
   imageOutputDir: "codegoblin-output/images",
   imageAutoApprove: false,
+  audioProvider: "elevenlabs",
   audioVoice: "",
   audioFormat: "mp3_44100_128",
   audioAutoApprove: false,
 } as const
 
-// Common ElevenLabs output formats the user can cycle through.
 export const AudioFormatOptions = [
   "mp3_44100_128",
   "mp3_44100_192",
@@ -40,6 +37,7 @@ export type ImageMediaSettings = {
 }
 
 export type AudioMediaSettings = {
+  provider: string
   voice: string
   format: string
   autoApprove: boolean
@@ -54,6 +52,7 @@ export function readImageSettings(kv: KVLike): ImageMediaSettings {
 
 export function readAudioSettings(kv: KVLike): AudioMediaSettings {
   return {
+    provider: kv.get(MediaSettingsKeys.audioProvider, MediaSettingsDefaults.audioProvider),
     voice: kv.get(MediaSettingsKeys.audioVoice, MediaSettingsDefaults.audioVoice),
     format: kv.get(MediaSettingsKeys.audioFormat, MediaSettingsDefaults.audioFormat),
     autoApprove: kv.get(MediaSettingsKeys.audioAutoApprove, MediaSettingsDefaults.audioAutoApprove),

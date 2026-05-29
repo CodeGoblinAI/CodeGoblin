@@ -210,4 +210,92 @@ describe("CodeGoblin audio command", () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  test("dry-runs Google Cloud TTS with a .wav extension default", async () => {
+    const result = await CodeGoblinAudioCommand.generate({
+      text: "hello goblin",
+      provider: "google",
+      model: "google-tts",
+      outputFormat: "LINEAR16",
+      cwd: process.cwd(),
+      dryRun: true,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.provider).toBe("google")
+    expect(result.model).toBe("neural2")
+    expect(result.outputFormat).toBe("LINEAR16")
+    expect(result.message).toContain("google/neural2")
+  })
+
+  test("generates audio through Google Cloud TTS and decodes base64", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codegoblin-audio-google-"))
+    await writeFile(path.join(root, ".env"), "GOOGLE_CLOUD_TTS_API_KEY=test-google-key\n")
+    const previousFetch = globalThis.fetch
+    const requests: { url: string; init?: RequestInit }[] = []
+    const audioBytes = new Uint8Array([7, 8, 9])
+    globalThis.fetch = (async (url, init) => {
+      requests.push({ url: url.toString(), init })
+      return Response.json({ audioContent: Buffer.from(audioBytes).toString("base64") })
+    }) as typeof fetch
+    try {
+      const result = await CodeGoblinAudioCommand.generate({
+        text: "hello goblin",
+        provider: "google",
+        output: "codegoblin-output/audio/test.mp3",
+        voice: "en-US-Neural2-C",
+        cwd: root,
+        voiceSettings: { speed: 1.5 },
+      })
+
+      expect(result.ok).toBe(true)
+      expect(result.provider).toBe("google")
+      expect(requests).toHaveLength(1)
+      expect(requests[0]!.url).toContain("texttospeech.googleapis.com/v1/text:synthesize?key=test-google-key")
+      expect(JSON.parse(String(requests[0]!.init?.body))).toEqual({
+        input: { text: "hello goblin" },
+        voice: { languageCode: "en-US", name: "en-US-Neural2-C" },
+        audioConfig: { audioEncoding: "MP3", speakingRate: 1.5 },
+      })
+      expect(await Bun.file(result.output!).bytes()).toEqual(audioBytes)
+    } finally {
+      globalThis.fetch = previousFetch
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("returns a friendly missing key error for Google without calling the provider", async () => {
+    const previousGoogle = process.env.GOOGLE_CLOUD_TTS_API_KEY
+    const previousApi = process.env.GOOGLE_API_KEY
+    const previousCodeGoblin = process.env.CODEGOBLIN_GOOGLE_TTS_API_KEY
+    const previousDisableAuth = process.env.CODEGOBLIN_AUDIO_DISABLE_CONNECTED_AUTH
+    const root = await mkdtemp(path.join(os.tmpdir(), "codegoblin-audio-google-missing-"))
+    delete process.env.GOOGLE_CLOUD_TTS_API_KEY
+    delete process.env.GOOGLE_API_KEY
+    delete process.env.CODEGOBLIN_GOOGLE_TTS_API_KEY
+    process.env.CODEGOBLIN_AUDIO_DISABLE_CONNECTED_AUTH = "1"
+    try {
+      const result = await CodeGoblinAudioCommand.generate({
+        text: "hello goblin",
+        provider: "google",
+        output: "codegoblin-output/audio/test.mp3",
+        keyFile: "missing.env",
+        cwd: root,
+      })
+
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain("No Google Cloud TTS key found")
+      expect(result.message).toContain("did not send")
+    } finally {
+      if (previousGoogle === undefined) delete process.env.GOOGLE_CLOUD_TTS_API_KEY
+      else process.env.GOOGLE_CLOUD_TTS_API_KEY = previousGoogle
+      if (previousApi === undefined) delete process.env.GOOGLE_API_KEY
+      else process.env.GOOGLE_API_KEY = previousApi
+      if (previousCodeGoblin === undefined) delete process.env.CODEGOBLIN_GOOGLE_TTS_API_KEY
+      else process.env.CODEGOBLIN_GOOGLE_TTS_API_KEY = previousCodeGoblin
+      if (previousDisableAuth === undefined) delete process.env.CODEGOBLIN_AUDIO_DISABLE_CONNECTED_AUTH
+      else process.env.CODEGOBLIN_AUDIO_DISABLE_CONNECTED_AUTH = previousDisableAuth
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

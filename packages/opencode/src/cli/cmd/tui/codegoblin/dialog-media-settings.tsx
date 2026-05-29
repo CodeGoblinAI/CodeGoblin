@@ -1,18 +1,14 @@
 import { DialogSelect, type DialogSelectOption } from "@tui/ui/dialog-select"
 import { DialogPrompt } from "@tui/ui/dialog-prompt"
 import { useDialog } from "@tui/ui/dialog"
+import { getAudioProvider, listAudioProviders } from "@/codegoblin/audio-providers"
 import { useKV } from "../context/kv"
 import {
-  AudioFormatOptions,
   MediaSettingsDefaults,
   MediaSettingsKeys,
   readAudioSettings,
   readImageSettings,
 } from "./media-settings"
-
-// Settings dialogs for /image and /audio. Each row toggles or edits a default
-// stored in KV so it persists across sessions. Re-rendering after each change
-// is done by re-opening the dialog via dialog.replace.
 
 export function DialogImageSettings() {
   const dialog = useDialog()
@@ -75,16 +71,23 @@ export function DialogAudioSettings() {
   const dialog = useDialog()
   const kv = useKV()
   const settings = readAudioSettings(kv)
+  const provider = getAudioProvider(settings.provider)
+  const formats = provider.outputFormats
 
   const options: DialogSelectOption<string>[] = [
     {
+      title: `Provider: ${provider.name}`,
+      description: "Text-to-speech provider used for /audio generation.",
+      value: "provider",
+    },
+    {
       title: `Voice: ${settings.voice || "auto (account voice)"}`,
-      description: "ElevenLabs voice id. Leave empty to auto-select a generated voice.",
+      description: `${provider.name} voice id. Leave empty to auto-select a voice.`,
       value: "voice",
     },
     {
       title: `Output format: ${settings.format}`,
-      description: "Cycle through common ElevenLabs output formats.",
+      description: `Cycle through ${provider.name} output formats.`,
       value: "format",
     },
     {
@@ -104,10 +107,20 @@ export function DialogAudioSettings() {
       options={options}
       onSelect={(option) => {
         switch (option.value) {
+          case "provider": {
+            const ids = listAudioProviders().map((item) => item.id)
+            const idx = ids.indexOf(provider.id)
+            const next = getAudioProvider(ids[(idx + 1) % ids.length])
+            kv.set(MediaSettingsKeys.audioProvider, next.id)
+            kv.set(MediaSettingsKeys.audioFormat, next.defaultOutputFormat)
+            kv.set(MediaSettingsKeys.audioVoice, MediaSettingsDefaults.audioVoice)
+            dialog.replace(() => <DialogAudioSettings />)
+            break
+          }
           case "voice":
             dialog.replace(() => (
               <DialogPrompt
-                title="ElevenLabs voice id"
+                title={`${provider.name} voice id`}
                 placeholder="leave empty for auto"
                 value={settings.voice}
                 onConfirm={(value) => {
@@ -119,8 +132,8 @@ export function DialogAudioSettings() {
             ))
             break
           case "format": {
-            const idx = AudioFormatOptions.indexOf(settings.format as (typeof AudioFormatOptions)[number])
-            const next = AudioFormatOptions[(idx + 1) % AudioFormatOptions.length]
+            const idx = formats.indexOf(settings.format)
+            const next = formats[(idx + 1) % formats.length]
             kv.set(MediaSettingsKeys.audioFormat, next)
             dialog.replace(() => <DialogAudioSettings />)
             break
@@ -130,6 +143,7 @@ export function DialogAudioSettings() {
             dialog.replace(() => <DialogAudioSettings />)
             break
           case "reset":
+            kv.set(MediaSettingsKeys.audioProvider, MediaSettingsDefaults.audioProvider)
             kv.set(MediaSettingsKeys.audioVoice, MediaSettingsDefaults.audioVoice)
             kv.set(MediaSettingsKeys.audioFormat, MediaSettingsDefaults.audioFormat)
             kv.set(MediaSettingsKeys.audioAutoApprove, MediaSettingsDefaults.audioAutoApprove)

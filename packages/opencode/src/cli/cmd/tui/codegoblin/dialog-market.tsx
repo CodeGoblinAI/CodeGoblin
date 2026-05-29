@@ -3,11 +3,6 @@ import { DialogAlert } from "@tui/ui/dialog-alert"
 import { useDialog } from "@tui/ui/dialog"
 import { Market, type MarketEntry } from "@/codegoblin/market"
 
-// TUI browser for the CodeGoblin market. Mirrors the `cg market` CLI command:
-// pick an integration to see its setup details and the opencode.json snippet.
-// Installing (writing config) stays on the CLI via `cg market add <id>` to
-// keep the dialog read-only and side-effect free.
-
 function kindLabel(kind: MarketEntry["kind"]) {
   return kind === "mcp" ? "MCP" : kind === "skill" ? "Skill" : "Plugin"
 }

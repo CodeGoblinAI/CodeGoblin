@@ -1,16 +1,3 @@
-// Lightweight prompt-injection / threat scan for memory content.
-//
-// Ported (in spirit) from two of the reference repos studied for this pass:
-//   - Hermes: scans memory before it is frozen into the system prompt so a
-//     malicious recalled fact cannot hijack a later turn.
-//   - ECC ("Every Command Counts"): defense-in-depth pattern matching for
-//     instruction-override and exfiltration attempts.
-//
-// This is intentionally simple and conservative: it returns a human-readable
-// reason string when content looks dangerous, or `undefined` when it is clean.
-// Memory is authoritative once injected, so we reject obvious attempts to
-// smuggle new instructions into it rather than trying to sanitize them.
-
 const THREAT_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   {
     pattern: /\bignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions|prompts|rules)\b/i,
@@ -38,10 +25,6 @@ const THREAT_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   },
 ]
 
-/**
- * Returns a reason string if the content matches a known threat pattern, or
- * `undefined` when the content is considered safe to store and recall.
- */
 export function scanMemoryContent(content: string): string | undefined {
   for (const { pattern, reason } of THREAT_PATTERNS) {
     if (pattern.test(content)) return reason

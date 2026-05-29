@@ -46,7 +46,7 @@ const ListCommand = cmd({
         return
       }
       for (const entry of entries) {
-        const flags = [entry.pinned ? "📌" : "", entry.archived ? "(archived)" : ""].filter(Boolean).join(" ")
+        const flags = [entry.pinned ? "P" : "", entry.archived ? "(archived)" : ""].filter(Boolean).join(" ")
         const tags = entry.tags.length ? ` [${entry.tags.join(", ")}]` : ""
         UI.println(`${entry.id}  ${entry.scope.padEnd(7)} ${flags ? flags + " " : ""}${entry.content}${tags}`)
       }

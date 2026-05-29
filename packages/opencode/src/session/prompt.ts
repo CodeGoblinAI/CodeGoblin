@@ -1417,8 +1417,8 @@ export const layer = Layer.effect(
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
             const memoryQuery = lastUserMsg?.parts
-              .filter((p) => p.type === "text" && !p.synthetic && p.text.trim())
-              .map((p) => (p as { text: string }).text)
+              .filter((p): p is MessageV2.TextPart => p.type === "text" && !p.synthetic && p.text.trim().length > 0)
+              .map((p) => p.text)
               .join(" ")
               .slice(0, 500)
 

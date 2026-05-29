@@ -78,8 +78,6 @@ export const layer = Layer.effect(
         ].join("\n")
       }),
 
-      // CodeGoblin durable memory: recall pinned/recent user, project, and
-      // session facts and freeze them into the prompt as authoritative context.
       memory: Effect.fn("SystemPrompt.memory")(function* (input: { sessionID?: string; query?: string }) {
         const ctx = yield* InstanceState.context
         return buildMemoryContext({

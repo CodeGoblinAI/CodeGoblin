@@ -43,8 +43,6 @@ export type CodeGoblinMemoryAddInput = {
   pinned?: boolean
 }
 
-// Per-entry content budget, inspired by Hermes' MEMORY/USER char caps. Keeps a
-// single fact from blowing up the frozen context block injected into prompts.
 const MAX_CONTENT_LENGTH = 1000
 
 export class CodeGoblinMemoryError extends Error {}
@@ -105,8 +103,6 @@ export const CodeGoblinMemory = {
     })
   },
 
-  // Lightweight substring recall (no embeddings) — surfaces the most relevant
-  // facts for the current task without needing a vector store.
   search(query: string, input: CodeGoblinMemoryListInput = {}): CodeGoblinMemoryEntry[] {
     const needle = query.trim()
     if (!needle) return CodeGoblinMemory.list(input)

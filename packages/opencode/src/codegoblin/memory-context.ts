@@ -1,13 +1,6 @@
 import { CodeGoblinMemory, type CodeGoblinMemoryEntry } from "./memory"
 import { scanMemoryContent } from "./memory-guard"
 
-// Builds the frozen "<memory-context>" block injected into the system prompt,
-// modeled on Hermes' approach: recalled memory is presented as authoritative
-// context (NOT user input) and the model is told it may use the memory tool to
-// persist new durable facts.
-
-// How many entries of each scope to surface. Pinned entries always win the
-// ordering (CodeGoblinMemory.list already sorts pinned first).
 const USER_LIMIT = 12
 const PROJECT_LIMIT = 12
 const SESSION_LIMIT = 6
@@ -15,7 +8,6 @@ const SESSION_LIMIT = 6
 export type MemoryContextInput = {
   projectID?: string
   sessionID?: string
-  /** Optional task hint used to bias recall toward relevant facts. */
   query?: string
 }
 
@@ -45,17 +37,13 @@ function renderGroup(title: string, entries: CodeGoblinMemoryEntry[]): string[] 
     `${title}:`,
     ...entries.map((entry) => {
       const tags = entry.tags.length ? ` [${entry.tags.join(", ")}]` : ""
-      const pin = entry.pinned ? "📌 " : "- "
+      const pin = entry.pinned ? "P " : "- "
       return `${pin}${entry.content}${tags}`
     }),
     "",
   ]
 }
 
-/**
- * Returns the system-prompt memory block, or `undefined` when there is nothing
- * to recall. Safe to call on every turn — it reads from SQLite synchronously.
- */
 export function buildMemoryContext(input: MemoryContextInput): string | undefined {
   const entries = recall(input).filter((entry) => !scanMemoryContent(entry.content))
   if (entries.length === 0) return undefined

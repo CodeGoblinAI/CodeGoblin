@@ -1,11 +1,5 @@
 import type { ConfigMCP } from "../config/mcp"
 
-// Curated catalog of popular MCP servers, skills, and plugins, modeled on the
-// "marketplace" UX of Codex, Claude Code, and Gemini CLI. This is a static,
-// reviewed list — `cg market add <id>` writes the chosen MCP server into the
-// project's opencode.json (the existing MCP config surface). Nothing here is
-// installed or executed at catalog-read time.
-
 export type MarketKind = "mcp" | "skill" | "plugin"
 
 export type MarketEntry = {
@@ -14,13 +8,9 @@ export type MarketEntry = {
   kind: MarketKind
   category: string
   description: string
-  /** Homepage or docs URL for the integration. */
   homepage?: string
-  /** Environment variables the user must provide for this integration. */
   env?: { name: string; description: string }[]
-  /** For MCP entries: the config snippet written to opencode.json. */
   mcp?: ConfigMCP.Info
-  /** For skill/plugin entries: a short install hint. */
   install?: string
 }
 

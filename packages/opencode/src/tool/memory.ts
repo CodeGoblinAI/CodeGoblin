@@ -58,7 +58,7 @@ type Metadata = {
 
 function formatEntry(entry: CodeGoblinMemoryEntry): string {
   const tags = entry.tags.length ? ` [${entry.tags.join(", ")}]` : ""
-  const pin = entry.pinned ? " 📌" : ""
+  const pin = entry.pinned ? " [pinned]" : ""
   return `${entry.id} (${entry.scope})${pin}: ${entry.content}${tags}`
 }
 

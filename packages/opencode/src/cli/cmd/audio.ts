@@ -3,6 +3,7 @@ import { CodeGoblinAudioCommand } from "@/codegoblin/audio-command"
 
 type Args = {
   text?: string[]
+  provider?: string
   output?: string
   model?: string
   voice?: string
@@ -30,6 +31,10 @@ export const AudioCommand = {
         describe: "text to turn into audio",
         type: "string",
         array: true,
+      })
+      .option("provider", {
+        describe: "audio provider to use: elevenlabs or google",
+        type: "string",
       })
       .option("output", {
         alias: "o",
@@ -99,7 +104,11 @@ export const AudioCommand = {
   handler: async (args) => {
     const text = (args.text ?? []).join(" ").trim()
     if (args.listVoices) {
-      const result = await CodeGoblinAudioCommand.voices({ cwd: process.cwd(), keyFile: args.keyFile })
+      const result = await CodeGoblinAudioCommand.voices({
+        cwd: process.cwd(),
+        keyFile: args.keyFile,
+        provider: args.provider,
+      })
       if (!result.ok) {
         console.error(result.message)
         process.exitCode = 1
@@ -128,6 +137,7 @@ export const AudioCommand = {
     }
     const plan = CodeGoblinAudioCommand.describe({
       text,
+      provider: args.provider,
       output: args.output,
       model: args.model,
       voice: args.voice,
@@ -136,9 +146,10 @@ export const AudioCommand = {
       cwd: process.cwd(),
       dryRun: args.dryRun,
     })
-    console.log(`${args.dryRun ? "Checking" : "Generating"} CodeGoblin audio with elevenlabs/${plan.model}; output: ${plan.output}`)
+    console.log(`${args.dryRun ? "Checking" : "Generating"} CodeGoblin audio with ${plan.provider}/${plan.model}; output: ${plan.output}`)
     const result = await CodeGoblinAudioCommand.generate({
       text,
+      provider: args.provider,
       output: args.output,
       model: args.model,
       voice: args.voice,

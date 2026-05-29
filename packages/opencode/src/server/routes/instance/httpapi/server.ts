@@ -238,6 +238,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           CodeGoblinAudioCommand.voices({
             cwd: route.directory,
             keyFile: url.searchParams.get("keyFile") ?? undefined,
+            provider: url.searchParams.get("provider") ?? undefined,
           }),
         )
         return HttpServerResponse.jsonUnsafe(result, { status: result.ok ? 200 : 400 })
@@ -294,6 +295,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           preview = CodeGoblinAudioCommand.describe({
             text: prompt,
             cwd: route.directory,
+            provider: requestProvider,
             output: typeof body?.output === "string" ? body.output : undefined,
             model: requestModel,
             voice: typeof body?.voice === "string" ? body.voice : undefined,
@@ -317,7 +319,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
                 typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
               assistantPartID: typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
               agent,
-              providerID: requestProvider,
+              providerID: preview.provider,
               modelID: preview.model,
               variant,
               routeDirectory: route.directory,
@@ -333,6 +335,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
             return await CodeGoblinAudioCommand.generate({
               text: prompt,
               cwd: route.directory,
+              provider: requestProvider,
               output: typeof body?.output === "string" ? body.output : undefined,
               model: requestModel,
               voice: typeof body?.voice === "string" ? body.voice : undefined,
