@@ -30,6 +30,8 @@ import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
+import { MemoryCommand } from "./cli/cmd/memory"
+import { OpenCommand } from "./cli/cmd/open"
 import { AudioCommand } from "./cli/cmd/audio"
 import { ImageCommand } from "./cli/cmd/image"
 import path from "path"
@@ -186,6 +188,8 @@ const cli = yargs(args)
   .command(SessionCommand)
   .command(PluginCommand)
   .command(DbCommand)
+  .command(MemoryCommand)
+  .command(OpenCommand)
   .fail((msg, err) => {
     if (
       msg?.startsWith("Unknown argument") ||

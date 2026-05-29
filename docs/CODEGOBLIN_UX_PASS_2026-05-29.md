@@ -200,3 +200,72 @@ spent). **ESC-to-end-message logic was intentionally left untouched.**
 - Use Hermes' agentic capabilities in a separate "mode".
 - Add 1 unique model for testing (e.g. a 3D asset generator).
 - Work with local models + cloud GPUs down the line.
+
+---
+
+# Follow-up pass — spend, animation, memory, open (2026-05-29 cont.)
+
+This section covers the second implementation pass.
+
+## Done & tested
+
+### 1. Spend accumulation now includes image/audio
+- **Symptom:** footer/companion showed `$0.00` even after a nanobanana image
+  generation estimated at `$0.039`.
+- **Root cause:** image/audio costs live on *synthetic assistant messages* and
+  are not always folded back into `session.cost`. Both the companion
+  (`sidebar.tsx`) and the prompt footer (`prompt/index.tsx`) read only
+  `session().cost`.
+- **Fix:** spend is now `max(session.cost, sum(assistant message costs))`, so
+  image/audio spend shows up in the footer/companion.
+
+### 2. Companion burn animation
+- The companion already defaults to header variant `09`, sprite `40`, action
+  variant `03` (the `dev:companion:03` coin-toss) and only triggers on real
+  positive cost/token deltas (the `CODEGOBLIN_COMPANION_PREVIEW` loop is
+  dev-only). The reason the animation "never" played for image gen was the spend
+  bug above — no delta meant no burn. With spend fixed, the burn animation now
+  fires on real image/audio spend.
+
+### 3. Balance source label + running-cost fallback
+- Footer balance is now tagged `· live` (DeepSeek/Moonshot API) or `· manual`
+  (`*_BALANCE_USD` env). For providers without a balance endpoint, the footer
+  falls back to a `~$X spent` running estimate. Covered by `balance.test.ts`.
+
+### 4. `cg memory list` + `cg memory status` (read-only, SQLite)
+- New `memory_entry` table (Drizzle migration `..._add_memory_entry`) plus
+  `CodeGoblinMemory` repo (`src/codegoblin/memory.ts`) and CLI command
+  (`src/cli/cmd/memory.ts`). Read-only slice 1: `cg memory list [--scope]
+  [--project] [--all] [--json]` and `cg memory status [--json]`. Write commands
+  (`add`/`replace`/`remove`/`review`) come later. Covered by `memory.test.ts`.
+
+### 5. `cg open`
+- `cg open [target] [--folder] [--reveal]` opens the most recent file under
+  `codegoblin-output/` (or a specific project-relative path). Reuses the same
+  path-confinement + platform-open behavior as the server's
+  `openCodeGoblinOutput`.
+
+## Deferred (with rationale)
+
+### `/audio` and `/image` in-app settings persistence
+- These slash commands **do not exist yet** in the TUI (image gen is currently
+  driven by selecting an image model and prompting). Persisting "last-used"
+  settings requires first building the settings dialogs. That is net-new UI and
+  was not built blind in this pass to avoid speculative scope. Next step: add
+  `/audio` and `/image` dialogs, then persist voice/model/format via the TUI KV
+  store (`useKV`, `Global.Path.state/kv.json`).
+
+### Web: remember audio/image settings (localStorage)
+- The web app (`packages/app`) has **no audio/image generation dialog** today, so
+  there is nothing to persist yet. Wire this once the web dialogs exist, using
+  the existing `localStorage` persistence helpers in `src/utils/persist.ts`.
+
+### Branding Phase B (`packages/opencode` → `packages/codegoblin`)
+- A full directory rename touches hundreds of imports, `turbo.json`,
+  `tsconfig`, the custom build, and the `bin` wrappers. Doing that blind while
+  unattended (with a flaky pre-push hook and a compiled-binary build path) is
+  high-risk and hard to reverse. **Recommendation:** do it as a dedicated,
+  attended PR. Keep all compat surfaces (`@opencode-ai/*`, `opencode.json`,
+  `.opencode`, `OPENCODE_*`, provider IDs, GitHub action URLs); only the
+  directory + internal package name change, with a path alias for the old name.
+
