@@ -48,6 +48,7 @@ import { DialogAlert } from "../../ui/dialog-alert"
 import { DialogConfirm } from "../../ui/dialog-confirm"
 import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv"
+import { readImageSettings, readAudioSettings } from "../../codegoblin/media-settings"
 import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import {
@@ -1083,12 +1084,14 @@ export function Prompt(props: PromptProps) {
   }
 
   function codeGoblinAutoApproveImages() {
+    if (readImageSettings(kv).autoApprove) return true
     const raw = process.env.CODEGOBLIN_IMAGE_AUTO_APPROVE ?? process.env.CODEGOBLIN_AUTO_IMAGE
     const normalized = raw?.trim().toLowerCase()
     return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
   }
 
   function codeGoblinAutoApproveAudio() {
+    if (readAudioSettings(kv).autoApprove) return true
     const raw = process.env.CODEGOBLIN_AUDIO_AUTO_APPROVE ?? process.env.CODEGOBLIN_AUTO_AUDIO
     const normalized = raw?.trim().toLowerCase()
     return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
@@ -1345,6 +1348,13 @@ export function Prompt(props: PromptProps) {
           prompt: submitted.trim(),
           provider: selectedModel.providerID,
           model: selectedModel.modelID,
+          ...iife(() => {
+            const audioSettings = readAudioSettings(kv)
+            return {
+              ...(audioSettings.voice ? { voice: audioSettings.voice } : {}),
+              ...(audioSettings.format ? { outputFormat: audioSettings.format } : {}),
+            }
+          }),
         })
           .then((result) => {
             toast.show({

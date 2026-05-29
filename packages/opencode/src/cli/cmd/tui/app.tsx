@@ -81,6 +81,7 @@ import { DialogVariant } from "./component/dialog-variant"
 import { CodeGoblinBrand } from "@/codegoblin/brand"
 import { codeGoblinProviderSummary } from "@/codegoblin/provider"
 import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
+import { DialogImageSettings, DialogAudioSettings } from "./codegoblin/dialog-media-settings"
 
 const appBindingCommands = [
   "command.palette.show",
@@ -719,6 +720,26 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
               message="CodeGoblin theme identity shows the product look: custom wordmark, green/black default TUI palette, CG terminal title, and local usage hoard. /themes opens the actual theme picker."
             />
           ))
+        },
+        category: "CodeGoblin",
+      },
+      {
+        name: "codegoblin.image.settings",
+        title: "Image generation settings",
+        slashName: "image-settings",
+        slashAliases: ["imagesettings", "image-config"],
+        run: () => {
+          dialog.replace(() => <DialogImageSettings />)
+        },
+        category: "CodeGoblin",
+      },
+      {
+        name: "codegoblin.audio.settings",
+        title: "Audio generation settings",
+        slashName: "audio-settings",
+        slashAliases: ["audiosettings", "audio-config"],
+        run: () => {
+          dialog.replace(() => <DialogAudioSettings />)
         },
         category: "CodeGoblin",
       },
