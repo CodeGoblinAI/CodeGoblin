@@ -15,7 +15,7 @@ import type { Provider } from "@/provider/provider"
 import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
-import { buildMemoryContext } from "@/codegoblin/memory-context"
+import { buildMemoryContextRanked } from "@/codegoblin/memory-context"
 
 export function provider(model: Provider.Model) {
   if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
@@ -80,11 +80,13 @@ export const layer = Layer.effect(
 
       memory: Effect.fn("SystemPrompt.memory")(function* (input: { sessionID?: string; query?: string }) {
         const ctx = yield* InstanceState.context
-        return buildMemoryContext({
-          projectID: ctx.project.id,
-          sessionID: input.sessionID,
-          query: input.query,
-        })
+        return yield* Effect.promise(() =>
+          buildMemoryContextRanked({
+            projectID: ctx.project.id,
+            sessionID: input.sessionID,
+            query: input.query,
+          }),
+        )
       }),
     })
   }),

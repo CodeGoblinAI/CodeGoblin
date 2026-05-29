@@ -1,5 +1,6 @@
 import { CodeGoblinMemory, type CodeGoblinMemoryEntry } from "./memory"
 import { scanMemoryContent } from "./memory-guard"
+import { rankEntries, scanContentBatch } from "./memory-native"
 
 const USER_LIMIT = 12
 const PROJECT_LIMIT = 12
@@ -47,7 +48,28 @@ function renderGroup(title: string, entries: CodeGoblinMemoryEntry[]): string[] 
 export function buildMemoryContext(input: MemoryContextInput): string | undefined {
   const entries = recall(input).filter((entry) => !scanMemoryContent(entry.content))
   if (entries.length === 0) return undefined
+  return renderContext(entries)
+}
 
+// Native-accelerated variant: batches guard scanning and ranks entries by query
+// relevance through the optional codegoblin-native binary (with a TS fallback).
+export async function buildMemoryContextRanked(input: MemoryContextInput): Promise<string | undefined> {
+  const recalled = recall(input)
+  if (recalled.length === 0) return undefined
+
+  const flags = await scanContentBatch(recalled.map((entry) => entry.content))
+  const safe = recalled.filter((_, index) => !flags[index])
+  if (safe.length === 0) return undefined
+
+  if (!input.query) return renderContext(safe)
+
+  const ranked = await rankEntries(input.query, safe.map((entry) => ({ id: entry.id, content: entry.content, pinned: entry.pinned })))
+  const byID = new Map(safe.map((entry) => [entry.id, entry]))
+  const ordered = ranked.map((item) => byID.get(item.id)).filter((entry): entry is CodeGoblinMemoryEntry => Boolean(entry))
+  return renderContext(ordered.length === safe.length ? ordered : safe)
+}
+
+function renderContext(entries: CodeGoblinMemoryEntry[]): string {
   const user = entries.filter((entry) => entry.scope === "user")
   const project = entries.filter((entry) => entry.scope === "project")
   const session = entries.filter((entry) => entry.scope === "session")
