@@ -1,9 +1,6 @@
 import type { Argv } from "yargs"
-import path from "path"
-import { modify, applyEdits } from "jsonc-parser"
 import { cmd } from "./cmd"
 import { UI } from "../ui"
-import { Filesystem } from "@/util/filesystem"
 import { Market, type MarketEntry, type MarketKind } from "@/codegoblin/market"
 import { errorMessage } from "../../util/error"
 
@@ -108,13 +105,7 @@ const AddCommand = cmd({
       return
     }
     try {
-      const configPath = await resolveConfigPath(process.cwd())
-      let text = "{}"
-      if (await Filesystem.exists(configPath)) text = await Filesystem.readText(configPath)
-      const edits = modify(text, ["mcp", entry.id], entry.mcp, {
-        formattingOptions: { tabSize: 2, insertSpaces: true },
-      })
-      await Filesystem.write(configPath, applyEdits(text, edits))
+      const configPath = await Market.addToConfig(entry, process.cwd())
       UI.println(`Added '${entry.id}' MCP server to ${configPath}.`)
       if (entry.env?.length) {
         UI.empty()
@@ -129,19 +120,6 @@ const AddCommand = cmd({
     }
   },
 })
-
-async function resolveConfigPath(baseDir: string) {
-  const candidates = [
-    path.join(baseDir, "opencode.json"),
-    path.join(baseDir, "opencode.jsonc"),
-    path.join(baseDir, ".opencode", "opencode.json"),
-    path.join(baseDir, ".opencode", "opencode.jsonc"),
-  ]
-  for (const candidate of candidates) {
-    if (await Filesystem.exists(candidate)) return candidate
-  }
-  return candidates[0]
-}
 
 export const MarketCommand = cmd({
   command: "market",

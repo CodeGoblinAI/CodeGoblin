@@ -1,3 +1,6 @@
+import path from "path"
+import { applyEdits, modify } from "jsonc-parser"
+import { Filesystem } from "../util/filesystem"
 import type { ConfigMCP } from "../config/mcp"
 
 export type MarketKind = "mcp" | "skill" | "plugin"
@@ -138,5 +141,30 @@ export const Market = {
   },
   categories(): string[] {
     return [...new Set(MarketCatalog.map((entry) => entry.category))].sort()
+  },
+  async resolveConfigPath(baseDir: string): Promise<string> {
+    const candidates = [
+      path.join(baseDir, "opencode.json"),
+      path.join(baseDir, "opencode.jsonc"),
+      path.join(baseDir, ".opencode", "opencode.json"),
+      path.join(baseDir, ".opencode", "opencode.jsonc"),
+    ]
+    for (const candidate of candidates) {
+      if (await Filesystem.exists(candidate)) return candidate
+    }
+    return candidates[0]
+  },
+  /** Write a catalog MCP entry into the project config, returning the config path. */
+  async addToConfig(entry: MarketEntry, baseDir: string): Promise<string> {
+    if (entry.kind !== "mcp" || !entry.mcp) {
+      throw new Error(`'${entry.id}' is not an MCP server.`)
+    }
+    const configPath = await Market.resolveConfigPath(baseDir)
+    const text = (await Filesystem.exists(configPath)) ? await Filesystem.readText(configPath) : "{}"
+    const edits = modify(text, ["mcp", entry.id], entry.mcp, {
+      formattingOptions: { tabSize: 2, insertSpaces: true },
+    })
+    await Filesystem.write(configPath, applyEdits(text, edits))
+    return configPath
   },
 }
