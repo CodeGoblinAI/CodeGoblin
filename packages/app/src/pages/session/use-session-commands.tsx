@@ -266,6 +266,12 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     })
   }
 
+  const chooseMemory = () => {
+    void import("@/components/dialog-memory").then((x) => {
+      dialog.show(() => <x.DialogMemory />)
+    })
+  }
+
   const toggleAutoAccept = () => {
     const sessionID = params.id
     if (sessionID) permission.toggleAutoAccept(sessionID, sdk.directory)
@@ -539,6 +545,18 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     }),
   ]
 
+  const codegoblinCommand = withCategory("CodeGoblin")
+
+  const codegoblinCmds = () => [
+    codegoblinCommand({
+      id: "codegoblin.memory",
+      title: "Memory",
+      description: "Browse, pin, archive, and add CodeGoblin memories",
+      slash: "memory",
+      onSelect: chooseMemory,
+    }),
+  ]
+
   const agentCmds = () => [
     agentCommand({
       id: "agent.cycle",
@@ -581,5 +599,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     ...mcpCmds(),
     ...agentCmds(),
     ...permissionsCmds(),
+    ...codegoblinCmds(),
   ])
 }
