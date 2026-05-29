@@ -1,4 +1,5 @@
 import { CodeGoblinMemory, type CodeGoblinMemoryEntry } from "./memory"
+import { scanMemoryContent } from "./memory-guard"
 
 // Builds the frozen "<memory-context>" block injected into the system prompt,
 // modeled on Hermes' approach: recalled memory is presented as authoritative
@@ -56,7 +57,7 @@ function renderGroup(title: string, entries: CodeGoblinMemoryEntry[]): string[] 
  * to recall. Safe to call on every turn — it reads from SQLite synchronously.
  */
 export function buildMemoryContext(input: MemoryContextInput): string | undefined {
-  const entries = recall(input)
+  const entries = recall(input).filter((entry) => !scanMemoryContent(entry.content))
   if (entries.length === 0) return undefined
 
   const user = entries.filter((entry) => entry.scope === "user")
