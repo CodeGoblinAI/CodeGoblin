@@ -82,6 +82,7 @@ import { CodeGoblinBrand } from "@/codegoblin/brand"
 import { codeGoblinProviderSummary } from "@/codegoblin/provider"
 import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
 import { DialogImageSettings, DialogAudioSettings } from "./codegoblin/dialog-media-settings"
+import { DialogMarket } from "./codegoblin/dialog-market"
 
 const appBindingCommands = [
   "command.palette.show",
@@ -740,6 +741,16 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         slashAliases: ["audiosettings", "audio-config"],
         run: () => {
           dialog.replace(() => <DialogAudioSettings />)
+        },
+        category: "CodeGoblin",
+      },
+      {
+        name: "codegoblin.market",
+        title: "CodeGoblin market",
+        slashName: "market",
+        slashAliases: ["mcp-market", "skills-market", "plugins"],
+        run: () => {
+          dialog.replace(() => <DialogMarket />)
         },
         category: "CodeGoblin",
       },
