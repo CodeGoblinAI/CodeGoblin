@@ -18,6 +18,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { DialogSelectDirectory } from "@/components/dialog-select-directory"
 import { DialogSelectServer } from "@/components/dialog-select-server"
 import { useServer } from "@/context/server"
+import { SDKProvider } from "@/context/sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
@@ -173,14 +174,26 @@ function HomeDesign() {
   }
 
   function openMemory() {
+    const directory = selectedProject()?.worktree ?? projects()[0]?.worktree
+    if (!directory) return
     void import("@/components/dialog-memory").then((x) => {
-      dialog.show(() => <x.DialogMemory />)
+      dialog.show(() => (
+        <SDKProvider directory={directory}>
+          <x.DialogMemory />
+        </SDKProvider>
+      ))
     })
   }
 
   function openMarket() {
+    const directory = selectedProject()?.worktree ?? projects()[0]?.worktree
+    if (!directory) return
     void import("@/components/dialog-market").then((x) => {
-      dialog.show(() => <x.DialogMarket />)
+      dialog.show(() => (
+        <SDKProvider directory={directory}>
+          <x.DialogMarket />
+        </SDKProvider>
+      ))
     })
   }
 

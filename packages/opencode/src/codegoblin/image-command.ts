@@ -816,7 +816,7 @@ function looksLikeImageIntent(prompt: string) {
 
 function looksLikeImageEditRequest(prompt: string) {
   return /\b(edit|change|modify|adjust|retouch|inpaint|outpaint|replace|remove|add)\b.{0,120}\b(image|picture|photo|it|this|that|last|previous|same)\b/i.test(prompt) ||
-    /\b(make|turn)\s+(it|this|that|the\s+(last|previous|same)\s+(image|picture|photo))\b/i.test(prompt) ||
+    /\b(make|turn|paint)\s+(it|this|that|him|her|them|the\s+(last|previous|same)\s+(image|picture|photo)|the\s+(subject|character|person|goblin|mascot|object))\b/i.test(prompt) ||
     /\b(last|previous|same)\s+(image|picture|photo)\b/i.test(prompt)
 }
 

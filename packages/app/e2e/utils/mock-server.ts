@@ -18,6 +18,7 @@ export interface MockServerConfig {
   project: unknown
   sessions: ({ id: string } & Record<string, unknown>)[]
   pageMessages: (sessionId: string, limit: number, before?: string) => { items: unknown[]; cursor?: string }
+  handleRoute?: (route: Route, url: URL, path: string) => Promise<boolean> | boolean
 }
 
 export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
@@ -43,6 +44,7 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     if (url.port !== targetPort) return route.fallback()
 
     const path = url.pathname
+    if (await config.handleRoute?.(route, url, path)) return
     if (path === "/global/event" || path === "/event") return sse(route)
     if (emptyObject.has(path)) return json(route, {})
     if (emptyList.has(path)) return json(route, [])

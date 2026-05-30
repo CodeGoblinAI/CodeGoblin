@@ -156,7 +156,7 @@ describe("CodeGoblin image command model routing", () => {
         })
       }) as typeof fetch
       const result = await CodeGoblinImageCommand.generate({
-        prompt: "make it red",
+        prompt: "make him red",
         provider: "google",
         model: "gemini-2.5-flash-image",
         cwd: root,

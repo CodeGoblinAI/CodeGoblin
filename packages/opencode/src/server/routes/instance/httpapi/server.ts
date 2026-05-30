@@ -424,17 +424,26 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         : []
       for (const imagePath of imagePathsFromBody(body)) inputImages.push({ path: imagePath })
       const useLastImage = body?.useLastImage === true || body?.lastImage === true
+      const replay =
+        typeof body?.sessionID === "string" && typeof body?.sourceAssistantMessageID === "string"
+          ? yield* codeGoblinImageReplayInput({
+              session,
+              sessionID: SessionID.make(body.sessionID),
+              assistantMessageID: MessageID.make(body.sourceAssistantMessageID),
+            })
+          : undefined
+      if (inputImages.length === 0 && replay?.inputImages.length) inputImages.push(...replay.inputImages)
 
-      const commandInput = typeof body?.input === "string" ? body.input : undefined
-      const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : ""
+      const commandInput = typeof body?.input === "string" ? body.input : replay?.input
+      const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : (replay?.prompt ?? "")
       if (!commandInput && !prompt) {
         return HttpServerResponse.jsonUnsafe({ ok: false, message: "Image prompt is required." }, { status: 400 })
       }
 
-      const requestProvider = typeof body?.provider === "string" ? body.provider : undefined
-      const requestModel = typeof body?.model === "string" ? body.model : undefined
+      const requestProvider = typeof body?.provider === "string" ? body.provider : replay?.providerID
+      const requestModel = typeof body?.model === "string" ? body.model : replay?.modelID
       const agent = typeof body?.agent === "string" && body.agent.trim() ? body.agent.trim() : "Agent"
-      const variant = typeof body?.variant === "string" ? body.variant : undefined
+      const variant = typeof body?.variant === "string" ? body.variant : replay?.variant
       const parsedCommand = commandInput
         ? CodeGoblinImageCommand.parse(commandInput.trimStart().replace(/^\/image\b/, "").trim())
         : undefined
@@ -658,12 +667,15 @@ function parseAudioVoiceSettings(value: unknown): AudioVoiceSettings | undefined
   return result
 }
 
-function sessionLastImageOutput(input: { session: Session.Interface; sessionID: SessionID }) {
+function sessionLastImageOutput(input: { session: Session.Interface; sessionID: SessionID; beforeMessageID?: MessageID }) {
   return Effect.gen(function* () {
     const messages = yield* input.session
       .messages({ sessionID: input.sessionID })
       .pipe(Effect.catch(() => Effect.succeed([] as MessageV2.WithParts[])))
-    for (let i = messages.length - 1; i >= 0; i--) {
+    const start = input.beforeMessageID
+      ? messages.findIndex((message) => message.info.id === input.beforeMessageID)
+      : messages.length
+    for (let i = (start < 0 ? messages.length : start) - 1; i >= 0; i--) {
       const parts = messages[i].parts
       for (let j = parts.length - 1; j >= 0; j--) {
         const meta = (parts[j] as { metadata?: { codegoblin?: { kind?: string; output?: string } } }).metadata
@@ -674,6 +686,90 @@ function sessionLastImageOutput(input: { session: Session.Interface; sessionID: 
       }
     }
     return undefined
+  })
+}
+
+function codeGoblinImageReplayInput(input: {
+  session: Session.Interface
+  sessionID: SessionID
+  assistantMessageID: MessageID
+}) {
+  return Effect.gen(function* () {
+    const messages = yield* input.session
+      .messages({ sessionID: input.sessionID })
+      .pipe(Effect.catch(() => Effect.succeed([] as MessageV2.WithParts[])))
+    const source = messages.find(
+      (message) => message.info.id === input.assistantMessageID && message.info.role === "assistant",
+    )
+    const parentID = (source?.info as { parentID?: MessageID } | undefined)?.parentID
+    if (!source || !parentID) return undefined
+
+    const parent = messages.find((message) => message.info.id === parentID)
+    const prompt =
+      parent?.parts
+        .filter((part): part is MessageV2.TextPart => part.type === "text" && typeof part.text === "string")
+        .map((part) => part.text)
+        .join("\n")
+        .trim() ?? ""
+    if (!prompt) return undefined
+
+    const inputImages =
+      parent?.parts
+        .filter((part): part is MessageV2.FilePart => part.type === "file")
+        .map((part) => filePartImageInput(part))
+        .filter((part): part is ImageInput => !!part) ?? []
+
+    if (inputImages.length === 0 && CodeGoblinImageCommand.looksLikeImageEditRequest(prompt)) {
+      const previous = yield* sessionLastImageOutput({
+        session: input.session,
+        sessionID: input.sessionID,
+        beforeMessageID: input.assistantMessageID,
+      })
+      if (previous) inputImages.push({ path: previous })
+    }
+
+    return {
+      prompt,
+      input: prompt.trimStart().startsWith("/image") ? prompt : undefined,
+      inputImages,
+      providerID: (source.info as { providerID?: string }).providerID,
+      modelID: (source.info as { modelID?: string }).modelID,
+      variant: (source.info as { variant?: string }).variant,
+    }
+  })
+}
+
+function filePartImageInput(part: MessageV2.FilePart): ImageInput | undefined {
+  if (typeof part.url !== "string" || !part.url.startsWith("data:")) return
+  if (typeof part.mime !== "string" || !part.mime.startsWith("image/")) return
+  return {
+    dataUrl: part.url,
+    mime: part.mime,
+    filename: part.filename,
+  }
+}
+
+function embeddedImageInput(root: string, image: ImageInput) {
+  return Effect.promise(async () => {
+    if (image.dataUrl) {
+      return {
+        url: image.dataUrl,
+        mime: image.mime ?? image.dataUrl.match(/^data:([^;,]+)/)?.[1] ?? "image/png",
+        filename: image.filename,
+      }
+    }
+    if (!image.path) return undefined
+    try {
+      const absolute = path.resolve(root, image.path)
+      const rel = path.relative(root, absolute)
+      if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return undefined
+      const mime = imageMimeType(absolute)
+      if (!mime) return undefined
+      const bytes = await fs.readFile(absolute)
+      return { url: `data:${mime};base64,${bytes.toString("base64")}`, mime, filename: image.filename ?? path.basename(absolute) }
+    } catch {
+      return undefined
+    }
   })
 }
 
@@ -726,15 +822,16 @@ function createCodeGoblinImageMessages(input: {
       },
     } as MessageV2.TextPart)
     for (const image of input.inputImages) {
-      if (!image.dataUrl) continue
+      const embedded = yield* embeddedImageInput(input.routeDirectory, image)
+      if (!embedded) continue
       yield* input.session.updatePart({
         id: PartID.ascending(),
         sessionID: input.sessionID,
         messageID: userMessageID,
         type: "file",
-        mime: image.mime ?? "image/png",
-        filename: image.filename,
-        url: image.dataUrl,
+        mime: embedded.mime,
+        filename: embedded.filename,
+        url: embedded.url,
       } as MessageV2.FilePart)
     }
     yield* input.session.updateMessage({

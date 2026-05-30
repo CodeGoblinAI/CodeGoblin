@@ -1476,6 +1476,14 @@ function codeGoblinImageMeta(metadata: Record<string, unknown> | undefined): Cod
   }
 }
 
+function codeGoblinURL(serverUrl: string | undefined, pathname: string, params?: Record<string, string | undefined>) {
+  const url = new URL(pathname, serverUrl ?? (typeof window === "undefined" ? "http://127.0.0.1" : window.location.origin))
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value !== undefined) url.searchParams.set(key, value)
+  }
+  return url.toString()
+}
+
 function codeGoblinAudioMeta(metadata: Record<string, unknown> | undefined): CodeGoblinAudioMeta | undefined {
   const raw = metadata?.codegoblin
   if (!raw || typeof raw !== "object") return
@@ -1539,6 +1547,8 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
   const [copied, setCopied] = createSignal(false)
   const [opened, setOpened] = createSignal<"idle" | "opening" | "done" | "error">("idle")
   const [retrying, setRetrying] = createSignal<"idle" | "running" | "done" | "error">("idle")
+  const [rerolling, setRerolling] = createSignal<"idle" | "running" | "done" | "error">("idle")
+  const [varianting, setVarianting] = createSignal<"idle" | "running" | "done" | "error">("idle")
   const retryRequest = createMemo(() => codeGoblinImageRetryRequest(data.store.part, props.message))
   const status = createMemo(() => {
     if (props.meta.kind === "image-progress") return "running"
@@ -1554,11 +1564,10 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
   const previewURL = createMemo(() => {
     if (status() !== "done") return
     if (!props.meta.output) return
-    const params = new URLSearchParams({
+    return codeGoblinURL(data.serverUrl, "/codegoblin/output-image", {
       directory: data.directory,
       output: props.meta.output,
     })
-    return `/codegoblin/output-image?${params.toString()}`
   })
   const detail = createMemo(() => {
     const output = props.meta.output
@@ -1590,7 +1599,7 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
   }
 
   const codeGoblinRequest = async (url: string, body: Record<string, unknown>) => {
-    const response = await fetch(url, {
+    const response = await fetch(codeGoblinURL(data.serverUrl, url), {
       method: "POST",
       credentials: "same-origin",
       headers: {
@@ -1627,6 +1636,7 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
     try {
       await codeGoblinRequest("/codegoblin/image", {
         sessionID: props.message.sessionID,
+        sourceAssistantMessageID: props.message.id,
         ...(request.slashInput ? { input: request.slashInput } : { prompt: request.prompt }),
         output: props.meta.output,
         provider: props.meta.provider,
@@ -1639,6 +1649,46 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
     } catch {
       setRetrying("error")
       setTimeout(() => setRetrying("idle"), 2500)
+    }
+  }
+
+  const rerollImage = async () => {
+    if (!retryRequest() || rerolling() === "running") return
+    setRerolling("running")
+    try {
+      await codeGoblinRequest("/codegoblin/image", {
+        sessionID: props.message.sessionID,
+        sourceAssistantMessageID: props.message.id,
+        provider: props.meta.provider,
+        model: props.meta.model,
+        requireImageModel: true,
+      })
+      setRerolling("done")
+      setTimeout(() => setRerolling("idle"), 2000)
+    } catch {
+      setRerolling("error")
+      setTimeout(() => setRerolling("idle"), 2500)
+    }
+  }
+
+  const createVariants = async () => {
+    if (!retryRequest() || varianting() === "running") return
+    setVarianting("running")
+    try {
+      for (const _ of [0, 1, 2]) {
+        await codeGoblinRequest("/codegoblin/image", {
+          sessionID: props.message.sessionID,
+          sourceAssistantMessageID: props.message.id,
+          provider: props.meta.provider,
+          model: props.meta.model,
+          requireImageModel: true,
+        })
+      }
+      setVarianting("done")
+      setTimeout(() => setVarianting("idle"), 2000)
+    } catch {
+      setVarianting("error")
+      setTimeout(() => setVarianting("idle"), 2500)
     }
   }
 
@@ -1705,6 +1755,65 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
           </a>
         )}
       </Show>
+      <Show when={status() === "done" && retryRequest()}>
+        <div data-slot="codegoblin-image-status-actions">
+          <Tooltip
+            value={
+              rerolling() === "done"
+                ? "Re-roll queued"
+                : rerolling() === "error"
+                  ? "Re-roll failed"
+                  : "Re-roll with the same prompt and input image"
+            }
+            placement="top"
+            gutter={4}
+          >
+            <IconButton
+              icon={rerolling() === "done" ? "check" : "reset"}
+              size="normal"
+              variant="secondary"
+              aria-label="Re-roll image"
+              disabled={rerolling() === "running" || varianting() === "running"}
+              onClick={rerollImage}
+              onMouseDown={(e) => e.preventDefault()}
+            />
+          </Tooltip>
+          <Tooltip
+            value={
+              varianting() === "done"
+                ? "Variants queued"
+                : varianting() === "error"
+                  ? "Variants failed"
+                  : "Create 3 variations with the same prompt and input image"
+            }
+            placement="top"
+            gutter={4}
+          >
+            <IconButton
+              icon={varianting() === "done" ? "check" : "plus-small"}
+              size="normal"
+              variant="secondary"
+              aria-label="Create 3 image variations"
+              disabled={rerolling() === "running" || varianting() === "running"}
+              onClick={createVariants}
+              onMouseDown={(e) => e.preventDefault()}
+            />
+          </Tooltip>
+          <span data-slot="codegoblin-image-action-note">
+            {rerolling() === "running"
+              ? "Re-rolling image..."
+              : varianting() === "running"
+                ? "Queuing 3 variations..."
+                : rerolling() === "done"
+                  ? "Re-roll queued"
+                  : varianting() === "done"
+                    ? "Variants queued"
+                    : rerolling() === "error" || varianting() === "error"
+                      ? "Image action failed"
+                      : "Re-roll or create 3 variants from this image turn."}
+          </span>
+        </div>
+      </Show>
       <Show when={status() === "error" && retryRequest()}>
         <div data-slot="codegoblin-image-status-actions">
           <Tooltip
@@ -1764,11 +1873,10 @@ function CodeGoblinAudioStatus(props: { meta: CodeGoblinAudioMeta; text: string 
   const previewURL = createMemo(() => {
     if (status() !== "done") return
     if (!props.meta.output) return
-    const params = new URLSearchParams({
+    return codeGoblinURL(data.serverUrl, "/codegoblin/output-audio", {
       directory: data.directory,
       output: props.meta.output,
     })
-    return `/codegoblin/output-audio?${params.toString()}`
   })
   const detail = createMemo(() => {
     const output = props.meta.output
@@ -1802,7 +1910,7 @@ function CodeGoblinAudioStatus(props: { meta: CodeGoblinAudioMeta; text: string 
   }
 
   const codeGoblinRequest = async (url: string, body: Record<string, unknown>) => {
-    const response = await fetch(url, {
+    const response = await fetch(codeGoblinURL(data.serverUrl, url), {
       method: "POST",
       credentials: "same-origin",
       headers: {
