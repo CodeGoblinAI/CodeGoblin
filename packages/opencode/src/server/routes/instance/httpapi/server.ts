@@ -422,6 +422,8 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
               filename: typeof item.filename === "string" ? item.filename : undefined,
             }))
         : []
+      for (const imagePath of imagePathsFromBody(body)) inputImages.push({ path: imagePath })
+      const useLastImage = body?.useLastImage === true || body?.lastImage === true
 
       const commandInput = typeof body?.input === "string" ? body.input : undefined
       const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : ""
@@ -444,6 +446,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           output: parsedCommand?.output ?? (typeof body?.output === "string" ? body.output : undefined),
           provider: parsedCommand?.provider ?? requestProvider,
           model: parsedCommand?.model ?? requestModel,
+          useLastImage: parsedCommand?.useLastImage || useLastImage,
         })
       } catch (error) {
         return HttpServerResponse.jsonUnsafe(
@@ -486,6 +489,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
                 provider: requestProvider,
                 model: requestModel,
                 inputImages,
+                useLastImage,
                 requireImageModel: body?.requireImageModel !== false,
               })
             : await CodeGoblinImageCommand.generate({
@@ -496,6 +500,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
                 model: requestModel,
                 keyFile: typeof body?.keyFile === "string" ? body.keyFile : undefined,
                 inputImages,
+                useLastImage,
                 requireImageModel: body?.requireImageModel !== false,
               })
         } catch (error) {
@@ -613,6 +618,15 @@ function audioMimeType(file: string) {
   if (ext === ".pcm") return "application/octet-stream"
   if (ext === ".ulaw" || ext === ".mulaw") return "audio/basic"
   return "audio/mpeg"
+}
+
+function imagePathsFromBody(body: any) {
+  return [
+    typeof body?.image === "string" ? body.image : undefined,
+    typeof body?.imagePath === "string" ? body.imagePath : undefined,
+    ...(Array.isArray(body?.images) ? body.images : []),
+    ...(Array.isArray(body?.imagePaths) ? body.imagePaths : []),
+  ].filter((item): item is string => typeof item === "string" && item.trim().length > 0)
 }
 
 function parseAudioVoiceSettings(value: unknown): AudioVoiceSettings | undefined {

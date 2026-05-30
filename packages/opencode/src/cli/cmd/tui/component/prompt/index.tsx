@@ -1275,6 +1275,7 @@ export function Prompt(props: PromptProps) {
           provider: selectedModel?.providerID,
           model: selectedModel?.modelID,
           inputImages,
+          useLastImage: CodeGoblinImageCommand.looksLikeImageEditRequest(submitted) && inputImages.length === 0,
           requireImageModel: true,
         })
           .then((result) => {
@@ -1438,6 +1439,7 @@ export function Prompt(props: PromptProps) {
           provider: selectedModel.providerID,
           model: selectedModel.modelID,
           inputImages,
+          useLastImage: CodeGoblinImageCommand.looksLikeImageEditRequest(trimmed) && inputImages.length === 0,
           requireImageModel: true,
         })
           .then((result) => {
