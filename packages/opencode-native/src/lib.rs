@@ -7,6 +7,7 @@
 //! otherwise, so behavior is identical whether or not the native layer is built.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 const STOPWORDS: &[&str] = &[
     "the", "and", "for", "with", "that", "this", "you", "your", "are", "was", "but", "not", "all",
@@ -40,14 +41,23 @@ pub struct Ranked {
 
 /// Score an entry against the query terms. Score is the count of query-term
 /// occurrences in the entry content, with a small bonus for pinned entries.
+///
+/// Efficiency: builds a single term-frequency map per entry (O(content)) and
+/// looks each query term up in O(1), instead of rescanning the content once
+/// per query term (the previous O(query * content) nested filter).
 pub fn score_entry(query_terms: &[String], entry: &Entry) -> f64 {
     if query_terms.is_empty() {
         return if entry.pinned { 2.0 } else { 0.0 };
     }
-    let content_terms = extract_terms(&entry.content);
+    let mut freq: HashMap<String, usize> = HashMap::new();
+    for term in extract_terms(&entry.content) {
+        *freq.entry(term).or_insert(0) += 1;
+    }
     let mut score = 0.0_f64;
     for q in query_terms {
-        score += content_terms.iter().filter(|t| *t == q).count() as f64;
+        if let Some(count) = freq.get(q) {
+            score += *count as f64;
+        }
     }
     if entry.pinned {
         score += 2.0;

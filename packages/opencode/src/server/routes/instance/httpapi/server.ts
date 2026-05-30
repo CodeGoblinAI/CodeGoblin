@@ -438,6 +438,21 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
       const parsedCommand = commandInput
         ? CodeGoblinImageCommand.parse(commandInput.trimStart().replace(/^\/image\b/, "").trim())
         : undefined
+      // Session-aware image continuity: when the user is editing ("make him red") and did not
+      // attach an image, reuse the most recent image generated in this chat session. This is more
+      // accurate than the global usage.json fallback because it stays scoped to the conversation.
+      const editPrompt = parsedCommand?.prompt ?? prompt
+      const wantsPreviousImage =
+        parsedCommand?.useLastImage ||
+        useLastImage ||
+        CodeGoblinImageCommand.looksLikeImageEditRequest(editPrompt)
+      if (typeof body?.sessionID === "string" && inputImages.length === 0 && wantsPreviousImage) {
+        const previous = yield* sessionLastImageOutput({
+          session,
+          sessionID: SessionID.make(body.sessionID),
+        })
+        if (previous) inputImages.push({ path: previous })
+      }
       let preview: ReturnType<typeof CodeGoblinImageCommand.describe>
       try {
         preview = CodeGoblinImageCommand.describe({
@@ -643,6 +658,25 @@ function parseAudioVoiceSettings(value: unknown): AudioVoiceSettings | undefined
   return result
 }
 
+function sessionLastImageOutput(input: { session: Session.Interface; sessionID: SessionID }) {
+  return Effect.gen(function* () {
+    const messages = yield* input.session
+      .messages({ sessionID: input.sessionID })
+      .pipe(Effect.catch(() => Effect.succeed([] as MessageV2.WithParts[])))
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const parts = messages[i].parts
+      for (let j = parts.length - 1; j >= 0; j--) {
+        const meta = (parts[j] as { metadata?: { codegoblin?: { kind?: string; output?: string } } }).metadata
+          ?.codegoblin
+        if (meta?.kind === "image-result" && typeof meta.output === "string" && meta.output.trim()) {
+          return meta.output
+        }
+      }
+    }
+    return undefined
+  })
+}
+
 function createCodeGoblinImageMessages(input: {
   session: Session.Interface
   sessionStatus: SessionStatus.Interface
@@ -796,6 +830,47 @@ function finishCodeGoblinImageMessages(input: {
         },
       },
     } as MessageV2.TextPart)
+    // Embed the generated image as a file part so it renders inline in chat and accumulates
+    // across turns instead of only showing a saved-path string.
+    if (input.result.ok && output) {
+      const embedded = yield* Effect.promise(async () => {
+        try {
+          const absolute = path.isAbsolute(output) ? output : path.resolve(input.persist.routeDirectory, output)
+          const bytes = await fs.readFile(absolute)
+          const ext = path.extname(absolute).toLowerCase()
+          const mime =
+            ext === ".jpg" || ext === ".jpeg"
+              ? "image/jpeg"
+              : ext === ".webp"
+                ? "image/webp"
+                : ext === ".gif"
+                  ? "image/gif"
+                  : "image/png"
+          return { url: `data:${mime};base64,${bytes.toString("base64")}`, mime, filename: path.basename(absolute) }
+        } catch {
+          return undefined
+        }
+      })
+      if (embedded) {
+        yield* input.session.updatePart({
+          id: PartID.ascending(),
+          sessionID: input.persist.sessionID,
+          messageID: input.persist.assistantMessageID,
+          type: "file",
+          mime: embedded.mime,
+          filename: embedded.filename,
+          url: embedded.url,
+          metadata: {
+            codegoblin: {
+              kind: "image-output",
+              output,
+              provider: providerID,
+              model: modelID,
+            },
+          },
+        } as MessageV2.FilePart)
+      }
+    }
     yield* input.session.updateMessage({
       id: input.persist.assistantMessageID,
       parentID: input.persist.userMessageID,

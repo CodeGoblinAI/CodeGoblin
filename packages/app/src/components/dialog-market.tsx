@@ -1,14 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query"
-import { Component, createMemo, createResource, Show } from "solid-js"
+import { Component, createMemo, createResource, For } from "solid-js"
 import { useSync } from "@/context/sync"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 import { useQueryOptions } from "@/context/global-sync"
 import { pathKey } from "@/utils/path-key"
 import { authTokenFromCredentials } from "@/utils/server"
+import { Button } from "@opencode-ai/ui/button"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { List } from "@opencode-ai/ui/list"
-import { Switch } from "@opencode-ai/ui/switch"
 import { showToast } from "@opencode-ai/ui/toast"
 
 type MarketEntry = {
@@ -19,8 +19,10 @@ type MarketEntry = {
   description: string
   homepage?: string
   env?: { name: string; description: string }[]
-  mcp?: unknown
+  mcp?: { type?: string } | unknown
 }
+
+type MarketAction = "add" | "connect" | "disconnect" | "authenticate"
 
 const statusLabels: Record<string, string> = {
   connected: "Connected",
@@ -65,9 +67,9 @@ export const DialogMarket: Component = () => {
   const refresh = () => queryClient.refetchQueries(queryOptions.mcp(pathKey(sync.directory)))
 
   const action = useMutation(() => ({
-    mutationFn: async (entry: MarketEntry) => {
-      const status = sync.data.mcp?.[entry.id]?.status
-      if (!status) {
+    mutationFn: async (input: { entry: MarketEntry; action: MarketAction }) => {
+      const { entry } = input
+      if (input.action === "add") {
         const response = await fetch(`${sdk.url}/codegoblin/market/install`, {
           method: "POST",
           headers: headers(),
@@ -77,18 +79,19 @@ export const DialogMarket: Component = () => {
           | { ok?: boolean; name?: string; config?: any; message?: string }
           | undefined
         if (!response.ok || !body?.ok || !body.config) {
-          throw new Error(body?.message ?? "Could not add to config.")
+          throw new Error(body?.message ?? "Could not add this server.")
         }
         await sdk.client.mcp.add({ name: body.name ?? entry.id, config: body.config })
-        showToast({ title: `${entry.name} added`, description: "Added to opencode.json and connecting." })
+        showToast({ title: `${entry.name} added`, description: "Connecting now." })
         return
       }
-      if (status === "connected") {
+      if (input.action === "disconnect") {
         await sdk.client.mcp.disconnect({ name: entry.id })
         return
       }
-      if (status === "needs_auth") {
+      if (input.action === "authenticate") {
         await sdk.client.mcp.auth.authenticate({ name: entry.id })
+        showToast({ title: `Authenticating ${entry.name}`, description: "Complete sign-in in your browser." })
         return
       }
       await sdk.client.mcp.connect({ name: entry.id })
@@ -109,10 +112,7 @@ export const DialogMarket: Component = () => {
         items={items}
         filterKeys={["name", "category", "description"]}
         sortBy={(a, b) => a.name.localeCompare(b.name)}
-        onSelect={(x) => {
-          if (!x || action.isPending) return
-          action.mutate(x)
-        }}
+        onSelect={() => {}}
       >
         {(entry) => {
           const status = () => sync.data.mcp?.[entry.id]?.status
@@ -121,7 +121,31 @@ export const DialogMarket: Component = () => {
             if (!s) return "Not added"
             return statusLabels[s] ?? s
           }
-          const enabled = () => status() === "connected"
+          const isRemote = () => (entry.mcp as { type?: string } | undefined)?.type === "remote"
+          const pending = () => action.isPending && action.variables?.entry.id === entry.id
+          const actions = (): { action: MarketAction; label: string; variant?: "primary" | "ghost" }[] => {
+            const s = status()
+            if (!s) return [{ action: "add", label: "Add", variant: "primary" }]
+            if (s === "needs_auth" || s === "needs_client_registration")
+              return [
+                { action: "authenticate", label: "Authenticate", variant: "primary" },
+                { action: "disconnect", label: "Remove", variant: "ghost" },
+              ]
+            if (s === "connected")
+              return isRemote()
+                ? [
+                    { action: "authenticate", label: "Re-authenticate", variant: "ghost" },
+                    { action: "disconnect", label: "Disconnect", variant: "ghost" },
+                  ]
+                : [{ action: "disconnect", label: "Disconnect", variant: "ghost" }]
+            // failed / disabled / other
+            return isRemote()
+              ? [
+                  { action: "connect", label: "Connect", variant: "primary" },
+                  { action: "authenticate", label: "Authenticate", variant: "ghost" },
+                ]
+              : [{ action: "connect", label: "Connect", variant: "primary" }]
+          }
           return (
             <div class="w-full flex items-center justify-between gap-x-3">
               <div class="flex flex-col gap-0.5 min-w-0">
@@ -131,15 +155,22 @@ export const DialogMarket: Component = () => {
                 </div>
                 <span class="text-11-regular text-text-weaker truncate">{entry.description}</span>
               </div>
-              <div onClick={(e) => e.stopPropagation()}>
-                <Switch
-                  checked={enabled()}
-                  disabled={action.isPending && action.variables?.id === entry.id}
-                  onChange={() => {
-                    if (action.isPending) return
-                    action.mutate(entry)
-                  }}
-                />
+              <div class="flex items-center gap-x-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                <For each={actions()}>
+                  {(item) => (
+                    <Button
+                      size="small"
+                      variant={item.variant ?? "ghost"}
+                      disabled={pending()}
+                      onClick={() => {
+                        if (action.isPending) return
+                        action.mutate({ entry, action: item.action })
+                      }}
+                    >
+                      {item.label}
+                    </Button>
+                  )}
+                </For>
               </div>
             </div>
           )

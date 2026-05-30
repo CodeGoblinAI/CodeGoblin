@@ -172,16 +172,28 @@ function HomeDesign() {
     })
   }
 
+  function openMemory() {
+    void import("@/components/dialog-memory").then((x) => {
+      dialog.show(() => <x.DialogMemory />)
+    })
+  }
+
+  function openMarket() {
+    void import("@/components/dialog-market").then((x) => {
+      dialog.show(() => <x.DialogMarket />)
+    })
+  }
+
   return (
     <div class="mx-auto grid w-full h-full max-w-[1080px] gap-x-8 gap-y-5 px-6 pb-16 lg:grid-cols-[280px_minmax(0,720px)]">
-      <CodeGoblinWebHero />
+      <CodeGoblinWebHero openMemory={openMemory} openMarket={openMarket} />
       <HomeProjectColumn
         projects={projects()}
         selected={selectedProject()?.worktree}
         selectProject={selectProject}
         chooseProject={() => void chooseProject()}
         openSettings={openSettings}
-        openHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
+        openHelp={() => platform.openLink("https://github.com/shawnisikli/CodeGoblin/issues")}
         language={language}
       />
 
@@ -229,7 +241,7 @@ function HomeDesign() {
   )
 }
 
-function CodeGoblinWebHero() {
+function CodeGoblinWebHero(props: { openMemory: () => void; openMarket: () => void }) {
   const chipClass = "rounded-[6px] border border-[#214f24] bg-[#071107] px-2 py-1 text-[#b8f8bb]"
 
   return (
@@ -251,10 +263,19 @@ function CodeGoblinWebHero() {
             </div>
           </div>
         </div>
-        <div class="hidden shrink-0 text-right text-12-medium leading-5 text-[#9bb09d] sm:block">
-          <div class="text-[#62f56e]">CG local</div>
-          <div>image jobs stay in chat</div>
-          <div>black/green theme</div>
+        <div class="hidden shrink-0 flex-col items-end gap-2 sm:flex">
+          <div class="flex gap-2">
+            <Button size="small" variant="secondary" onClick={() => props.openMemory()}>
+              Memory
+            </Button>
+            <Button size="small" variant="secondary" onClick={() => props.openMarket()}>
+              Market
+            </Button>
+          </div>
+          <div class="text-right text-12-medium leading-5 text-[#9bb09d]">
+            <div class="text-[#62f56e]">CG local</div>
+            <div>image jobs stay in chat</div>
+          </div>
         </div>
       </div>
     </div>

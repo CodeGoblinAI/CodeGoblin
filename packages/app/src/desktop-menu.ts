@@ -201,8 +201,8 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     label: "Help",
     items: [
       { type: "item", label: "CodeGoblin Project State", href: "https://github.com/shawnisikli/CodeGoblin/blob/dev/docs/PROJECT_STATE.md" },
-      { type: "item", label: "Base Project Docs", href: "https://opencode.ai/docs" },
-      { type: "item", label: "Base Project Discord", href: "https://discord.com/invite/opencode" },
+      { type: "item", label: "Documentation", href: "https://github.com/shawnisikli/CodeGoblin#readme" },
+      { type: "item", label: "Upstream Community (opencode)", href: "https://discord.com/invite/opencode" },
       { type: "item", label: "Export Logs...", command: "logs.export" },
       { type: "separator" },
       {
