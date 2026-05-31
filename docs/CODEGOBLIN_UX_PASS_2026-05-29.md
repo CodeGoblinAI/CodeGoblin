@@ -33,7 +33,7 @@ next steps.
 ## What was fixed this session (detail)
 
 ### 1. `cg update` / `codegoblin update`
-- **Symptom:** `Error: Failed to change directory to C:\Users\shawn\update`.
+- **Symptom:** `Error: Failed to change directory to %USERPROFILE%\update`.
 - **Root cause:** the global `cg`/`codegoblin` shim prefers the compiled binary
   at `dist/opencode-windows-x64/bin/opencode.exe` over source. That compiled
   binary was built *before* the `update` command existed, so `update` was parsed

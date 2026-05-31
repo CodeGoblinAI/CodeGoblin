@@ -48,3 +48,5 @@ tsconfig.tsbuildinfo
 .codegoblin/
 codegoblin-output/
 codegoblin-generated/
+docs/*HANDOFF*.md
+docs/*CONTINUATION*.md
