@@ -269,3 +269,42 @@ This section covers the second implementation pass.
   `.opencode`, `OPENCODE_*`, provider IDs, GitHub action URLs); only the
   directory + internal package name change, with a path alias for the old name.
 
+---
+
+# UX pass — media settings + phase check (2026-05-31)
+
+This pass revisits the deferred UX items now that the web image/audio flows and
+image re-roll actions exist.
+
+## Done in this pass
+
+1. **Web audio settings are remembered and can be auto-approved.** The audio
+   dialog already persists voice, format, normalization, and tuning in browser
+   localStorage; this pass added a first-class Settings > General switch for
+   **Auto-approve audio generation**, which reuses those saved settings and skips
+   the confirmation dialog.
+2. **Image result actions are more explicit.** The completed image card now uses
+   labeled buttons for **Re-roll**, **3 variants**, and error-state **Retry
+   image** instead of icon-only actions.
+3. **Phase-A copy polish.** Updated the desktop Help menu to point at the live
+   CodeGoblin UX plan instead of a removed project-state file, and removed a
+   stray settings console log.
+
+## Phase check
+
+- **Phase A — cosmetic/user-visible polish:** continued. Safe user-facing copy
+  and action labels were improved without touching compatibility identifiers.
+- **Phase B — internal package directory rename:** still deferred. This remains a
+  dedicated migration PR because it touches workspace/package/build paths.
+- **Phase C — public identifiers/scope rename:** still deferred until a new
+  publish scope and compatibility shim are intentionally planned.
+
+## Still worth doing next
+
+- Add provider-specific media presets so image/audio settings can be saved per
+  provider/model rather than globally.
+- Surface the active saved audio voice/format in the model selector or prompt
+  footer when an audio model is selected.
+- Keep Phase B/C as separate, attended migrations; do not mix them into feature
+  UX passes.
+

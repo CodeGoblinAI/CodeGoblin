@@ -128,6 +128,7 @@ type ConfirmAudioGenerationInput = {
   provider: string
   model: string
   text: string
+  autoApprove: boolean
 }
 
 const defaultAudioSettings = (): AudioGenerationSettings => ({
@@ -158,6 +159,7 @@ const fallbackConfirmImageGeneration = (input: ConfirmImageGenerationInput) => {
 }
 
 const fallbackConfirmAudioGeneration = (input: ConfirmAudioGenerationInput) => {
+  if (input.autoApprove) return defaultAudioSettings()
   if (typeof globalThis.confirm !== "function") return false
   if (
     !globalThis.confirm(
@@ -483,6 +485,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           provider: currentModel.provider.id,
           model: currentModel.id,
           text: trimmed,
+          autoApprove: settings.permissions.audioGenerationAutoApprove(),
         })
         if (!confirmed) {
           showToast({

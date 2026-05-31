@@ -49,6 +49,7 @@ import { getDirectory as _getDirectory, getFilename } from "@opencode-ai/core/ut
 import { checksum } from "@opencode-ai/core/util/encode"
 import { Tooltip } from "./tooltip"
 import { IconButton } from "./icon-button"
+import { Button } from "./button"
 import { Spinner } from "./spinner"
 import { TextShimmer } from "./text-shimmer"
 import { AnimatedCountList } from "./tool-count-summary"
@@ -1757,48 +1758,54 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
       </Show>
       <Show when={status() === "done" && retryRequest()}>
         <div data-slot="codegoblin-image-status-actions">
-          <Tooltip
-            value={
-              rerolling() === "done"
-                ? "Re-roll queued"
-                : rerolling() === "error"
-                  ? "Re-roll failed"
-                  : "Re-roll with the same prompt and input image"
-            }
-            placement="top"
-            gutter={4}
-          >
-            <IconButton
-              icon={rerolling() === "done" ? "check" : "reset"}
-              size="normal"
-              variant="secondary"
-              aria-label="Re-roll image"
-              disabled={rerolling() === "running" || varianting() === "running"}
-              onClick={rerollImage}
-              onMouseDown={(e) => e.preventDefault()}
-            />
-          </Tooltip>
-          <Tooltip
-            value={
-              varianting() === "done"
-                ? "Variants queued"
-                : varianting() === "error"
-                  ? "Variants failed"
-                  : "Create 3 variations with the same prompt and input image"
-            }
-            placement="top"
-            gutter={4}
-          >
-            <IconButton
-              icon={varianting() === "done" ? "check" : "plus-small"}
-              size="normal"
-              variant="secondary"
-              aria-label="Create 3 image variations"
-              disabled={rerolling() === "running" || varianting() === "running"}
-              onClick={createVariants}
-              onMouseDown={(e) => e.preventDefault()}
-            />
-          </Tooltip>
+          <div data-slot="codegoblin-image-action-buttons">
+            <Tooltip
+              value={
+                rerolling() === "done"
+                  ? "Re-roll queued"
+                  : rerolling() === "error"
+                    ? "Re-roll failed"
+                    : "Re-roll with the same prompt and input image"
+              }
+              placement="top"
+              gutter={4}
+            >
+              <Button
+                icon={rerolling() === "done" ? "check" : "reset"}
+                size="small"
+                variant="secondary"
+                aria-label="Re-roll image"
+                disabled={rerolling() === "running" || varianting() === "running"}
+                onClick={rerollImage}
+                onMouseDown={(event: MouseEvent) => event.preventDefault()}
+              >
+                {rerolling() === "running" ? "Re-rolling" : "Re-roll"}
+              </Button>
+            </Tooltip>
+            <Tooltip
+              value={
+                varianting() === "done"
+                  ? "Variants queued"
+                  : varianting() === "error"
+                    ? "Variants failed"
+                    : "Create 3 variations with the same prompt and input image"
+              }
+              placement="top"
+              gutter={4}
+            >
+              <Button
+                icon={varianting() === "done" ? "check" : "plus-small"}
+                size="small"
+                variant="secondary"
+                aria-label="Create 3 image variations"
+                disabled={rerolling() === "running" || varianting() === "running"}
+                onClick={createVariants}
+                onMouseDown={(event: MouseEvent) => event.preventDefault()}
+              >
+                {varianting() === "running" ? "Queuing" : "3 variants"}
+              </Button>
+            </Tooltip>
+          </div>
           <span data-slot="codegoblin-image-action-note">
             {rerolling() === "running"
               ? "Re-rolling image..."
@@ -1827,15 +1834,17 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
             placement="top"
             gutter={4}
           >
-            <IconButton
+            <Button
               icon={retrying() === "done" ? "check" : "reset"}
-              size="normal"
+              size="small"
               variant="secondary"
               aria-label="Retry image generation"
               disabled={retrying() === "running"}
               onClick={retryImage}
-              onMouseDown={(e) => e.preventDefault()}
-            />
+              onMouseDown={(event: MouseEvent) => event.preventDefault()}
+            >
+              {retrying() === "running" ? "Retrying" : "Retry image"}
+            </Button>
           </Tooltip>
           <span data-slot="codegoblin-image-action-note">
             {retrying() === "running"

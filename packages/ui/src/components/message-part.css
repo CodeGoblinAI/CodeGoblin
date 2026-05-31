@@ -365,6 +365,14 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex-wrap: wrap;
+}
+
+[data-slot="codegoblin-image-action-buttons"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 [data-slot="codegoblin-image-action-note"] {

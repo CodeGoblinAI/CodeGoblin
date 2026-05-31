@@ -343,6 +343,18 @@ export const SettingsGeneral: Component = () => {
         </SettingsRow>
 
         <SettingsRow
+          title={language.t("settings.general.row.audioAutoApprove.title")}
+          description={language.t("settings.general.row.audioAutoApprove.description")}
+        >
+          <div data-action="settings-audio-generation-auto-approve">
+            <Switch
+              checked={settings.permissions.audioGenerationAutoApprove()}
+              onChange={(checked) => settings.permissions.setAudioGenerationAutoApprove(checked)}
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
           title={language.t("settings.general.row.shell.title")}
           description={language.t("settings.general.row.shell.description")}
         >
@@ -793,7 +805,6 @@ export const SettingsGeneral: Component = () => {
     </Show>
   )
 
-  console.log(import.meta.env)
   return (
     <div class="flex flex-col h-full overflow-y-auto no-scrollbar px-4 pb-10 sm:px-10 sm:pb-10">
       <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
