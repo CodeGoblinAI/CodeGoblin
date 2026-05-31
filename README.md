@@ -45,7 +45,7 @@ $env:PATH='C:\Users\shawn\.cache\codex-runtimes\codex-primary-runtime\dependenci
 npm run build
 ```
 
-If you only need quick CLI/TUI smoke tests, `--skip-embed-web-ui` is still available. Do **not** use it for `codegoblin web` builds: without embedded web assets the binary proxies the browser UI through `https://app.opencode.ai`, which can be blocked by corporate filters even though the local server still runs on `127.0.0.1`.
+If you only need quick CLI/TUI smoke tests, `--skip-embed-web-ui` is still available. Do **not** use it for public `codegoblin web` builds: without embedded CodeGoblin web assets the compatibility fallback can proxy the browser UI through the upstream web host, which is not the intended CodeGoblin release experience even though the local server still runs on `127.0.0.1`.
 
 On Windows, if native dependency install scripts fail in a local checkout, this lighter setup is often enough for CLI smoke testing:
 
@@ -98,5 +98,6 @@ CodeGoblin builds on OpenCode's MIT-licensed architecture. Preserve legal attrib
 See also:
 
 - `UPSTREAM.md`
-- `docs/PROJECT_STATE.md`
-- `docs/SECURITY_NOTES.md`
+- `docs/OPEN_SOURCE_BOUNDARIES.md`
+- `docs/MONETIZATION.md`
+- `SECURITY.md`

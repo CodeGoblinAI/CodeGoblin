@@ -39,6 +39,7 @@ logs/
 *.key
 *.p12
 *.pfx
+**/auth.json
 *.heapsnapshot
 *.bun-build
 tsconfig.tsbuildinfo

@@ -446,7 +446,7 @@ export const ProvidersLoginCommand = effectCmd({
       }
 
       yield* Prompt.log.warn(
-        `This only stores a credential for ${provider} - you will need configure it in opencode.json, check the docs for examples.`,
+        `This only stores a credential for ${provider} - configure it in CodeGoblin config (opencode.json) to use it.`,
       )
     }
 
@@ -461,7 +461,7 @@ export const ProvidersLoginCommand = effectCmd({
     }
 
     if (provider === "opencode") {
-      yield* Prompt.log.info("Create an api key at https://opencode.ai/auth")
+      yield* Prompt.log.info("Create a hosted provider API key at https://opencode.ai/auth")
     }
 
     if (provider === "vercel") {

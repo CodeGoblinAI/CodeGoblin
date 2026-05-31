@@ -20,7 +20,7 @@ export const CodeGoblinBrand = {
     "cute small green goblin mascot eating glowing token coins beside a developer terminal, useful serious dev tool style",
   disclaimer:
     "CodeGoblin is an independent fork/customization of OpenCode and is not affiliated with OpenCode, Anomaly, or their maintainers.",
-  docs: "docs/PROJECT_STATE.md",
+  docs: "docs/OPEN_SOURCE_BOUNDARIES.md",
 } as const
 
 export function codeGoblinCliName() {

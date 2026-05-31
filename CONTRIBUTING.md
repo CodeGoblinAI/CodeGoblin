@@ -1,6 +1,6 @@
-# Contributing to OpenCode
+# Contributing to CodeGoblin
 
-We want to make it easy for you to contribute to OpenCode. Here are the most common type of changes that get merged:
+We want to make it easy for you to contribute to CodeGoblin. Here are the most common types of changes that get merged:
 
 - Bug fixes
 - Additional LSPs / Formatters
@@ -10,7 +10,7 @@ We want to make it easy for you to contribute to OpenCode. Here are the most com
 - Missing standard behavior
 - Documentation improvements
 
-However, any UI or core product feature must go through a design review with the core team before implementation.
+However, any UI or core product feature should go through a design review before implementation, especially when it touches CodeGoblin branding, local security boundaries, or future hosted/commercial seams.
 
 If you are unsure if a PR would be accepted, feel free to ask a maintainer or look for issues with any of the following labels:
 
@@ -29,7 +29,7 @@ Want to take on an issue? Leave a comment and a maintainer may assign it to you 
 New providers shouldn't require many if ANY code changes, but if you want to add support for a new provider first make a PR to:
 https://github.com/anomalyco/models.dev
 
-## Developing OpenCode
+## Developing CodeGoblin
 
 - Requirements: Bun 1.3+
 - Install dependencies and start the dev server from the repo root:
@@ -41,19 +41,19 @@ https://github.com/anomalyco/models.dev
 
 ### Running against a different directory
 
-By default, `bun dev` runs OpenCode in the `packages/opencode` directory. To run it against a different directory or repository:
+By default, `bun dev` runs CodeGoblin from the compatibility core package in `packages/opencode`. To run it against a different directory or repository:
 
 ```bash
 bun dev <directory>
 ```
 
-To run OpenCode in the root of the opencode repo itself:
+To run CodeGoblin in the root of this repo itself:
 
 ```bash
 bun dev .
 ```
 
-### Building a "localcode"
+### Building a local CodeGoblin binary
 
 To compile a standalone executable:
 
@@ -61,24 +61,26 @@ To compile a standalone executable:
 ./packages/opencode/script/build.ts --single
 ```
 
-Then run it with:
+The low-level build artifact still uses OpenCode-compatible names until the dedicated package-directory migration. Prefer the npm wrapper or local link for CodeGoblin command testing:
 
 ```bash
-./packages/opencode/dist/opencode-<platform>/bin/opencode
+npm run link:local
+codegoblin --help
+cg --help
 ```
 
-Replace `<platform>` with your platform (e.g., `darwin-arm64`, `linux-x64`).
+If you need to inspect the raw artifact directly, it remains under `packages/opencode/dist/opencode-<platform>/bin/opencode`; replace `<platform>` with your platform (for example, `darwin-arm64` or `linux-x64`).
 
 - Core pieces:
-  - `packages/opencode`: OpenCode core business logic & server.
+  - `packages/opencode`: CodeGoblin's compatibility core package, server, and CLI internals.
   - `packages/opencode/src/cli/cmd/tui/`: The TUI code, written in SolidJS with [opentui](https://github.com/sst/opentui)
   - `packages/app`: The shared web UI components, written in SolidJS
   - `packages/desktop`: The native desktop app, built with Electron (wraps `packages/app`)
   - `packages/plugin`: Source for `@opencode-ai/plugin`
 
-### Understanding bun dev vs opencode
+### Understanding bun dev vs codegoblin
 
-During development, `bun dev` is the local equivalent of the built `opencode` command. Both run the same CLI interface:
+During development, `bun dev` is the local equivalent of the built `codegoblin` command. Both run the same CLI interface:
 
 ```bash
 # Development (from project root)
@@ -88,15 +90,15 @@ bun dev web              # Start server + open web interface
 bun dev <directory>      # Start TUI in specific directory
 
 # Production
-opencode --help          # Show all available commands
-opencode serve           # Start headless API server
-opencode web             # Start server + open web interface
-opencode <directory>     # Start TUI in specific directory
+codegoblin --help        # Show all available commands
+codegoblin serve         # Start headless API server
+codegoblin web           # Start server + open web interface
+codegoblin <directory>   # Start TUI in specific directory
 ```
 
 ### Running the API Server
 
-To start the OpenCode headless API server:
+To start the CodeGoblin headless API server:
 
 ```bash
 bun dev serve
@@ -112,7 +114,7 @@ bun dev serve --port 8080
 
 To test UI changes during development:
 
-1. **First, start the OpenCode server** (see [Running the API Server](#running-the-api-server) section above)
+1. **First, start the CodeGoblin server** (see [Running the API Server](#running-the-api-server) section above)
 2. **Then run the web app:**
 
 ```bash
