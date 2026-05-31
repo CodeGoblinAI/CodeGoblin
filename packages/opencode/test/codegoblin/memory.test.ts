@@ -16,6 +16,7 @@ function insert(input: {
   pinned?: boolean
   archived?: boolean
   projectID?: string
+  sourceSessionID?: string
 }) {
   Database.use((db) =>
     db
@@ -26,6 +27,7 @@ function insert(input: {
         content: input.content,
         pinned: input.pinned ?? false,
         project_id: input.projectID ?? null,
+        source_session_id: input.sourceSessionID ?? null,
         time_archived: input.archived ? Date.now() : null,
       })
       .run(),
@@ -126,4 +128,28 @@ test("buildMemoryContext skips stored entries that fail the security guard", () 
   const block = buildMemoryContext({})
   expect(block).toContain("prefers concise answers")
   expect(block).not.toContain("ignore previous instructions")
+})
+
+test("buildMemoryContext keeps only the requested session memories before limiting", () => {
+  for (let index = 0; index < 6; index += 1) {
+    insert({
+      id: CodeGoblinMemory.generateID(),
+      scope: "session",
+      content: `other session ${index}`,
+      projectID: "p1",
+      sourceSessionID: `session-${index}`,
+    })
+  }
+
+  insert({
+    id: CodeGoblinMemory.generateID(),
+    scope: "session",
+    content: "current session note",
+    projectID: "p1",
+    sourceSessionID: "current-session",
+  })
+
+  const block = buildMemoryContext({ projectID: "p1", sessionID: "current-session" })
+  expect(block).toContain("current session note")
+  expect(block).not.toContain("other session 0")
 })

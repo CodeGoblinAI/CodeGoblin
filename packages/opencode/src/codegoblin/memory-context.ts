@@ -24,9 +24,7 @@ function recall(input: MemoryContextInput): CodeGoblinMemoryEntry[] {
     : []
 
   const session = input.sessionID
-    ? CodeGoblinMemory.list({ scope: "session", limit: SESSION_LIMIT }).filter(
-        (entry) => entry.sourceSessionID === input.sessionID,
-      )
+    ? CodeGoblinMemory.list({ scope: "session", sourceSessionID: input.sessionID, limit: SESSION_LIMIT })
     : []
 
   return [...user, ...project, ...session]

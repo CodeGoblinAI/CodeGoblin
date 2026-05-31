@@ -30,6 +30,7 @@ export type CodeGoblinMemoryStatus = {
 export type CodeGoblinMemoryListInput = {
   scope?: CodeGoblinMemoryScope
   projectID?: string
+  sourceSessionID?: string
   includeArchived?: boolean
   limit?: number
 }
@@ -91,6 +92,7 @@ export const CodeGoblinMemory = {
       const filters = [
         input.scope ? eq(MemoryEntryTable.scope, input.scope) : undefined,
         input.projectID ? eq(MemoryEntryTable.project_id, input.projectID) : undefined,
+        input.sourceSessionID ? eq(MemoryEntryTable.source_session_id, input.sourceSessionID) : undefined,
         input.includeArchived ? undefined : isNull(MemoryEntryTable.time_archived),
       ].filter((item): item is NonNullable<typeof item> => Boolean(item))
       const base = db
@@ -116,6 +118,7 @@ export const CodeGoblinMemory = {
       const scopeFilters = [
         input.scope ? eq(MemoryEntryTable.scope, input.scope) : undefined,
         input.projectID ? eq(MemoryEntryTable.project_id, input.projectID) : undefined,
+        input.sourceSessionID ? eq(MemoryEntryTable.source_session_id, input.sourceSessionID) : undefined,
         input.includeArchived ? undefined : isNull(MemoryEntryTable.time_archived),
       ].filter((item): item is NonNullable<typeof item> => Boolean(item))
       const termFilter = or(...terms.map((term) => like(MemoryEntryTable.content, `%${term}%`)))

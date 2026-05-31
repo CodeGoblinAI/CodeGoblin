@@ -158,8 +158,12 @@ const DialogMemoryAdd: Component<{ onSaved: () => void }> = (props) => {
     setSaving(false)
     if (result.error) {
       const message =
-        typeof result.error === "object" && result.error && "message" in result.error
-          ? String((result.error as { message: unknown }).message)
+        typeof result.error === "object" && result.error
+          ? "error" in result.error && typeof (result.error as { error?: unknown }).error === "string"
+            ? String((result.error as { error: unknown }).error)
+            : "message" in result.error && typeof (result.error as { message?: unknown }).message === "string"
+              ? String((result.error as { message: unknown }).message)
+              : "Memory rejected."
           : "Memory rejected."
       setError(message)
       return

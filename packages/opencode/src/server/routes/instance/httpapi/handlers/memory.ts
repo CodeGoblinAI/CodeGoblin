@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { MemoryAddPayload, MemoryPinPayload, MemoryRejectedError } from "../groups/memory"
+import { InstanceState } from "@/effect/instance-state"
 import { CodeGoblinMemory, CodeGoblinMemoryError, type CodeGoblinMemoryScope } from "@/codegoblin/memory"
 
 export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (handlers) =>
@@ -30,21 +31,22 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     })
 
     const add = Effect.fn("MemoryHttpApi.add")(function* (ctx: { payload: typeof MemoryAddPayload.Type }) {
-      return yield* Effect.try({
-        try: () =>
-          CodeGoblinMemory.add({
-            scope: ctx.payload.scope,
-            content: ctx.payload.content,
-            projectID: ctx.payload.projectID,
-            sourceSessionID: ctx.payload.sourceSessionID,
-            tags: ctx.payload.tags ? [...ctx.payload.tags] : undefined,
-            pinned: ctx.payload.pinned,
-          }),
-        catch: (error) =>
-          new MemoryRejectedError({
-            error: error instanceof CodeGoblinMemoryError ? error.message : String(error),
-          }),
-      })
+      try {
+        const instance = yield* InstanceState.context
+        const projectID = ctx.payload.scope === "project" ? instance.project.id : ctx.payload.projectID
+        return CodeGoblinMemory.add({
+          scope: ctx.payload.scope,
+          content: ctx.payload.content,
+          projectID,
+          sourceSessionID: ctx.payload.sourceSessionID,
+          tags: ctx.payload.tags ? [...ctx.payload.tags] : undefined,
+          pinned: ctx.payload.pinned,
+        })
+      } catch (error) {
+        throw new MemoryRejectedError({
+          error: error instanceof CodeGoblinMemoryError ? error.message : String(error),
+        })
+      }
     })
 
     const pin = Effect.fn("MemoryHttpApi.pin")(function* (ctx: {

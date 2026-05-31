@@ -1203,6 +1203,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       const [voiceStatus, setVoiceStatus] = createSignal(
         input.provider.toLowerCase().includes("elevenlabs") ? "Loading ElevenLabs speakers…" : "",
       )
+      const providerIsGoogle = input.provider.toLowerCase().includes("google")
+      const outputFormats = providerIsGoogle
+        ? ["MP3", "LINEAR16", "OGG_OPUS", "MULAW", "ALAW"]
+        : ["mp3_44100_128", "mp3_44100_192", "mp3_22050_32", "wav_44100", "pcm_16000", "ulaw_8000"]
+      const defaultOutputFormat = providerIsGoogle ? "MP3" : "mp3_44100_128"
+      const selectedOutputFormat = outputFormats.includes(audio.outputFormat) ? audio.outputFormat : defaultOutputFormat
       let settled = false
       const done = (value: AudioGenerationSettings | false) => {
         if (settled) return
@@ -1292,15 +1298,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     <span class="text-12-medium uppercase tracking-wide text-text-muted">Format</span>
                     <select
                       class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
-                      value={audio.outputFormat}
+                      value={selectedOutputFormat}
                       onChange={(event) => setAudio("outputFormat", event.currentTarget.value)}
                     >
-                      <option value="mp3_44100_128">MP3 44.1kHz 128kbps</option>
-                      <option value="mp3_22050_32">MP3 22.05kHz 32kbps</option>
-                      <option value="mp3_44100_192">MP3 44.1kHz 192kbps</option>
-                      <option value="wav_44100">WAV 44.1kHz</option>
-                      <option value="pcm_16000">PCM 16kHz</option>
-                      <option value="ulaw_8000">μ-law 8kHz</option>
+                      {outputFormats.map((format) => (
+                        <option value={format}>{format}</option>
+                      ))}
                     </select>
                   </label>
                   <label class="flex flex-col gap-1">
