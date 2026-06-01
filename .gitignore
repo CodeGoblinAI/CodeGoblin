@@ -39,6 +39,7 @@ logs/
 *.key
 *.p12
 *.pfx
+**/auth.json
 *.heapsnapshot
 *.bun-build
 tsconfig.tsbuildinfo
@@ -47,3 +48,5 @@ tsconfig.tsbuildinfo
 .codegoblin/
 codegoblin-output/
 codegoblin-generated/
+docs/*HANDOFF*.md
+docs/*CONTINUATION*.md

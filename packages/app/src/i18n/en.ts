@@ -101,9 +101,9 @@ export const dict = {
   "dialog.provider.group.popular": "Popular",
   "dialog.provider.group.other": "Other",
   "dialog.provider.tag.recommended": "Recommended",
-  "dialog.provider.opencode.note": "Upstream hosted models including Claude, GPT, Gemini and more",
-  "dialog.provider.opencode.tagline": "Upstream hosted models",
-  "dialog.provider.opencodeGo.tagline": "Upstream low cost subscription",
+  "dialog.provider.opencode.note": "Hosted coding models including Claude, GPT, Gemini and more",
+  "dialog.provider.opencode.tagline": "Hosted coding models",
+  "dialog.provider.opencodeGo.tagline": "Low-cost hosted subscription",
   "dialog.provider.anthropic.note": "Direct access to Claude models, including Pro and Max",
   "dialog.provider.copilot.note": "AI models for coding assistance via GitHub Copilot",
   "dialog.provider.openai.note": "GPT models for fast, capable general AI tasks",
@@ -136,11 +136,11 @@ export const dict = {
   "provider.connect.apiKey.placeholder": "API key",
   "provider.connect.apiKey.required": "API key is required",
   "provider.connect.opencodeZen.line1":
-    "This hosted Zen provider gives access to a curated set of reliable optimized models for coding agents.",
+    "This hosted provider gives CodeGoblin access to curated, reliable models for coding agents.",
   "provider.connect.opencodeZen.line2":
-    "CodeGoblin can use it with your key while keeping the rest of the app branded and routed through CodeGoblin.",
+    "It is backed by the upstream Zen compatibility provider while your key stays in CodeGoblin's local auth store.",
   "provider.connect.opencodeZen.visit.prefix": "Visit ",
-  "provider.connect.opencodeZen.visit.link": "opencode.ai/zen",
+  "provider.connect.opencodeZen.visit.link": "the hosted provider page",
   "provider.connect.opencodeZen.visit.suffix": " to collect your API key.",
   "provider.connect.oauth.code.visit.prefix": "Visit ",
   "provider.connect.oauth.code.visit.link": "this link",
@@ -750,6 +750,9 @@ export const dict = {
   "settings.general.row.imageAutoApprove.title": "Auto-approve image generation",
   "settings.general.row.imageAutoApprove.description":
     "Skip the confirmation when an image-looking prompt is sent with an image model selected.",
+  "settings.general.row.audioAutoApprove.title": "Auto-approve audio generation",
+  "settings.general.row.audioAutoApprove.description":
+    "Skip the audio confirmation and reuse the last saved voice, format, and tuning settings.",
   "settings.general.row.appearance.title": "Appearance",
   "settings.general.row.appearance.description": "Customise how CodeGoblin looks on your device",
   "settings.general.row.colorScheme.title": "Color scheme",

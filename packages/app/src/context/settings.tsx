@@ -46,6 +46,7 @@ export interface Settings {
   permissions: {
     autoApprove: boolean
     imageGenerationAutoApprove: boolean
+    audioGenerationAutoApprove: boolean
   }
   notifications: NotificationSettings
   sounds: SoundSettings
@@ -132,6 +133,7 @@ const defaultSettings: Settings = {
   permissions: {
     autoApprove: false,
     imageGenerationAutoApprove: false,
+    audioGenerationAutoApprove: false,
   },
   notifications: {
     agent: true,
@@ -291,6 +293,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setImageGenerationAutoApprove(value: boolean) {
           setStore("permissions", "imageGenerationAutoApprove", value)
+        },
+        audioGenerationAutoApprove: withFallback(
+          () => store.permissions?.audioGenerationAutoApprove,
+          defaultSettings.permissions.audioGenerationAutoApprove,
+        ),
+        setAudioGenerationAutoApprove(value: boolean) {
+          setStore("permissions", "audioGenerationAutoApprove", value)
         },
       },
       notifications: {

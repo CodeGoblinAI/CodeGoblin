@@ -1,6 +1,10 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import { getAudioProvider } from "./audio-providers"
+import type { AudioVoiceOption, AudioVoiceSettings } from "./audio-providers"
+
+export type { AudioVoiceOption, AudioVoiceSettings } from "./audio-providers"
 
 export type AudioCommandResult = {
   ok: boolean
@@ -12,25 +16,9 @@ export type AudioCommandResult = {
   outputFormat?: string
 }
 
-export type AudioVoiceSettings = {
-  stability?: number
-  similarityBoost?: number
-  style?: number
-  useSpeakerBoost?: boolean
-  speed?: number
-}
-
-export type AudioVoiceOption = {
-  id: string
-  name: string
-  category?: string
-  description?: string
-  previewUrl?: string
-  labels?: Record<string, string>
-}
-
 type GenerateInput = {
   text: string
+  provider?: string
   output?: string
   model?: string
   voice?: string
@@ -45,148 +33,136 @@ type GenerateInput = {
   keyFile?: string
 }
 
+type VoicesInput = Pick<GenerateInput, "cwd" | "keyFile" | "provider">
+
 type Env = Record<string, string | undefined>
 
-const DEFAULT_MODEL = "eleven_multilingual_v2"
-const DEFAULT_VOICE = "21m00Tcm4TlvDq8ikWAM"
 const AUTO_VOICE = "auto-generated account voice"
 const DEFAULT_DIR = "codegoblin-output/audio"
-const DEFAULT_OUTPUT_FORMAT = "mp3_44100_128"
 
 export const CodeGoblinAudioCommand = {
   async generate(input: GenerateInput): Promise<AudioCommandResult> {
     return generateAudio(input)
   },
-  async voices(input: Pick<GenerateInput, "cwd" | "keyFile">) {
+  async voices(input: VoicesInput) {
     return listVoices(input)
   },
   describe(input: GenerateInput) {
+    const provider = getAudioProvider(input.provider)
     const root = path.resolve(input.cwd || process.cwd())
+    const outputFormat = normalizeOutputFormat(provider, input.outputFormat)
     return {
-      provider: "elevenlabs",
-      model: normalizeModel(input.model),
+      provider: provider.id,
+      model: provider.normalizeModel(input.model),
       voice: configuredVoice(input, process.env) || AUTO_VOICE,
-      outputFormat: normalizeOutputFormat(input.outputFormat),
-      output: safeOutputPath(root, input.output),
+      outputFormat,
+      output: safeOutputPath(root, input.output, provider.fileExtension(outputFormat)),
     }
   },
 }
 
 async function generateAudio(input: GenerateInput): Promise<AudioCommandResult> {
+  const provider = getAudioProvider(input.provider)
   const root = path.resolve(input.cwd || process.cwd())
   const env = await loadLocalEnv(root, input.keyFile)
-  const output = safeOutputPath(root, input.output)
-  const model = normalizeModel(input.model)
+  const outputFormat = normalizeOutputFormat(provider, input.outputFormat)
+  const output = safeOutputPath(root, input.output, provider.fileExtension(outputFormat))
+  const model = provider.normalizeModel(input.model)
   const requestedVoice = configuredVoice(input, env)
   const dryRunVoice = requestedVoice || AUTO_VOICE
-  const outputFormat = normalizeOutputFormat(input.outputFormat)
-  const voiceSettings = normalizeVoiceSettings(input.voiceSettings)
 
   if (input.dryRun) {
     return {
       ok: true,
-      provider: "elevenlabs",
+      provider: provider.id,
       model,
       voice: dryRunVoice,
       outputFormat,
       output,
-      message: `Audio dry run OK. CodeGoblin would generate with elevenlabs/${model}, voice ${dryRunVoice}, format ${outputFormat}, and save to ${output}`,
+      message: `Audio dry run OK. CodeGoblin would generate with ${provider.id}/${model}, voice ${dryRunVoice}, format ${outputFormat}, and save to ${output}`,
     }
   }
 
-  const key = await findAudioKey(env)
-  const voice = requestedVoice || (await findAccountGeneratedVoice(key?.value)) || DEFAULT_VOICE
+  const key = await findAudioKey(env, provider.envKeys, provider.authProviderID)
   if (!key) {
     return {
       ok: false,
-      provider: "elevenlabs",
+      provider: provider.id,
       model,
-      voice,
+      voice: requestedVoice || AUTO_VOICE,
       outputFormat,
       output,
-      message:
-        "No ElevenLabs key found. Set ELEVENLABS_API_KEY or CODEGOBLIN_ELEVENLABS_API_KEY locally, or connect the ElevenLabs provider, then retry. CodeGoblin did not send this audio request.",
+      message: `No ${provider.name} key found. Set ${provider.envKeys.join(" or ")} locally${
+        provider.authProviderID ? `, or connect the ${provider.name} provider,` : ""
+      } then retry. CodeGoblin did not send this audio request.`,
     }
   }
 
-  const query = new URLSearchParams({ output_format: outputFormat })
-  const body = {
+  const voice = await provider.resolveDefaultVoice(
+    { voice: requestedVoice, languageCode: input.languageCode },
+    key.value,
+  )
+  const result = await provider.generate({
     text: input.text,
-    model_id: model,
-    ...(input.languageCode ? { language_code: input.languageCode } : {}),
-    ...(voiceSettings ? { voice_settings: voiceSettings } : {}),
-    ...(input.seed !== undefined ? { seed: input.seed } : {}),
-    ...(input.applyTextNormalization ? { apply_text_normalization: input.applyTextNormalization } : {}),
-    ...(input.applyLanguageTextNormalization !== undefined
-      ? { apply_language_text_normalization: input.applyLanguageTextNormalization }
-      : {}),
-  }
-
-  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}?${query}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: audioAccept(outputFormat),
-      "xi-api-key": key.value,
-    },
-    body: JSON.stringify(body),
+    model,
+    voice,
+    outputFormat,
+    voiceSettings: input.voiceSettings,
+    languageCode: input.languageCode,
+    seed: input.seed,
+    applyTextNormalization: input.applyTextNormalization,
+    applyLanguageTextNormalization: input.applyLanguageTextNormalization,
+    apiKey: key.value,
   })
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "")
+  if (!result.ok) {
     return {
       ok: false,
-      provider: "elevenlabs",
+      provider: provider.id,
       model,
-      voice,
+      voice: voice || requestedVoice || AUTO_VOICE,
       outputFormat,
       output,
-      message: `ElevenLabs audio request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 220)}` : ""}${requestedVoice ? "" : " If this account cannot use the fallback library voice, pass --voice or set ELEVENLABS_VOICE_ID to a generated voice from your ElevenLabs account."}`,
+      message: result.message,
     }
   }
 
   await fs.mkdir(path.dirname(output), { recursive: true })
-  await fs.writeFile(output, Buffer.from(await response.arrayBuffer()))
+  await fs.writeFile(output, Buffer.from(result.audio))
   return {
     ok: true,
-    provider: "elevenlabs",
+    provider: provider.id,
     model,
-    voice,
+    voice: result.voice,
     outputFormat,
     output,
-    message: `Audio generated with elevenlabs/${model}, voice ${voice}, and saved to ${output}.`,
+    message: `Audio generated with ${provider.id}/${model}, voice ${result.voice}, and saved to ${output}.`,
   }
 }
 
-async function listVoices(input: Pick<GenerateInput, "cwd" | "keyFile">) {
+async function listVoices(input: VoicesInput) {
+  const provider = getAudioProvider(input.provider)
   const root = path.resolve(input.cwd || process.cwd())
-  const key = await findAudioKey(await loadLocalEnv(root, input.keyFile))
+  const key = await findAudioKey(await loadLocalEnv(root, input.keyFile), provider.envKeys, provider.authProviderID)
   if (!key) {
     return {
       ok: false as const,
       voices: [] as AudioVoiceOption[],
-      message:
-        "No ElevenLabs key found. Set ELEVENLABS_API_KEY or CODEGOBLIN_ELEVENLABS_API_KEY locally, or connect the ElevenLabs provider, then retry.",
+      message: `No ${provider.name} key found. Set ${provider.envKeys.join(" or ")} locally${
+        provider.authProviderID ? `, or connect the ${provider.name} provider,` : ""
+      } then retry.`,
     }
   }
 
-  const response = await fetchElevenLabsVoices(key.value)
+  const response = await provider.voices(key.value)
   if (!response.ok) {
-    return {
-      ok: false as const,
-      voices: [] as AudioVoiceOption[],
-      message: response.message,
-    }
+    return { ok: false as const, voices: [] as AudioVoiceOption[], message: response.message }
   }
-
-  return {
-    ok: true as const,
-    voices: response.voices,
-  }
+  return { ok: true as const, voices: response.voices }
 }
 
-function safeOutputPath(root: string, output?: string) {
-  const target = path.resolve(root, output || path.join(DEFAULT_DIR, `${timestamp()}.mp3`))
+function safeOutputPath(root: string, output: string | undefined, extension: string) {
+  const target = path.resolve(root, output || path.join(DEFAULT_DIR, `${timestamp()}.${extension}`))
   const rel = path.relative(root, target)
   if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
     throw new Error("Audio output path must stay inside the current project directory.")
@@ -194,114 +170,14 @@ function safeOutputPath(root: string, output?: string) {
   return target
 }
 
-function normalizeModel(model?: string) {
-  const raw = model?.trim()
-  if (!raw) return DEFAULT_MODEL
-  const lower = raw.toLowerCase().replace(/\s+/g, "-")
-  if (lower === "elevenlabs-tts" || lower === "elevenlabs-v2.5-turbo" || lower === "eleven-turbo-v2.5") {
-    return "eleven_turbo_v2_5"
-  }
-  if (lower === "elevenlabs-flash" || lower === "eleven-flash-v2.5" || lower === "elevenlabs-v2.5-flash") {
-    return "eleven_flash_v2_5"
-  }
-  if (lower === "elevenlabs-v3") return "eleven_v3"
-  return raw
-}
-
-function normalizeOutputFormat(outputFormat?: string) {
-  return outputFormat?.trim() || DEFAULT_OUTPUT_FORMAT
+function normalizeOutputFormat(provider: { defaultOutputFormat: string }, outputFormat?: string) {
+  return outputFormat?.trim() || provider.defaultOutputFormat
 }
 
 function configuredVoice(input: Pick<GenerateInput, "voice">, env: Env) {
-  return [input.voice, env.ELEVENLABS_VOICE_ID, env.CODEGOBLIN_ELEVENLABS_VOICE_ID]
+  return [input.voice, env.ELEVENLABS_VOICE_ID, env.CODEGOBLIN_ELEVENLABS_VOICE_ID, env.CODEGOBLIN_AUDIO_VOICE_ID]
     .map((item) => item?.trim())
     .find((item): item is string => Boolean(item))
-}
-
-async function findAccountGeneratedVoice(apiKey?: string) {
-  if (!apiKey) return
-  const response = await fetchElevenLabsVoices(apiKey)
-  if (!response.ok) return
-  return response.voices
-    .filter((item) => item.category === "generated")
-    .map((item) => item.id)
-    .find((item) => Boolean(item))
-}
-
-async function fetchElevenLabsVoices(apiKey: string) {
-  const response = await fetch("https://api.elevenlabs.io/v2/voices?page_size=100", {
-    headers: {
-      "xi-api-key": apiKey,
-    },
-  }).catch(() => undefined)
-  if (!response) {
-    return {
-      ok: false as const,
-      voices: [] as AudioVoiceOption[],
-      message: "Could not reach ElevenLabs voices API.",
-    }
-  }
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "")
-    return {
-      ok: false as const,
-      voices: [] as AudioVoiceOption[],
-      message: `ElevenLabs voices request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 220)}` : ""}`,
-    }
-  }
-
-  const data = (await response.json().catch(() => undefined)) as { voices?: unknown } | undefined
-  return {
-    ok: true as const,
-    voices: (Array.isArray(data?.voices) ? data.voices : [])
-      .map((item) => (item && typeof item === "object" ? toAudioVoiceOption(item as Record<string, unknown>) : undefined))
-      .filter((item): item is AudioVoiceOption => Boolean(item)),
-  }
-}
-
-function toAudioVoiceOption(input: Record<string, unknown>) {
-  if (typeof input.voice_id !== "string") return
-  const labels =
-    input.labels && typeof input.labels === "object"
-      ? Object.fromEntries(
-          Object.entries(input.labels as Record<string, unknown>).filter(
-            (entry): entry is [string, string] => typeof entry[1] === "string",
-          ),
-        )
-      : undefined
-  return {
-    id: input.voice_id,
-    name: typeof input.name === "string" && input.name.trim() ? input.name : input.voice_id,
-    ...(typeof input.category === "string" ? { category: input.category } : {}),
-    ...(typeof input.description === "string" ? { description: input.description } : {}),
-    ...(typeof input.preview_url === "string" ? { previewUrl: input.preview_url } : {}),
-    ...(labels && Object.keys(labels).length > 0 ? { labels } : {}),
-  } satisfies AudioVoiceOption
-}
-
-function normalizeVoiceSettings(settings?: AudioVoiceSettings) {
-  if (!settings) return
-  const result = {
-    ...(settings.stability !== undefined ? { stability: clamp(settings.stability, 0, 1) } : {}),
-    ...(settings.similarityBoost !== undefined ? { similarity_boost: clamp(settings.similarityBoost, 0, 1) } : {}),
-    ...(settings.style !== undefined ? { style: clamp(settings.style, 0, 1) } : {}),
-    ...(settings.useSpeakerBoost !== undefined ? { use_speaker_boost: settings.useSpeakerBoost } : {}),
-    ...(settings.speed !== undefined ? { speed: clamp(settings.speed, 0.7, 1.2) } : {}),
-  }
-  if (Object.keys(result).length === 0) return
-  return result
-}
-
-function clamp(value: number, min: number, max: number) {
-  if (Number.isNaN(value)) return min
-  return Math.min(max, Math.max(min, value))
-}
-
-function audioAccept(outputFormat: string) {
-  if (outputFormat.startsWith("wav_")) return "audio/wav"
-  if (outputFormat.startsWith("pcm_")) return "application/octet-stream"
-  if (outputFormat.startsWith("ulaw_")) return "audio/basic"
-  return "audio/mpeg"
 }
 
 async function loadLocalEnv(root: string, keyFile?: string) {
@@ -324,16 +200,16 @@ async function loadLocalEnv(root: string, keyFile?: string) {
   return result
 }
 
-async function findAudioKey(env: Env) {
-  const local = ["ELEVENLABS_API_KEY", "CODEGOBLIN_ELEVENLABS_API_KEY"]
-    .map((name) => (env[name] ? { value: env[name], source: name } : undefined))
+async function findAudioKey(env: Env, envKeys: string[], authProviderID?: string) {
+  const local = envKeys
+    .map((name) => (env[name] ? { value: env[name] as string, source: name } : undefined))
     .filter((item): item is { value: string; source: string } => Boolean(item))[0]
   if (local) return local
-  if (env.CODEGOBLIN_AUDIO_DISABLE_CONNECTED_AUTH === "1") return
+  if (env.CODEGOBLIN_AUDIO_DISABLE_CONNECTED_AUTH === "1" || !authProviderID) return
 
-  const key = await authKey("elevenlabs")
+  const key = await authKey(authProviderID)
   if (!key) return
-  return { value: key, source: "connected ElevenLabs provider" }
+  return { value: key, source: `connected ${authProviderID} provider` }
 }
 
 async function authKey(provider: string) {

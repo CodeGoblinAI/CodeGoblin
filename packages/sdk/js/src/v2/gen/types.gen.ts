@@ -1700,6 +1700,33 @@ export type McpServerNotFoundError = {
   message: string
 }
 
+export type CodeGoblinMemoryEntry = {
+  id: string
+  scope: "user" | "project" | "session"
+  projectID?: string
+  sourceSessionID?: string
+  content: string
+  tags: Array<string>
+  pinned: boolean
+  archived: boolean
+  timeCreated: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  timeUpdated: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
+export type CodeGoblinMemoryStatus = {
+  total: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  active: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  archived: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  pinned: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  byScope: {
+    [key: string]: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+}
+
+export type CodeGoblinMemoryRejectedError = {
+  error: string
+}
+
 export type ProjectNotFoundError = {
   _tag: "ProjectNotFoundError"
   projectID: string
@@ -5338,6 +5365,200 @@ export type McpDisconnectResponses = {
 }
 
 export type McpDisconnectResponse = McpDisconnectResponses[keyof McpDisconnectResponses]
+
+export type MemoryListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    scope?: "user" | "project" | "session"
+    projectID?: string
+    query?: string
+    includeArchived?: string
+    limit?: string
+  }
+  url: "/codegoblin/memory"
+}
+
+export type MemoryListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type MemoryListError = MemoryListErrors[keyof MemoryListErrors]
+
+export type MemoryListResponses = {
+  /**
+   * Stored memory entries
+   */
+  200: Array<CodeGoblinMemoryEntry>
+}
+
+export type MemoryListResponse = MemoryListResponses[keyof MemoryListResponses]
+
+export type MemoryAddData = {
+  body?: {
+    scope: "user" | "project" | "session"
+    content: string
+    projectID?: string
+    sourceSessionID?: string
+    tags?: Array<string>
+    pinned?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/codegoblin/memory"
+}
+
+export type MemoryAddErrors = {
+  /**
+   * CodeGoblinMemoryRejectedError | InvalidRequestError
+   */
+  400: CodeGoblinMemoryRejectedError | InvalidRequestError
+}
+
+export type MemoryAddError = MemoryAddErrors[keyof MemoryAddErrors]
+
+export type MemoryAddResponses = {
+  /**
+   * Memory entry added
+   */
+  200: CodeGoblinMemoryEntry
+}
+
+export type MemoryAddResponse = MemoryAddResponses[keyof MemoryAddResponses]
+
+export type MemoryStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/codegoblin/memory/status"
+}
+
+export type MemoryStatusErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type MemoryStatusError = MemoryStatusErrors[keyof MemoryStatusErrors]
+
+export type MemoryStatusResponses = {
+  /**
+   * Memory store status
+   */
+  200: CodeGoblinMemoryStatus
+}
+
+export type MemoryStatusResponse = MemoryStatusResponses[keyof MemoryStatusResponses]
+
+export type MemoryPinData = {
+  body?: {
+    pinned: boolean
+  }
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/codegoblin/memory/{id}/pin"
+}
+
+export type MemoryPinErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type MemoryPinError = MemoryPinErrors[keyof MemoryPinErrors]
+
+export type MemoryPinResponses = {
+  /**
+   * Pin state updated
+   */
+  200: {
+    success: boolean
+  }
+}
+
+export type MemoryPinResponse = MemoryPinResponses[keyof MemoryPinResponses]
+
+export type MemoryRestoreData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/codegoblin/memory/{id}/restore"
+}
+
+export type MemoryRestoreErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type MemoryRestoreError = MemoryRestoreErrors[keyof MemoryRestoreErrors]
+
+export type MemoryRestoreResponses = {
+  /**
+   * Memory entry restored
+   */
+  200: {
+    success: boolean
+  }
+}
+
+export type MemoryRestoreResponse = MemoryRestoreResponses[keyof MemoryRestoreResponses]
+
+export type MemoryRemoveData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/codegoblin/memory/{id}"
+}
+
+export type MemoryRemoveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type MemoryRemoveError = MemoryRemoveErrors[keyof MemoryRemoveErrors]
+
+export type MemoryRemoveResponses = {
+  /**
+   * Memory entry archived
+   */
+  200: {
+    success: boolean
+  }
+}
+
+export type MemoryRemoveResponse = MemoryRemoveResponses[keyof MemoryRemoveResponses]
 
 export type ProjectListData = {
   body?: never

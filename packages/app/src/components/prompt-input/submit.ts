@@ -58,6 +58,15 @@ const imageIntent = (text: string) =>
     text,
   )
 
+const imageEditIntent = (text: string) =>
+  /\b(edit|change|modify|adjust|retouch|inpaint|outpaint|replace|remove|add)\b.{0,120}\b(image|picture|photo|it|this|that|last|previous|same)\b/i.test(
+    text,
+  ) ||
+  /\b(make|turn|paint)\s+(it|this|that|him|her|them|the\s+(last|previous|same)\s+(image|picture|photo)|the\s+(subject|character|person|goblin|mascot|object))\b/i.test(text) ||
+  /\b(last|previous|same)\s+(image|picture|photo)\b/i.test(text)
+
+const imageFilePath = (value: string) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(value)
+
 const casualText = (text: string) =>
   /^(hi|hii+|hello|hey|yo|sup|thanks?|thank you|ok|okay|yes|no|how are you\??|what'?s up\??)[\s.!?]*$/i.test(text.trim())
 
@@ -119,6 +128,7 @@ type ConfirmAudioGenerationInput = {
   provider: string
   model: string
   text: string
+  autoApprove: boolean
 }
 
 const defaultAudioSettings = (): AudioGenerationSettings => ({
@@ -149,6 +159,7 @@ const fallbackConfirmImageGeneration = (input: ConfirmImageGenerationInput) => {
 }
 
 const fallbackConfirmAudioGeneration = (input: ConfirmAudioGenerationInput) => {
+  if (input.autoApprove) return defaultAudioSettings()
   if (typeof globalThis.confirm !== "function") return false
   if (
     !globalThis.confirm(
@@ -474,6 +485,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           provider: currentModel.provider.id,
           model: currentModel.id,
           text: trimmed,
+          autoApprove: settings.permissions.audioGenerationAutoApprove(),
         })
         if (!confirmed) {
           showToast({
@@ -820,6 +832,16 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         const requestText = isImageSlash ? trimmed : text.trim()
         const plannedOutput = isImageSlash ? slashImageOutput(requestText) : defaultImageOutput()
         const plannedOutputDisplay = displayImageOutput(sessionDirectory, plannedOutput)
+        const inputImages = [
+          ...images.map((attachment) => ({
+            dataUrl: attachment.dataUrl,
+            mime: attachment.mime,
+            filename: attachment.filename,
+          })),
+          ...context
+            .filter((item) => item.type === "file" && imageFilePath(item.path))
+            .map((item) => ({ path: item.path })),
+        ]
         const optimisticUser: Message = {
           id: userMessageID,
           sessionID: session.id,
@@ -927,11 +949,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             output: plannedOutput,
             provider: currentModel.provider.id,
             model: currentModel.id,
-            inputImages: images.map((attachment) => ({
-              dataUrl: attachment.dataUrl,
-              mime: attachment.mime,
-              filename: attachment.filename,
-            })),
+            inputImages,
+            useLastImage: imageEditIntent(requestText) && inputImages.length === 0,
             requireImageModel: true,
           }),
         })

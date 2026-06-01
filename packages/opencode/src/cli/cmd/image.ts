@@ -8,6 +8,7 @@ type Args = {
   provider?: string
   keyFile?: string
   input?: string[]
+  lastImage?: boolean
   dryRun?: boolean
 }
 
@@ -40,6 +41,11 @@ export const ImageCommand = {
         type: "string",
         array: true,
       })
+      .option("last-image", {
+        alias: "last",
+        describe: "use the last CodeGoblin-generated image as the edit/reference input",
+        type: "boolean",
+      })
       .option("key-file", {
         describe: "optional local env file containing image provider keys",
         type: "string",
@@ -60,6 +66,7 @@ export const ImageCommand = {
       cwd: process.cwd(),
       dryRun: args.dryRun,
       inputImages,
+      useLastImage: args.lastImage,
     })
     if (!plan.supported) {
       console.error(
@@ -76,6 +83,8 @@ export const ImageCommand = {
     )
     if (inputImages.length > 0) {
       console.log(`Using ${inputImages.length} input image${inputImages.length === 1 ? "" : "s"} for edit/reference.`)
+    } else if (args.lastImage) {
+      console.log("Using the last CodeGoblin-generated image for edit/reference.")
     }
     const result = await CodeGoblinImageCommand.generate({
       prompt,
@@ -86,6 +95,7 @@ export const ImageCommand = {
       cwd: process.cwd(),
       dryRun: args.dryRun,
       inputImages,
+      useLastImage: args.lastImage,
       requireImageModel: true,
     }).catch((error) => ({
       ok: false,

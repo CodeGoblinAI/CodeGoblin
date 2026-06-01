@@ -9,6 +9,15 @@ Security defaults for this fork:
 - CodeGoblin hosted subscription/gateway code in this public fork is scaffold-only. Production keys, Stripe logic, pricing logic, and private business rules must live outside this repository.
 - New key storage should follow OpenCode's existing local auth/config patterns unless there is a documented reason to do otherwise.
 
+## Public Fork Boundaries
+
+This repository is safe to open-source only when it remains local-first and scaffold-only for commercial features:
+
+- Keep public code limited to local CLI/TUI/web app behavior, provider adapters, media generation orchestration, compatibility auth, and documented extension points.
+- Keep hosted gateway, billing, pricing, Stripe webhooks, production analytics, private provider contracts, and production secrets in a separate private repository.
+- Use `CODEGOBLIN_*` names for new public-facing configuration. Keep `OPENCODE_*`, `opencode.json`, and `.opencode/` support as compatibility aliases unless a dedicated migration PR adds backward-compatible replacements.
+- Do not add generated outputs, local auth stores, `.env` files, screenshots containing credentials, or provider response logs to git.
+
 CodeGoblin is an independent fork/customization of OpenCode and is not affiliated with OpenCode, Anomaly, or their maintainers.
 
 # Upstream OpenCode Security Notes
@@ -51,7 +60,7 @@ Server mode is opt-in only. When enabled, set `OPENCODE_SERVER_PASSWORD` to requ
 
 We appreciate your efforts to responsibly disclose your findings, and will make every effort to acknowledge your contributions.
 
-To report a security issue, please use the GitHub Security Advisory ["Report a Vulnerability"](https://github.com/anomalyco/opencode/security/advisories/new) tab.
+To report a CodeGoblin security issue, use the GitHub Security Advisory "Report a Vulnerability" tab for this repository when it is available. For upstream OpenCode vulnerabilities, report through the upstream OpenCode advisory process.
 
 The team will send a response indicating the next steps in handling your report. After the initial reply to your report, the security team will keep you informed of the progress towards a fix and full announcement, and may ask for additional information or guidance.
 

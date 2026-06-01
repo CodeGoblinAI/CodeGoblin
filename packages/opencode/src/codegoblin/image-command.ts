@@ -22,6 +22,7 @@ type GenerateInput = {
   dryRun?: boolean
   keyFile?: string
   inputImages?: ImageInput[]
+  useLastImage?: boolean
   requireImageModel?: boolean
 }
 
@@ -31,6 +32,7 @@ type SlashInput = {
   provider?: string
   model?: string
   inputImages?: ImageInput[]
+  useLastImage?: boolean
   requireImageModel?: boolean
 }
 
@@ -87,6 +89,7 @@ export const CodeGoblinImageCommand = {
       model: parsed.model ?? input.model,
       ...parsed,
       inputImages: parsed.inputImages?.length ? parsed.inputImages : input.inputImages,
+      useLastImage: parsed.useLastImage || input.useLastImage,
       cwd: input.cwd,
       requireImageModel: input.requireImageModel && !parsed.provider && !parsed.model,
     })
@@ -96,6 +99,7 @@ export const CodeGoblinImageCommand = {
   describe: describeImage,
   shouldRoutePromptToImage,
   looksLikeImageIntent,
+  looksLikeImageEditRequest,
   looksLikeCasualText,
   isImageModelSelection,
   async usageSummary(cwd: string) {
@@ -119,14 +123,27 @@ async function generateImage(input: GenerateInput): Promise<ImageCommandResult> 
 
   const provider = plan.provider ?? "google"
   const model = plan.model ?? DEFAULT_MODEL
+  const resolvedInput = await resolveInputImages(root, input)
+  if (!resolvedInput.ok) {
+    return {
+      ok: false,
+      model,
+      provider,
+      output,
+      message: resolvedInput.message,
+    }
+  }
 
   if (input.dryRun) {
+    const editHint = resolvedInput.inputImages.length
+      ? ` and edit/reference ${resolvedInput.inputImages.length} input image${resolvedInput.inputImages.length === 1 ? "" : "s"}`
+      : ""
     return {
       ok: true,
       model,
       provider,
       output,
-      message: `Image dry run OK. CodeGoblin would generate with ${provider}/${model} and save to ${output}`,
+      message: `Image dry run OK. CodeGoblin would generate with ${provider}/${model}${editHint} and save to ${output}`,
     }
   }
 
@@ -144,12 +161,44 @@ async function generateImage(input: GenerateInput): Promise<ImageCommandResult> 
 
   const result =
     provider === "xai"
-      ? await generateXai({ ...input, root, output, model, apiKey: imageKey.value, keySource: imageKey.source })
+      ? await generateXai({
+          ...input,
+          inputImages: resolvedInput.inputImages,
+          root,
+          output,
+          model,
+          apiKey: imageKey.value,
+          keySource: imageKey.source,
+        })
       : provider === "openai"
-        ? await generateOpenAI({ ...input, root, output, model, apiKey: imageKey.value, keySource: imageKey.source })
+        ? await generateOpenAI({
+            ...input,
+            inputImages: resolvedInput.inputImages,
+            root,
+            output,
+            model,
+            apiKey: imageKey.value,
+            keySource: imageKey.source,
+          })
         : provider === "qwen"
-          ? await generateQwen({ ...input, root, output, model, apiKey: imageKey.value, keySource: imageKey.source })
-          : await generateGemini({ ...input, root, output, model, apiKey: imageKey.value, keySource: imageKey.source })
+          ? await generateQwen({
+              ...input,
+              inputImages: resolvedInput.inputImages,
+              root,
+              output,
+              model,
+              apiKey: imageKey.value,
+              keySource: imageKey.source,
+            })
+          : await generateGemini({
+              ...input,
+              inputImages: resolvedInput.inputImages,
+              root,
+              output,
+              model,
+              apiKey: imageKey.value,
+              keySource: imageKey.source,
+            })
   if (result.ok) await recordUsage(root, result)
   return result
 }
@@ -194,7 +243,22 @@ async function generateGemini(input: ProviderGenerateInput): Promise<ImageComman
         responseModalities: ["TEXT", "IMAGE"],
       },
     }),
-  })
+  }).catch((error) => error)
+
+  if (!(response instanceof Response)) {
+    return {
+      ok: false,
+      model: input.model,
+      provider: "google",
+      output: input.output,
+      message: providerConnectionFailureMessage({
+        label: "Gemini image",
+        provider: "google",
+        endpoint,
+        error: response,
+      }),
+    }
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "")
@@ -556,6 +620,7 @@ function parseImageArgs(raw: string): Omit<GenerateInput, "cwd"> {
   let keyFile: string | undefined
   const inputImages: ImageInput[] = []
   let dryRun = false
+  let useLastImage = false
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]
@@ -604,6 +669,10 @@ function parseImageArgs(raw: string): Omit<GenerateInput, "cwd"> {
       inputImages.push({ path: token.slice("--image=".length) })
       continue
     }
+    if (token === "--last" || token === "--last-image" || token === "--previous-image") {
+      useLastImage = true
+      continue
+    }
     if (token === "--dry-run") {
       dryRun = true
       continue
@@ -618,6 +687,7 @@ function parseImageArgs(raw: string): Omit<GenerateInput, "cwd"> {
     provider,
     keyFile,
     inputImages,
+    useLastImage,
     dryRun,
   }
 }
@@ -744,6 +814,12 @@ function looksLikeImageIntent(prompt: string) {
   return /\b(create|generate|make|draw|render|design|edit|change|transform|paint)\b.{0,100}\b(image|picture|photo|logo|mascot|illustration|avatar|icon|cat|dog|horse|goblin|car|flames?|red|style)\b/i.test(prompt)
 }
 
+function looksLikeImageEditRequest(prompt: string) {
+  return /\b(edit|change|modify|adjust|retouch|inpaint|outpaint|replace|remove|add)\b.{0,120}\b(image|picture|photo|it|this|that|last|previous|same)\b/i.test(prompt) ||
+    /\b(make|turn|paint)\s+(it|this|that|him|her|them|the\s+(last|previous|same)\s+(image|picture|photo)|the\s+(subject|character|person|goblin|mascot|object))\b/i.test(prompt) ||
+    /\b(last|previous|same)\s+(image|picture|photo)\b/i.test(prompt)
+}
+
 function looksLikeCasualText(prompt: string) {
   return /^(hi|hii+|hello|hey|yo|sup|thanks?|thank you|ok|okay|yes|no|how are you\??|what'?s up\??)[\s.!?]*$/i.test(prompt.trim())
 }
@@ -867,6 +943,34 @@ function providerFailureMessage(input: {
   return `${input.label} request failed with HTTP ${input.status}${detail.message ? `: ${detail.message}` : ""}`
 }
 
+function providerConnectionFailureMessage(input: {
+  label: string
+  provider: ImageProvider
+  endpoint: string
+  error: unknown
+}) {
+  return [
+    `${input.label} request could not connect to ${safeOrigin(input.endpoint)}.`,
+    `Provider: ${input.provider}.`,
+    "Check network/VPN/firewall/proxy access and that the provider API is reachable from this machine.",
+    `Original error: ${errorText(input.error)}`,
+  ].join(" ")
+}
+
+function safeOrigin(endpoint: string) {
+  try {
+    return new URL(endpoint).origin
+  } catch {
+    return "the provider API"
+  }
+}
+
+function errorText(error: unknown) {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  return "unknown network error"
+}
+
 function imageAuthFailureHint(
   provider: ImageProvider,
   status: number,
@@ -932,6 +1036,43 @@ function successMessage(provider: string, model: string, output: string, cost?: 
   return `Image generated with ${provider}/${model} and saved to ${output}. Goblin pocketed ~${formatCost(cost)} from the token pile.`
 }
 
+async function resolveInputImages(root: string, input: Pick<GenerateInput, "inputImages" | "prompt" | "useLastImage">) {
+  const explicit = (input.inputImages ?? []).filter((item) => item.path || item.dataUrl)
+  if (explicit.length > 0) return { ok: true as const, inputImages: explicit }
+
+  if (!input.useLastImage && !looksLikeImageEditRequest(input.prompt)) {
+    return { ok: true as const, inputImages: [] }
+  }
+
+  const last = await lastGeneratedImage(root)
+  if (last) {
+    return {
+      ok: true as const,
+      inputImages: [{ path: last.path, filename: path.basename(last.path) }],
+    }
+  }
+
+  return {
+    ok: false as const,
+    message:
+      "No previous CodeGoblin image was found to edit. Attach an image, pass --image <path>, use --last-image after generating one, or generate an image first.",
+  }
+}
+
+async function lastGeneratedImage(root: string) {
+  const existing = await fs.readFile(path.join(root, USAGE_FILE), "utf8").then((x) => JSON.parse(x)).catch(() => undefined)
+  const output = stringValue(asRecord(asRecord(existing)?.last)?.output)
+  if (!output) return
+  const target = safeInputImagePathOrUndefined(root, output)
+  if (!target) return
+  const stat = await fs.stat(target).catch(() => undefined)
+  if (!stat?.isFile()) return
+  return {
+    path: path.relative(root, target) || path.basename(target),
+    absolute: target,
+  }
+}
+
 async function imageInputParts(
   root: string,
   inputs: ImageInput[] | undefined,
@@ -957,7 +1098,7 @@ async function normalizeInputImages(root: string, inputs: ImageInput[] | undefin
       continue
     }
     if (!item.path) continue
-    const resolved = path.resolve(root, item.path)
+    const resolved = safeInputImagePath(root, item.path)
     const data = await fs.readFile(resolved)
     const mime = item.mime || mimeFromPath(resolved)
     if (!mime.startsWith("image/")) continue
@@ -970,6 +1111,23 @@ async function normalizeInputImages(root: string, inputs: ImageInput[] | undefin
     })
   }
   return result
+}
+
+function safeInputImagePath(root: string, input: string) {
+  const target = path.resolve(root, input)
+  const rel = path.relative(root, target)
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("Input image path must stay inside the current project directory.")
+  }
+  return target
+}
+
+function safeInputImagePathOrUndefined(root: string, input: string) {
+  try {
+    return safeInputImagePath(root, input)
+  } catch {
+    return
+  }
 }
 
 function parseDataUrl(dataUrl: string, fallbackMime?: string, filename?: string) {
@@ -1015,6 +1173,7 @@ async function recordUsage(root: string, result: ImageCommandResult) {
     last: undefined,
   }))
   const provider = result.provider || "unknown"
+  existing.providers = existing.providers && typeof existing.providers === "object" ? existing.providers : {}
   existing.images = Number(existing.images || 0) + 1
   existing.estimatedCost = Number(existing.estimatedCost || 0) + Number(result.cost || 0)
   existing.providers[provider] = Number(existing.providers[provider] || 0) + 1

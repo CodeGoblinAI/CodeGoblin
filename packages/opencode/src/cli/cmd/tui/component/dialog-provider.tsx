@@ -26,7 +26,7 @@ const PROVIDER_PRIORITY: Record<string, number> = {
   elevenlabs: 6,
 }
 
-const CUSTOM_PROVIDER_OPTION_VALUE = "__opencode_custom_provider__"
+const CUSTOM_PROVIDER_OPTION_VALUE = "__codegoblin_custom_provider__"
 const CUSTOM_PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
 
 type ProviderOptionBase = {
@@ -56,11 +56,11 @@ export function providerOptions(list: { id: string; name: string }[]): ProviderO
         value: provider.id,
         providerID: provider.id,
         description: {
-          opencode: "(Upstream hosted)",
+          opencode: "(Hosted coding models)",
           anthropic: "(API key)",
           openai: "(ChatGPT Plus/Pro or API key)",
           elevenlabs: "(Voice, TTS, and music API key)",
-          "opencode-go": "Upstream subscription provider",
+          "opencode-go": "Low-cost hosted subscription",
         }[provider.id],
         category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Providers",
       })),
@@ -360,7 +360,7 @@ function ApiMethod(props: ApiMethodProps) {
           opencode: (
             <box gap={1}>
               <text fg={theme.textMuted}>
-                Zen is an upstream hosted provider. CodeGoblin can use it with your key, but is not affiliated.
+                This hosted provider gives CodeGoblin access to curated coding models through a compatibility provider.
               </text>
               <text fg={theme.text}>
                 Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> to get a key
@@ -370,10 +370,10 @@ function ApiMethod(props: ApiMethodProps) {
           "opencode-go": (
             <box gap={1}>
               <text fg={theme.textMuted}>
-                Upstream Go is a subscription provider. CodeGoblin can use it with your key, but is not affiliated.
+                This low-cost hosted subscription stays outside CodeGoblin and is wired through compatibility auth.
               </text>
               <text fg={theme.text}>
-                Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> and enable upstream Go
+                Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> and enable hosted Go
               </text>
             </box>
           ),

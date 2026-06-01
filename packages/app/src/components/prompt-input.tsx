@@ -1195,13 +1195,20 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   }
 
-  const confirmAudioGeneration = (input: { provider: string; model: string; text: string }) => {
+  const confirmAudioGeneration = (input: { provider: string; model: string; text: string; autoApprove: boolean }) => {
+    if (input.autoApprove) return loadAudioSettings()
     return new Promise<AudioGenerationSettings | false>((resolve) => {
       const [audio, setAudio] = createStore(loadAudioSettings())
       const [voiceOptions, setVoiceOptions] = createSignal<AudioVoiceOption[]>([])
       const [voiceStatus, setVoiceStatus] = createSignal(
         input.provider.toLowerCase().includes("elevenlabs") ? "Loading ElevenLabs speakers…" : "",
       )
+      const providerIsGoogle = input.provider.toLowerCase().includes("google")
+      const outputFormats = providerIsGoogle
+        ? ["MP3", "LINEAR16", "OGG_OPUS", "MULAW", "ALAW"]
+        : ["mp3_44100_128", "mp3_44100_192", "mp3_22050_32", "wav_44100", "pcm_16000", "ulaw_8000"]
+      const defaultOutputFormat = providerIsGoogle ? "MP3" : "mp3_44100_128"
+      const selectedOutputFormat = outputFormats.includes(audio.outputFormat) ? audio.outputFormat : defaultOutputFormat
       let settled = false
       const done = (value: AudioGenerationSettings | false) => {
         if (settled) return
@@ -1217,7 +1224,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       const voiceLabel = (voice: AudioVoiceOption) =>
         [voice.name, voice.category, voice.labels?.accent, voice.labels?.gender].filter(Boolean).join(" · ")
       const loadVoices = async () => {
-        if (!input.provider.toLowerCase().includes("elevenlabs")) return
+        const provider = input.provider.toLowerCase()
+        const supportsVoices = provider.includes("elevenlabs") || provider.includes("google")
+        if (!supportsVoices) return
+        const providerLabel = provider.includes("google") ? "Google" : "ElevenLabs"
         const activeServer = server.current
         const headers: Record<string, string> = {
           "x-opencode-directory": sdk.directory,
@@ -1228,22 +1238,23 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             password: activeServer.http.password,
           })}`
         }
-        const result = (await fetch(`${sdk.url}/codegoblin/audio/voices`, { headers }).then((response) =>
+        const voicesUrl = `${sdk.url}/codegoblin/audio/voices?provider=${encodeURIComponent(input.provider)}`
+        const result = (await fetch(voicesUrl, { headers }).then((response) =>
           response.json().then((body) => ({ response, body })).catch(() => ({ response, body: undefined })),
         )) as { response: Response; body?: { ok?: boolean; voices?: AudioVoiceOption[]; message?: string } }
         if (!result.response.ok || !result.body?.ok) {
-          setVoiceStatus(result.body?.message ?? "Could not load ElevenLabs speakers. You can still paste a voice ID.")
+          setVoiceStatus(result.body?.message ?? `Could not load ${providerLabel} speakers. You can still paste a voice ID.`)
           return
         }
         setVoiceOptions(result.body.voices ?? [])
-        setVoiceStatus(result.body.voices?.length ? "" : "No ElevenLabs speakers found. You can still paste a voice ID.")
+        setVoiceStatus(result.body.voices?.length ? "" : `No ${providerLabel} speakers found. You can still paste a voice ID.`)
       }
-      void loadVoices().catch(() => setVoiceStatus("Could not load ElevenLabs speakers. You can still paste a voice ID."))
+      void loadVoices().catch(() => setVoiceStatus("Could not load speakers. You can still paste a voice ID."))
       dialog.show(
         () => (
           <Dialog
             title="Generate audio?"
-            description="Tune the ElevenLabs request before CodeGoblin spends audio credits."
+            description="Tune the voice request before CodeGoblin spends audio credits."
             action={
               <Button variant="ghost" size="normal" onClick={() => done(false)}>
                 Not now
@@ -1252,61 +1263,62 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           >
             <div class="flex h-full flex-col gap-4 text-13-regular text-text-base">
               <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1 pb-1">
-              <div class="grid gap-3 rounded-lg border border-border-base bg-surface-raised px-4 py-3 sm:grid-cols-2">
-                <label class="flex flex-col gap-1">
-                  <span class="text-12-medium uppercase tracking-wide text-text-muted">Model</span>
-                  <span class="font-mono text-12-regular text-text-strong">{input.provider}/{input.model}</span>
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="text-12-medium uppercase tracking-wide text-text-muted">Speaker</span>
-                  <select
-                    class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
-                    value={voiceOptions().some((voice) => voice.id === audio.voice) ? audio.voice : ""}
-                    onChange={(event) => setAudio("voice", event.currentTarget.value)}
-                  >
-                    <option value="">Auto-pick generated voice</option>
-                    {voiceOptions().map((voice) => (
-                      <option value={voice.id}>{voiceLabel(voice)}</option>
-                    ))}
-                  </select>
-                  <input
-                    class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 font-mono text-12-regular text-text-strong outline-none"
-                    placeholder="or paste a voice ID"
-                    value={audio.voice}
-                    onInput={(event) => setAudio("voice", event.currentTarget.value.trim())}
-                  />
-                  <Show when={voiceStatus()}>
-                    <span class="text-11-regular text-text-muted">{voiceStatus()}</span>
-                  </Show>
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="text-12-medium uppercase tracking-wide text-text-muted">Format</span>
-                  <select
-                    class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
-                    value={audio.outputFormat}
-                    onChange={(event) => setAudio("outputFormat", event.currentTarget.value)}
-                  >
-                    <option value="mp3_44100_128">MP3 44.1kHz 128kbps</option>
-                    <option value="mp3_22050_32">MP3 22.05kHz 32kbps</option>
-                    <option value="mp3_44100_192">MP3 44.1kHz 192kbps</option>
-                    <option value="wav_44100">WAV 44.1kHz</option>
-                    <option value="pcm_16000">PCM 16kHz</option>
-                    <option value="ulaw_8000">μ-law 8kHz</option>
-                  </select>
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="text-12-medium uppercase tracking-wide text-text-muted">Text normalization</span>
-                  <select
-                    class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
-                    value={audio.textNormalization ?? "auto"}
-                    onChange={(event) => setAudio("textNormalization", event.currentTarget.value as "auto" | "on" | "off")}
-                  >
-                    <option value="auto">Auto</option>
-                    <option value="on">On</option>
-                    <option value="off">Off</option>
-                  </select>
-                </label>
-              </div>
+                <div class="rounded-lg border border-border-base bg-surface-raised px-4 py-3 text-12-regular text-text-muted">
+                  These audio settings are saved in this browser and reused for the next request. Turn on Auto-approve
+                  audio generation in Settings &gt; General to skip this dialog.
+                </div>
+                <div class="grid gap-3 rounded-lg border border-border-base bg-surface-raised px-4 py-3 sm:grid-cols-2">
+                  <label class="flex flex-col gap-1">
+                    <span class="text-12-medium uppercase tracking-wide text-text-muted">Model</span>
+                    <span class="font-mono text-12-regular text-text-strong">{input.provider}/{input.model}</span>
+                  </label>
+                  <label class="flex flex-col gap-1">
+                    <span class="text-12-medium uppercase tracking-wide text-text-muted">Speaker</span>
+                    <select
+                      class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
+                      value={voiceOptions().some((voice) => voice.id === audio.voice) ? audio.voice : ""}
+                      onChange={(event) => setAudio("voice", event.currentTarget.value)}
+                    >
+                      <option value="">Auto-pick generated voice</option>
+                      {voiceOptions().map((voice) => (
+                        <option value={voice.id}>{voiceLabel(voice)}</option>
+                      ))}
+                    </select>
+                    <input
+                      class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 font-mono text-12-regular text-text-strong outline-none"
+                      placeholder="or paste a voice ID"
+                      value={audio.voice}
+                      onInput={(event) => setAudio("voice", event.currentTarget.value.trim())}
+                    />
+                    <Show when={voiceStatus()}>
+                      <span class="text-11-regular text-text-muted">{voiceStatus()}</span>
+                    </Show>
+                  </label>
+                  <label class="flex flex-col gap-1">
+                    <span class="text-12-medium uppercase tracking-wide text-text-muted">Format</span>
+                    <select
+                      class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
+                      value={selectedOutputFormat}
+                      onChange={(event) => setAudio("outputFormat", event.currentTarget.value)}
+                    >
+                      {outputFormats.map((format) => (
+                        <option value={format}>{format}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label class="flex flex-col gap-1">
+                    <span class="text-12-medium uppercase tracking-wide text-text-muted">Text normalization</span>
+                    <select
+                      class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
+                      value={audio.textNormalization ?? "auto"}
+                      onChange={(event) => setAudio("textNormalization", event.currentTarget.value as "auto" | "on" | "off")}
+                    >
+                      <option value="auto">Auto</option>
+                      <option value="on">On</option>
+                      <option value="off">Off</option>
+                    </select>
+                  </label>
+                </div>
               <div class="grid gap-3 rounded-lg border border-border-base bg-surface-raised px-4 py-3 sm:grid-cols-2">
                 <label class="flex flex-col gap-1">
                   <span class="text-12-medium text-text-muted">Stability · {audio.voiceSettings.stability.toFixed(2)}</span>

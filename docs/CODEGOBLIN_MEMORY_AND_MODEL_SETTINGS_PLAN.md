@@ -193,3 +193,23 @@ Default recommendation: local SQLite provider first; Honcho later as opt-in `clo
 - Action animation triggers only from real session cost/token deltas.
 - Thinking/image/audio animations trigger only from real runtime states.
 - `CODEGOBLIN_COMPANION_PREVIEW` remains dev-only for review/demo loops.
+
+## Pass 2 implementation status (branch `feat/codegoblin-pass-2`)
+
+Delivered this pass (all behind compat-safe surfaces; `opencode.json`/`.opencode`/`@opencode-ai/*`/`OPENCODE_*` unchanged):
+
+1. **Memory wiring (Hermes-inspired).**
+   - `src/codegoblin/memory.ts` — write API (`add`/`get`/`search`/`remove`/`restore`/`setPinned`), 1,000-char cap, scope normalization, project-id validation.
+   - `src/codegoblin/memory-guard.ts` — `scanMemoryContent()` threat patterns (instruction override, role reassignment, forged `<system>`/`<memory-context>` tags, credential exfil). Scanned before write.
+   - `src/codegoblin/memory-context.ts` — `buildMemoryContext()` renders a fenced `<memory-context>` block (user/project/session, pinned first) marked authoritative-background, not user instruction.
+   - `src/tool/memory.ts` — agent `memory` tool (`add`/`list`/`search`/`remove`). Injected into the system prompt via `src/session/system.ts` + `src/session/prompt.ts` (recall keyed on the last user message). CLI write commands in `src/cli/cmd/memory.ts`.
+2. **`/image` + `/audio` settings.** `src/cli/cmd/tui/codegoblin/media-settings.ts` + `dialog-media-settings.tsx`; KV-persisted output dir / voice / format / auto-approve. Web app has no media-generation UI yet, so there is nothing to persist there (deferred until a web media dialog exists).
+3. **CodeGoblin Market.** `src/codegoblin/market.ts` — curated catalog (Supabase, Playwright, Firebase, Notion, GitHub, Context7, Sentry, filesystem). `cg market list|show|add` (`src/cli/cmd/market.ts`, writes MCP entries to `opencode.json` via jsonc-parser, identical to `cg mcp add`) and a read-only `/market` TUI browser (`dialog-market.tsx`).
+
+### Reference-repo attributions (the "bits and pieces" mined)
+
+- **Hermes** — curated/bounded memory facts, frozen `<memory-context>` system-prompt block, tool-managed writes, scan-before-inject. Implemented above.
+- **ECC** — prompt-injection threat-pattern catalog reused in `memory-guard.ts` (forged-tag and instruction-override detection).
+- **agentmemory** — substring/term search fallback over SQLite (`memory.search` splits the query into `like` OR-terms) so recall works without an embedding store.
+- **codegraph** — efficiency idea: bounded, ranked recall (pinned-first, per-scope caps of 12/12/6) keeps the injected block small and cache-stable rather than dumping all memory.
+- **jcode** — efficiency idea: static, reviewed catalog data (no network at catalog-read time) for the market, mirroring jcode's precomputed-manifest approach.

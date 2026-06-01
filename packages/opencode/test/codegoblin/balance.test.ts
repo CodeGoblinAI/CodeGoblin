@@ -37,7 +37,31 @@ describe("CodeGoblin balance display", () => {
     // Provider with no balance endpoint shows a running session-spend estimate.
     expect(
       CodeGoblinBalance.formatFooter({ balances: live, providerID: "google", modelID: "gemini-2.5-flash-image", spent: 0.039 }),
-    ).toBe("~$0.039 spent")
+    ).toBe("~$0.039 spent · est")
+  })
+
+  test("never fabricates a balance when nothing is configured", () => {
+    // No manual env and no live balances: the footer must be empty, not a made-up number.
+    expect(CodeGoblinBalance.configured({})).toEqual([])
+    expect(CodeGoblinBalance.formatFooter({ balances: [] })).toBeUndefined()
+    expect(
+      CodeGoblinBalance.formatFooter({ balances: [], providerID: "deepseek", modelID: "deepseek-chat" }),
+    ).toBeUndefined()
+    // The only number ever shown without a configured balance is a clearly-tagged spend estimate.
+    expect(CodeGoblinBalance.formatFooter({ balances: [], spent: 0.5 })).toBe("~$0.5 spent · est")
+  })
+
+  test("resolve returns no balances and no fabricated numbers without keys or manual env", async () => {
+    const result = await CodeGoblinBalance.resolve({
+      cwd: path.join(os.tmpdir(), "codegoblin-balance-empty"),
+      env: {},
+      fetch: async () => {
+        throw new Error("network should not be reachable without an API key")
+      },
+      now: new Date("2026-05-27T00:00:00.000Z"),
+    })
+    expect(result.balances).toEqual([])
+    expect(CodeGoblinBalance.formatFooter({ balances: result.balances })).toBeUndefined()
   })
 
   test("ignores invalid manual balances instead of surfacing a giant error", () => {

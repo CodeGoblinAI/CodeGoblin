@@ -102,6 +102,18 @@ import type {
   McpRemoteConfig,
   McpStatusErrors,
   McpStatusResponses,
+  MemoryAddErrors,
+  MemoryAddResponses,
+  MemoryListErrors,
+  MemoryListResponses,
+  MemoryPinErrors,
+  MemoryPinResponses,
+  MemoryRemoveErrors,
+  MemoryRemoveResponses,
+  MemoryRestoreErrors,
+  MemoryRestoreResponses,
+  MemoryStatusErrors,
+  MemoryStatusResponses,
   OutputFormat,
   Part as Part2,
   PartDeleteErrors,
@@ -535,7 +547,7 @@ export class Global extends HeyApiClient {
   /**
    * Get health
    *
-   * Get health information about the OpenCode server.
+   * Get health information about the CodeGoblin server.
    */
   public health<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).get<GlobalHealthResponses, GlobalHealthErrors, ThrowOnError>({
@@ -842,7 +854,7 @@ export class Session extends HeyApiClient {
   /**
    * List sessions
    *
-   * Get a list of all OpenCode sessions across projects, sorted by most recently updated. Archived sessions are excluded by default.
+   * Get a list of all CodeGoblin sessions across projects, sorted by most recently updated. Archived sessions are excluded by default.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -2231,6 +2243,228 @@ export class Mcp extends HeyApiClient {
   }
 }
 
+export class Memory extends HeyApiClient {
+  /**
+   * List memory
+   *
+   * List or search CodeGoblin memory entries.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      scope?: "user" | "project" | "session"
+      projectID?: string
+      query?: string
+      includeArchived?: string
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "scope" },
+            { in: "query", key: "projectID" },
+            { in: "query", key: "query" },
+            { in: "query", key: "includeArchived" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemoryListResponses, MemoryListErrors, ThrowOnError>({
+      url: "/codegoblin/memory",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Add memory
+   *
+   * Add a CodeGoblin memory entry. Content is scanned by the security guard before storage.
+   */
+  public add<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      scope?: "user" | "project" | "session"
+      content?: string
+      projectID?: string
+      sourceSessionID?: string
+      tags?: Array<string>
+      pinned?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "scope" },
+            { in: "body", key: "content" },
+            { in: "body", key: "projectID" },
+            { in: "body", key: "sourceSessionID" },
+            { in: "body", key: "tags" },
+            { in: "body", key: "pinned" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<MemoryAddResponses, MemoryAddErrors, ThrowOnError>({
+      url: "/codegoblin/memory",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Memory status
+   *
+   * Counts of total, active, archived, and pinned memory entries.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemoryStatusResponses, MemoryStatusErrors, ThrowOnError>({
+      url: "/codegoblin/memory/status",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Pin memory
+   *
+   * Pin or unpin a memory entry.
+   */
+  public pin<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+      pinned?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "pinned" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<MemoryPinResponses, MemoryPinErrors, ThrowOnError>({
+      url: "/codegoblin/memory/{id}/pin",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Restore memory
+   *
+   * Restore an archived memory entry.
+   */
+  public restore<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<MemoryRestoreResponses, MemoryRestoreErrors, ThrowOnError>({
+      url: "/codegoblin/memory/{id}/restore",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Archive memory
+   *
+   * Archive (soft-delete) a memory entry.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<MemoryRemoveResponses, MemoryRemoveErrors, ThrowOnError>({
+      url: "/codegoblin/memory/{id}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Project extends HeyApiClient {
   /**
    * List all projects
@@ -3040,7 +3274,7 @@ export class Session2 extends HeyApiClient {
   /**
    * List sessions
    *
-   * Get a list of all OpenCode sessions, sorted by most recently updated.
+   * Get a list of all CodeGoblin sessions, sorted by most recently updated.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -5100,6 +5334,11 @@ export class OpencodeClient extends HeyApiClient {
   private _mcp?: Mcp
   get mcp(): Mcp {
     return (this._mcp ??= new Mcp({ client: this.client }))
+  }
+
+  private _memory?: Memory
+  get memory(): Memory {
+    return (this._memory ??= new Memory({ client: this.client }))
   }
 
   private _project?: Project

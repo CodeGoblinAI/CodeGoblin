@@ -40,6 +40,7 @@ let selected = "/repo/worktree-a"
 let variant: string | undefined
 let selectedModel: TestModel = { id: "model", provider: { id: "provider" } }
 let imageGenerationAutoApprove = false
+let audioGenerationAutoApprove = false
 let promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 let promptResetCount = 0
 let promptSetCount = 0
@@ -173,6 +174,7 @@ beforeAll(async () => {
     useSettings: () => ({
       permissions: {
         imageGenerationAutoApprove: () => imageGenerationAutoApprove,
+        audioGenerationAutoApprove: () => audioGenerationAutoApprove,
       },
     }),
   }))
@@ -282,6 +284,7 @@ beforeEach(() => {
   selected = "/repo/worktree-a"
   selectedModel = { id: "model", provider: { id: "provider" } }
   imageGenerationAutoApprove = false
+  audioGenerationAutoApprove = false
   promptValue = [{ type: "text", content: "ls", start: 0, end: 2 }]
   promptResetCount = 0
   promptSetCount = 0
@@ -637,6 +640,7 @@ describe("prompt submit worktree selection", () => {
           provider: "elevenlabs",
           model: "eleven_multilingual_v2",
           text: "read this with goblin swagger",
+          autoApprove: false,
         })
         return {
           voice: "voice_test",
@@ -710,6 +714,62 @@ describe("prompt submit worktree selection", () => {
     })
     expect(fetchRequests[0]?.body.messageID).toBe(optimistic[0]?.message.id)
     expect(fetchRequests[0]?.body.assistantMessageID).toBe(optimistic[1]?.message.id)
+  })
+
+  test("uses settings to auto-approve audio generation with saved defaults", async () => {
+    params = { id: "session-1" }
+    selectedModel = {
+      id: "eleven_multilingual_v2",
+      provider: { id: "elevenlabs" },
+      family: "elevenlabs",
+      capabilities: {
+        input: { text: true },
+        output: { audio: true },
+      },
+    }
+    promptValue = [{ type: "text", content: "read this goblin note", start: 0, end: "read this goblin note".length }]
+    audioGenerationAutoApprove = true
+    confirmResponse = false
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+    await submit.handleSubmit(event)
+
+    expect(confirmPrompts).toHaveLength(0)
+    expect(promptResetCount).toBe(1)
+    expect(fetchRequests).toHaveLength(1)
+    expect(fetchRequests[0]).toMatchObject({
+      url: "http://localhost:4096/codegoblin/audio",
+      body: {
+        prompt: "read this goblin note",
+        provider: "elevenlabs",
+        model: "eleven_multilingual_v2",
+        outputFormat: "mp3_44100_128",
+        voiceSettings: {
+          stability: 0.5,
+          similarityBoost: 0.75,
+          style: 0,
+          speed: 1,
+          useSpeakerBoost: true,
+        },
+      },
+    })
   })
 
   test("routes descriptive prompts through the selected image model", async () => {

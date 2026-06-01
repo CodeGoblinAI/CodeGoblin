@@ -73,6 +73,7 @@ import { fileHandlers } from "./handlers/file"
 import { globalHandlers } from "./handlers/global"
 import { instanceHandlers } from "./handlers/instance"
 import { mcpHandlers } from "./handlers/mcp"
+import { memoryHandlers } from "./handlers/memory"
 import { permissionHandlers } from "./handlers/permission"
 import { projectHandlers } from "./handlers/project"
 import { providerHandlers } from "./handlers/provider"
@@ -94,6 +95,7 @@ import { fenceLayer } from "./middleware/fence"
 import { schemaErrorLayer } from "./middleware/schema-error"
 import { CodeGoblinImageCommand, type ImageInput } from "@/codegoblin/image-command"
 import { CodeGoblinAudioCommand, type AudioVoiceSettings } from "@/codegoblin/audio-command"
+import { Market } from "@/codegoblin/market"
 import { Process } from "@/util/process"
 
 type CodeGoblinImagePersist = {
@@ -163,6 +165,7 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
     fileHandlers,
     instanceHandlers,
     mcpHandlers,
+    memoryHandlers,
     projectHandlers,
     ptyHandlers,
     questionHandlers,
@@ -236,9 +239,42 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           CodeGoblinAudioCommand.voices({
             cwd: route.directory,
             keyFile: url.searchParams.get("keyFile") ?? undefined,
+            provider: url.searchParams.get("provider") ?? undefined,
           }),
         )
         return HttpServerResponse.jsonUnsafe(result, { status: result.ok ? 200 : 400 })
+      }),
+    )
+    yield* router.add("GET", "/codegoblin/market", (request) =>
+      Effect.gen(function* () {
+        const url = new URL(request.url, "http://localhost")
+        const kind = url.searchParams.get("kind") ?? undefined
+        const entries = Market.list(kind ? { kind: kind as any } : undefined)
+        return HttpServerResponse.jsonUnsafe({ ok: true, entries }, { status: 200 })
+      }),
+    )
+    yield* router.add("POST", "/codegoblin/market/install", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const text = yield* Effect.orDie(request.text)
+        let body: any
+        try {
+          body = text ? JSON.parse(text) : {}
+        } catch {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Invalid JSON body." }, { status: 400 })
+        }
+        const id = typeof body?.id === "string" ? body.id : ""
+        const entry = id ? Market.get(id) : undefined
+        if (!entry) return HttpServerResponse.jsonUnsafe({ ok: false, message: "Unknown market entry." }, { status: 404 })
+        const installed = yield* Effect.promise(async () => {
+          try {
+            const configPath = await Market.addToConfig(entry, route.directory)
+            return { ok: true as const, configPath, name: entry.id, config: entry.mcp }
+          } catch (error) {
+            return { ok: false as const, message: error instanceof Error ? error.message : "Could not add to config." }
+          }
+        })
+        return HttpServerResponse.jsonUnsafe(installed, { status: installed.ok ? 200 : 400 })
       }),
     )
     yield* router.add("POST", "/codegoblin/open-output", (request) =>
@@ -292,6 +328,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           preview = CodeGoblinAudioCommand.describe({
             text: prompt,
             cwd: route.directory,
+            provider: requestProvider,
             output: typeof body?.output === "string" ? body.output : undefined,
             model: requestModel,
             voice: typeof body?.voice === "string" ? body.voice : undefined,
@@ -315,7 +352,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
                 typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
               assistantPartID: typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
               agent,
-              providerID: requestProvider,
+              providerID: preview.provider,
               modelID: preview.model,
               variant,
               routeDirectory: route.directory,
@@ -331,6 +368,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
             return await CodeGoblinAudioCommand.generate({
               text: prompt,
               cwd: route.directory,
+              provider: requestProvider,
               output: typeof body?.output === "string" ? body.output : undefined,
               model: requestModel,
               voice: typeof body?.voice === "string" ? body.voice : undefined,
@@ -384,20 +422,46 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
               filename: typeof item.filename === "string" ? item.filename : undefined,
             }))
         : []
+      for (const imagePath of imagePathsFromBody(body)) inputImages.push({ path: imagePath })
+      const useLastImage = body?.useLastImage === true || body?.lastImage === true
+      const replay =
+        typeof body?.sessionID === "string" && typeof body?.sourceAssistantMessageID === "string"
+          ? yield* codeGoblinImageReplayInput({
+              session,
+              sessionID: SessionID.make(body.sessionID),
+              assistantMessageID: MessageID.make(body.sourceAssistantMessageID),
+            })
+          : undefined
+      if (inputImages.length === 0 && replay?.inputImages.length) inputImages.push(...replay.inputImages)
 
-      const commandInput = typeof body?.input === "string" ? body.input : undefined
-      const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : ""
+      const commandInput = typeof body?.input === "string" ? body.input : replay?.input
+      const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : (replay?.prompt ?? "")
       if (!commandInput && !prompt) {
         return HttpServerResponse.jsonUnsafe({ ok: false, message: "Image prompt is required." }, { status: 400 })
       }
 
-      const requestProvider = typeof body?.provider === "string" ? body.provider : undefined
-      const requestModel = typeof body?.model === "string" ? body.model : undefined
+      const requestProvider = typeof body?.provider === "string" ? body.provider : replay?.providerID
+      const requestModel = typeof body?.model === "string" ? body.model : replay?.modelID
       const agent = typeof body?.agent === "string" && body.agent.trim() ? body.agent.trim() : "Agent"
-      const variant = typeof body?.variant === "string" ? body.variant : undefined
+      const variant = typeof body?.variant === "string" ? body.variant : replay?.variant
       const parsedCommand = commandInput
         ? CodeGoblinImageCommand.parse(commandInput.trimStart().replace(/^\/image\b/, "").trim())
         : undefined
+      // Session-aware image continuity: when the user is editing ("make him red") and did not
+      // attach an image, reuse the most recent image generated in this chat session. This is more
+      // accurate than the global usage.json fallback because it stays scoped to the conversation.
+      const editPrompt = parsedCommand?.prompt ?? prompt
+      const wantsPreviousImage =
+        parsedCommand?.useLastImage ||
+        useLastImage ||
+        CodeGoblinImageCommand.looksLikeImageEditRequest(editPrompt)
+      if (typeof body?.sessionID === "string" && inputImages.length === 0 && wantsPreviousImage) {
+        const previous = yield* sessionLastImageOutput({
+          session,
+          sessionID: SessionID.make(body.sessionID),
+        })
+        if (previous) inputImages.push({ path: previous })
+      }
       let preview: ReturnType<typeof CodeGoblinImageCommand.describe>
       try {
         preview = CodeGoblinImageCommand.describe({
@@ -406,6 +470,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           output: parsedCommand?.output ?? (typeof body?.output === "string" ? body.output : undefined),
           provider: parsedCommand?.provider ?? requestProvider,
           model: parsedCommand?.model ?? requestModel,
+          useLastImage: parsedCommand?.useLastImage || useLastImage,
         })
       } catch (error) {
         return HttpServerResponse.jsonUnsafe(
@@ -448,6 +513,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
                 provider: requestProvider,
                 model: requestModel,
                 inputImages,
+                useLastImage,
                 requireImageModel: body?.requireImageModel !== false,
               })
             : await CodeGoblinImageCommand.generate({
@@ -458,6 +524,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
                 model: requestModel,
                 keyFile: typeof body?.keyFile === "string" ? body.keyFile : undefined,
                 inputImages,
+                useLastImage,
                 requireImageModel: body?.requireImageModel !== false,
               })
         } catch (error) {
@@ -577,6 +644,15 @@ function audioMimeType(file: string) {
   return "audio/mpeg"
 }
 
+function imagePathsFromBody(body: any) {
+  return [
+    typeof body?.image === "string" ? body.image : undefined,
+    typeof body?.imagePath === "string" ? body.imagePath : undefined,
+    ...(Array.isArray(body?.images) ? body.images : []),
+    ...(Array.isArray(body?.imagePaths) ? body.imagePaths : []),
+  ].filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+}
+
 function parseAudioVoiceSettings(value: unknown): AudioVoiceSettings | undefined {
   if (!value || typeof value !== "object") return
   const input = value as Record<string, unknown>
@@ -589,6 +665,112 @@ function parseAudioVoiceSettings(value: unknown): AudioVoiceSettings | undefined
   }
   if (Object.values(result).every((item) => item === undefined)) return
   return result
+}
+
+function sessionLastImageOutput(input: { session: Session.Interface; sessionID: SessionID; beforeMessageID?: MessageID }) {
+  return Effect.gen(function* () {
+    const messages = yield* input.session
+      .messages({ sessionID: input.sessionID })
+      .pipe(Effect.catch(() => Effect.succeed([] as MessageV2.WithParts[])))
+    const start = input.beforeMessageID
+      ? messages.findIndex((message) => message.info.id === input.beforeMessageID)
+      : messages.length
+    for (let i = (start < 0 ? messages.length : start) - 1; i >= 0; i--) {
+      const parts = messages[i].parts
+      for (let j = parts.length - 1; j >= 0; j--) {
+        const meta = (parts[j] as { metadata?: { codegoblin?: { kind?: string; output?: string } } }).metadata
+          ?.codegoblin
+        if (meta?.kind === "image-result" && typeof meta.output === "string" && meta.output.trim()) {
+          return meta.output
+        }
+      }
+    }
+    return undefined
+  })
+}
+
+function codeGoblinImageReplayInput(input: {
+  session: Session.Interface
+  sessionID: SessionID
+  assistantMessageID: MessageID
+}) {
+  return Effect.gen(function* () {
+    const messages = yield* input.session
+      .messages({ sessionID: input.sessionID })
+      .pipe(Effect.catch(() => Effect.succeed([] as MessageV2.WithParts[])))
+    const source = messages.find(
+      (message) => message.info.id === input.assistantMessageID && message.info.role === "assistant",
+    )
+    const parentID = (source?.info as { parentID?: MessageID } | undefined)?.parentID
+    if (!source || !parentID) return undefined
+
+    const parent = messages.find((message) => message.info.id === parentID)
+    const prompt =
+      parent?.parts
+        .filter((part): part is MessageV2.TextPart => part.type === "text" && typeof part.text === "string")
+        .map((part) => part.text)
+        .join("\n")
+        .trim() ?? ""
+    if (!prompt) return undefined
+
+    const inputImages =
+      parent?.parts
+        .filter((part): part is MessageV2.FilePart => part.type === "file")
+        .map((part) => filePartImageInput(part))
+        .filter((part): part is ImageInput => !!part) ?? []
+
+    if (inputImages.length === 0 && CodeGoblinImageCommand.looksLikeImageEditRequest(prompt)) {
+      const previous = yield* sessionLastImageOutput({
+        session: input.session,
+        sessionID: input.sessionID,
+        beforeMessageID: input.assistantMessageID,
+      })
+      if (previous) inputImages.push({ path: previous })
+    }
+
+    return {
+      prompt,
+      input: prompt.trimStart().startsWith("/image") ? prompt : undefined,
+      inputImages,
+      providerID: (source.info as { providerID?: string }).providerID,
+      modelID: (source.info as { modelID?: string }).modelID,
+      variant: (source.info as { variant?: string }).variant,
+    }
+  })
+}
+
+function filePartImageInput(part: MessageV2.FilePart): ImageInput | undefined {
+  if (typeof part.url !== "string" || !part.url.startsWith("data:")) return
+  if (typeof part.mime !== "string" || !part.mime.startsWith("image/")) return
+  return {
+    dataUrl: part.url,
+    mime: part.mime,
+    filename: part.filename,
+  }
+}
+
+function embeddedImageInput(root: string, image: ImageInput) {
+  return Effect.promise(async () => {
+    if (image.dataUrl) {
+      return {
+        url: image.dataUrl,
+        mime: image.mime ?? image.dataUrl.match(/^data:([^;,]+)/)?.[1] ?? "image/png",
+        filename: image.filename,
+      }
+    }
+    if (!image.path) return undefined
+    try {
+      const absolute = path.resolve(root, image.path)
+      const rel = path.relative(root, absolute)
+      if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return undefined
+      const mime = imageMimeType(absolute)
+      if (!mime) return undefined
+      const bytes = await fs.readFile(absolute)
+      return { url: `data:${mime};base64,${bytes.toString("base64")}`, mime, filename: image.filename ?? path.basename(absolute) }
+    } catch {
+      return undefined
+    }
+  })
 }
 
 function createCodeGoblinImageMessages(input: {
@@ -640,15 +822,16 @@ function createCodeGoblinImageMessages(input: {
       },
     } as MessageV2.TextPart)
     for (const image of input.inputImages) {
-      if (!image.dataUrl) continue
+      const embedded = yield* embeddedImageInput(input.routeDirectory, image)
+      if (!embedded) continue
       yield* input.session.updatePart({
         id: PartID.ascending(),
         sessionID: input.sessionID,
         messageID: userMessageID,
         type: "file",
-        mime: image.mime ?? "image/png",
-        filename: image.filename,
-        url: image.dataUrl,
+        mime: embedded.mime,
+        filename: embedded.filename,
+        url: embedded.url,
       } as MessageV2.FilePart)
     }
     yield* input.session.updateMessage({
@@ -744,6 +927,47 @@ function finishCodeGoblinImageMessages(input: {
         },
       },
     } as MessageV2.TextPart)
+    // Embed the generated image as a file part so it renders inline in chat and accumulates
+    // across turns instead of only showing a saved-path string.
+    if (input.result.ok && output) {
+      const embedded = yield* Effect.promise(async () => {
+        try {
+          const absolute = path.isAbsolute(output) ? output : path.resolve(input.persist.routeDirectory, output)
+          const bytes = await fs.readFile(absolute)
+          const ext = path.extname(absolute).toLowerCase()
+          const mime =
+            ext === ".jpg" || ext === ".jpeg"
+              ? "image/jpeg"
+              : ext === ".webp"
+                ? "image/webp"
+                : ext === ".gif"
+                  ? "image/gif"
+                  : "image/png"
+          return { url: `data:${mime};base64,${bytes.toString("base64")}`, mime, filename: path.basename(absolute) }
+        } catch {
+          return undefined
+        }
+      })
+      if (embedded) {
+        yield* input.session.updatePart({
+          id: PartID.ascending(),
+          sessionID: input.persist.sessionID,
+          messageID: input.persist.assistantMessageID,
+          type: "file",
+          mime: embedded.mime,
+          filename: embedded.filename,
+          url: embedded.url,
+          metadata: {
+            codegoblin: {
+              kind: "image-output",
+              output,
+              provider: providerID,
+              model: modelID,
+            },
+          },
+        } as MessageV2.FilePart)
+      }
+    }
     yield* input.session.updateMessage({
       id: input.persist.assistantMessageID,
       parentID: input.persist.userMessageID,
