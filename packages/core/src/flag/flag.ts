@@ -1,74 +1,91 @@
 import { Config } from "effect"
 
-function truthy(key: string) {
-  const value = process.env[key]?.toLowerCase()
+// Resolve a flag env var by its suffix, preferring the CodeGoblin-branded name
+// (CODEGOBLIN_<suffix>) and falling back to the legacy OpenCode name
+// (OPENCODE_<suffix>) for backward compatibility. Existing OPENCODE_* setups
+// keep working unchanged; CODEGOBLIN_* takes precedence when both are set.
+function raw(suffix: string) {
+  return process.env["CODEGOBLIN_" + suffix] ?? process.env["OPENCODE_" + suffix]
+}
+
+function truthy(suffix: string) {
+  const value = raw(suffix)?.toLowerCase()
   return value === "true" || value === "1"
 }
 
-const OPENCODE_EXPERIMENTAL = truthy("OPENCODE_EXPERIMENTAL")
-const copy = process.env["OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT"]
-const serverPassword = process.env["CODEGOBLIN_SERVER_PASSWORD"] ?? process.env["OPENCODE_SERVER_PASSWORD"]
-const serverUsername = process.env["CODEGOBLIN_SERVER_USERNAME"] ?? process.env["OPENCODE_SERVER_USERNAME"]
+// Effect Config variant of the same fallback: prefer CODEGOBLIN_<suffix>, then
+// OPENCODE_<suffix>, then the provided default.
+function boolConfig(suffix: string) {
+  return Config.boolean("CODEGOBLIN_" + suffix).pipe(
+    Config.orElse(() => Config.boolean("OPENCODE_" + suffix)),
+    Config.withDefault(false),
+  )
+}
+
+const EXPERIMENTAL = truthy("EXPERIMENTAL")
+const copy = raw("EXPERIMENTAL_DISABLE_COPY_ON_SELECT")
+const serverPassword = raw("SERVER_PASSWORD")
+const serverUsername = raw("SERVER_USERNAME")
 
 export const Flag = {
   OTEL_EXPORTER_OTLP_ENDPOINT: process.env["OTEL_EXPORTER_OTLP_ENDPOINT"],
   OTEL_EXPORTER_OTLP_HEADERS: process.env["OTEL_EXPORTER_OTLP_HEADERS"],
 
-  OPENCODE_AUTO_HEAP_SNAPSHOT: truthy("OPENCODE_AUTO_HEAP_SNAPSHOT"),
-  OPENCODE_GIT_BASH_PATH: process.env["OPENCODE_GIT_BASH_PATH"],
-  OPENCODE_CONFIG: process.env["OPENCODE_CONFIG"],
-  OPENCODE_CONFIG_CONTENT: process.env["OPENCODE_CONFIG_CONTENT"],
-  OPENCODE_DISABLE_AUTOUPDATE: truthy("OPENCODE_DISABLE_AUTOUPDATE"),
-  OPENCODE_ALWAYS_NOTIFY_UPDATE: truthy("OPENCODE_ALWAYS_NOTIFY_UPDATE"),
-  OPENCODE_DISABLE_PRUNE: truthy("OPENCODE_DISABLE_PRUNE"),
-  OPENCODE_DISABLE_TERMINAL_TITLE: truthy("OPENCODE_DISABLE_TERMINAL_TITLE"),
-  OPENCODE_SHOW_TTFD: truthy("OPENCODE_SHOW_TTFD"),
-  OPENCODE_DISABLE_AUTOCOMPACT: truthy("OPENCODE_DISABLE_AUTOCOMPACT"),
-  OPENCODE_DISABLE_MODELS_FETCH: truthy("OPENCODE_DISABLE_MODELS_FETCH"),
-  OPENCODE_DISABLE_MOUSE: truthy("OPENCODE_DISABLE_MOUSE"),
-  OPENCODE_FAKE_VCS: process.env["OPENCODE_FAKE_VCS"],
+  OPENCODE_AUTO_HEAP_SNAPSHOT: truthy("AUTO_HEAP_SNAPSHOT"),
+  OPENCODE_GIT_BASH_PATH: raw("GIT_BASH_PATH"),
+  OPENCODE_DISABLE_AUTOUPDATE: truthy("DISABLE_AUTOUPDATE"),
+  OPENCODE_ALWAYS_NOTIFY_UPDATE: truthy("ALWAYS_NOTIFY_UPDATE"),
+  OPENCODE_DISABLE_PRUNE: truthy("DISABLE_PRUNE"),
+  OPENCODE_DISABLE_TERMINAL_TITLE: truthy("DISABLE_TERMINAL_TITLE"),
+  OPENCODE_SHOW_TTFD: truthy("SHOW_TTFD"),
+  OPENCODE_DISABLE_AUTOCOMPACT: truthy("DISABLE_AUTOCOMPACT"),
+  OPENCODE_DISABLE_MODELS_FETCH: truthy("DISABLE_MODELS_FETCH"),
+  OPENCODE_DISABLE_MOUSE: truthy("DISABLE_MOUSE"),
+  OPENCODE_FAKE_VCS: raw("FAKE_VCS"),
   CODEGOBLIN_SERVER_PASSWORD: serverPassword,
   CODEGOBLIN_SERVER_USERNAME: serverUsername,
   OPENCODE_SERVER_PASSWORD: serverPassword,
   OPENCODE_SERVER_USERNAME: serverUsername,
 
   // Experimental
-  OPENCODE_EXPERIMENTAL_FILEWATCHER: Config.boolean("OPENCODE_EXPERIMENTAL_FILEWATCHER").pipe(
-    Config.withDefault(false),
-  ),
-  OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: Config.boolean("OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER").pipe(
-    Config.withDefault(false),
-  ),
+  OPENCODE_EXPERIMENTAL_FILEWATCHER: boolConfig("EXPERIMENTAL_FILEWATCHER"),
+  OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: boolConfig("EXPERIMENTAL_DISABLE_FILEWATCHER"),
   OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT:
-    copy === undefined ? process.platform === "win32" : truthy("OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT"),
-  OPENCODE_MODELS_URL: process.env["OPENCODE_MODELS_URL"],
-  OPENCODE_MODELS_PATH: process.env["OPENCODE_MODELS_PATH"],
-  OPENCODE_DB: process.env["OPENCODE_DB"],
+    copy === undefined ? process.platform === "win32" : truthy("EXPERIMENTAL_DISABLE_COPY_ON_SELECT"),
+  OPENCODE_MODELS_URL: raw("MODELS_URL"),
+  OPENCODE_MODELS_PATH: raw("MODELS_PATH"),
+  OPENCODE_DB: raw("DB"),
 
-  OPENCODE_WORKSPACE_ID: process.env["OPENCODE_WORKSPACE_ID"],
-  OPENCODE_EXPERIMENTAL_WORKSPACES: OPENCODE_EXPERIMENTAL || truthy("OPENCODE_EXPERIMENTAL_WORKSPACES"),
+  OPENCODE_WORKSPACE_ID: raw("WORKSPACE_ID"),
+  OPENCODE_EXPERIMENTAL_WORKSPACES: EXPERIMENTAL || truthy("EXPERIMENTAL_WORKSPACES"),
 
   // Evaluated at access time (not module load) because tests, the CLI, and
   // external tooling set these env vars at runtime.
+  get OPENCODE_CONFIG() {
+    return raw("CONFIG")
+  },
+  get OPENCODE_CONFIG_CONTENT() {
+    return raw("CONFIG_CONTENT")
+  },
   get OPENCODE_DISABLE_PROJECT_CONFIG() {
-    return truthy("OPENCODE_DISABLE_PROJECT_CONFIG")
+    return truthy("DISABLE_PROJECT_CONFIG")
   },
   get OPENCODE_TUI_CONFIG() {
-    return process.env["OPENCODE_TUI_CONFIG"]
+    return raw("TUI_CONFIG")
   },
   get OPENCODE_CONFIG_DIR() {
-    return process.env["OPENCODE_CONFIG_DIR"]
+    return raw("CONFIG_DIR")
   },
   get OPENCODE_PURE() {
-    return truthy("OPENCODE_PURE")
+    return truthy("PURE")
   },
   get OPENCODE_PERMISSION() {
-    return process.env["OPENCODE_PERMISSION"]
+    return raw("PERMISSION")
   },
   get OPENCODE_PLUGIN_META_FILE() {
-    return process.env["OPENCODE_PLUGIN_META_FILE"]
+    return raw("PLUGIN_META_FILE")
   },
   get OPENCODE_CLIENT() {
-    return process.env["OPENCODE_CLIENT"] ?? "cli"
+    return raw("CLIENT") ?? "cli"
   },
 }

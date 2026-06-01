@@ -337,8 +337,10 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Co
 export const use = serviceUse(Service)
 
 function globalConfigFile() {
-  const candidates = ["opencode.jsonc", "opencode.json", "config.json"].map((file) =>
-    path.join(Global.Path.config, file),
+  // Prefer an existing config file (so existing opencode.json/jsonc installs keep
+  // writing to the same file), but default fresh installs to codegoblin.jsonc.
+  const candidates = ["codegoblin.jsonc", "codegoblin.json", "opencode.jsonc", "opencode.json", "config.json"].map(
+    (file) => path.join(Global.Path.config, file),
   )
   for (const file of candidates) {
     if (existsSync(file)) return file
@@ -455,6 +457,9 @@ export const layer = Layer.effect(
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "config.json"), env))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode.json"), env))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode.jsonc"), env))
+      // CodeGoblin-branded global config is merged last so it wins over legacy opencode files.
+      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "codegoblin.json"), env))
+      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "codegoblin.jsonc"), env))
 
       const legacy = path.join(Global.Path.config, "config")
       if (existsSync(legacy)) {
@@ -600,7 +605,9 @@ export const layer = Layer.effect(
         }
 
         if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-          for (const file of yield* ConfigPaths.files("opencode", ctx.directory, ctx.worktree).pipe(Effect.orDie)) {
+          for (const file of yield* ConfigPaths.files(["codegoblin", "opencode"], ctx.directory, ctx.worktree).pipe(
+            Effect.orDie,
+          )) {
             yield* merge(file, yield* loadFile(file, authEnv), "local")
           }
         }
@@ -618,8 +625,21 @@ export const layer = Layer.effect(
         const deps: Fiber.Fiber<void>[] = []
 
         for (const dir of directories) {
-          if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
-            for (const file of ["opencode.json", "opencode.jsonc"]) {
+          // Load brand-specific config files from each discovered directory.
+          // `.codegoblin` dirs read codegoblin.json(c); legacy `.opencode` dirs
+          // read opencode.json(c); an explicit *_CONFIG_DIR reads both with the
+          // CodeGoblin-branded files winning.
+          const base = path.basename(dir)
+          const brands =
+            base === ".codegoblin"
+              ? ["codegoblin"]
+              : base === ".opencode"
+                ? ["opencode"]
+                : dir === Flag.OPENCODE_CONFIG_DIR
+                  ? ["opencode", "codegoblin"]
+                  : []
+          for (const name of brands) {
+            for (const file of [`${name}.json`, `${name}.jsonc`]) {
               const source = path.join(dir, file)
               log.debug(`loading config from ${source}`)
               yield* merge(source, yield* loadFile(source, authEnv))
@@ -663,9 +683,9 @@ export const layer = Layer.effect(
           yield* mergePluginOrigins(dir, list)
         }
 
-        if (process.env.OPENCODE_CONFIG_CONTENT) {
+        if (Flag.OPENCODE_CONFIG_CONTENT) {
           const source = "OPENCODE_CONFIG_CONTENT"
-          const next = yield* loadConfig(process.env.OPENCODE_CONFIG_CONTENT, {
+          const next = yield* loadConfig(Flag.OPENCODE_CONFIG_CONTENT, {
             dir: ctx.directory,
             source,
           })

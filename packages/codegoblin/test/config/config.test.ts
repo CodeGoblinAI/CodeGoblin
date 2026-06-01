@@ -13,6 +13,7 @@ import { Auth } from "../../src/auth"
 import { Account } from "../../src/account/account"
 import { AccessToken, AccountID, OrgID } from "../../src/account/schema"
 import { AppFileSystem } from "@codegoblin/core/filesystem"
+import { Flag } from "@codegoblin/core/flag/flag"
 import { Env } from "../../src/env"
 import {
   provideTmpdirInstance,
@@ -296,7 +297,8 @@ it.effect("creates global jsonc config with schema when no global configs exist"
     Effect.gen(function* () {
       yield* Config.use.get().pipe(provideInstanceEffect(dir))
 
-      const content = yield* AppFileSystem.use.readFileString(path.join(dir, "opencode.jsonc"))
+      // Fresh installs now seed the CodeGoblin-branded config file.
+      const content = yield* AppFileSystem.use.readFileString(path.join(dir, "codegoblin.jsonc"))
       expect(content).toContain('"$schema": "https://opencode.ai/config.json"')
     }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
   ),
@@ -1970,4 +1972,242 @@ test("parseManagedPlist handles empty config", async () => {
     "test:mobileconfig",
   )
   expect(config.$schema).toBe("https://opencode.ai/config.json")
+})
+
+// ---------------------------------------------------------------------------
+// Phase D: CodeGoblin config/env compatibility shim.
+//
+// codegoblin.json / .codegoblin / CODEGOBLIN_* are the new primary identifiers,
+// with the legacy opencode.json / .opencode / OPENCODE_* still honored as a
+// fallback. CodeGoblin-branded sources win on conflicts.
+// ---------------------------------------------------------------------------
+
+describe("CodeGoblin config files (Phase D)", () => {
+  it.instance("loads codegoblin.json project config", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* writeConfigEffect(
+        test.directory,
+        { $schema: "https://opencode.ai/config.json", model: "codegoblin/model", username: "goblin" },
+        "codegoblin.json",
+      )
+      const config = yield* Config.use.get()
+      expect(config.model).toBe("codegoblin/model")
+      expect(config.username).toBe("goblin")
+    }),
+  )
+
+  it.instance("loads codegoblin.jsonc project config", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* AppFileSystem.use.writeWithDirs(
+        path.join(test.directory, "codegoblin.jsonc"),
+        `{
+          // CodeGoblin config with a comment
+          "$schema": "https://opencode.ai/config.json",
+          "model": "codegoblin/jsonc"
+        }`,
+      )
+      const config = yield* Config.use.get()
+      expect(config.model).toBe("codegoblin/jsonc")
+    }),
+  )
+
+  it.instance("codegoblin.json overrides opencode.json in the same directory", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* writeConfigEffect(test.directory, {
+        $schema: "https://opencode.ai/config.json",
+        model: "opencode/model",
+        username: "from-opencode",
+      })
+      yield* writeConfigEffect(
+        test.directory,
+        { $schema: "https://opencode.ai/config.json", model: "codegoblin/model" },
+        "codegoblin.json",
+      )
+      const config = yield* Config.use.get()
+      // CodeGoblin wins where both set a key; untouched keys still fall back.
+      expect(config.model).toBe("codegoblin/model")
+      expect(config.username).toBe("from-opencode")
+    }),
+  )
+
+  it.instance("loads config from .codegoblin directory", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* AppFileSystem.use.writeWithDirs(
+        path.join(test.directory, ".codegoblin", "agent", "goblin.md"),
+        `---
+model: test/model
+---
+Goblin agent prompt`,
+      )
+      const config = yield* Config.use.get()
+      expect(config.agent?.["goblin"]).toEqual(
+        expect.objectContaining({
+          name: "goblin",
+          model: "test/model",
+          prompt: "Goblin agent prompt",
+        }),
+      )
+    }),
+  )
+
+  it.instance(".codegoblin config overrides .opencode config", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* writeConfigEffect(
+        path.join(test.directory, ".opencode"),
+        { $schema: "https://opencode.ai/config.json", model: "opencode-dir/model", username: "from-opencode-dir" },
+        "opencode.json",
+      )
+      yield* writeConfigEffect(
+        path.join(test.directory, ".codegoblin"),
+        { $schema: "https://opencode.ai/config.json", model: "codegoblin-dir/model" },
+        "codegoblin.json",
+      )
+      const config = yield* Config.use.get()
+      expect(config.model).toBe("codegoblin-dir/model")
+      expect(config.username).toBe("from-opencode-dir")
+    }),
+  )
+
+  it.effect("global codegoblin.json overrides global opencode.json", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      yield* writeConfigEffect(dir, schemaConfig({ model: "global-opencode", username: "global-opencode" }))
+      yield* writeConfigEffect(dir, schemaConfig({ model: "global-codegoblin" }), "codegoblin.json")
+      yield* withGlobalConfigDir(
+        dir,
+        Effect.gen(function* () {
+          const project = yield* tmpdirScoped()
+          yield* withInstanceDir(
+            project,
+            Effect.gen(function* () {
+              const config = yield* Config.use.get()
+              expect(config.model).toBe("global-codegoblin")
+              expect(config.username).toBe("global-opencode")
+            }),
+          )
+        }),
+      )
+    }),
+  )
+
+  it.effect("fresh installs seed codegoblin.jsonc with the schema", () =>
+    withGlobalConfig({}, ({ dir }) =>
+      Effect.gen(function* () {
+        yield* Config.use.get().pipe(provideInstanceEffect(dir))
+        const content = yield* AppFileSystem.use.readFileString(path.join(dir, "codegoblin.jsonc"))
+        expect(content).toContain('"$schema": "https://opencode.ai/config.json"')
+        // The legacy opencode.jsonc must not be created for fresh installs.
+        expect(yield* AppFileSystem.use.existsSafe(path.join(dir, "opencode.jsonc"))).toBe(false)
+      }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
+    ),
+  )
+
+  it.effect("existing opencode.jsonc remains the global write target", () =>
+    withGlobalConfig({ config: { model: "existing" }, name: "opencode.jsonc" }, ({ dir }) =>
+      Effect.gen(function* () {
+        yield* Config.use.updateGlobal({ username: "writer" })
+        // Writes go back to the pre-existing opencode.jsonc, not a new codegoblin file.
+        expect(yield* AppFileSystem.use.existsSafe(path.join(dir, "codegoblin.jsonc"))).toBe(false)
+        const content = yield* AppFileSystem.use.readFileString(path.join(dir, "opencode.jsonc"))
+        expect(content).toContain("writer")
+      }),
+    ),
+  )
+})
+
+describe("CodeGoblin env vars (Phase D)", () => {
+  it.instance("honors CODEGOBLIN_CONFIG_CONTENT", () =>
+    withProcessEnv(
+      "CODEGOBLIN_CONFIG_CONTENT",
+      JSON.stringify({ $schema: "https://opencode.ai/config.json", username: "from-codegoblin-content" }),
+      Effect.gen(function* () {
+        const config = yield* Config.use.get()
+        expect(config.username).toBe("from-codegoblin-content")
+      }),
+    ),
+  )
+
+  it.instance("CODEGOBLIN_CONFIG_CONTENT overrides OPENCODE_CONFIG_CONTENT", () =>
+    withProcessEnvs(
+      {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({ $schema: "https://opencode.ai/config.json", username: "legacy" }),
+        CODEGOBLIN_CONFIG_CONTENT: JSON.stringify({ $schema: "https://opencode.ai/config.json", username: "primary" }),
+      },
+      Effect.gen(function* () {
+        const config = yield* Config.use.get()
+        expect(config.username).toBe("primary")
+      }),
+    ),
+  )
+
+  it.instance(
+    "CODEGOBLIN_CONFIG_DIR is honored",
+    () =>
+      Effect.gen(function* () {
+        const configDir = yield* tmpdirScoped()
+        yield* writeConfigEffect(
+          configDir,
+          { $schema: "https://opencode.ai/config.json", model: "codegoblin-configdir/model" },
+          "codegoblin.json",
+        )
+        yield* withProcessEnv(
+          "CODEGOBLIN_CONFIG_DIR",
+          configDir,
+          Effect.gen(function* () {
+            const config = yield* Config.use.get()
+            expect(config.model).toBe("codegoblin-configdir/model")
+          }),
+        )
+      }),
+    { config: { model: "project/model" } },
+  )
+
+  it.instance(
+    "CODEGOBLIN_DISABLE_PROJECT_CONFIG skips project config",
+    () =>
+      withProcessEnv(
+        "CODEGOBLIN_DISABLE_PROJECT_CONFIG",
+        "true",
+        Effect.gen(function* () {
+          const config = yield* Config.use.get()
+          expect(config.model).not.toBe("project/model")
+        }),
+      ),
+    { config: { model: "project/model" } },
+  )
+
+  describe("Flag fallback precedence", () => {
+    test("CODEGOBLIN_* takes precedence over OPENCODE_*", () => {
+      const prev = { cg: process.env.CODEGOBLIN_CONFIG, oc: process.env.OPENCODE_CONFIG }
+      try {
+        process.env.OPENCODE_CONFIG = "/legacy/path"
+        process.env.CODEGOBLIN_CONFIG = "/primary/path"
+        expect(Flag.OPENCODE_CONFIG).toBe("/primary/path")
+      } finally {
+        if (prev.cg === undefined) delete process.env.CODEGOBLIN_CONFIG
+        else process.env.CODEGOBLIN_CONFIG = prev.cg
+        if (prev.oc === undefined) delete process.env.OPENCODE_CONFIG
+        else process.env.OPENCODE_CONFIG = prev.oc
+      }
+    })
+
+    test("falls back to OPENCODE_* when CODEGOBLIN_* is unset", () => {
+      const prev = { cg: process.env.CODEGOBLIN_CONFIG_DIR, oc: process.env.OPENCODE_CONFIG_DIR }
+      try {
+        delete process.env.CODEGOBLIN_CONFIG_DIR
+        process.env.OPENCODE_CONFIG_DIR = "/legacy/dir"
+        expect(Flag.OPENCODE_CONFIG_DIR).toBe("/legacy/dir")
+      } finally {
+        if (prev.cg === undefined) delete process.env.CODEGOBLIN_CONFIG_DIR
+        else process.env.CODEGOBLIN_CONFIG_DIR = prev.cg
+        if (prev.oc === undefined) delete process.env.OPENCODE_CONFIG_DIR
+        else process.env.OPENCODE_CONFIG_DIR = prev.oc
+      }
+    })
+  })
 })
