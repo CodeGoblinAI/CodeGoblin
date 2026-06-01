@@ -1,12 +1,14 @@
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { MemoryAddPayload, MemoryPinPayload, MemoryRejectedError } from "../groups/memory"
-import { InstanceState } from "@/effect/instance-state"
 import { CodeGoblinMemory, CodeGoblinMemoryError, type CodeGoblinMemoryScope } from "@/codegoblin/memory"
+import { Project } from "@/project/project"
 
 export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (handlers) =>
   Effect.gen(function* () {
+    const project = yield* Project.Service
+
     const list = Effect.fn("MemoryHttpApi.list")(function* (ctx: {
       query: {
         scope?: CodeGoblinMemoryScope
@@ -30,23 +32,37 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       return CodeGoblinMemory.status()
     })
 
-    const add = Effect.fn("MemoryHttpApi.add")(function* (ctx: { payload: typeof MemoryAddPayload.Type }) {
-      try {
-        const instance = yield* InstanceState.context
-        const projectID = ctx.payload.scope === "project" ? instance.project.id : ctx.payload.projectID
-        return CodeGoblinMemory.add({
-          scope: ctx.payload.scope,
-          content: ctx.payload.content,
-          projectID,
-          sourceSessionID: ctx.payload.sourceSessionID,
-          tags: ctx.payload.tags ? [...ctx.payload.tags] : undefined,
-          pinned: ctx.payload.pinned,
-        })
-      } catch (error) {
-        throw new MemoryRejectedError({
-          error: error instanceof CodeGoblinMemoryError ? error.message : String(error),
-        })
+    const add = Effect.fn("MemoryHttpApi.add")(function* (ctx: {
+      query: {
+        directory?: string
       }
+      payload: typeof MemoryAddPayload.Type
+    }) {
+      const resolvedProjectID =
+        ctx.payload.scope !== "project" || ctx.payload.projectID
+          ? Option.none<string>()
+          : yield* Effect.option(
+              project.fromDirectory(ctx.query.directory || process.cwd()).pipe(Effect.map((result) => result.project.id)),
+            )
+      const projectID =
+        ctx.payload.scope === "project"
+          ? (ctx.payload.projectID ?? (Option.isSome(resolvedProjectID) ? resolvedProjectID.value : undefined))
+          : ctx.payload.projectID
+      return yield* Effect.try({
+        try: () =>
+          CodeGoblinMemory.add({
+            scope: ctx.payload.scope,
+            content: ctx.payload.content,
+            projectID,
+            sourceSessionID: ctx.payload.sourceSessionID,
+            tags: ctx.payload.tags ? [...ctx.payload.tags] : undefined,
+            pinned: ctx.payload.pinned,
+          }),
+        catch: (error) =>
+          new MemoryRejectedError({
+            error: error instanceof CodeGoblinMemoryError ? error.message : String(error),
+          }),
+      })
     })
 
     const pin = Effect.fn("MemoryHttpApi.pin")(function* (ctx: {
