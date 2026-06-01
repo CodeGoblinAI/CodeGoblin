@@ -1,7 +1,7 @@
 import path from "path"
 import { Context, Effect, Layer, Schema } from "effect"
-import { AppFileSystem } from "@opencode-ai/core/filesystem"
-import { Flock } from "@opencode-ai/core/util/flock"
+import { AppFileSystem } from "@codegoblin/core/filesystem"
+import { Flock } from "@codegoblin/core/util/flock"
 import { Git } from "@/git"
 import {
   repositoryCachePath,

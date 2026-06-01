@@ -1,6 +1,6 @@
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
-import { AssistantMessage, Part, SessionStatus, SnapshotFileDiff, UserMessage } from "@opencode-ai/sdk/v2"
-import { groupParts, PartGroup, renderable } from "@opencode-ai/ui/message-part"
+import { AssistantMessage, Part, SessionStatus, SnapshotFileDiff, UserMessage } from "@codegoblin/sdk/v2"
+import { groupParts, PartGroup, renderable } from "@codegoblin/ui/message-part"
 import { Data, Equal } from "effect"
 
 export type SummaryDiff = SnapshotFileDiff & { file: string }

@@ -7,7 +7,7 @@ import { KVProvider, useKV } from "../../../../src/cli/cmd/tui/context/kv"
 import { ProjectProvider, useProject } from "../../../../src/cli/cmd/tui/context/project"
 import { SDKProvider, type EventSource } from "../../../../src/cli/cmd/tui/context/sdk"
 import { SyncProvider, useSync } from "../../../../src/cli/cmd/tui/context/sync"
-import type { GlobalEvent } from "@opencode-ai/sdk/v2"
+import type { GlobalEvent } from "@codegoblin/sdk/v2"
 
 export const worktree = "/tmp/opencode"
 export const directory = `${worktree}/packages/codegoblin`

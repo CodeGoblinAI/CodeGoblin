@@ -1,4 +1,4 @@
-import { createSimpleContext } from "@opencode-ai/ui/context"
+import { createSimpleContext } from "@codegoblin/ui/context"
 import { useGlobalSDK } from "./global-sdk"
 
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({

@@ -1,9 +1,9 @@
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
-import { Catalog } from "@opencode-ai/core/catalog"
-import { PluginV2 } from "@opencode-ai/core/plugin"
-import { GoogleVertexAnthropicPlugin, GoogleVertexPlugin } from "@opencode-ai/core/plugin/provider/google-vertex"
-import { ProviderV2 } from "@opencode-ai/core/provider"
+import { Catalog } from "@codegoblin/core/catalog"
+import { PluginV2 } from "@codegoblin/core/plugin"
+import { GoogleVertexAnthropicPlugin, GoogleVertexPlugin } from "@codegoblin/core/plugin/provider/google-vertex"
+import { ProviderV2 } from "@codegoblin/core/provider"
 import { fakeSelectorSdk, it, model, withEnv } from "./provider-helper"
 
 describe("GoogleVertexAnthropicPlugin", () => {

@@ -1,5 +1,5 @@
-import { Message, Model, Part, Session, SnapshotFileDiff } from "@opencode-ai/sdk/v2"
-import { iife } from "@opencode-ai/core/util/iife"
+import { Message, Model, Part, Session, SnapshotFileDiff } from "@codegoblin/sdk/v2"
+import { iife } from "@codegoblin/core/util/iife"
 import z from "zod"
 import { Storage } from "./storage"
 

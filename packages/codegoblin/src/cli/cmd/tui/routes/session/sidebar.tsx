@@ -3,8 +3,8 @@ import { useSync } from "@tui/context/sync"
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { useTheme } from "../../context/theme"
 import { useTuiConfig } from "../../context/tui-config"
-import { InstallationChannel, InstallationVersion } from "@opencode-ai/core/installation/version"
-import type { AssistantMessage } from "@opencode-ai/sdk/v2"
+import { InstallationChannel, InstallationVersion } from "@codegoblin/core/installation/version"
+import type { AssistantMessage } from "@codegoblin/sdk/v2"
 import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
 import {
   codeGoblinCompanionActionVariant,

@@ -1,11 +1,11 @@
-import { Button } from "@opencode-ai/ui/button"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { Dialog } from "@opencode-ai/ui/dialog"
-import { List } from "@opencode-ai/ui/list"
-import { TextField } from "@opencode-ai/ui/text-field"
-import { showToast } from "@opencode-ai/ui/toast"
+import { Button } from "@codegoblin/ui/button"
+import { useDialog } from "@codegoblin/ui/context/dialog"
+import { Dialog } from "@codegoblin/ui/dialog"
+import { List } from "@codegoblin/ui/list"
+import { TextField } from "@codegoblin/ui/text-field"
+import { showToast } from "@codegoblin/ui/toast"
 import { Component, createSignal, Show } from "solid-js"
-import type { CodeGoblinMemoryEntry } from "@opencode-ai/sdk/v2"
+import type { CodeGoblinMemoryEntry } from "@codegoblin/sdk/v2"
 import { useSDK } from "@/context/sdk"
 
 const scopeLabels: Record<CodeGoblinMemoryEntry["scope"], string> = {

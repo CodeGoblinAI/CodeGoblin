@@ -1,6 +1,6 @@
 import { redirect } from "@solidjs/router"
 import type { APIEvent } from "@solidjs/start/server"
-import { Referral } from "@opencode-ai/console-core/referral.js"
+import { Referral } from "@codegoblin/console-core/referral.js"
 import { AuthClient } from "~/context/auth"
 import { useAuthSession } from "~/context/auth"
 import { i18n } from "~/i18n"

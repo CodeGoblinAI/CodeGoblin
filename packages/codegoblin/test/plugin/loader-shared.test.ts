@@ -3,8 +3,8 @@ import { Effect, Layer } from "effect"
 import fs from "fs/promises"
 import path from "path"
 import { pathToFileURL } from "url"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { AppFileSystem } from "@opencode-ai/core/filesystem"
+import { CrossSpawnSpawner } from "@codegoblin/core/cross-spawn-spawner"
+import { AppFileSystem } from "@codegoblin/core/filesystem"
 import { disposeAllInstances, provideInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
@@ -12,7 +12,7 @@ const { Plugin } = await import("../../src/plugin/index")
 const { PluginLoader } = await import("../../src/plugin/loader")
 const { readPackageThemes } = await import("../../src/plugin/shared")
 const { Bus } = await import("../../src/bus")
-const { Npm } = await import("@opencode-ai/core/npm")
+const { Npm } = await import("@codegoblin/core/npm")
 const { TestConfig } = await import("../fixture/config")
 const { RuntimeFlags } = await import("../../src/effect/runtime-flags")
 

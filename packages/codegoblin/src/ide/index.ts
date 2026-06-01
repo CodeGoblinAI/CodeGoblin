@@ -1,7 +1,7 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Schema } from "effect"
-import { NamedError } from "@opencode-ai/core/util/error"
-import * as Log from "@opencode-ai/core/util/log"
+import { NamedError } from "@codegoblin/core/util/error"
+import * as Log from "@codegoblin/core/util/log"
 import { Process } from "@/util/process"
 
 const SUPPORTED_IDES = [

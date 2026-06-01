@@ -3,7 +3,7 @@ import { $ } from "bun"
 import fs from "fs"
 import path from "path"
 import pkg from "../package.json"
-import { Script } from "@opencode-ai/script"
+import { Script } from "@codegoblin/script"
 import { fileURLToPath } from "url"
 
 const dir = fileURLToPath(new URL("..", import.meta.url))

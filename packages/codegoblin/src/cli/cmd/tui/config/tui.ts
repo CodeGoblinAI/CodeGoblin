@@ -8,21 +8,21 @@ import { ConfigParse } from "@/config/parse"
 import * as ConfigPaths from "@/config/paths"
 import { migrateTuiConfig } from "./tui-migrate"
 import { KeymapLeaderTimeoutDefault, resolveAttentionSoundPaths, TuiInfo } from "./tui-schema"
-import { Flag } from "@opencode-ai/core/flag/flag"
+import { Flag } from "@codegoblin/core/flag/flag"
 import { isRecord } from "@/util/record"
-import { Global } from "@opencode-ai/core/global"
-import { AppFileSystem } from "@opencode-ai/core/filesystem"
+import { Global } from "@codegoblin/core/global"
+import { AppFileSystem } from "@codegoblin/core/filesystem"
 import { CurrentWorkingDirectory } from "./cwd"
 import { ConfigPlugin } from "@/config/plugin"
 import { TuiKeybind } from "./keybind"
-import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/installation/version"
-import { makeRuntime } from "@opencode-ai/core/effect/runtime"
+import { InstallationLocal, InstallationVersion } from "@codegoblin/core/installation/version"
+import { makeRuntime } from "@codegoblin/core/effect/runtime"
 import { Filesystem } from "@/util/filesystem"
-import * as Log from "@opencode-ai/core/util/log"
+import * as Log from "@codegoblin/core/util/log"
 import { ConfigVariable } from "@/config/variable"
-import { Npm } from "@opencode-ai/core/npm"
-import type { DeepMutable } from "@opencode-ai/core/schema"
-import type { TuiAttentionSoundName } from "@opencode-ai/plugin/tui"
+import { Npm } from "@codegoblin/core/npm"
+import type { DeepMutable } from "@codegoblin/core/schema"
+import type { TuiAttentionSoundName } from "@codegoblin/plugin/tui"
 import { FormatError, FormatUnknownError } from "@/cli/error"
 
 const log = Log.create({ service: "tui.config" })
@@ -275,7 +275,7 @@ export const layer = Layer.effect(
           .install(dir, {
             add: [
               {
-                name: "@opencode-ai/plugin",
+                name: "@codegoblin/plugin",
                 version: InstallationLocal ? undefined : InstallationVersion,
               },
             ],

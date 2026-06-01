@@ -6,10 +6,10 @@ import { useServer } from "@/context/server"
 import { useQueryOptions } from "@/context/global-sync"
 import { pathKey } from "@/utils/path-key"
 import { authTokenFromCredentials } from "@/utils/server"
-import { Button } from "@opencode-ai/ui/button"
-import { Dialog } from "@opencode-ai/ui/dialog"
-import { List } from "@opencode-ai/ui/list"
-import { showToast } from "@opencode-ai/ui/toast"
+import { Button } from "@codegoblin/ui/button"
+import { Dialog } from "@codegoblin/ui/dialog"
+import { List } from "@codegoblin/ui/list"
+import { showToast } from "@codegoblin/ui/toast"
 
 type MarketEntry = {
   id: string

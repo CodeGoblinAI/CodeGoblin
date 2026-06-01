@@ -1,5 +1,5 @@
 {
-  "name": "@opencode-ai/function",
+  "name": "@codegoblin/function",
   "version": "1.15.10",
   "$schema": "https://json.schemastore.org/package.json",
   "private": true,

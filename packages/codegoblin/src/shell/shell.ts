@@ -1,4 +1,4 @@
-import { Flag } from "@opencode-ai/core/flag/flag"
+import { Flag } from "@codegoblin/core/flag/flag"
 import { lazy } from "@/util/lazy"
 import { Filesystem } from "@/util/filesystem"
 import { which } from "@/util/which"

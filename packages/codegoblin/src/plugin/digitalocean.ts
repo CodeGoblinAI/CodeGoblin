@@ -1,7 +1,7 @@
-import type { Hooks, PluginInput } from "@opencode-ai/plugin"
-import type { Model } from "@opencode-ai/sdk/v2"
-import * as Log from "@opencode-ai/core/util/log"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import type { Hooks, PluginInput } from "@codegoblin/plugin"
+import type { Model } from "@codegoblin/sdk/v2"
+import * as Log from "@codegoblin/core/util/log"
+import { InstallationVersion } from "@codegoblin/core/installation/version"
 import { createServer } from "http"
 
 const log = Log.create({ service: "plugin.digitalocean" })

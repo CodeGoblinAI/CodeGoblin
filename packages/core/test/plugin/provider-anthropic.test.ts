@@ -1,9 +1,9 @@
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
-import { Catalog } from "@opencode-ai/core/catalog"
-import { PluginV2 } from "@opencode-ai/core/plugin"
-import { AnthropicPlugin } from "@opencode-ai/core/plugin/provider/anthropic"
-import { ProviderV2 } from "@opencode-ai/core/provider"
+import { Catalog } from "@codegoblin/core/catalog"
+import { PluginV2 } from "@codegoblin/core/plugin"
+import { AnthropicPlugin } from "@codegoblin/core/plugin/provider/anthropic"
+import { ProviderV2 } from "@codegoblin/core/provider"
 import { it, model, provider } from "./provider-helper"
 
 describe("AnthropicPlugin", () => {

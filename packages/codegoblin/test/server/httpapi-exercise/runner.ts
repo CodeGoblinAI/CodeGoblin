@@ -1,4 +1,4 @@
-import { Flag } from "@opencode-ai/core/flag/flag"
+import { Flag } from "@codegoblin/core/flag/flag"
 import { Cause, Duration, Effect } from "effect"
 import { TestLLMServer } from "../../lib/llm-server"
 import type { Config } from "../../../src/config/config"

@@ -2,13 +2,13 @@ import { Cause, Duration, Effect, Layer, Schedule, Schema, Semaphore, Context } 
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { formatPatch, structuredPatch } from "diff"
 import path from "path"
-import { AppProcess } from "@opencode-ai/core/process"
+import { AppProcess } from "@codegoblin/core/process"
 import { InstanceState } from "@/effect/instance-state"
-import { AppFileSystem } from "@opencode-ai/core/filesystem"
-import { Hash } from "@opencode-ai/core/util/hash"
+import { AppFileSystem } from "@codegoblin/core/filesystem"
+import { Hash } from "@codegoblin/core/util/hash"
 import { Config } from "@/config/config"
-import { Global } from "@opencode-ai/core/global"
-import * as Log from "@opencode-ai/core/util/log"
+import { Global } from "@codegoblin/core/global"
+import * as Log from "@codegoblin/core/util/log"
 
 export const Patch = Schema.Struct({
   hash: Schema.String,

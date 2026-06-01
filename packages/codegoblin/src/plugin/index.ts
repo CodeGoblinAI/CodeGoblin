@@ -4,15 +4,15 @@ import type {
   Plugin as PluginInstance,
   PluginModule,
   WorkspaceAdapter as PluginWorkspaceAdapter,
-} from "@opencode-ai/plugin"
+} from "@codegoblin/plugin"
 import { Config } from "@/config/config"
 import { Bus } from "../bus"
-import * as Log from "@opencode-ai/core/util/log"
-import { createOpencodeClient } from "@opencode-ai/sdk"
+import * as Log from "@codegoblin/core/util/log"
+import { createOpencodeClient } from "@codegoblin/sdk"
 import { ServerAuth } from "@/server/auth"
 import { CodexAuthPlugin } from "./codex"
 import { Session } from "@/session/session"
-import { NamedError } from "@opencode-ai/core/util/error"
+import { NamedError } from "@codegoblin/core/util/error"
 import { CopilotAuthPlugin } from "./github-copilot/copilot"
 import { gitlabAuthPlugin as GitlabAuthPlugin } from "opencode-gitlab-auth"
 import { PoeAuthPlugin } from "opencode-poe-auth"

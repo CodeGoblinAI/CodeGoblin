@@ -1,5 +1,5 @@
-import type { Event } from "@opencode-ai/sdk/v2"
-import type { TuiAttentionSoundName, TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
+import type { Event } from "@codegoblin/sdk/v2"
+import type { TuiAttentionSoundName, TuiPlugin, TuiPluginApi } from "@codegoblin/plugin/tui"
 import type { InternalTuiPlugin } from "../../plugin/internal"
 
 const id = "internal:notifications"

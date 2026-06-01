@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "version": "1.15.10",
-  "name": "@opencode-ai/core",
+  "name": "@codegoblin/core",
   "type": "module",
   "license": "MIT",
   "private": true,

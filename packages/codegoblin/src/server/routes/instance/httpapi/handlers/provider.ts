@@ -1,6 +1,6 @@
 import { ProviderAuth } from "@/provider/auth"
 import { Config } from "@/config/config"
-import { ModelsDev } from "@opencode-ai/core/models-dev"
+import { ModelsDev } from "@codegoblin/core/models-dev"
 import { Provider } from "@/provider/provider"
 import { ProviderID } from "@/provider/schema"
 import { augmentAudioModelCatalog, augmentImageModelCatalog } from "@/codegoblin/provider"

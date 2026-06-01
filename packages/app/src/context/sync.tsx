@@ -1,7 +1,7 @@
-import { Binary } from "@opencode-ai/core/util/binary"
+import { Binary } from "@codegoblin/core/util/binary"
 import { useGlobalSync } from "./global-sync"
 import { useSDK } from "./sdk"
-import type { Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part } from "@codegoblin/sdk/v2/client"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
