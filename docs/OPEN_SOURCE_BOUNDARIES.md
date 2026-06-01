@@ -23,7 +23,6 @@ CodeGoblin is a local-first fork/customization of OpenCode. This public reposito
 
 These names are intentionally kept until a dedicated migration PR provides aliases, data migration, and release notes:
 
-- `packages/opencode`
 - `@opencode-ai/*`
 - `opencode.json`
 - `.opencode/`

@@ -326,7 +326,7 @@ if (showChatGoblin) {
 }
 console.log("Press Ctrl+C to stop this variant before trying another one.\n")
 
-const child = Bun.spawn([process.execPath, "run", "--cwd", "packages/opencode", "--conditions=browser", "src/index.ts"], {
+const child = Bun.spawn([process.execPath, "run", "--cwd", "packages/codegoblin", "--conditions=browser", "src/index.ts"], {
   cwd: repoRoot,
   env: {
     ...process.env,

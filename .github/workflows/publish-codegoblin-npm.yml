@@ -36,7 +36,7 @@ jobs:
         env:
           OPENCODE_VERSION: ${{ inputs.version }}
         run: |
-          ./packages/opencode/script/build.ts
+          ./packages/codegoblin/script/build.ts
 
       - name: Pack or publish CodeGoblin npm packages
         shell: bash
@@ -56,4 +56,4 @@ jobs:
             exit 1
           fi
 
-          bun ./packages/opencode/script/publish.ts
+          bun ./packages/codegoblin/script/publish.ts

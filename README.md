@@ -36,7 +36,7 @@ codegoblin --help
 cg --help
 ```
 
-`npm run build` is a convenience wrapper around `bun run --cwd packages/opencode build --single --skip-install`; Bun is still the package manager for dependencies.
+`npm run build` is a convenience wrapper around `bun run --cwd packages/codegoblin build --single --skip-install`; Bun is still the package manager for dependencies.
 
 On Windows, the embedded web build may need a newer Node first on `PATH`:
 
@@ -52,7 +52,7 @@ On Windows, if native dependency install scripts fail in a local checkout, this 
 ```bat
 bun install --ignore-scripts
 set MODELS_DEV_API_JSON=%CD%\packages\opencode\test\tool\fixtures\models-api.json
-bun run --cwd packages/opencode build --single --skip-embed-web-ui --skip-install
+bun run --cwd packages/codegoblin build --single --skip-embed-web-ui --skip-install
 ```
 
 For a Windows build that supports `codegoblin web`, drop `--skip-embed-web-ui` from that last command.
@@ -70,19 +70,19 @@ Image outputs default under `codegoblin-output/images` inside the current projec
 Useful package-level commands:
 
 ```bash
-bun run --cwd packages/opencode typecheck
+bun run --cwd packages/codegoblin typecheck
 npm run typecheck:codegoblin
 npm run build
-bun run --cwd packages/opencode build --single --skip-install
-bun run --cwd packages/opencode build --single --skip-embed-web-ui --skip-install
-bun run --cwd packages/opencode script/publish.ts --dry-run
+bun run --cwd packages/codegoblin build --single --skip-install
+bun run --cwd packages/codegoblin build --single --skip-embed-web-ui --skip-install
+bun run --cwd packages/codegoblin script/publish.ts --dry-run
 ```
 
-Do not run tests from the repo root; use package directories such as `packages/opencode`.
+Do not run tests from the repo root; use package directories such as `packages/codegoblin`.
 
 ## npm packaging notes
 
-The CodeGoblin npm package is generated from `packages/opencode/script/publish.ts`:
+The CodeGoblin npm package is generated from `packages/codegoblin/script/publish.ts`:
 
 - top-level package: `codegoblin`
 - commands: `codegoblin`, `cg`

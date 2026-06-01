@@ -1,0 +1,122 @@
+#!/usr/bin/env node
+
+import childProcess from "child_process"
+import fs from "fs"
+import path from "path"
+import os from "os"
+import { fileURLToPath } from "url"
+
+const forwardedSignals = ["SIGINT", "SIGTERM", "SIGHUP"]
+const argv = process.argv.slice(2)
+const bunCommand = process.platform === "win32" ? "bun.cmd" : "bun"
+const env = {
+  ...process.env,
+  CODEGOBLIN: "1",
+  CODEGOBLIN_CLI_NAME: process.env.CODEGOBLIN_CLI_NAME || "codegoblin",
+  OPENCODE: "1",
+}
+
+function run(command, args = argv) {
+  const useShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command)
+  let child
+  try {
+    child = childProcess.spawn(command, args, {
+      stdio: "inherit",
+      env,
+      shell: useShell,
+    })
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
+
+  child.on("error", (error) => {
+    console.error(error.message)
+    process.exit(1)
+  })
+
+  const forwarders = {}
+  for (const signal of forwardedSignals) {
+    forwarders[signal] = () => {
+      try {
+        child.kill(signal)
+      } catch {}
+    }
+    process.on(signal, forwarders[signal])
+  }
+
+  child.on("exit", (code, signal) => {
+    for (const forwardedSignal of forwardedSignals) {
+      process.removeListener(forwardedSignal, forwarders[forwardedSignal])
+    }
+    if (signal) {
+      process.kill(process.pid, signal)
+      return
+    }
+    process.exit(typeof code === "number" ? code : 0)
+  })
+}
+
+const scriptPath = fs.realpathSync(fileURLToPath(import.meta.url))
+const scriptDir = path.dirname(scriptPath)
+const packageDir = path.dirname(scriptDir)
+const source = path.join(packageDir, "src", "index.ts")
+
+const platformMap = {
+  darwin: "darwin",
+  linux: "linux",
+  win32: "windows",
+}
+const archMap = {
+  x64: "x64",
+  arm64: "arm64",
+  arm: "arm",
+}
+const platform = platformMap[os.platform()] || os.platform()
+const arch = archMap[os.arch()] || os.arch()
+const binary = platform === "windows" ? "opencode.exe" : "opencode"
+const packageNames = [`opencode-${platform}-${arch}`, `opencode-${platform}-${arch}-baseline`]
+
+function findBinary(startDir) {
+  let current = startDir
+  for (;;) {
+    const modules = path.join(current, "node_modules")
+    if (fs.existsSync(modules)) {
+      for (const name of packageNames) {
+        const candidate = path.join(modules, name, "bin", binary)
+        if (fs.existsSync(candidate)) return candidate
+      }
+    }
+    const parent = path.dirname(current)
+    if (parent === current) return
+    current = parent
+  }
+}
+
+const candidates = [
+  process.env.CODEGOBLIN_BIN_PATH,
+  process.env.OPENCODE_BIN_PATH,
+  path.join(scriptDir, ".codegoblin"),
+  path.join(scriptDir, ".opencode"),
+  path.join(packageDir, "dist", `opencode-${platform}-${arch}`, "bin", binary),
+  path.join(packageDir, "dist", `opencode-${platform}-${arch}-baseline`, "bin", binary),
+].filter(Boolean)
+
+const resolved = candidates.find((candidate) => fs.existsSync(candidate))
+if (resolved) {
+  run(resolved)
+} else if (fs.existsSync(source)) {
+  run(bunCommand, ["--conditions=browser", source, ...argv])
+} else {
+  const packageCandidates = [
+  findBinary(scriptDir),
+  ].filter(Boolean)
+  const packaged = packageCandidates.find((candidate) => fs.existsSync(candidate))
+  if (packaged) {
+    run(packaged)
+  } else {
+    console.error("CodeGoblin could not find a built CLI binary or local source checkout.")
+    console.error("Run `bun install`, `bun run --cwd packages/codegoblin build --single --skip-install`, then `npm --prefix packages/codegoblin link`.")
+    process.exit(1)
+  }
+}

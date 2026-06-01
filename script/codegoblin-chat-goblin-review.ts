@@ -39,7 +39,7 @@ interface CompanionActivityVariantDefinition {
 const DEFAULT_SIDEBAR_COLS = 46
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const sidebarPath = join(repoRoot, "packages/opencode/src/cli/cmd/tui/routes/session/sidebar.tsx")
+const sidebarPath = join(repoRoot, "packages/codegoblin/src/cli/cmd/tui/routes/session/sidebar.tsx")
 const outputDir = join(repoRoot, "codegoblin-generated")
 const outputPath = join(outputDir, "codegoblin-chat-goblin-review.html")
 
