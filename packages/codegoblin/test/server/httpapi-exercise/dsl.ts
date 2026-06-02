@@ -202,9 +202,16 @@ export function route(template: string, params: Record<string, string>) {
 }
 
 export function controlledPtyInput(title: string | undefined) {
+  const shell =
+    process.platform === "win32"
+      ? { command: "cmd.exe", args: ["/c", "timeout /t 1 /nobreak >nul"] }
+      : { command: "/bin/sh", args: ["-c", "sleep 1"] }
   return {
-    command: "/bin/sh",
-    args: ["-c", "sleep 30"],
+    ...shell,
     ...(title ? { title } : {}),
   }
+}
+
+export function controlledPtyCommand() {
+  return process.platform === "win32" ? "cmd.exe" : "/bin/sh"
 }
