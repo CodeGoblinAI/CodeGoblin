@@ -71,7 +71,9 @@ async function createNativePackage(sourceName: string, version: string) {
   const targetName = targetBinaryPackageName(sourceName)
   const sourceDir = path.join(dir, "dist", sourceName)
   const targetDir = path.join(dir, "dist", targetName)
-  await copyDirectory(sourceDir, targetDir)
+  if (path.resolve(sourceDir) !== path.resolve(targetDir)) {
+    await copyDirectory(sourceDir, targetDir)
+  }
 
   const packageJsonPath = path.join(targetDir, "package.json")
   const packageJson = await Bun.file(packageJsonPath).json()
