@@ -36,8 +36,7 @@ jobs:
         env:
           OPENCODE_VERSION: ${{ inputs.version }}
           OPENCODE_CHANNEL: latest
-        run: |
-          ./packages/codegoblin/script/build.ts --single --skip-install
+        run: bun ./packages/codegoblin/script/build.ts --single --skip-install
 
       - name: Pack or publish CodeGoblin npm packages
         shell: bash
