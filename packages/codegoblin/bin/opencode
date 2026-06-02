@@ -196,7 +196,14 @@ function findBinary(startDir) {
   }
 }
 
-const local = names.map((name) => path.join(packageDir, "dist", name, "bin", binary)).find((candidate) => fs.existsSync(candidate))
+const local = names
+  .flatMap((name) =>
+    ["codegoblin", "opencode"].map((prefix) => {
+      const distName = name.replace(/^opencode-/, `${prefix}-`)
+      return path.join(packageDir, "dist", distName, "bin", binary)
+    }),
+  )
+  .find((candidate) => fs.existsSync(candidate))
 const resolved = envPath || (fs.existsSync(cached) ? cached : local || findBinary(scriptDir))
 if (!resolved) {
   console.error(

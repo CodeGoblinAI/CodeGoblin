@@ -88,4 +88,14 @@ export const Flag = {
   get OPENCODE_CLIENT() {
     return raw("CLIENT") ?? "cli"
   },
+  get CODEGOBLIN_WEB_UI_PATH() {
+    return raw("WEB_UI_PATH")
+  },
+  get CODEGOBLIN_WEB_UI_DEV_URL() {
+    return raw("WEB_UI_DEV_URL")
+  },
+  // Opt-in only. CodeGoblin no longer proxies upstream OpenCode by default.
+  get CODEGOBLIN_WEB_UI_UPSTREAM() {
+    return raw("WEB_UI_UPSTREAM")
+  },
 }

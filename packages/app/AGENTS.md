@@ -4,11 +4,12 @@
 
 ## Local Dev
 
-- `opencode dev web` proxies `https://app.opencode.ai`, so local UI/CSS changes will not show there.
-- For local UI changes, run the backend and app dev servers separately.
+- `codegoblin web` in source mode serves, in order: embedded UI (after a full build), local `packages/app/dist`, an optional dev-server proxy, or a help page. It no longer proxies upstream OpenCode by default.
+- For live UI/CSS work, run the backend and app dev servers separately.
 - Backend (from `packages/codegoblin`): `bun run --conditions=browser ./src/index.ts serve --port 4096`
 - App (from `packages/app`): `bun dev -- --port 4444`
 - Open `http://localhost:4444` to verify UI changes (it targets the backend at `http://localhost:4096`).
+- Optional single-port dev proxy: set `CODEGOBLIN_WEB_UI_DEV_URL=http://127.0.0.1:4444` while running `codegoblin web`.
 
 ## SolidJS
 

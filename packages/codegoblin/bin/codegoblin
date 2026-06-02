@@ -75,7 +75,12 @@ const archMap = {
 const platform = platformMap[os.platform()] || os.platform()
 const arch = archMap[os.arch()] || os.arch()
 const binary = platform === "windows" ? "opencode.exe" : "opencode"
-const packageNames = [`opencode-${platform}-${arch}`, `opencode-${platform}-${arch}-baseline`]
+const packageNames = [
+  `codegoblin-${platform}-${arch}`,
+  `codegoblin-${platform}-${arch}-baseline`,
+  `opencode-${platform}-${arch}`,
+  `opencode-${platform}-${arch}-baseline`,
+]
 
 function findBinary(startDir) {
   let current = startDir
@@ -98,6 +103,8 @@ const candidates = [
   process.env.OPENCODE_BIN_PATH,
   path.join(scriptDir, ".codegoblin"),
   path.join(scriptDir, ".opencode"),
+  path.join(packageDir, "dist", `codegoblin-${platform}-${arch}`, "bin", binary),
+  path.join(packageDir, "dist", `codegoblin-${platform}-${arch}-baseline`, "bin", binary),
   path.join(packageDir, "dist", `opencode-${platform}-${arch}`, "bin", binary),
   path.join(packageDir, "dist", `opencode-${platform}-${arch}-baseline`, "bin", binary),
 ].filter(Boolean)

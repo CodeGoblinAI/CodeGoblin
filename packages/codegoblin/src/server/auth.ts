@@ -32,11 +32,12 @@ export function required(config: Info) {
 }
 
 export function authorized(credentials: DecodedCredentials, config: Info) {
-  return (
-    Option.isSome(config.password) &&
-    credentials.username === config.username &&
-    Redacted.value(credentials.password) === config.password.value
-  )
+  if (!Option.isSome(config.password)) return false
+  if (Redacted.value(credentials.password) !== config.password.value) return false
+  if (credentials.username === config.username) return true
+  // Legacy basic-auth clients still send username "opencode" after the default
+  // rebrand to "codegoblin". Accept the old username when password matches.
+  return config.username === "codegoblin" && credentials.username === "opencode"
 }
 
 export function header(credentials?: Credentials) {

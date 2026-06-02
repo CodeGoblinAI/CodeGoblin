@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect } from "bun:test"
 import { Flag } from "@codegoblin/core/flag/flag"
 import * as Log from "@codegoblin/core/util/log"
@@ -17,7 +20,7 @@ import { RuntimeFlags } from "../../src/effect/runtime-flags"
 import { ServerAuth } from "../../src/server/auth"
 import { authorizationRouterMiddleware } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
-import { serveEmbeddedUIEffect, serveUIEffect } from "../../src/server/shared/ui"
+import { serveEmbeddedUIEffect, serveLocalDistUIEffect, serveUIEffect, resetUIResolutionCacheForTests } from "../../src/server/shared/ui"
 import { testEffect } from "../lib/effect"
 
 void Log.init({ print: false })
@@ -50,6 +53,29 @@ function restoreEnv(key: string, value: string | undefined) {
     return
   }
   process.env[key] = value
+}
+
+function withProxyOnlyUIEffect<A, E, R>(run: Effect.Effect<A, E, R>, upstream = "https://app.opencode.ai") {
+  return Effect.gen(function* () {
+    const previousUpstream = process.env.CODEGOBLIN_WEB_UI_UPSTREAM
+    const previousDev = process.env.CODEGOBLIN_WEB_UI_DEV_URL
+    const previousPath = process.env.CODEGOBLIN_WEB_UI_PATH
+    process.env.CODEGOBLIN_WEB_UI_UPSTREAM = upstream
+    delete process.env.CODEGOBLIN_WEB_UI_DEV_URL
+    process.env.CODEGOBLIN_WEB_UI_PATH = mkdtempSync(path.join(tmpdir(), "cg-ui-empty-"))
+    resetUIResolutionCacheForTests()
+
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        restoreEnv("CODEGOBLIN_WEB_UI_UPSTREAM", previousUpstream)
+        restoreEnv("CODEGOBLIN_WEB_UI_DEV_URL", previousDev)
+        restoreEnv("CODEGOBLIN_WEB_UI_PATH", previousPath)
+        resetUIResolutionCacheForTests()
+      }),
+    )
+
+    return yield* run
+  })
 }
 
 function app(input?: { password?: string; username?: string }) {
@@ -184,119 +210,177 @@ function responseText(response: Response) {
 }
 
 describe("HttpApi UI fallback", () => {
-  it.live("serves the web UI through the HTTP API app", () =>
-    Effect.gen(function* () {
-      let proxiedUrl: string | undefined
+  it.live("serves the web UI through an explicit upstream proxy", () =>
+    withProxyOnlyUIEffect(
+      Effect.gen(function* () {
+        let proxiedUrl: string | undefined
 
+        const response = yield* uiApp({
+          disableEmbeddedWebUi: true,
+          client: httpClient(
+            new Response("<html>opencode</html>", { headers: { "content-type": "text/html" } }),
+            (request) => {
+              proxiedUrl = request.url
+            },
+          ),
+        }).request("/")
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get("content-type")).toContain("text/html")
+        expect(yield* responseText(response)).toBe("<html>opencode</html>")
+        expect(proxiedUrl).toBe("https://app.opencode.ai/")
+      }),
+    ),
+  )
+
+  it.live("returns a CodeGoblin help page when no UI source is configured", () =>
+    Effect.gen(function* () {
+      resetUIResolutionCacheForTests()
+      const previousUpstream = process.env.CODEGOBLIN_WEB_UI_UPSTREAM
+      const previousDev = process.env.CODEGOBLIN_WEB_UI_DEV_URL
+      const previousPath = process.env.CODEGOBLIN_WEB_UI_PATH
+      delete process.env.CODEGOBLIN_WEB_UI_UPSTREAM
+      delete process.env.CODEGOBLIN_WEB_UI_DEV_URL
+      process.env.CODEGOBLIN_WEB_UI_PATH = mkdtempSync(path.join(tmpdir(), "cg-ui-empty-"))
+
+      let proxied = false
       const response = yield* uiApp({
         disableEmbeddedWebUi: true,
-        client: httpClient(
-          new Response("<html>opencode</html>", { headers: { "content-type": "text/html" } }),
-          (request) => {
-            proxiedUrl = request.url
-          },
-        ),
+        client: httpClient(new Response("should-not-proxy"), () => {
+          proxied = true
+        }),
       }).request("/")
+
+      restoreEnv("CODEGOBLIN_WEB_UI_UPSTREAM", previousUpstream)
+      restoreEnv("CODEGOBLIN_WEB_UI_DEV_URL", previousDev)
+      restoreEnv("CODEGOBLIN_WEB_UI_PATH", previousPath)
+      resetUIResolutionCacheForTests()
+
+      expect(proxied).toBe(false)
+      expect(response.status).toBe(503)
+      expect(yield* responseText(response)).toContain("CodeGoblin web UI unavailable")
+    }),
+  )
+
+  it.live("serves a local app dist build when embedded UI is disabled", () =>
+    Effect.gen(function* () {
+      const fs = yield* AppFileSystem.Service
+      const response = yield* serveLocalDistUIEffect(
+        "/",
+        "/tmp/codegoblin-app-dist",
+        {
+          ...fs,
+          existsSafe: (file) =>
+            Effect.succeed(file === "/tmp/codegoblin-app-dist/index.html" || file.endsWith("index.html")),
+          readFile: (file) =>
+            file.endsWith("index.html")
+              ? Effect.succeed(new TextEncoder().encode("<html>CodeGoblin</html>"))
+              : Effect.die(`unexpected local UI path: ${file}`),
+        },
+      ).pipe(Effect.map(HttpServerResponse.toWeb))
 
       expect(response.status).toBe(200)
       expect(response.headers.get("content-type")).toContain("text/html")
-      expect(yield* responseText(response)).toBe("<html>opencode</html>")
-      expect(proxiedUrl).toBe("https://app.opencode.ai/")
+      expect(yield* responseText(response)).toBe("<html>CodeGoblin</html>")
     }),
   )
 
   it.live("strips upstream transfer encoding headers from proxied assets", () =>
-    Effect.gen(function* () {
-      let proxiedUrl: string | undefined
+    withProxyOnlyUIEffect(
+      Effect.gen(function* () {
+        let proxiedUrl: string | undefined
 
-      const response = yield* Effect.gen(function* () {
-        const fs = yield* AppFileSystem.Service
-        const client = yield* HttpClient.HttpClient
-        const flags = yield* RuntimeFlags.Service
-        return yield* serveUIEffect(HttpServerRequest.fromWeb(new Request("http://localhost/assets/app.js")), {
-          fs,
-          client,
-          disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
-        })
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            RuntimeFlags.layer({ disableEmbeddedWebUi: true }),
-            Layer.succeed(
-              HttpClient.HttpClient,
-              HttpClient.make((request) => {
-                proxiedUrl = request.url
-                return Effect.succeed(
-                  HttpClientResponse.fromWeb(
-                    request,
-                    new Response("console.log('ok')", {
-                      headers: {
-                        "content-encoding": "br",
-                        "content-length": "999",
-                        "content-type": "text/javascript",
-                      },
-                    }),
-                  ),
-                )
-              }),
+        const response = yield* Effect.gen(function* () {
+          const fs = yield* AppFileSystem.Service
+          const client = yield* HttpClient.HttpClient
+          const flags = yield* RuntimeFlags.Service
+          return yield* serveUIEffect(HttpServerRequest.fromWeb(new Request("http://localhost/assets/app.js")), {
+            fs,
+            client,
+            disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+          })
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              RuntimeFlags.layer({ disableEmbeddedWebUi: true }),
+              Layer.succeed(
+                HttpClient.HttpClient,
+                HttpClient.make((request) => {
+                  proxiedUrl = request.url
+                  return Effect.succeed(
+                    HttpClientResponse.fromWeb(
+                      request,
+                      new Response("console.log('ok')", {
+                        headers: {
+                          "content-encoding": "br",
+                          "content-length": "999",
+                          "content-type": "text/javascript",
+                        },
+                      }),
+                    ),
+                  )
+                }),
+              ),
             ),
           ),
-        ),
-        Effect.map(HttpServerResponse.toWeb),
-      )
+          Effect.map(HttpServerResponse.toWeb),
+        )
 
-      expect(response.status).toBe(200)
-      expect(proxiedUrl).toBe("https://app.opencode.ai/assets/app.js")
-      expect(response.headers.get("content-encoding")).toBeNull()
-      expect(response.headers.get("content-length")).not.toBe("999")
-      expect(response.headers.get("content-type")).toContain("text/javascript")
-      expect(yield* responseText(response)).toBe("console.log('ok')")
-    }),
+        expect(response.status).toBe(200)
+        expect(proxiedUrl).toBe("https://app.opencode.ai/assets/app.js")
+        expect(response.headers.get("content-encoding")).toBeNull()
+        expect(response.headers.get("content-length")).not.toBe("999")
+        expect(response.headers.get("content-type")).toContain("text/javascript")
+        expect(yield* responseText(response)).toBe("console.log('ok')")
+      }),
+    ),
   )
 
   // Regression for #25698 (Ope): upstream `transfer-encoding: chunked` was
   // forwarded through the proxy while the proxy itself re-frames the body,
   // causing browsers to fail with `ERR_INVALID_CHUNKED_ENCODING`.
   it.live("strips upstream transfer-encoding header from proxied assets", () =>
-    Effect.gen(function* () {
-      const response = yield* Effect.gen(function* () {
-        const fs = yield* AppFileSystem.Service
-        const client = yield* HttpClient.HttpClient
-        const flags = yield* RuntimeFlags.Service
-        return yield* serveUIEffect(HttpServerRequest.fromWeb(new Request("http://localhost/")), {
-          fs,
-          client,
-          disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
-        })
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            RuntimeFlags.layer({ disableEmbeddedWebUi: true }),
-            Layer.succeed(
-              HttpClient.HttpClient,
-              HttpClient.make((request) =>
-                Effect.succeed(
-                  HttpClientResponse.fromWeb(
-                    request,
-                    new Response("<html>opencode</html>", {
-                      headers: {
-                        "transfer-encoding": "chunked",
-                        "content-type": "text/html",
-                      },
-                    }),
+    withProxyOnlyUIEffect(
+      Effect.gen(function* () {
+        const response = yield* Effect.gen(function* () {
+          const fs = yield* AppFileSystem.Service
+          const client = yield* HttpClient.HttpClient
+          const flags = yield* RuntimeFlags.Service
+          return yield* serveUIEffect(HttpServerRequest.fromWeb(new Request("http://localhost/")), {
+            fs,
+            client,
+            disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+          })
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              RuntimeFlags.layer({ disableEmbeddedWebUi: true }),
+              Layer.succeed(
+                HttpClient.HttpClient,
+                HttpClient.make((request) =>
+                  Effect.succeed(
+                    HttpClientResponse.fromWeb(
+                      request,
+                      new Response("<html>opencode</html>", {
+                        headers: {
+                          "transfer-encoding": "chunked",
+                          "content-type": "text/html",
+                        },
+                      }),
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
-        Effect.map(HttpServerResponse.toWeb),
-      )
+          Effect.map(HttpServerResponse.toWeb),
+        )
 
-      expect(response.status).toBe(200)
-      expect(response.headers.get("transfer-encoding")).toBeNull()
-      expect(yield* responseText(response)).toBe("<html>opencode</html>")
-    }),
+        expect(response.status).toBe(200)
+        expect(response.headers.get("transfer-encoding")).toBeNull()
+        expect(yield* responseText(response)).toBe("<html>opencode</html>")
+      }),
+    ),
   )
 
   it.live("serves embedded UI assets when Bun can read them but access reports missing", () =>
@@ -379,17 +463,19 @@ describe("HttpApi UI fallback", () => {
   )
 
   it.live("accepts auth token for the web UI", () =>
-    Effect.gen(function* () {
-      const response = yield* uiApp({
-        password: "secret",
-        username: "opencode",
-        disableEmbeddedWebUi: true,
-        client: httpClient(new Response("<html>opencode</html>", { headers: { "content-type": "text/html" } })),
-      }).request(`/?auth_token=${btoa("opencode:secret")}`)
+    withProxyOnlyUIEffect(
+      Effect.gen(function* () {
+        const response = yield* uiApp({
+          password: "secret",
+          username: "opencode",
+          disableEmbeddedWebUi: true,
+          client: httpClient(new Response("<html>opencode</html>", { headers: { "content-type": "text/html" } })),
+        }).request(`/?auth_token=${btoa("opencode:secret")}`)
 
-      expect(response.status).toBe(200)
-      expect(yield* responseText(response)).toBe("<html>opencode</html>")
-    }),
+        expect(response.status).toBe(200)
+        expect(yield* responseText(response)).toBe("<html>opencode</html>")
+      }),
+    ),
   )
 
   it.live("accepts basic auth for the web UI", () =>
