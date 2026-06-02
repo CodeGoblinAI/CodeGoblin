@@ -86,7 +86,7 @@ describe("installation", () => {
       Effect.gen(function* () {
         const result = yield* Installation.use.latest("npm")
         expect(result).toBe("1.5.0")
-        expect(npmCalls).toContain(`https://registry.npmjs.org/opencode-ai/${InstallationChannel}`)
+        expect(npmCalls).toContain(`https://registry.npmjs.org/codegoblin/${InstallationChannel}`)
       }),
     )
 
@@ -100,7 +100,7 @@ describe("installation", () => {
       Effect.gen(function* () {
         const result = yield* Installation.use.latest("bun")
         expect(result).toBe("1.6.0")
-        expect(bunCalls).toContain(`https://registry.npmjs.org/opencode-ai/${InstallationChannel}`)
+        expect(bunCalls).toContain(`https://registry.npmjs.org/codegoblin/${InstallationChannel}`)
       }),
     )
 
@@ -114,7 +114,7 @@ describe("installation", () => {
       Effect.gen(function* () {
         const result = yield* Installation.use.latest("pnpm")
         expect(result).toBe("1.7.0")
-        expect(pnpmCalls).toContain(`https://registry.npmjs.org/opencode-ai/${InstallationChannel}`)
+        expect(pnpmCalls).toContain(`https://registry.npmjs.org/codegoblin/${InstallationChannel}`)
       }),
     )
 
@@ -193,20 +193,20 @@ describe("installation", () => {
 
     testEffect(
       testLayer(
-        () => new Response("install script with token=secret", { status: 200 }),
+        () => jsonResponse({}),
         (cmd) => {
-          if (cmd === "bash") return { code: 1, stderr: "script output with token=secret" }
+          if (cmd === "npm") return { code: 1, stderr: "token=secret command output" }
           return ""
         },
       ),
-    ).effect("returns sanitized typed errors when the curl install script fails", () =>
+    ).effect("returns sanitized typed errors when curl upgrade falls back to npm", () =>
       Effect.gen(function* () {
         const error = yield* Effect.flip(Installation.use.upgrade("curl", "9.9.9"))
         expect(error).toBeInstanceOf(Installation.UpgradeFailedError)
         expect(error.stderr).toBe("Upgrade failed for curl (exit code 1).")
         expect(error.message).toBe(error.stderr)
         expect(error.stderr).not.toContain("secret")
-        expect(error.stderr).not.toContain("script output")
+        expect(error.stderr).not.toContain("command output")
       }),
     )
   })

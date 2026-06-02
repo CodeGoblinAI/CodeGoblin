@@ -12,7 +12,19 @@ import { EventV2 } from "./event"
 export const CatalogModelStatus = Schema.Literals(["alpha", "beta", "deprecated"])
 export type CatalogModelStatus = typeof CatalogModelStatus.Type
 
-const USER_AGENT = `opencode/${InstallationChannel}/${InstallationVersion}/${Flag.OPENCODE_CLIENT}`
+const USER_AGENT = `${process.env.CODEGOBLIN_CLI_NAME || (process.env.CODEGOBLIN === "1" ? "codegoblin" : "opencode")}/${InstallationChannel}/${InstallationVersion}/${Flag.OPENCODE_CLIENT}`
+
+function defaultModelsSource() {
+  const configured = Flag.OPENCODE_MODELS_URL
+  if (configured) return configured
+  if (process.env.CODEGOBLIN === "1") {
+    return (
+      process.env.CODEGOBLIN_MODELS_CATALOG_URL ||
+      "https://raw.githubusercontent.com/shawnisikli/CodeGoblin/dev/packages/codegoblin/models"
+    )
+  }
+  return "https://models.dev"
+}
 
 const CostTier = Schema.Struct({
   input: Schema.Finite,
@@ -137,7 +149,7 @@ export const layer = Layer.effect(
       ),
     )
 
-    const source = Flag.OPENCODE_MODELS_URL || "https://models.dev"
+    const source = defaultModelsSource()
     const filepath = path.join(
       Global.Path.cache,
       source === "https://models.dev" ? "models.json" : `models-${Hash.fast(source)}.json`,
