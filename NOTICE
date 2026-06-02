@@ -1,0 +1,20 @@
+CodeGoblin
+Copyright (c) 2025-2026 Shawn Isikli and CodeGoblin contributors
+
+This product includes software developed as part of the OpenCode project.
+
+OpenCode
+Copyright (c) 2025 opencode
+
+Both CodeGoblin and OpenCode are licensed under the MIT License. See LICENSE
+for the full license text.
+
+CodeGoblin is an independent fork/customization of OpenCode and is not
+affiliated with OpenCode, Anomaly, or their maintainers.
+
+Upstream repository: https://github.com/anomalyco/opencode
+Fork details: UPSTREAM.md
+
+Some user-facing and compatibility identifiers intentionally retain OpenCode
+names (for example `opencode.json`, `.opencode/`, `OPENCODE_*` environment
+variables, and provider IDs such as `opencode`). See docs/OPEN_SOURCE_BOUNDARIES.md.

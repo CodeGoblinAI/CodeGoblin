@@ -107,7 +107,7 @@ const HTML_CALLBACK = `<!doctype html>
             return
           }
           titleEl.textContent = "Authorization Successful"
-          msgEl.textContent = "You can close this window and return to OpenCode."
+          msgEl.textContent = "You can close this window and return to CodeGoblin."
           setTimeout(function () { window.close() }, 2000)
         } catch (e) {
           titleEl.textContent = "Authorization Failed"
@@ -365,7 +365,7 @@ export async function DigitalOceanAuthPlugin(input: PluginInput): Promise<Hooks>
             return {
               url: buildAuthorizeUrl(state),
               instructions:
-                "Sign in to DigitalOcean in your browser. OpenCode will create a Model Access Key named opencode-oauth-* and load your Inference Routers. Re-run /connect to refresh routers later.",
+                "Sign in to DigitalOcean in your browser. CodeGoblin will create a Model Access Key named opencode-oauth-* and load your Inference Routers. Re-run /connect to refresh routers later.",
               method: "auto" as const,
               async callback() {
                 try {

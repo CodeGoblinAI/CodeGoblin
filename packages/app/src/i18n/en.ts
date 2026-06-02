@@ -300,7 +300,7 @@ export const dict = {
   "dialog.mcp.empty": "No MCPs configured",
 
   "dialog.lsp.empty": "LSPs auto-detected from file types",
-  "dialog.plugins.empty": "Plugins configured in CodeGoblin config (opencode.json)",
+  "dialog.plugins.empty": "Plugins configured in codegoblin.jsonc (legacy opencode.json supported)",
 
   "mcp.status.connected": "connected",
   "mcp.status.failed": "failed",
@@ -500,7 +500,7 @@ export const dict = {
   "error.chain.responseBody": "Response body:\n{{body}}",
   "error.chain.didYouMean": "Did you mean: {{suggestions}}",
   "error.chain.modelNotFound": "Model not found: {{provider}}/{{model}}",
-  "error.chain.checkConfig": "Check your CodeGoblin config (opencode.json) provider/model names",
+  "error.chain.checkConfig": "Check your CodeGoblin config (codegoblin.jsonc or opencode.json) provider/model names",
   "error.chain.mcpFailed": 'MCP server "{{name}}" failed. CodeGoblin could not complete this MCP authentication flow yet.',
   "error.chain.providerAuthFailed": "Provider authentication failed ({{provider}}): {{message}}",
   "error.chain.providerInitFailed":

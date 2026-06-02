@@ -23,6 +23,7 @@ import { TestLLMServer } from "../../lib/llm-server"
 import path from "path"
 import { array, boolean, check, isRecord, message, object, stable } from "./assertions"
 import { controlledPtyInput, http, route } from "./dsl"
+import { CodeGoblinMemory } from "../../../src/codegoblin/memory"
 import {
   cleanupExercisePaths,
   exerciseConfigDirectory,
@@ -1319,6 +1320,70 @@ const scenarios: Scenario[] = [
     .probe({ path: "/global/upgrade", body: { target: 1 } })
     .at(() => ({ path: "/global/upgrade", body: { target: 1 } }))
     .status(400),
+  http.protected
+    .get("/codegoblin/memory/status", "memory.status")
+    .json(200, (body) => {
+      object(body)
+      check(typeof body.total === "number", "memory status should include total")
+      check(typeof body.active === "number", "memory status should include active count")
+    }),
+  http.protected.get("/codegoblin/memory", "memory.list").json(200, array),
+  http.protected
+    .post("/codegoblin/memory", "memory.add")
+    .mutating()
+    .at((ctx) => ({
+      path: "/codegoblin/memory",
+      headers: ctx.headers(),
+      body: { scope: "user", content: "HTTP API memory exercise entry" },
+    }))
+    .json(200, (body) => {
+      object(body)
+      check(typeof body.id === "string", "memory add should return id")
+      check(body.content === "HTTP API memory exercise entry", "memory add should return content")
+    }),
+  http.protected
+    .post("/codegoblin/memory/{id}/pin", "memory.pin")
+    .mutating()
+    .seeded(() => Effect.sync(() => CodeGoblinMemory.add({ scope: "user", content: "pin exercise memory" })))
+    .at((ctx) => ({
+      path: route("/codegoblin/memory/{id}/pin", { id: ctx.state.id }),
+      headers: ctx.headers(),
+      body: { pinned: true },
+    }))
+    .json(200, (body) => {
+      object(body)
+      check(body.success === true, "memory pin should succeed")
+    }),
+  http.protected
+    .delete("/codegoblin/memory/{id}", "memory.remove")
+    .mutating()
+    .seeded(() => Effect.sync(() => CodeGoblinMemory.add({ scope: "user", content: "archive exercise memory" })))
+    .at((ctx) => ({
+      path: route("/codegoblin/memory/{id}", { id: ctx.state.id }),
+      headers: ctx.headers(),
+    }))
+    .json(200, (body) => {
+      object(body)
+      check(body.success === true, "memory archive should succeed")
+    }),
+  http.protected
+    .post("/codegoblin/memory/{id}/restore", "memory.restore")
+    .mutating()
+    .seeded(() =>
+      Effect.sync(() => {
+        const entry = CodeGoblinMemory.add({ scope: "user", content: "restore exercise memory" })
+        CodeGoblinMemory.remove(entry.id)
+        return entry
+      }),
+    )
+    .at((ctx) => ({
+      path: route("/codegoblin/memory/{id}/restore", { id: ctx.state.id }),
+      headers: ctx.headers(),
+    }))
+    .json(200, (body) => {
+      object(body)
+      check(body.success === true, "memory restore should succeed")
+    }),
 ]
 
 const llmScenarios = new Set([

@@ -1,15 +1,30 @@
-# js
+# CodeGoblin CLI
 
-To install dependencies:
+Local AI coding agent — terminal UI, web UI, BYOK providers, and CodeGoblin image workflows.
+
+## Commands
+
+```bash
+codegoblin          # interactive TUI
+codegoblin web      # local web UI
+codegoblin image    # image generation with local output paths
+cg                  # short alias
+```
+
+## Development
 
 ```bash
 bun install
+bun run typecheck
+bun test
+bun run test:httpapi
+bun run build --single --skip-install
 ```
 
-To run:
+Publish dry-run:
 
 ```bash
-bun run index.ts
+bun run script/publish.ts --dry-run
 ```
 
-This project was created using `bun init` in bun v1.2.12. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
+See the repository root `README.md` for install, attribution, and open-source boundaries.

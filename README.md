@@ -2,11 +2,9 @@
 
 Your local AI goblin for code, images, and agents.
 
-CodeGoblin is an independent fork/customization of OpenCode and is not affiliated with OpenCode, Anomaly, or their maintainers. It preserves the OpenCode-style local agent architecture while adding CodeGoblin branding, image-generation workflows, local asset output paths, and a path toward simpler end-user installation.
+CodeGoblin is a local-first AI coding agent with a terminal UI, web UI, and BYOK provider support. It keeps prompts, sessions, and generated assets on your machine by default, and adds goblin-branded workflows for image generation, local asset output, and simpler installation.
 
 ## Install
-
-The intended public npm install path is:
 
 ```bash
 npm install -g codegoblin
@@ -20,9 +18,9 @@ codegoblin
 cg --help
 ```
 
-The `codegoblin` npm package is wired to install a small launcher plus the native binary package for your platform. The short `cg` command is included as an alias.
+The `codegoblin` npm package installs a small launcher plus the native binary package for your platform. `cg` is included as a short alias.
 
-> The npm package wiring is being prepared on the CodeGoblin local-install branch. Until a release is published, use the source checkout flow below.
+Publish and dry-run via GitHub Actions → **publish-codegoblin-npm** on `shawnisikli/CodeGoblin`.
 
 ## Run from a source checkout
 
@@ -36,7 +34,7 @@ codegoblin --help
 cg --help
 ```
 
-`npm run build` is a convenience wrapper around `bun run --cwd packages/codegoblin build --single --skip-install`; Bun is still the package manager for dependencies.
+`npm run build` wraps `bun run --cwd packages/codegoblin build --single --skip-install`. Bun is still the package manager for dependencies.
 
 On Windows, the embedded web build may need a newer Node first on `PATH`:
 
@@ -45,13 +43,13 @@ $env:PATH='C:\Users\shawn\.cache\codex-runtimes\codex-primary-runtime\dependenci
 npm run build
 ```
 
-If you only need quick CLI/TUI smoke tests, `--skip-embed-web-ui` is still available. Do **not** use it for public `codegoblin web` builds: without embedded CodeGoblin web assets the compatibility fallback can proxy the browser UI through the upstream web host, which is not the intended CodeGoblin release experience even though the local server still runs on `127.0.0.1`.
+For quick CLI/TUI smoke tests only, `--skip-embed-web-ui` is available. Do **not** use it for public `codegoblin web` builds: without embedded CodeGoblin web assets the compatibility fallback can proxy the browser UI through an upstream web host.
 
-On Windows, if native dependency install scripts fail in a local checkout, this lighter setup is often enough for CLI smoke testing:
+On Windows, if native dependency install scripts fail in a local checkout:
 
 ```bat
 bun install --ignore-scripts
-set MODELS_DEV_API_JSON=%CD%\packages\opencode\test\tool\fixtures\models-api.json
+set MODELS_DEV_API_JSON=%CD%\packages\codegoblin\test\tool\fixtures\models-api.json
 bun run --cwd packages/codegoblin build --single --skip-embed-web-ui --skip-install
 ```
 
@@ -78,6 +76,13 @@ bun run --cwd packages/codegoblin build --single --skip-embed-web-ui --skip-inst
 bun run --cwd packages/codegoblin script/publish.ts --dry-run
 ```
 
+Backend route coverage (isolated DB, safe for CI):
+
+```bash
+bun run --cwd packages/codegoblin test:httpapi
+bun run --cwd packages/codegoblin script/httpapi-exercise.ts --mode coverage --fail-on-missing --fail-on-skip
+```
+
 Do not run tests from the repo root; use package directories such as `packages/codegoblin`.
 
 ## npm packaging notes
@@ -89,14 +94,15 @@ The CodeGoblin npm package is generated from `packages/codegoblin/script/publish
 - native package prefix: `codegoblin-<platform>-<arch>`
 - native postinstall config is stored in generated package metadata
 
-The internal workspace still contains OpenCode-compatible package names and paths where broad renames would be risky. User-facing install and command surfaces should prefer CodeGoblin names.
+Some internal paths and compatibility identifiers still use OpenCode names where broad renames would break existing configs. User-facing install and command surfaces prefer CodeGoblin names.
 
 ## Attribution
 
-CodeGoblin builds on OpenCode's MIT-licensed architecture. Preserve legal attribution and compatibility notes when changing inherited internals.
+CodeGoblin builds on OpenCode's MIT-licensed architecture. It is an independent fork/customization of [OpenCode](https://github.com/anomalyco/opencode) and is not affiliated with OpenCode, Anomaly, or their maintainers.
 
 See also:
 
+- `NOTICE`
 - `UPSTREAM.md`
 - `docs/OPEN_SOURCE_BOUNDARIES.md`
 - `docs/MONETIZATION.md`

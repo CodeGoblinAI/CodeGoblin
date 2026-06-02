@@ -1,8 +1,6 @@
 # Upstream
 
-CodeGoblin is an independent fork/customization of OpenCode.
-
-CodeGoblin is not affiliated with OpenCode, Anomaly, or their maintainers.
+CodeGoblin builds on OpenCode's MIT-licensed codebase. It is an independent fork/customization and is not affiliated with OpenCode, Anomaly, or their maintainers.
 
 ## Upstream Details
 
@@ -12,7 +10,18 @@ CodeGoblin is not affiliated with OpenCode, Anomaly, or their maintainers.
 - Fork date: 2026-05-24
 - Fork-start commit: `47f333299bb193f28dfdd94ccc43e55c529198ee`
 - Upstream license: MIT
-- Upstream copyright notice in `LICENSE`: `Copyright (c) 2025 opencode`
+- Upstream copyright notice: `Copyright (c) 2025 opencode` (preserved in LICENSE and NOTICE)
+
+## What stays OpenCode-named
+
+Compatibility surfaces are intentionally preserved until a dedicated migration provides aliases, data migration, and release notes. Examples:
+
+- Config files: `opencode.json`, `opencode.jsonc`, `.opencode/`
+- Environment variables: `OPENCODE_*` (with `CODEGOBLIN_*` preferred for new CodeGoblin-specific flags)
+- Provider IDs: `opencode`, `opencode-go`, and related upstream-hosted provider integrations
+- Internal API/type names where renaming would break extensions or stored data
+
+See `docs/OPEN_SOURCE_BOUNDARIES.md` for the full list.
 
 ## Attribution
 
@@ -45,8 +54,6 @@ Resolve conflicts by preserving CodeGoblin product changes while keeping upstrea
 git push -u origin dev
 ```
 
-## Public Disclaimer
-
-Use this wording in public-facing docs:
+## Public disclaimer (when needed)
 
 > CodeGoblin is an independent fork/customization of OpenCode and is not affiliated with OpenCode, Anomaly, or their maintainers.
