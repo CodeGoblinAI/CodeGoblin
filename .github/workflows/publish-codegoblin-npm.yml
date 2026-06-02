@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   publish-npm:
-    if: github.repository == 'shawnisikli/CodeGoblin'
+    if: github.repository == 'shawnisikli/CodeGoblin' || github.repository == 'codegoblin/codegoblin'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
@@ -35,8 +35,9 @@ jobs:
         shell: bash
         env:
           OPENCODE_VERSION: ${{ inputs.version }}
+          OPENCODE_CHANNEL: latest
         run: |
-          ./packages/codegoblin/script/build.ts
+          ./packages/codegoblin/script/build.ts --single --skip-install
 
       - name: Pack or publish CodeGoblin npm packages
         shell: bash
@@ -44,6 +45,8 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
           OPENCODE_VERSION: ${{ inputs.version }}
+          OPENCODE_CHANNEL: latest
+          CODEGOBLIN_NPM_SCOPE: ${{ vars.CODEGOBLIN_NPM_SCOPE }}
           CODEGOBLIN_PUBLISH_DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
         run: |
           if [ "${{ inputs.dry_run }}" != "true" ] && [ -z "$NODE_AUTH_TOKEN" ]; then

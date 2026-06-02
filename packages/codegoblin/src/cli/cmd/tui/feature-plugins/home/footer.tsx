@@ -1,7 +1,10 @@
 import type { TuiPlugin, TuiPluginApi } from "@codegoblin/plugin/tui"
 import type { InternalTuiPlugin } from "../../plugin/internal"
-import { createMemo, Match, Show, Switch } from "solid-js"
+import semver from "semver"
+import { InstallationVersion } from "@codegoblin/core/installation/version"
+import { createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from "solid-js"
 import { Global } from "@codegoblin/core/global"
+import { markUpdateAvailable, UPDATE_AVAILABLE_KV_KEY } from "../../util/installation-update"
 
 const id = "internal:home-footer"
 
@@ -47,10 +50,31 @@ function Mcp(props: { api: TuiPluginApi }) {
 
 function Version(props: { api: TuiPluginApi }) {
   const theme = () => props.api.theme.current
+  const [updateVersion, setUpdateVersion] = createSignal<string | undefined>(
+    props.api.kv.get(UPDATE_AVAILABLE_KV_KEY, undefined),
+  )
+
+  onMount(() => {
+    const stop = props.api.event.on("installation.update-available", (evt) => {
+      markUpdateAvailable(props.api.kv, evt.properties.version)
+      setUpdateVersion(evt.properties.version)
+    })
+    onCleanup(stop)
+  })
+
+  const showUpdate = createMemo(() => {
+    const latest = updateVersion()
+    if (!latest) return false
+    if (!semver.valid(latest) || !semver.valid(InstallationVersion)) return true
+    return semver.gt(latest, InstallationVersion)
+  })
 
   return (
-    <box flexShrink={0}>
+    <box flexDirection="row" flexShrink={0} gap={1}>
       <text fg={theme().textMuted}>{props.api.app.version}</text>
+      <Show when={showUpdate()}>
+        <text fg={theme().warning}>↑ v{updateVersion()} · codegoblin update</text>
+      </Show>
     </box>
   )
 }

@@ -153,22 +153,27 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
 
     const upgradeCurl = Effect.fnUntraced(
       function* (target: string) {
-        if (Product.installScriptUrl) {
-          const response = yield* httpOk.execute(HttpClientRequest.get(Product.installScriptUrl))
-          const body = yield* response.text
-          const bodyBytes = new TextEncoder().encode(body)
-          const result = yield* appProcess.run(
-            ChildProcess.make("bash", [], {
-              stdin: Stream.make(bodyBytes),
-              env: { VERSION: target },
-              extendEnv: true,
-            }),
+        if (process.platform !== "win32" && Product.installScriptUrl) {
+          const piped = yield* Effect.gen(function* () {
+            const response = yield* httpOk.execute(HttpClientRequest.get(Product.installScriptUrl))
+            const body = yield* response.text
+            const bodyBytes = new TextEncoder().encode(body)
+            return yield* appProcess.run(
+              ChildProcess.make("bash", [], {
+                stdin: Stream.make(bodyBytes),
+                env: { VERSION: target, CODEGOBLIN_NPM_PACKAGE: Product.npmScopedPackage },
+                extendEnv: true,
+              }),
+            )
+          }).pipe(
+            Effect.map((result) => ({
+              code: result.exitCode,
+              stdout: result.stdout.toString("utf8"),
+              stderr: result.stderr.toString("utf8"),
+            })),
+            Effect.catch(() => Effect.succeed(undefined)),
           )
-          return {
-            code: result.exitCode,
-            stdout: result.stdout.toString("utf8"),
-            stderr: result.stderr.toString("utf8"),
-          }
+          if (piped) return piped
         }
         return yield* run(["npm", "install", "-g", npmInstallSpec(target)])
       },
@@ -189,10 +194,10 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
         const exec = process.execPath.toLowerCase()
 
         const checks: Array<{ name: Method; command: () => Effect.Effect<string>; packages: string[] }> = [
-          { name: "npm", command: () => text(["npm", "list", "-g", "--depth=0"]), packages: [Product.npmPackage, Product.legacyNpmPackage] },
-          { name: "yarn", command: () => text(["yarn", "global", "list"]), packages: [Product.npmPackage, Product.legacyNpmPackage] },
-          { name: "pnpm", command: () => text(["pnpm", "list", "-g", "--depth=0"]), packages: [Product.npmPackage, Product.legacyNpmPackage] },
-          { name: "bun", command: () => text(["bun", "pm", "ls", "-g"]), packages: [Product.npmPackage, Product.legacyNpmPackage] },
+          { name: "npm", command: () => text(["npm", "list", "-g", "--depth=0"]), packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage] },
+          { name: "yarn", command: () => text(["yarn", "global", "list"]), packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage] },
+          { name: "pnpm", command: () => text(["pnpm", "list", "-g", "--depth=0"]), packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage] },
+          { name: "bun", command: () => text(["bun", "pm", "ls", "-g"]), packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage] },
           {
             name: "brew",
             command: () => text(["brew", "list", "--formula", Product.brewFormulae[0]]),

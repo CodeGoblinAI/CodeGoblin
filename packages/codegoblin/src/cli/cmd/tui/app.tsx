@@ -21,6 +21,11 @@ import {
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { Flag } from "@codegoblin/core/flag/flag"
 import semver from "semver"
+import {
+  markUpdateAvailable,
+  performInstallationUpdate,
+  SKIPPED_VERSION_KV_KEY,
+} from "@tui/util/installation-update"
 import { DialogProvider, useDialog } from "@tui/ui/dialog"
 import { DialogProvider as DialogProviderList } from "@tui/component/dialog-provider"
 import { ErrorComponent } from "@tui/component/error-component"
@@ -946,48 +951,29 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
   event.on("installation.update-available", async (evt) => {
     const version = evt.properties.version
 
-    const skipped = kv.get("skipped_version")
+    const skipped = kv.get(SKIPPED_VERSION_KV_KEY)
     if (skipped && !semver.gt(version, skipped)) return
 
-    const choice = await DialogConfirm.show(
-      dialog,
-      `Update Available`,
-      `A new release v${version} is available. Would you like to update now?`,
-      "skip",
-    )
-
-    if (choice === false) {
-      kv.set("skipped_version", version)
-      return
-    }
-
-    if (choice !== true) return
+    markUpdateAvailable(kv, version)
 
     toast.show({
       variant: "info",
-      message: `Updating to v${version}...`,
-      duration: 30000,
+      title: "Update available",
+      message: `CodeGoblin v${version} is ready — run codegoblin update`,
+      duration: 12000,
     })
 
-    const result = await sdk.client.global.upgrade({ target: version })
+    if (!Flag.OPENCODE_ALWAYS_NOTIFY_UPDATE) return
 
-    if (result.error || !result.data?.success) {
-      toast.show({
-        variant: "error",
-        title: "Update Failed",
-        message: "Update failed",
-        duration: 10000,
-      })
-      return
-    }
-
-    await DialogAlert.show(
+    await performInstallationUpdate({
+      version,
       dialog,
-      "Update Complete",
-      `Successfully updated CodeGoblin to v${result.data.version}. Please restart the application.`,
-    )
-
-    void exit()
+      kv,
+      sdk,
+      toast,
+      exit,
+      confirm: true,
+    })
   })
 
   const plugin = createMemo(() => {

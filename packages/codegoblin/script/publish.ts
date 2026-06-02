@@ -13,11 +13,16 @@ const dryRun = process.argv.includes("--dry-run") || process.env.CODEGOBLIN_PUBL
 const product = {
   name: "CodeGoblin",
   npm: process.env.CODEGOBLIN_NPM_PACKAGE || "codegoblin",
+  npmScope: process.env.CODEGOBLIN_NPM_SCOPE,
   binaryPrefix: process.env.CODEGOBLIN_BINARY_PACKAGE_PREFIX || "codegoblin",
   command: "codegoblin",
   shortCommand: "cg",
   description: "Your local AI goblin for code, images, and agents.",
   repository: "https://github.com/shawnisikli/CodeGoblin",
+}
+
+function publishedPackageName() {
+  return product.npmScope ? `${product.npmScope}/${product.npm}` : product.npm
 }
 
 async function published(name: string, version: string) {
@@ -167,6 +172,7 @@ The npm package installs a small launcher plus the native ${product.name} binary
 }
 
 async function createInstallerPackage(nativePackages: Record<string, string>, version: string) {
+  const packageName = publishedPackageName()
   const packageDir = path.join(dir, "dist", product.npm)
   await fs.promises.rm(packageDir, { recursive: true, force: true })
   await fs.promises.mkdir(path.join(packageDir, "bin"), { recursive: true })
@@ -181,7 +187,7 @@ async function createInstallerPackage(nativePackages: Record<string, string>, ve
   await fs.promises.chmod(shortCommandWrapper, 0o755)
 
   await writeJSON(path.join(packageDir, "package.json"), {
-    name: product.npm,
+    name: packageName,
     version,
     description: product.description,
     license: pkg.license,
@@ -230,4 +236,4 @@ console.log("native packages", nativePackages)
 await createInstallerPackage(nativePackages, version)
 
 await Promise.all(Object.entries(nativePackages).map(([name, version]) => publish(`./dist/${name}`, name, version)))
-await publish(`./dist/${product.npm}`, product.npm, version)
+await publish(`./dist/${product.npm}`, publishedPackageName(), version)

@@ -6,17 +6,28 @@ function envOr(suffix: string, fallback: string) {
   return env(suffix) || fallback
 }
 
+const githubRepo = envOr("GITHUB_REPO", "shawnisikli/CodeGoblin")
+const npmPackage = envOr("NPM_PACKAGE", "codegoblin")
+const npmScope = env("NPM_SCOPE")
+
 /** CodeGoblin distribution identity — used for updates, npm install, and release checks. */
 export const Product = {
   name: "CodeGoblin",
   cliName: envOr("CLI_NAME", "codegoblin"),
-  npmPackage: envOr("NPM_PACKAGE", "codegoblin"),
+  /** Unscoped package today (`codegoblin`). Future org scope via CODEGOBLIN_NPM_SCOPE, e.g. `@codegoblin/cli`. */
+  npmPackage,
+  npmScope,
+  npmScopedPackage: npmScope ? `${npmScope}/${npmPackage}` : npmPackage,
   /** Legacy npm package name kept for install-method detection on migrated machines. */
   legacyNpmPackage: "opencode-ai",
-  githubRepo: envOr("GITHUB_REPO", "shawnisikli/CodeGoblin"),
-  githubReleaseApi: () => `https://api.github.com/repos/${Product.githubRepo}/releases/latest`,
-  /** Optional install script URL; curl installs fall back to npm when unset. */
-  installScriptUrl: env("INSTALL_SCRIPT_URL"),
+  githubRepo,
+  githubReleaseApi: () => `https://api.github.com/repos/${githubRepo}/releases/latest`,
+  installScriptUrl:
+    env("INSTALL_SCRIPT_URL") ||
+    `https://raw.githubusercontent.com/${githubRepo}/dev/script/install.sh`,
+  installScriptUrlWindows:
+    env("INSTALL_SCRIPT_URL_WINDOWS") ||
+    `https://raw.githubusercontent.com/${githubRepo}/dev/script/install.ps1`,
   /** Default remote models catalog base (append /api.json). Override with CODEGOBLIN_MODELS_URL. */
   modelsCatalogUrl: envOr("MODELS_CATALOG_URL", "https://raw.githubusercontent.com/shawnisikli/CodeGoblin/dev/packages/codegoblin/models"),
   brewFormulae: [envOr("BREW_FORMULA", "codegoblin"), "anomalyco/tap/opencode", "opencode"],
@@ -28,11 +39,12 @@ export const Product = {
 
 export function npmRegistryPackageUrl(registry: string, channel: string) {
   const tag = channel || "latest"
-  return `${registry.replace(/\/$/, "")}/${Product.npmPackage}/${tag}`
+  const pkg = encodeURIComponent(Product.npmScopedPackage)
+  return `${registry.replace(/\/$/, "")}/${pkg}/${tag}`
 }
 
 export function npmInstallSpec(version: string) {
-  return `${Product.npmPackage}@${version}`
+  return `${Product.npmScopedPackage}@${version}`
 }
 
 export function legacyNpmInstallSpec(version: string) {

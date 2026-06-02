@@ -100,13 +100,13 @@ jobs:
         with:
           name: opencode-cli
           path: |
-            packages/codegoblin/dist/opencode-darwin*
-            packages/codegoblin/dist/opencode-linux*
+            packages/codegoblin/dist/codegoblin-darwin*
+            packages/codegoblin/dist/codegoblin-linux*
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: opencode-cli-windows
-          path: packages/codegoblin/dist/opencode-windows*
+          path: packages/codegoblin/dist/codegoblin-windows*
     outputs:
       version: ${{ needs.version.outputs.version }}
 
@@ -151,9 +151,9 @@ jobs:
           signing-account-name: ${{ env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           certificate-profile-name: ${{ env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
           files: |
-            ${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64\bin\opencode.exe
-            ${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64\bin\opencode.exe
-            ${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode.exe
+            ${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-arm64\bin\opencode.exe
+            ${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64\bin\opencode.exe
+            ${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64-baseline\bin\opencode.exe
           exclude-environment-credential: true
           exclude-workload-identity-credential: true
           exclude-managed-identity-credential: true
@@ -169,9 +169,9 @@ jobs:
         shell: pwsh
         run: |
           $files = @(
-            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64\bin\opencode.exe",
-            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64\bin\opencode.exe",
-            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode.exe"
+            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-arm64\bin\opencode.exe",
+            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64\bin\opencode.exe",
+            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64-baseline\bin\opencode.exe"
           )
 
           foreach ($file in $files) {
@@ -185,9 +185,9 @@ jobs:
         working-directory: packages/codegoblin/dist
         shell: pwsh
         run: |
-          Compress-Archive -Path "opencode-windows-arm64\bin\*" -DestinationPath "opencode-windows-arm64.zip" -Force
-          Compress-Archive -Path "opencode-windows-x64\bin\*" -DestinationPath "opencode-windows-x64.zip" -Force
-          Compress-Archive -Path "opencode-windows-x64-baseline\bin\*" -DestinationPath "opencode-windows-x64-baseline.zip" -Force
+          Compress-Archive -Path "codegoblin-windows-arm64\bin\*" -DestinationPath "codegoblin-windows-arm64.zip" -Force
+          Compress-Archive -Path "codegoblin-windows-x64\bin\*" -DestinationPath "codegoblin-windows-x64.zip" -Force
+          Compress-Archive -Path "codegoblin-windows-x64-baseline\bin\*" -DestinationPath "codegoblin-windows-x64-baseline.zip" -Force
 
       - name: Upload signed Windows CLI release assets
         if: needs.version.outputs.release != ''
@@ -196,9 +196,9 @@ jobs:
           GH_TOKEN: ${{ steps.committer.outputs.token }}
         run: |
           gh release upload "v${{ needs.version.outputs.version }}" `
-            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64.zip" `
-            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64.zip" `
-            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline.zip" `
+            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-arm64.zip" `
+            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64.zip" `
+            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64-baseline.zip" `
             --clobber `
             --repo "${{ needs.version.outputs.repo }}"
 
@@ -206,9 +206,9 @@ jobs:
         with:
           name: opencode-cli-signed-windows
           path: |
-            packages/codegoblin/dist/opencode-windows-arm64
-            packages/codegoblin/dist/opencode-windows-x64
-            packages/codegoblin/dist/opencode-windows-x64-baseline
+            packages/codegoblin/dist/codegoblin-windows-arm64
+            packages/codegoblin/dist/codegoblin-windows-x64
+            packages/codegoblin/dist/codegoblin-windows-x64-baseline
 
   build-electron:
     needs:
