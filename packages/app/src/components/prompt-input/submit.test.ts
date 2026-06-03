@@ -41,6 +41,7 @@ let variant: string | undefined
 let selectedModel: TestModel = { id: "model", provider: { id: "provider" } }
 let imageGenerationAutoApprove = false
 let audioGenerationAutoApprove = false
+let model3dGenerationAutoApprove = false
 let promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 let promptResetCount = 0
 let promptSetCount = 0
@@ -175,6 +176,7 @@ beforeAll(async () => {
       permissions: {
         imageGenerationAutoApprove: () => imageGenerationAutoApprove,
         audioGenerationAutoApprove: () => audioGenerationAutoApprove,
+        model3dGenerationAutoApprove: () => model3dGenerationAutoApprove,
       },
     }),
   }))
@@ -285,6 +287,7 @@ beforeEach(() => {
   selectedModel = { id: "model", provider: { id: "provider" } }
   imageGenerationAutoApprove = false
   audioGenerationAutoApprove = false
+  model3dGenerationAutoApprove = false
   promptValue = [{ type: "text", content: "ls", start: 0, end: 2 }]
   promptResetCount = 0
   promptSetCount = 0
@@ -841,5 +844,60 @@ describe("prompt submit worktree selection", () => {
     expect(optimistic).toHaveLength(0)
     expect(promptResetCount).toBe(0)
     expect(promptSetCount).toBe(0)
+  })
+
+  test("routes selected 3D models through the model3d endpoint after confirmation", async () => {
+    params = { id: "session-1" }
+    selectedModel = {
+      id: "text-to-model",
+      provider: { id: "tripo" },
+      family: "tripo-h3",
+      capabilities: {
+        input: { text: true },
+        output: { model3d: true },
+      },
+    }
+    promptValue = [{ type: "text", content: "wooden chair", start: 0, end: "wooden chair".length }]
+    model3dGenerationAutoApprove = true
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+    await submit.handleSubmit(event)
+
+    expect(fetchRequests).toHaveLength(1)
+    expect(fetchRequests[0]).toMatchObject({
+      url: "http://localhost:4096/codegoblin/model3d",
+      body: {
+        prompt: "wooden chair",
+        provider: "tripo",
+        model: "text-to-model",
+        modelVersion: "v3.1-20260211",
+        require3DModel: true,
+      },
+    })
+    expect((optimistic[1]?.parts?.[0] as any)?.metadata).toMatchObject({
+      codegoblin: {
+        kind: "3d-progress",
+        provider: "tripo",
+        model: "text-to-model",
+      },
+    })
+    expect(promptResetCount).toBe(1)
   })
 })

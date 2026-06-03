@@ -5,6 +5,9 @@ export const MediaSettingsKeys = {
   audioVoice: "codegoblin_audio_voice",
   audioFormat: "codegoblin_audio_format",
   audioAutoApprove: "codegoblin_audio_auto_approve",
+  model3dOutputDir: "codegoblin_model3d_output_dir",
+  model3dAutoApprove: "codegoblin_model3d_auto_approve",
+  model3dVersion: "codegoblin_model3d_version",
 } as const
 
 export const MediaSettingsDefaults = {
@@ -14,6 +17,9 @@ export const MediaSettingsDefaults = {
   audioVoice: "",
   audioFormat: "mp3_44100_128",
   audioAutoApprove: false,
+  model3dOutputDir: "codegoblin-output/models",
+  model3dAutoApprove: false,
+  model3dVersion: "v3.1-20260211",
 } as const
 
 export const AudioFormatOptions = [
@@ -43,6 +49,12 @@ export type AudioMediaSettings = {
   autoApprove: boolean
 }
 
+export type Model3DMediaSettings = {
+  outputDir: string
+  autoApprove: boolean
+  modelVersion: string
+}
+
 export function readImageSettings(kv: KVLike): ImageMediaSettings {
   return {
     outputDir: kv.get(MediaSettingsKeys.imageOutputDir, MediaSettingsDefaults.imageOutputDir),
@@ -56,5 +68,13 @@ export function readAudioSettings(kv: KVLike): AudioMediaSettings {
     voice: kv.get(MediaSettingsKeys.audioVoice, MediaSettingsDefaults.audioVoice),
     format: kv.get(MediaSettingsKeys.audioFormat, MediaSettingsDefaults.audioFormat),
     autoApprove: kv.get(MediaSettingsKeys.audioAutoApprove, MediaSettingsDefaults.audioAutoApprove),
+  }
+}
+
+export function readModel3DSettings(kv: KVLike): Model3DMediaSettings {
+  return {
+    outputDir: kv.get(MediaSettingsKeys.model3dOutputDir, MediaSettingsDefaults.model3dOutputDir),
+    autoApprove: kv.get(MediaSettingsKeys.model3dAutoApprove, MediaSettingsDefaults.model3dAutoApprove),
+    modelVersion: kv.get(MediaSettingsKeys.model3dVersion, MediaSettingsDefaults.model3dVersion),
   }
 }

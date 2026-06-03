@@ -42,4 +42,18 @@ describe("web model buckets", () => {
     expect(isDefaultChatModel(model)).toBe(false)
     expect(modelBucket(model)).toBe("Voice & audio models")
   })
+
+  test("places Tripo 3D models in the 3D bucket", () => {
+    const model = {
+      id: "text-to-model",
+      family: "tripo-h3",
+      capabilities: {
+        input: { text: true },
+        output: { model3d: true },
+      },
+    }
+    expect(modelBucket(model)).toBe("3D models")
+    expect(isChatSelectableModel(model)).toBe(true)
+    expect(isDefaultChatModel(model)).toBe(false)
+  })
 })

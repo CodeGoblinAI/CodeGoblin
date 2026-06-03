@@ -1463,6 +1463,15 @@ type CodeGoblinAudioMeta = {
   outputFormat?: string
 }
 
+type CodeGoblin3DMeta = {
+  kind: "3d-progress" | "3d-result" | "3d-error"
+  provider?: string
+  model?: string
+  output?: string
+  inputMode?: string
+  modelVersion?: string
+}
+
 function codeGoblinImageMeta(metadata: Record<string, unknown> | undefined): CodeGoblinImageMeta | undefined {
   const raw = metadata?.codegoblin
   if (!raw || typeof raw !== "object") return
@@ -1498,6 +1507,22 @@ function codeGoblinAudioMeta(metadata: Record<string, unknown> | undefined): Cod
     output: typeof value.output === "string" ? value.output : undefined,
     voice: typeof value.voice === "string" ? value.voice : undefined,
     outputFormat: typeof value.outputFormat === "string" ? value.outputFormat : undefined,
+  }
+}
+
+function codeGoblin3DMeta(metadata: Record<string, unknown> | undefined): CodeGoblin3DMeta | undefined {
+  const raw = metadata?.codegoblin
+  if (!raw || typeof raw !== "object") return
+  const value = raw as Record<string, unknown>
+  const kind = value.kind
+  if (kind !== "3d-progress" && kind !== "3d-result" && kind !== "3d-error") return
+  return {
+    kind,
+    provider: typeof value.provider === "string" ? value.provider : undefined,
+    model: typeof value.model === "string" ? value.model : undefined,
+    output: typeof value.output === "string" ? value.output : undefined,
+    inputMode: typeof value.inputMode === "string" ? value.inputMode : undefined,
+    modelVersion: typeof value.modelVersion === "string" ? value.modelVersion : undefined,
   }
 }
 
@@ -2028,6 +2053,169 @@ function CodeGoblinAudioStatus(props: { meta: CodeGoblinAudioMeta; text: string 
   )
 }
 
+function CodeGoblin3DStatus(props: { meta: CodeGoblin3DMeta; text: string }) {
+  const data = useData()
+  const [copied, setCopied] = createSignal(false)
+  const [opened, setOpened] = createSignal<"idle" | "opening" | "done" | "error">("idle")
+  const status = createMemo(() => {
+    if (props.meta.kind === "3d-progress") return "running"
+    if (props.meta.kind === "3d-error") return "error"
+    return "done"
+  })
+  const title = createMemo(() => {
+    if (status() === "running") return "CodeGoblin is generating a 3D model"
+    if (status() === "error") return "3D generation failed"
+    return "3D model generated"
+  })
+  const model = createMemo(() => [props.meta.provider, props.meta.model].filter(Boolean).join("/"))
+  const previewURL = createMemo(() => {
+    if (status() !== "done") return
+    if (!props.meta.output) return
+    return codeGoblinURL(data.serverUrl, "/codegoblin/output-model3d", {
+      directory: data.directory,
+      output: props.meta.output,
+    })
+  })
+  const detail = createMemo(() => {
+    const output = props.meta.output
+    return props.text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => {
+        if (!line) return false
+        if (line.startsWith("CodeGoblin is generating a 3D model")) return false
+        if (line.startsWith("This chat message will update")) return false
+        if (line.startsWith("3D model generated")) return false
+        if (line.startsWith("3D generation failed")) return false
+        if (line.startsWith("Model:")) return false
+        if (line.startsWith("Input:")) return false
+        if (line.startsWith("Tripo version:")) return false
+        if (line.startsWith("Saved to:")) return false
+        if (line.startsWith("Saving to:")) return false
+        if (line.startsWith("Planned output:")) return false
+        if (output && line.includes(output)) return false
+        return true
+      })
+      .join("\n")
+  })
+
+  const copyOutput = async () => {
+    if (!props.meta.output) return
+    if (await writeClipboard(props.meta.output)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  const codeGoblinRequest = async (url: string, body: Record<string, unknown>) => {
+    const response = await fetch(codeGoblinURL(data.serverUrl, url), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "content-type": "application/json",
+        "x-opencode-directory": data.directory,
+      },
+      body: JSON.stringify(body),
+    })
+    const json = await response.json().catch(() => undefined)
+    if (!response.ok || json?.ok === false) {
+      throw new Error(typeof json?.message === "string" ? json.message : "CodeGoblin request failed.")
+    }
+    return json
+  }
+
+  const openOutputFolder = async () => {
+    const output = props.meta.output
+    if (!output || opened() === "opening") return
+    setOpened("opening")
+    try {
+      await codeGoblinRequest("/codegoblin/open-output", { output, mode: "folder" })
+      setOpened("done")
+      setTimeout(() => setOpened("idle"), 2000)
+    } catch {
+      setOpened("error")
+      setTimeout(() => setOpened("idle"), 2500)
+    }
+  }
+
+  return (
+    <div data-component="codegoblin-3d-status" data-status={status()}>
+      <div data-slot="codegoblin-3d-header">
+        <div data-slot="codegoblin-3d-title">
+          <Show when={status() === "running"}>
+            <Spinner />
+          </Show>
+          <span>{title()}</span>
+          <Show when={model()}>
+            <span data-slot="codegoblin-3d-model">{model()}</span>
+          </Show>
+        </div>
+        <Show when={props.meta.output}>
+          <div data-slot="codegoblin-3d-actions">
+            <Tooltip value={copied() ? "Copied" : "Copy output path"} placement="top" gutter={4}>
+              <IconButton
+                icon={copied() ? "check" : "copy"}
+                size="normal"
+                variant="ghost"
+                aria-label="Copy output path"
+                onClick={copyOutput}
+                onMouseDown={(e) => e.preventDefault()}
+              />
+            </Tooltip>
+            <Tooltip
+              value={
+                opened() === "done"
+                  ? "Opened folder"
+                  : opened() === "error"
+                    ? "Folder not available"
+                    : "Open output folder"
+              }
+              placement="top"
+              gutter={4}
+            >
+              <IconButton
+                icon={opened() === "done" ? "check" : "folder"}
+                size="normal"
+                variant="ghost"
+                aria-label="Open output folder"
+                disabled={opened() === "opening" || status() === "running"}
+                onClick={openOutputFolder}
+                onMouseDown={(e) => e.preventDefault()}
+              />
+            </Tooltip>
+          </div>
+        </Show>
+      </div>
+      <Show when={props.meta.inputMode || props.meta.modelVersion}>
+        <div data-slot="codegoblin-3d-detail">
+          {[
+            props.meta.inputMode ? `Input: ${props.meta.inputMode}` : undefined,
+            props.meta.modelVersion ? `Tripo version: ${props.meta.modelVersion}` : undefined,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+      </Show>
+      <Show when={props.meta.output}>
+        <div data-slot="codegoblin-3d-output">
+          {status() === "error" ? "Planned output: " : "Saved to: "}
+          {props.meta.output}
+        </div>
+      </Show>
+      <Show when={previewURL() && status() === "done"}>
+        {(url) => (
+          <a data-slot="codegoblin-3d-download" href={url()} target="_blank" rel="noreferrer">
+            Download GLB/OBJ
+          </a>
+        )}
+      </Show>
+      <Show when={detail()}>
+        {(value) => <div data-slot="codegoblin-3d-detail">{value()}</div>}
+      </Show>
+    </div>
+  )
+}
+
 PART_MAPPING["text"] = function TextPartDisplay(props) {
   const data = useData()
   const i18n = useI18n()
@@ -2035,6 +2223,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
   const part = () => props.part as TextPart
   const imageStatus = createMemo(() => codeGoblinImageMeta(part().metadata))
   const audioStatus = createMemo(() => codeGoblinAudioMeta(part().metadata))
+  const model3dStatus = createMemo(() => codeGoblin3DMeta(part().metadata))
   const interrupted = createMemo(
     () =>
       props.message.role === "assistant" && (props.message as AssistantMessage).error?.name === "MessageAbortedError",
@@ -2117,8 +2306,15 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
               <Show
                 when={audioStatus()}
                 fallback={
-                  <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
-                    <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
+                  <Show
+                    when={model3dStatus()}
+                    fallback={
+                      <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
+                        <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
+                      </Show>
+                    }
+                  >
+                    {(status) => <CodeGoblin3DStatus meta={status()} text={text()} />}
                   </Show>
                 }
               >

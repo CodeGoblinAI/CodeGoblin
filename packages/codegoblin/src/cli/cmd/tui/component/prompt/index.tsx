@@ -48,7 +48,7 @@ import { DialogAlert } from "../../ui/dialog-alert"
 import { DialogConfirm } from "../../ui/dialog-confirm"
 import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv"
-import { readImageSettings, readAudioSettings } from "../../codegoblin/media-settings"
+import { readImageSettings, readAudioSettings, readModel3DSettings } from "../../codegoblin/media-settings"
 import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import {
@@ -71,6 +71,7 @@ import {
 } from "../../keymap"
 import { useTuiConfig } from "../../context/tui-config"
 import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
+import { CodeGoblin3DCommand } from "@/codegoblin/model3d-command"
 import { CodeGoblinBalance } from "@/codegoblin/balance"
 
 export type PromptProps = {
@@ -1097,6 +1098,18 @@ export function Prompt(props: PromptProps) {
     return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
   }
 
+  function codeGoblinAutoApproveModel3D() {
+    if (readModel3DSettings(kv).autoApprove) return true
+    const raw = process.env.CODEGOBLIN_MODEL3D_AUTO_APPROVE ?? process.env.CODEGOBLIN_AUTO_MODEL3D
+    const normalized = raw?.trim().toLowerCase()
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
+  }
+
+  function is3DModelSelection(input: { providerID: string; modelID: string; family?: string; outputModel3d?: boolean }) {
+    if (input.outputModel3d) return true
+    return CodeGoblin3DCommand.is3DModelSelection(input.providerID, input.modelID)
+  }
+
   function isAudioModelSelection(input: { providerID: string; modelID: string; family?: string; outputAudio?: boolean }) {
     if (input.outputAudio) return true
     const raw = `${input.providerID} ${input.modelID} ${input.family ?? ""}`.toLowerCase()
@@ -1133,6 +1146,30 @@ export function Prompt(props: PromptProps) {
         "The voice auto-selects a generated ElevenLabs voice when no voice is configured.",
         "Use `cg audio --help` for full audio settings.",
         "Set CODEGOBLIN_AUDIO_AUTO_APPROVE=1 to skip this confirmation.",
+      ].join("\n"),
+      "not now",
+    )
+    return ok === true
+  }
+
+  async function confirmModel3DGeneration(input: {
+    providerID: string
+    modelID: string
+    prompt: string
+    inputMode: "text" | "image"
+    modelVersion: string
+  }) {
+    if (codeGoblinAutoApproveModel3D()) return true
+    const ok = await DialogConfirm.show(
+      dialog,
+      "Generate 3D Model?",
+      [
+        `Use ${input.providerID}/${input.modelID} (${input.inputMode}) for this Tripo request?`,
+        `Tripo version: ${input.modelVersion}`,
+        "",
+        Locale.truncate(input.prompt || "Attached image input", 220),
+        "",
+        "Tripo credits apply. Set CODEGOBLIN_MODEL3D_AUTO_APPROVE=1 to skip this confirmation.",
       ].join("\n"),
       "not now",
     )
@@ -1208,6 +1245,22 @@ export function Prompt(props: PromptProps) {
     const result = (await response.json().catch(() => undefined)) as { ok?: boolean; message?: string } | undefined
     if (!response.ok || !result?.ok) {
       throw new Error(result?.message ?? "CodeGoblin audio command failed.")
+    }
+    return result
+  }
+
+  async function postCodeGoblinModel3D(body: Record<string, unknown>) {
+    const response = await sdk.fetch(`${sdk.url}/codegoblin/model3d`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-opencode-directory": project.instance.directory() || process.cwd(),
+      },
+      body: JSON.stringify(body),
+    })
+    const result = (await response.json().catch(() => undefined)) as { ok?: boolean; message?: string } | undefined
+    if (!response.ok || !result?.ok) {
+      throw new Error(result?.message ?? "CodeGoblin 3D command failed.")
     }
     return result
   }
@@ -1302,6 +1355,57 @@ export function Prompt(props: PromptProps) {
         return false
       }
     }
+    if (store.mode !== "shell" && CodeGoblin3DCommand.isSlash(trimmed)) {
+      const currentMode = store.mode
+      if (!selectedModel) {
+        void promptModelWarning()
+        return false
+      }
+      try {
+        const sessionID = await ensureSessionForImage(agent, selectedModel, variant, "3d")
+        if (!sessionID) return false
+        const submitted = store.prompt.input
+        const inputImages = currentImageInputs()
+        finishLocalSubmit(currentMode)
+        toast.show({
+          variant: "info",
+          message: `CodeGoblin is generating a 3D model with ${selectedModel.providerID}/${selectedModel.modelID}.`,
+          duration: 4000,
+        })
+        void postCodeGoblinModel3D({
+          sessionID,
+          agent: agent.name,
+          variant,
+          prompt: submitted.trimStart().replace(/^\/model3d\b/, "").trim(),
+          provider: selectedModel.providerID,
+          model: selectedModel.modelID,
+          inputImages,
+          modelVersion: readModel3DSettings(kv).modelVersion,
+        })
+          .then((result) => {
+            toast.show({
+              variant: "success",
+              message: result.message ?? "CodeGoblin saved the 3D model locally.",
+              duration: 9000,
+            })
+          })
+          .catch((error) => {
+            toast.show({
+              variant: "error",
+              message: error instanceof Error ? error.message : "CodeGoblin 3D command failed.",
+              duration: 9000,
+            })
+          })
+        return true
+      } catch (error) {
+        toast.show({
+          variant: "error",
+          message: error instanceof Error ? error.message : "CodeGoblin 3D command failed.",
+          duration: 9000,
+        })
+        return false
+      }
+    }
     if (!selectedModel) {
       void promptModelWarning()
       return false
@@ -1377,6 +1481,87 @@ export function Prompt(props: PromptProps) {
         toast.show({
           variant: "error",
           message: error instanceof Error ? error.message : "CodeGoblin audio command failed.",
+          duration: 9000,
+        })
+        return false
+      }
+    }
+    if (
+      store.mode !== "shell" &&
+      is3DModelSelection({
+        providerID: selectedModel.providerID,
+        modelID: selectedModel.modelID,
+        family: selectedModelInfo?.family,
+        outputModel3d: (selectedModelInfo?.capabilities?.output as { model3d?: boolean } | undefined)?.model3d,
+      })
+    ) {
+      const currentMode = store.mode
+      const inputImages = currentImageInputs()
+      const inputMode = inputImages.length > 0 ? "image" : "text"
+      if (inputMode === "text" && !trimmed) {
+        toast.show({
+          variant: "warning",
+          message: "Add a text prompt or attach an image for Tripo 3D generation.",
+          duration: 9000,
+        })
+        return false
+      }
+      if (inputMode === "image" && selectedModel.modelID.includes("text-to-model")) {
+        toast.show({
+          variant: "warning",
+          message: "Switch to tripo/image-to-model when using an attached image, or remove the attachment for text-to-3D.",
+          duration: 9000,
+        })
+        return false
+      }
+      try {
+        const modelVersion = local.model.variant.current() ?? readModel3DSettings(kv).modelVersion
+        const confirmed = await confirmModel3DGeneration({
+          providerID: selectedModel.providerID,
+          modelID: selectedModel.modelID,
+          prompt: trimmed,
+          inputMode,
+          modelVersion,
+        })
+        if (!confirmed) return false
+        const sessionID = await ensureSessionForImage(agent, selectedModel, variant, "3d")
+        if (!sessionID) return false
+        const submitted = store.prompt.input
+        finishLocalSubmit(currentMode)
+        toast.show({
+          variant: "info",
+          message: `CodeGoblin is generating a 3D model with ${selectedModel.providerID}/${selectedModel.modelID}.`,
+          duration: 5000,
+        })
+        void postCodeGoblinModel3D({
+          sessionID,
+          agent: agent.name,
+          variant,
+          prompt: submitted.trim(),
+          provider: selectedModel.providerID,
+          model: selectedModel.modelID,
+          inputImages,
+          modelVersion,
+        })
+          .then((result) => {
+            toast.show({
+              variant: "success",
+              message: result.message ?? "CodeGoblin saved the 3D model locally.",
+              duration: 9000,
+            })
+          })
+          .catch((error) => {
+            toast.show({
+              variant: "error",
+              message: error instanceof Error ? error.message : "CodeGoblin 3D command failed.",
+              duration: 9000,
+            })
+          })
+        return true
+      } catch (error) {
+        toast.show({
+          variant: "error",
+          message: error instanceof Error ? error.message : "CodeGoblin 3D command failed.",
           duration: 9000,
         })
         return false

@@ -84,7 +84,7 @@ import {
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
 import { CodeGoblinBrand } from "@/codegoblin/brand"
-import { DialogImageSettings, DialogAudioSettings } from "./codegoblin/dialog-media-settings"
+import { DialogImageSettings, DialogAudioSettings, DialogModel3DSettings } from "./codegoblin/dialog-media-settings"
 import { DialogMarket } from "./codegoblin/dialog-market"
 import { DialogGoblinHub } from "./codegoblin/dialog-goblin-hub"
 import { DialogMemory } from "./codegoblin/dialog-memory"
@@ -699,6 +699,16 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         slashAliases: ["audiosettings", "audio-config"],
         run: () => {
           dialog.replace(() => <DialogAudioSettings />)
+        },
+        category: "CodeGoblin",
+      },
+      {
+        name: "codegoblin.model3d.settings",
+        title: "3D model generation settings",
+        slashName: "model3d-settings",
+        slashAliases: ["model3dsettings", "3d-settings", "3d-config"],
+        run: () => {
+          dialog.replace(() => <DialogModel3DSettings />)
         },
         category: "CodeGoblin",
       },
