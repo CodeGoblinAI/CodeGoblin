@@ -4,13 +4,14 @@ import { useDialog } from "@tui/ui/dialog"
 import { CodeGoblinBrand } from "@/codegoblin/brand"
 import { codeGoblinProviderSummary } from "@/codegoblin/provider"
 import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
+import { collectRuntimeStatus, formatRuntimeStatus } from "@/codegoblin/runtime-status"
 import { CodeGoblinBalance } from "@/codegoblin/balance"
 import { useProject } from "@tui/context/project"
 import { DialogMemory } from "./dialog-memory"
 import { DialogMarket } from "./dialog-market"
-import { DialogImageSettings, DialogAudioSettings } from "./dialog-media-settings"
+import { DialogImageSettings, DialogAudioSettings, DialogModel3DSettings } from "./dialog-media-settings"
 
-type HubEntry = "memory" | "market" | "media-image" | "media-audio" | "status" | "usage" | "models" | "balance" | "identity"
+type HubEntry = "memory" | "market" | "media-image" | "media-audio" | "media-3d" | "status" | "usage" | "models" | "balance" | "identity"
 
 const ENTRIES: DialogSelectOption<HubEntry>[] = [
   {
@@ -32,6 +33,11 @@ const ENTRIES: DialogSelectOption<HubEntry>[] = [
     title: "Audio settings",
     description: "Provider, voice, and output format for audio",
     value: "media-audio",
+  },
+  {
+    title: "3D model settings",
+    description: "Tripo version, output directory, and auto-approve for 3D",
+    value: "media-3d",
   },
   {
     title: "Status & about",
@@ -85,11 +91,16 @@ export function DialogGoblinHub() {
           dialog.replace(() => <DialogAudioSettings />)
           return
         }
+        if (option.value === "media-3d") {
+          dialog.replace(() => <DialogModel3DSettings />)
+          return
+        }
         if (option.value === "status") {
+          const runtime = await collectRuntimeStatus()
           dialog.replace(() => (
             <DialogAlert
               title={CodeGoblinBrand.product}
-              message={`${CodeGoblinBrand.mascot}\n${CodeGoblinBrand.tagline}\n\nImage prompts route to local files when an image model is selected. Try: create an image of a cat. Outputs land under codegoblin-output/images unless you pass --output.\n\nThe goblin eats token spend and writes the receipt to codegoblin-output/usage.json.\n\n${CodeGoblinBrand.disclaimer}`}
+              message={`${CodeGoblinBrand.mascot}\n${CodeGoblinBrand.tagline}\n\n${formatRuntimeStatus(runtime)}\n\nImage prompts route to local files when an image model is selected. 3D models use Tripo when a 3D model is selected.\n\n${CodeGoblinBrand.disclaimer}`}
             />
           ))
           return

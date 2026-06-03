@@ -47,6 +47,7 @@ export interface Settings {
     autoApprove: boolean
     imageGenerationAutoApprove: boolean
     audioGenerationAutoApprove: boolean
+    model3dGenerationAutoApprove: boolean
   }
   notifications: NotificationSettings
   sounds: SoundSettings
@@ -134,6 +135,7 @@ const defaultSettings: Settings = {
     autoApprove: false,
     imageGenerationAutoApprove: false,
     audioGenerationAutoApprove: false,
+    model3dGenerationAutoApprove: false,
   },
   notifications: {
     agent: true,
@@ -300,6 +302,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setAudioGenerationAutoApprove(value: boolean) {
           setStore("permissions", "audioGenerationAutoApprove", value)
+        },
+        model3dGenerationAutoApprove: withFallback(
+          () => store.permissions?.model3dGenerationAutoApprove,
+          defaultSettings.permissions.model3dGenerationAutoApprove,
+        ),
+        setModel3dGenerationAutoApprove(value: boolean) {
+          setStore("permissions", "model3dGenerationAutoApprove", value)
         },
       },
       notifications: {

@@ -1668,6 +1668,31 @@ function codeGoblinAudioMeta(metadata: Record<string, unknown> | undefined): Cod
   }
 }
 
+type CodeGoblin3DMeta = {
+  kind: "3d-progress" | "3d-result" | "3d-error"
+  provider?: string
+  model?: string
+  output?: string
+  inputMode?: string
+  modelVersion?: string
+}
+
+function codeGoblin3DMeta(metadata: Record<string, unknown> | undefined): CodeGoblin3DMeta | undefined {
+  const raw = metadata?.codegoblin
+  if (!raw || typeof raw !== "object") return
+  const value = raw as Record<string, unknown>
+  const kind = value.kind
+  if (kind !== "3d-progress" && kind !== "3d-result" && kind !== "3d-error") return
+  return {
+    kind,
+    provider: typeof value.provider === "string" ? value.provider : undefined,
+    model: typeof value.model === "string" ? value.model : undefined,
+    output: typeof value.output === "string" ? value.output : undefined,
+    inputMode: typeof value.inputMode === "string" ? value.inputMode : undefined,
+    modelVersion: typeof value.modelVersion === "string" ? value.modelVersion : undefined,
+  }
+}
+
 async function openCodeGoblinOutputFromTui(input: {
   sdk: ReturnType<typeof useSDK>
   project: ReturnType<typeof useProject>
@@ -1904,11 +1929,122 @@ function CodeGoblinAudioStatusPart(props: { part: TextPart }) {
   )
 }
 
+function CodeGoblin3DStatusPart(props: { part: TextPart }) {
+  const { theme } = useTheme()
+  const sdk = useSDK()
+  const project = useProject()
+  const toast = useToast()
+  const renderer = useRenderer()
+  const [hover, setHover] = createSignal(false)
+  const meta = createMemo(() => codeGoblin3DMeta(props.part.metadata))
+  const status = createMemo(() => {
+    const kind = meta()?.kind
+    if (kind === "3d-progress") return "running"
+    if (kind === "3d-error") return "error"
+    return "done"
+  })
+  const model = createMemo(() => [meta()?.provider, meta()?.model].filter(Boolean).join("/"))
+  const title = createMemo(() => {
+    if (status() === "running") return "CodeGoblin is generating a 3D model"
+    if (status() === "error") return "3D generation failed"
+    return "3D model generated"
+  })
+  const detail = createMemo(() =>
+    props.part.text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => {
+        const output = meta()?.output
+        if (!line) return false
+        if (line.startsWith("CodeGoblin is generating a 3D model")) return false
+        if (line.startsWith("This chat message will update")) return false
+        if (line.startsWith("3D model generated")) return false
+        if (line.startsWith("3D generation failed")) return false
+        if (line.startsWith("Model:")) return false
+        if (line.startsWith("Input:")) return false
+        if (line.startsWith("Tripo version:")) return false
+        if (line.startsWith("Saved to:")) return false
+        if (line.startsWith("Saving to:")) return false
+        if (line.startsWith("Planned output:")) return false
+        if (output && line.includes(output)) return false
+        return true
+      })
+      .join("\n"),
+  )
+  return (
+    <Show when={meta()}>
+      {(model3d) => (
+        <box
+          id={"text-" + props.part.id}
+          paddingLeft={2}
+          paddingRight={2}
+          paddingTop={1}
+          paddingBottom={1}
+          marginTop={1}
+          marginLeft={3}
+          flexShrink={0}
+          flexDirection="column"
+          border={["left"]}
+          borderColor={status() === "error" ? theme.error : theme.primary}
+          backgroundColor={theme.backgroundPanel}
+          onMouseOver={() => setHover(true)}
+          onMouseOut={() => setHover(false)}
+          onMouseUp={() => {
+            if (renderer.getSelection()?.getSelectedText()) return
+            const output = model3d().output
+            if (!output || status() === "running") return
+            void openCodeGoblinOutputFromTui({ sdk, project, toast, output, mode: "open" })
+          }}
+          customBorderChars={SplitBorder.customBorderChars}
+          gap={1}
+        >
+          <box flexDirection="row" gap={1} flexShrink={0}>
+            <Show
+              when={status() === "running"}
+              fallback={<text fg={status() === "error" ? theme.error : theme.primary}>{title()}</text>}
+            >
+              <Spinner color={theme.primary}>{title()}</Spinner>
+            </Show>
+            <Show when={model()}>
+              {(value) => <text fg={theme.textMuted}>{value()}</text>}
+            </Show>
+          </box>
+          <Show when={model3d().inputMode || model3d().modelVersion}>
+            <text fg={theme.textMuted} wrapMode="word">
+              {[
+                model3d().inputMode ? `Input: ${model3d().inputMode}` : undefined,
+                model3d().modelVersion ? `Tripo version: ${model3d().modelVersion}` : undefined,
+              ]
+                .filter(Boolean)
+                .join("  ·  ")}
+            </text>
+          </Show>
+          <Show when={model3d().output}>
+            {(output) => (
+              <text fg={theme.text} wrapMode="word">
+                <span style={{ fg: theme.textMuted }}>{status() === "error" ? "Planned output: " : "Saved to: "}</span>
+                {output()}
+              </text>
+            )}
+          </Show>
+          <Show when={detail()}>
+            {(value) => <text fg={theme.textMuted}>{value()}</text>}
+          </Show>
+          <Show when={model3d().output && status() !== "running"}>
+            <text fg={hover() ? theme.text : theme.textMuted}>click to open · command palette can reveal in Explorer</text>
+          </Show>
+        </box>
+      )}
+    </Show>
+  )
+}
+
 function TextPart(props: { last: boolean; part: TextPart; message: AssistantMessage }) {
   const ctx = use()
   const { theme, syntax } = useTheme()
   const imageMeta = createMemo(() => codeGoblinImageMeta(props.part.metadata))
   const audioMeta = createMemo(() => codeGoblinAudioMeta(props.part.metadata))
+  const model3dMeta = createMemo(() => codeGoblin3DMeta(props.part.metadata))
   return (
     <Show when={props.part.text.trim()}>
       <Switch
@@ -1932,6 +2068,9 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
         </Match>
         <Match when={audioMeta()}>
           <CodeGoblinAudioStatusPart part={props.part} />
+        </Match>
+        <Match when={model3dMeta()}>
+          <CodeGoblin3DStatusPart part={props.part} />
         </Match>
       </Switch>
     </Show>

@@ -1,4 +1,4 @@
-export const MODEL_BUCKET_ORDER = ["Text models", "Image models", "Voice & audio models", "Other models"] as const
+export const MODEL_BUCKET_ORDER = ["Text models", "Image models", "3D models", "Voice & audio models", "Other models"] as const
 
 const SECTION_ORDER = ["Favorites", "Recent"] as const
 
@@ -12,6 +12,7 @@ type ModelCapabilities = {
     text?: boolean
     audio?: boolean
     image?: boolean
+    model3d?: boolean
   }
 }
 
@@ -21,19 +22,26 @@ export type BucketModelInfo = {
   capabilities?: ModelCapabilities
 }
 
+export function is3DOnlyModel(info: BucketModelInfo) {
+  const output = info.capabilities?.output
+  return output?.model3d === true && output.text !== true && output.image !== true && output.audio !== true
+}
+
 export function isAudioOnlyModel(info: BucketModelInfo) {
-  return info.capabilities?.output?.audio === true && info.capabilities.output.text !== true && info.capabilities.output.image !== true
+  return info.capabilities?.output?.audio === true && info.capabilities.output.text !== true && info.capabilities.output.image !== true && !is3DOnlyModel(info)
 }
 
 export function isChatSelectableModel(info: BucketModelInfo) {
+  if (is3DOnlyModel(info) || isAudioOnlyModel(info)) return true
   return info.capabilities?.output?.audio === true || info.capabilities?.output?.image === true || info.capabilities?.output?.text === true || info.capabilities?.input?.text === true
 }
 
 export function isDefaultChatModel(info: BucketModelInfo) {
-  return !isAudioOnlyModel(info)
+  return !isAudioOnlyModel(info) && !is3DOnlyModel(info)
 }
 
 export function modelBucket(modelID: string, info: BucketModelInfo) {
+  if (info.capabilities?.output?.model3d || is3DGenerationModel(modelID, info)) return "3D models"
   if (info.capabilities?.output?.audio || isAudioGenerationModel(modelID, info)) return "Voice & audio models"
   if (info.capabilities?.output?.image || isImageGenerationModel(modelID, info)) return "Image models"
   if (info.capabilities?.output?.text || info.capabilities?.input?.text) return "Text models"
@@ -76,6 +84,11 @@ function categoryParts(category: string) {
 function bucketIndex(bucket: string) {
   const index = MODEL_BUCKET_ORDER.indexOf(bucket as (typeof MODEL_BUCKET_ORDER)[number])
   return index >= 0 ? index : MODEL_BUCKET_ORDER.length
+}
+
+function is3DGenerationModel(modelID: string, info: BucketModelInfo) {
+  const raw = `${modelID} ${info.family ?? ""}`.toLowerCase()
+  return /(^|[\s/_-])(tripo|text-to-model|image-to-model|3d-model)([\s/_-]|$)/.test(raw)
 }
 
 function isImageGenerationModel(modelID: string, info: BucketModelInfo) {

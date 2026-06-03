@@ -8,7 +8,10 @@ import {
   MediaSettingsKeys,
   readAudioSettings,
   readImageSettings,
+  readModel3DSettings,
 } from "./media-settings"
+
+const MODEL3D_VERSIONS = ["v3.1-20260211", "v3.0-20250812"] as const
 
 export function DialogImageSettings() {
   const dialog = useDialog()
@@ -148,6 +151,76 @@ export function DialogAudioSettings() {
             kv.set(MediaSettingsKeys.audioFormat, MediaSettingsDefaults.audioFormat)
             kv.set(MediaSettingsKeys.audioAutoApprove, MediaSettingsDefaults.audioAutoApprove)
             dialog.replace(() => <DialogAudioSettings />)
+            break
+        }
+      }}
+    />
+  )
+}
+
+export function DialogModel3DSettings() {
+  const dialog = useDialog()
+  const kv = useKV()
+  const settings = readModel3DSettings(kv)
+
+  const options: DialogSelectOption<string>[] = [
+    {
+      title: `Output directory: ${settings.outputDir}`,
+      description: "Where generated 3D models are saved (relative to the project root).",
+      value: "output",
+    },
+    {
+      title: `Tripo model version: ${settings.modelVersion}`,
+      description: "Cycle through supported Tripo H3 model versions.",
+      value: "version",
+    },
+    {
+      title: `Auto-approve generation: ${settings.autoApprove ? "on" : "off"}`,
+      description: "Skip the confirmation prompt before generating a 3D model.",
+      value: "auto",
+    },
+    {
+      title: "Reset to defaults",
+      value: "reset",
+    },
+  ]
+
+  return (
+    <DialogSelect
+      title="3D model settings"
+      options={options}
+      onSelect={(option) => {
+        switch (option.value) {
+          case "output":
+            dialog.replace(() => (
+              <DialogPrompt
+                title="3D output directory"
+                placeholder="codegoblin-output/models"
+                value={settings.outputDir}
+                onConfirm={(value) => {
+                  kv.set(MediaSettingsKeys.model3dOutputDir, value.trim() || MediaSettingsDefaults.model3dOutputDir)
+                  dialog.replace(() => <DialogModel3DSettings />)
+                }}
+                onCancel={() => dialog.replace(() => <DialogModel3DSettings />)}
+              />
+            ))
+            break
+          case "version": {
+            const idx = MODEL3D_VERSIONS.indexOf(settings.modelVersion as (typeof MODEL3D_VERSIONS)[number])
+            const next = MODEL3D_VERSIONS[(idx + 1) % MODEL3D_VERSIONS.length]
+            kv.set(MediaSettingsKeys.model3dVersion, next)
+            dialog.replace(() => <DialogModel3DSettings />)
+            break
+          }
+          case "auto":
+            kv.set(MediaSettingsKeys.model3dAutoApprove, !settings.autoApprove)
+            dialog.replace(() => <DialogModel3DSettings />)
+            break
+          case "reset":
+            kv.set(MediaSettingsKeys.model3dOutputDir, MediaSettingsDefaults.model3dOutputDir)
+            kv.set(MediaSettingsKeys.model3dAutoApprove, MediaSettingsDefaults.model3dAutoApprove)
+            kv.set(MediaSettingsKeys.model3dVersion, MediaSettingsDefaults.model3dVersion)
+            dialog.replace(() => <DialogModel3DSettings />)
             break
         }
       }}
