@@ -52,26 +52,80 @@ function scanContentBatchTs(contents: readonly string[]): (string | undefined)[]
 let nativeBinChecked = false
 let nativeBin: string | undefined
 
-function resolveNativeBin(): string | undefined {
-  if (nativeBinChecked) return nativeBin
-  nativeBinChecked = true
+async function fileExists(candidate: string): Promise<boolean> {
+  try {
+    return (await Bun.file(candidate).size) > 0
+  } catch {
+    return false
+  }
+}
+
+function siblingNativeCandidates(): string[] {
+  const exe = process.platform === "win32" ? ".exe" : ""
+  const name = `codegoblin-native${exe}`
+  const candidates: string[] = []
+  if (process.execPath) {
+    candidates.push(path.join(path.dirname(process.execPath), name))
+  }
+  if (process.argv[1]) {
+    candidates.push(path.join(path.dirname(path.resolve(process.argv[1])), name))
+  }
+  return candidates
+}
+
+async function resolveNativeBinAsync(): Promise<string | undefined> {
   const configured = process.env["CODEGOBLIN_NATIVE_BIN"]?.trim()
   const exe = process.platform === "win32" ? ".exe" : ""
   const here = path.dirname(fileURLToPath(import.meta.url))
-  // packages/codegoblin/src/codegoblin -> packages/codegoblin-native/target/release
-  const fallback = path.resolve(here, "../../../codegoblin-native/target/release", `codegoblin-native${exe}`)
-  for (const candidate of [configured, fallback]) {
-    if (candidate && Bun.file(candidate).size > 0) {
-      nativeBin = candidate
-      return nativeBin
+  const devFallback = path.resolve(here, "../../../codegoblin-native/target/release", `codegoblin-native${exe}`)
+  for (const candidate of [...(configured ? [configured] : []), ...siblingNativeCandidates(), devFallback]) {
+    if (await fileExists(candidate)) {
+      return candidate
+    }
+  }
+  return undefined
+}
+
+function resolveNativeBin(): string | undefined {
+  if (nativeBinChecked) return nativeBin
+  nativeBinChecked = true
+  // Sync probe for hot paths; async resolution fills in on first miss.
+  const configured = process.env["CODEGOBLIN_NATIVE_BIN"]?.trim()
+  const exe = process.platform === "win32" ? ".exe" : ""
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const devFallback = path.resolve(here, "../../../codegoblin-native/target/release", `codegoblin-native${exe}`)
+  for (const candidate of [...(configured ? [configured] : []), ...siblingNativeCandidates(), devFallback]) {
+    try {
+      if (Bun.file(candidate).size > 0) {
+        nativeBin = candidate
+        return nativeBin
+      }
+    } catch {
+      // continue
     }
   }
   nativeBin = undefined
   return nativeBin
 }
 
+export function nativeBinPath(): string | undefined {
+  return resolveNativeBin()
+}
+
 export function isNativeAvailable(): boolean {
   return resolveNativeBin() !== undefined
+}
+
+/** Resolve native binary path including async filesystem checks. */
+export async function resolveNativeBinPath(): Promise<string | undefined> {
+  const sync = resolveNativeBin()
+  if (sync) return sync
+  const resolved = await resolveNativeBinAsync()
+  if (resolved) {
+    nativeBin = resolved
+    nativeBinChecked = true
+  }
+  return resolved
 }
 
 async function runNative(request: unknown): Promise<any | undefined> {
