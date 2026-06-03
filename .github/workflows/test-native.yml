@@ -1,0 +1,34 @@
+name: test-native
+
+on:
+  push:
+    paths:
+      - "packages/codegoblin-native/**"
+      - "packages/codegoblin/src/codegoblin/memory-native.ts"
+      - ".github/workflows/test-native.yml"
+  pull_request:
+    paths:
+      - "packages/codegoblin-native/**"
+      - "packages/codegoblin/src/codegoblin/memory-native.ts"
+      - ".github/workflows/test-native.yml"
+  workflow_dispatch:
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo test
+        working-directory: packages/codegoblin-native
+        run: cargo test
+
+      - name: Cargo build release
+        working-directory: packages/codegoblin-native
+        run: cargo build --release

@@ -9,6 +9,7 @@ import { described } from "./metadata"
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
   version: Schema.String,
+  memoryNative: Schema.Boolean,
 })
 
 const GlobalEventSchema = Schema.Struct({

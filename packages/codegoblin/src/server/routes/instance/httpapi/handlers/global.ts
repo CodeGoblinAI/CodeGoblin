@@ -5,6 +5,7 @@ import { Bus } from "@/bus"
 import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@codegoblin/core/installation/version"
+import { isNativeAvailable } from "@/codegoblin/memory-native"
 import * as Log from "@codegoblin/core/util/log"
 import { Effect, Queue, Schema } from "effect"
 import * as Stream from "effect/Stream"
@@ -73,7 +74,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const bridge = yield* EffectBridge.make()
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
-      return { healthy: true as const, version: InstallationVersion }
+      return { healthy: true as const, version: InstallationVersion, memoryNative: isNativeAvailable() }
     })
 
     const event = Effect.fn("GlobalHttpApi.event")(function* () {

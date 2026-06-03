@@ -88,6 +88,11 @@ async function createNativePackage(sourceName: string, version: string) {
     await fs.promises.rm(sourceBinaryPath, { force: true })
   }
 
+  const nativeSidecar = path.join(targetDir, "bin", "codegoblin-native" + (packageJson.os?.[0] === "win32" ? ".exe" : ""))
+  if (fs.existsSync(nativeSidecar)) {
+    await fs.promises.chmod(nativeSidecar, 0o755)
+  }
+
   await writeJSON(packageJsonPath, {
     ...packageJson,
     name: targetName,
