@@ -51,6 +51,12 @@ import { Tooltip } from "./tooltip"
 import { IconButton } from "./icon-button"
 import { Button } from "./button"
 import { Spinner } from "./spinner"
+import { CodeGoblinModelViewer } from "./codegoblin-model-viewer"
+import {
+  displayCodeGoblinOutput,
+  isGlbOutputPath,
+  relativeCodeGoblinOutput,
+} from "../utils/codegoblin-output-path"
 import { TextShimmer } from "./text-shimmer"
 import { AnimatedCountList } from "./tool-count-summary"
 import { ToolStatusTitle } from "./tool-status-title"
@@ -1470,6 +1476,10 @@ type CodeGoblin3DMeta = {
   output?: string
   inputMode?: string
   modelVersion?: string
+  progressMessage?: string
+  credits?: number
+  startedAt?: number
+  taskId?: string
 }
 
 function codeGoblinImageMeta(metadata: Record<string, unknown> | undefined): CodeGoblinImageMeta | undefined {
@@ -1523,6 +1533,10 @@ function codeGoblin3DMeta(metadata: Record<string, unknown> | undefined): CodeGo
     output: typeof value.output === "string" ? value.output : undefined,
     inputMode: typeof value.inputMode === "string" ? value.inputMode : undefined,
     modelVersion: typeof value.modelVersion === "string" ? value.modelVersion : undefined,
+    progressMessage: typeof value.progressMessage === "string" ? value.progressMessage : undefined,
+    credits: typeof value.credits === "number" ? value.credits : undefined,
+    startedAt: typeof value.startedAt === "number" ? value.startedAt : undefined,
+    taskId: typeof value.taskId === "string" ? value.taskId : undefined,
   }
 }
 
@@ -2057,6 +2071,7 @@ function CodeGoblin3DStatus(props: { meta: CodeGoblin3DMeta; text: string }) {
   const data = useData()
   const [copied, setCopied] = createSignal(false)
   const [opened, setOpened] = createSignal<"idle" | "opening" | "done" | "error">("idle")
+  const [elapsedSec, setElapsedSec] = createSignal(0)
   const status = createMemo(() => {
     if (props.meta.kind === "3d-progress") return "running"
     if (props.meta.kind === "3d-error") return "error"
@@ -2068,14 +2083,48 @@ function CodeGoblin3DStatus(props: { meta: CodeGoblin3DMeta; text: string }) {
     return "3D model generated"
   })
   const model = createMemo(() => [props.meta.provider, props.meta.model].filter(Boolean).join("/"))
+  const apiOutput = createMemo(() => relativeCodeGoblinOutput(data.directory, props.meta.output))
+  const displayOutput = createMemo(() => displayCodeGoblinOutput(data.directory, props.meta.output))
   const previewURL = createMemo(() => {
     if (status() !== "done") return
-    if (!props.meta.output) return
+    const output = apiOutput()
+    if (!output) return
     return codeGoblinURL(data.serverUrl, "/codegoblin/output-model3d", {
       directory: data.directory,
-      output: props.meta.output,
+      output,
     })
   })
+  const showModelViewer = createMemo(() => {
+    const url = previewURL()
+    if (!url || !isGlbOutputPath(props.meta.output)) return
+    return url
+  })
+  const progressMessage = createMemo(() => {
+    if (props.meta.progressMessage) return props.meta.progressMessage
+    const line = props.text
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .find((item) => item.startsWith("Tripo task") || item.startsWith("Uploading") || item.startsWith("Downloading"))
+    return line
+  })
+  const elapsedLabel = createMemo(() => {
+    if (status() !== "running") return
+    const sec = elapsedSec()
+    if (sec < 60) return `${sec}s elapsed · usually 1–5 min`
+    const min = Math.floor(sec / 60)
+    const rem = sec % 60
+    return `${min}m ${rem}s elapsed · usually 1–5 min`
+  })
+
+  createEffect(() => {
+    if (status() !== "running") return
+    const started = props.meta.startedAt ?? Date.now()
+    const tick = () => setElapsedSec(Math.max(0, Math.floor((Date.now() - started) / 1000)))
+    tick()
+    const id = window.setInterval(tick, 1000)
+    onCleanup(() => window.clearInterval(id))
+  })
+
   const detail = createMemo(() => {
     const output = props.meta.output
     return props.text
@@ -2085,11 +2134,19 @@ function CodeGoblin3DStatus(props: { meta: CodeGoblin3DMeta; text: string }) {
         if (!line) return false
         if (line.startsWith("CodeGoblin is generating a 3D model")) return false
         if (line.startsWith("This chat message will update")) return false
+        if (line.startsWith("Usually takes")) return false
+        if (line.startsWith("Estimated Tripo credits")) return false
+        if (line.startsWith("Tripo credits:")) return false
         if (line.startsWith("3D model generated")) return false
         if (line.startsWith("3D generation failed")) return false
         if (line.startsWith("Model:")) return false
+        if (line.startsWith("Input mode:")) return false
         if (line.startsWith("Input:")) return false
         if (line.startsWith("Tripo version:")) return false
+        if (line.startsWith("Tripo task")) return false
+        if (line.startsWith("Uploading")) return false
+        if (line.startsWith("Downloading")) return false
+        if (line.startsWith("Starting Tripo")) return false
         if (line.startsWith("Saved to:")) return false
         if (line.startsWith("Saving to:")) return false
         if (line.startsWith("Planned output:")) return false
@@ -2135,6 +2192,36 @@ function CodeGoblin3DStatus(props: { meta: CodeGoblin3DMeta; text: string }) {
     } catch {
       setOpened("error")
       setTimeout(() => setOpened("idle"), 2500)
+    }
+  }
+
+  const fetchModelBlob = async () => {
+    const url = previewURL()
+    if (!url) throw new Error("3D model URL is unavailable.")
+    const headers: Record<string, string> = { "x-opencode-directory": data.directory }
+    const response = await fetch(url, { credentials: "same-origin", headers })
+    if (!response.ok) throw new Error(`Could not load 3D model (${response.status}).`)
+    const contentType = response.headers.get("content-type") ?? ""
+    if (contentType.includes("text/html") || contentType.includes("application/json")) {
+      throw new Error("Server returned an error page instead of a model file.")
+    }
+    return response.blob()
+  }
+
+  const downloadModel = async () => {
+    const output = apiOutput() || props.meta.output
+    if (!output || !previewURL()) return
+    const filename = output.split(/[/\\]/).pop() || "model.glb"
+    try {
+      const blob = await fetchModelBlob()
+      const href = URL.createObjectURL(blob)
+      const anchor = document.createElement("a")
+      anchor.href = href
+      anchor.download = filename
+      anchor.click()
+      URL.revokeObjectURL(href)
+    } catch (cause) {
+      console.error("[codegoblin-3d]", cause)
     }
   }
 
@@ -2186,28 +2273,46 @@ function CodeGoblin3DStatus(props: { meta: CodeGoblin3DMeta; text: string }) {
           </div>
         </Show>
       </div>
-      <Show when={props.meta.inputMode || props.meta.modelVersion}>
+      <Show when={props.meta.inputMode || props.meta.modelVersion || props.meta.credits !== undefined}>
         <div data-slot="codegoblin-3d-detail">
           {[
             props.meta.inputMode ? `Input: ${props.meta.inputMode}` : undefined,
             props.meta.modelVersion ? `Tripo version: ${props.meta.modelVersion}` : undefined,
+            props.meta.credits !== undefined
+              ? status() === "done"
+                ? `Tripo credits: ~${props.meta.credits}`
+                : `Estimated Tripo credits: ~${props.meta.credits}`
+              : undefined,
           ]
             .filter(Boolean)
             .join(" · ")}
         </div>
       </Show>
-      <Show when={props.meta.output}>
-        <div data-slot="codegoblin-3d-output">
-          {status() === "error" ? "Planned output: " : "Saved to: "}
-          {props.meta.output}
+      <Show when={status() === "running" && (progressMessage() || elapsedLabel())}>
+        <div data-slot="codegoblin-3d-progress">
+          <Show when={progressMessage()}>{(msg) => <span data-slot="codegoblin-3d-progress-message">{msg()}</span>}</Show>
+          <Show when={elapsedLabel()}>
+            {(label) => <span data-slot="codegoblin-3d-progress-elapsed">{label()}</span>}
+          </Show>
         </div>
       </Show>
-      <Show when={previewURL() && status() === "done"}>
+      <Show when={displayOutput()}>
+        <div data-slot="codegoblin-3d-output">
+          {status() === "running" ? "Saving to: " : status() === "error" ? "Planned output: " : "Saved to: "}
+          {displayOutput()}
+        </div>
+      </Show>
+      <Show when={showModelViewer()}>
         {(url) => (
-          <a data-slot="codegoblin-3d-download" href={url()} target="_blank" rel="noreferrer">
-            Download GLB/OBJ
-          </a>
+          <div data-slot="codegoblin-3d-preview">
+            <CodeGoblinModelViewer src={url()} directory={data.directory} alt={`3D model ${model()}`} />
+          </div>
         )}
+      </Show>
+      <Show when={previewURL() && status() === "done"}>
+        <button type="button" data-slot="codegoblin-3d-download" onClick={() => void downloadModel()}>
+          Download model file
+        </button>
       </Show>
       <Show when={detail()}>
         {(value) => <div data-slot="codegoblin-3d-detail">{value()}</div>}

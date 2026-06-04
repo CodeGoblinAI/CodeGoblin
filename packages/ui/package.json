@@ -75,6 +75,7 @@
     "solid-js": "catalog:",
     "solid-list": "catalog:",
     "strip-ansi": "7.1.2",
-    "virtua": "catalog:"
+    "virtua": "catalog:",
+    "@google/model-viewer": "4.0.0"
   }
 }
