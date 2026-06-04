@@ -96,7 +96,7 @@ async function readImageBytes(image: Model3DInputImage, root?: string): Promise<
 async function uploadImage(apiKey: string, image: Model3DInputImage, root?: string) {
   const { bytes, filename } = await readImageBytes(image, root)
   const form = new FormData()
-  const blob = new Blob([bytes], { type: image.mime ?? "image/png" })
+  const blob = new Blob([Buffer.from(bytes)], { type: image.mime ?? "image/png" })
   form.append("file", blob, filename)
 
   const response = await fetch(`${API_BASE}/upload/sts`, {
@@ -154,7 +154,7 @@ async function downloadModel(url: string) {
 
 async function generateTripo(request: Model3DGenerateRequest): Promise<Model3DGenerateOutput> {
   const modelVersion = request.modelVersion || DEFAULT_MODEL_VERSION
-  let taskId: string
+  let taskId: string | undefined
 
   try {
     if (request.inputMode === "image") {
