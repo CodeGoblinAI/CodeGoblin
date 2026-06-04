@@ -1,7 +1,7 @@
 import type { useDialog } from "@tui/ui/dialog"
-import type { useKV } from "../../context/kv"
-import type { useSDK } from "../../context/sdk"
-import type { useToast } from "../../ui/toast"
+import type { useKV } from "../context/kv"
+import type { useSDK } from "../context/sdk"
+import type { useToast } from "../ui/toast"
 import { DialogAlert } from "@tui/ui/dialog-alert"
 import { DialogConfirm } from "@tui/ui/dialog-confirm"
 

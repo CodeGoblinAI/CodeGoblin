@@ -3,6 +3,8 @@ import os from "os"
 import path from "path"
 import { getModel3DProvider, type Model3DInputImage, type Model3DInputMode } from "./model3d-providers"
 
+export type { Model3DInputMode } from "./model3d-providers"
+
 export type Model3DCommandResult = {
   ok: boolean
   message: string
@@ -28,6 +30,7 @@ type GenerateInput = {
   cwd: string
   dryRun?: boolean
   keyFile?: string
+  require3DModel?: boolean
   onProgress?: (message: string) => void | Promise<void>
 }
 

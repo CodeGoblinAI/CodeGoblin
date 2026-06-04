@@ -1,27 +1,6 @@
 import "@google/model-viewer"
 import { createEffect, createSignal, onCleanup, Show, type Component } from "solid-js"
 
-declare module "solid-js" {
-  namespace JSX {
-    interface IntrinsicElements {
-      "model-viewer": ModelViewerElement & {
-        children?: unknown
-        class?: string
-      }
-    }
-  }
-}
-
-type ModelViewerElement = HTMLElement & {
-  src?: string
-  alt?: string
-  "camera-controls"?: boolean
-  "auto-rotate"?: boolean
-  "shadow-intensity"?: string
-  "interaction-prompt"?: string
-  loading?: "auto" | "lazy" | "eager"
-}
-
 export type CodeGoblinModelViewerProps = {
   src: string
   directory?: string

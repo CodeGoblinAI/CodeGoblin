@@ -1,15 +1,17 @@
-import { DIFFS_TAG_NAME } from "@pierre/diffs"
-
-/**
- * TypeScript declaration for the <diffs-container> custom element.
- * This tells TypeScript that <diffs-container> is a valid JSX element in SolidJS.
- * Required for using the @pierre/diffs web component in .tsx files.
- */
+import type { JSX } from "solid-js"
 
 declare module "solid-js" {
   namespace JSX {
     interface IntrinsicElements {
-      [DIFFS_TAG_NAME]: HTMLAttributes<HTMLElement>
+      "model-viewer": JSX.HTMLAttributes<HTMLElement> & {
+        src?: string
+        alt?: string
+        "camera-controls"?: boolean
+        "auto-rotate"?: boolean
+        "shadow-intensity"?: string
+        "interaction-prompt"?: string
+        loading?: "auto" | "lazy" | "eager"
+      }
     }
   }
 }
