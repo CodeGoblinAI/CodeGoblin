@@ -127,6 +127,23 @@ function uniqueRows(rows: Row[]) {
   })
 }
 
+function resolveTypedPath(value: string, home: string, start: string | undefined) {
+  const raw = normalizeDriveRoot(cleanInput(value))
+  if (!raw) return undefined
+
+  const base = trimTrailing(start || home)
+  if (raw === "~") return trimTrailing(home || base)
+  if (raw.startsWith("~/")) return trimTrailing(joinPath(home || base, raw.slice(2)))
+
+  const root = rootOf(raw)
+  if (root) {
+    const rest = raw.slice(root.length).replace(/^\/+/, "")
+    return trimTrailing(rest ? joinPath(root, rest) : root)
+  }
+
+  return trimTrailing(joinPath(base, raw))
+}
+
 function useDirectorySearch(args: {
   sdk: ReturnType<typeof useGlobalSDK>
   start: () => string | undefined
@@ -321,6 +338,13 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
     dialog.close()
   }
 
+  function tryResolveTypedPath() {
+    const absolute = resolveTypedPath(filter(), home(), start())
+    if (!absolute) return false
+    resolve(absolute)
+    return true
+  }
+
   return (
     <Dialog title={props.title ?? language.t("command.project.open")}>
       <List
@@ -341,6 +365,13 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
         ref={(r) => (list = r)}
         onFilter={(value) => setFilter(cleanInput(value))}
         onKeyEvent={(e, item) => {
+          if (e.key === "Enter" && !item) {
+            if (tryResolveTypedPath()) {
+              e.preventDefault()
+              e.stopPropagation()
+            }
+            return
+          }
           if (e.key !== "Tab") return
           if (e.shiftKey) return
           if (!item) return

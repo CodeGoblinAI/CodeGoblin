@@ -19,6 +19,10 @@ export const pathKey = (path: string) => {
   const value = isWindowsPath(path) ? path.replaceAll("\\", "/") : path
   const trimmed = trimTrailingSlashes(value)
   if (!trimmed && value.startsWith("/")) return "/" as PathKey
-  if (isDrive(trimmed)) return `${trimmed}/` as PathKey
-  return trimmed as PathKey
+  if (isDrive(trimmed)) return `${trimmed.toLowerCase()}/` as PathKey
+  const normalized = isWindowsPath(path) ? trimmed.toLowerCase() : trimmed
+  if (!normalized && value.startsWith("/")) return "/" as PathKey
+  return normalized as PathKey
 }
+
+export const pathKeysEqual = (a: string, b: string) => pathKey(a) === pathKey(b)

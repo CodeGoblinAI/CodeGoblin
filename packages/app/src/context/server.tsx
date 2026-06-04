@@ -1,4 +1,5 @@
 import { createSimpleContext } from "@codegoblin/ui/context"
+import { pathKeysEqual } from "@/utils/path-key"
 import { type Accessor, batch, createEffect, createMemo, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
@@ -258,7 +259,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
           const key = origin()
           if (!key) return
           const current = store.projects[key] ?? []
-          if (current.find((x) => x.worktree === directory)) return
+          if (current.find((x) => pathKeysEqual(x.worktree, directory))) return
           setStore("projects", key, [{ worktree: directory, expanded: true }, ...current])
         },
         close(directory: string) {
@@ -268,28 +269,28 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
           setStore(
             "projects",
             key,
-            current.filter((x) => x.worktree !== directory),
+            current.filter((x) => !pathKeysEqual(x.worktree, directory)),
           )
         },
         expand(directory: string) {
           const key = origin()
           if (!key) return
           const current = store.projects[key] ?? []
-          const index = current.findIndex((x) => x.worktree === directory)
+          const index = current.findIndex((x) => pathKeysEqual(x.worktree, directory))
           if (index !== -1) setStore("projects", key, index, "expanded", true)
         },
         collapse(directory: string) {
           const key = origin()
           if (!key) return
           const current = store.projects[key] ?? []
-          const index = current.findIndex((x) => x.worktree === directory)
+          const index = current.findIndex((x) => pathKeysEqual(x.worktree, directory))
           if (index !== -1) setStore("projects", key, index, "expanded", false)
         },
         move(directory: string, toIndex: number) {
           const key = origin()
           if (!key) return
           const current = store.projects[key] ?? []
-          const fromIndex = current.findIndex((x) => x.worktree === directory)
+          const fromIndex = current.findIndex((x) => pathKeysEqual(x.worktree, directory))
           if (fromIndex === -1 || fromIndex === toIndex) return
           const result = [...current]
           const [item] = result.splice(fromIndex, 1)
