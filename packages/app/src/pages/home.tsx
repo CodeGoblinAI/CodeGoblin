@@ -24,6 +24,7 @@ import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
 import { displayName, getProjectAvatarSource, projectForSession, sortedRootSessions } from "@/pages/layout/helpers"
+import { pathKeysEqual } from "@/utils/path-key"
 import { getFilename } from "@codegoblin/core/util/path"
 import { sessionTitle } from "@/utils/session-title"
 import { pathKey } from "@/utils/path-key"
@@ -70,9 +71,12 @@ function HomeDesign() {
     () => projects().find((project) => project.worktree === state.project) ?? projects()[0],
   )
   const projectDirectories = createMemo(() => {
-    const project = selectedProject()
-    if (!project) return []
-    return [project.worktree, ...(project.sandboxes ?? [])]
+    const dirs = new Set<string>()
+    for (const project of projects()) {
+      dirs.add(project.worktree)
+      for (const sandbox of project.sandboxes ?? []) dirs.add(sandbox)
+    }
+    return [...dirs]
   })
   const search = createMemo(() => state.search.trim())
   const sessionLoad = useQuery(() => ({
@@ -114,7 +118,7 @@ function HomeDesign() {
   const groups = createMemo(() => groupSessions(records(), language))
 
   function selectProject(directory: string) {
-    if (!projects().some((project) => project.worktree === directory)) return
+    if (!projects().some((project) => pathKeysEqual(project.worktree, directory))) return
     setState("project", directory)
   }
 
