@@ -1609,7 +1609,9 @@ function CodeGoblinImageStatus(props: { meta: CodeGoblinImageMeta; text: string;
       },
       body: JSON.stringify(body),
     })
-    const json = await response.json().catch(() => undefined)
+    const json = (await response.json().catch(() => undefined)) as
+      | { ok?: boolean; message?: string }
+      | undefined
     if (!response.ok || json?.ok === false) {
       throw new Error(typeof json?.message === "string" ? json.message : "CodeGoblin request failed.")
     }
@@ -1928,7 +1930,9 @@ function CodeGoblinAudioStatus(props: { meta: CodeGoblinAudioMeta; text: string 
       },
       body: JSON.stringify(body),
     })
-    const json = await response.json().catch(() => undefined)
+    const json = (await response.json().catch(() => undefined)) as
+      | { ok?: boolean; message?: string }
+      | undefined
     if (!response.ok || json?.ok === false) {
       throw new Error(typeof json?.message === "string" ? json.message : "CodeGoblin request failed.")
     }
