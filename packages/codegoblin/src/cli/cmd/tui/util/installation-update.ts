@@ -1,5 +1,4 @@
 import type { useDialog } from "@tui/ui/dialog"
-import type { useKV } from "../context/kv"
 import type { useSDK } from "../context/sdk"
 import type { useToast } from "../ui/toast"
 import { DialogAlert } from "@tui/ui/dialog-alert"
@@ -9,22 +8,25 @@ export const UPDATE_AVAILABLE_KV_KEY = "update_available_version"
 export const SKIPPED_VERSION_KV_KEY = "skipped_version"
 
 type Dialog = ReturnType<typeof useDialog>
-type KV = ReturnType<typeof useKV>
+type KVLike = {
+  get: (key: string, defaultValue?: any) => any
+  set: (key: string, value: any) => void
+}
 type SDK = ReturnType<typeof useSDK>
 type Toast = ReturnType<typeof useToast>
 
-export function markUpdateAvailable(kv: KV, version: string) {
+export function markUpdateAvailable(kv: KVLike, version: string) {
   kv.set(UPDATE_AVAILABLE_KV_KEY, version)
 }
 
-export function clearUpdateAvailable(kv: KV) {
+export function clearUpdateAvailable(kv: KVLike) {
   kv.set(UPDATE_AVAILABLE_KV_KEY, undefined)
 }
 
 export async function performInstallationUpdate(input: {
   version: string
   dialog: Dialog
-  kv: KV
+  kv: KVLike
   sdk: SDK
   toast: Toast
   exit: () => void
