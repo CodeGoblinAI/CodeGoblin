@@ -141,6 +141,35 @@ type CodeGoblin3DPersist = {
   plannedOutput?: string
   inputMode?: Model3DInputMode
   modelVersion?: string
+  startedAt: number
+  estimatedCredits?: number
+}
+
+function codeGoblin3DProgressText(persist: CodeGoblin3DPersist, progressMessage: string) {
+  return [
+    `CodeGoblin is generating a 3D model with ${persist.providerID}/${persist.modelID}.`,
+    persist.inputMode ? `Input mode: ${persist.inputMode}.` : undefined,
+    persist.modelVersion ? `Tripo version: ${persist.modelVersion}.` : undefined,
+    progressMessage,
+    "Usually takes 1–5 minutes.",
+    persist.estimatedCredits !== undefined ? `Estimated Tripo credits: ~${persist.estimatedCredits}.` : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n")
+}
+
+function codeGoblin3DProgressMetadata(persist: CodeGoblin3DPersist, progressMessage: string) {
+  return {
+    kind: "3d-progress" as const,
+    output: persist.plannedOutput,
+    provider: persist.providerID,
+    model: persist.modelID,
+    inputMode: persist.inputMode,
+    modelVersion: persist.modelVersion,
+    progressMessage,
+    credits: persist.estimatedCredits,
+    startedAt: persist.startedAt,
+  }
 }
 
 export const context = Context.makeUnsafe<unknown>(new Map())
@@ -263,13 +292,13 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           }
         })
         if (!model3d.ok) return HttpServerResponse.jsonUnsafe(model3d, { status: 404 })
-        return HttpServerResponse.raw(model3d.body, {
-          headers: new Headers({
-            "cache-control": "no-store",
-            "content-type": model3d.mime,
-            "x-content-type-options": "nosniff",
-          }),
+        const headers = new Headers({
+          "cache-control": "no-store",
+          "content-type": model3d.mime,
+          "x-content-type-options": "nosniff",
+          "content-disposition": `inline; filename="${model3d.filename}"`,
         })
+        return HttpServerResponse.raw(model3d.body, { headers })
       }),
     )
     yield* router.add("GET", "/codegoblin/audio/voices", (request) =>
@@ -316,6 +345,13 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           }
         })
         return HttpServerResponse.jsonUnsafe(installed, { status: installed.ok ? 200 : 400 })
+      }),
+    )
+    yield* router.add("POST", "/codegoblin/market/firebase-login", () =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        yield* Effect.sync(() => Market.startFirebaseLogin(route.directory))
+        return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 })
       }),
     )
     yield* router.add("POST", "/codegoblin/open-output", (request) =>
@@ -744,15 +780,7 @@ export async function openCodeGoblinOutput(
 }
 
 export async function readCodeGoblinOutputImage(root: string, output: string) {
-  if (!output.trim()) throw new Error("CodeGoblin output path is required.")
-
-  const rootPath = path.resolve(root)
-  const target = path.resolve(rootPath, output)
-  const rel = path.relative(rootPath, target)
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error("CodeGoblin output path must stay inside the current project directory.")
-  }
-
+  const target = resolveCodeGoblinOutputTarget(root, output)
   const stat = await fs.stat(target).catch(() => undefined)
   if (!stat || !stat.isFile()) throw new Error("CodeGoblin output image does not exist yet.")
 
@@ -767,14 +795,7 @@ export async function readCodeGoblinOutputImage(root: string, output: string) {
 }
 
 export async function readCodeGoblinOutputAudio(root: string, output: string) {
-  if (!output.trim()) throw new Error("CodeGoblin output path is required.")
-
-  const rootPath = path.resolve(root)
-  const target = path.resolve(rootPath, output)
-  const rel = path.relative(rootPath, target)
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error("CodeGoblin output path must stay inside the current project directory.")
-  }
+  const target = resolveCodeGoblinOutputTarget(root, output)
 
   const stat = await fs.stat(target).catch(() => undefined)
   if (!stat || !stat.isFile()) throw new Error("CodeGoblin output audio does not exist yet.")
@@ -787,14 +808,7 @@ export async function readCodeGoblinOutputAudio(root: string, output: string) {
 }
 
 export async function readCodeGoblinOutputModel3D(root: string, output: string) {
-  if (!output.trim()) throw new Error("CodeGoblin output path is required.")
-
-  const rootPath = path.resolve(root)
-  const target = path.resolve(rootPath, output)
-  const rel = path.relative(rootPath, target)
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error("CodeGoblin output path must stay inside the current project directory.")
-  }
+  const target = resolveCodeGoblinOutputTarget(root, output)
 
   const stat = await fs.stat(target).catch(() => undefined)
   if (!stat || !stat.isFile()) throw new Error("CodeGoblin output 3D model does not exist yet.")
@@ -803,7 +817,21 @@ export async function readCodeGoblinOutputModel3D(root: string, output: string) 
     ok: true as const,
     body: await fs.readFile(target),
     mime: model3dMimeType(target),
+    filename: path.basename(target),
   }
+}
+
+function resolveCodeGoblinOutputTarget(root: string, output: string) {
+  const trimmed = output.trim()
+  if (!trimmed) throw new Error("CodeGoblin output path is required.")
+
+  const rootPath = path.resolve(root)
+  const target = path.isAbsolute(trimmed) ? path.normalize(trimmed) : path.resolve(rootPath, trimmed)
+  const rel = path.relative(rootPath, target)
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("CodeGoblin output path must stay inside the current project directory.")
+  }
+  return target
 }
 
 function imageMimeType(file: string) {
@@ -1425,29 +1453,57 @@ function createCodeGoblin3DMessages(input: {
       time: { created: Date.now() },
       sessionID: input.sessionID,
     } as MessageV2.Assistant)
+    const startedAt = Date.now()
+    const estimatedCredits = CodeGoblin3DCommand.estimateCredits(
+      input.providerID,
+      input.inputMode,
+      input.modelVersion,
+    )
+    const initialProgress = "Starting Tripo task…"
     yield* input.session.updatePart({
       id: assistantPartID,
       sessionID: input.sessionID,
       messageID: assistantMessageID,
       type: "text",
-      text: [
-        `CodeGoblin is generating a 3D model with ${input.providerID}/${input.modelID}.`,
-        input.inputMode ? `Input mode: ${input.inputMode}.` : undefined,
-        input.modelVersion ? `Tripo version: ${input.modelVersion}.` : undefined,
-        input.plannedOutput ? `Saving to: ${input.plannedOutput}` : undefined,
-        "This chat message will update when the 3D model finishes.",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      metadata: {
-        codegoblin: {
-          kind: "3d-progress",
-          output: input.plannedOutput,
-          provider: input.providerID,
-          model: input.modelID,
+      text: codeGoblin3DProgressText(
+        {
+          sessionID: input.sessionID,
+          userMessageID,
+          assistantMessageID,
+          assistantPartID,
+          agent: input.agent,
+          providerID: input.providerID,
+          modelID: input.modelID,
+          variant: input.variant,
+          routeDirectory: input.routeDirectory,
+          plannedOutput: input.plannedOutput,
           inputMode: input.inputMode,
           modelVersion: input.modelVersion,
+          startedAt,
+          estimatedCredits,
         },
+        initialProgress,
+      ),
+      metadata: {
+        codegoblin: codeGoblin3DProgressMetadata(
+          {
+            sessionID: input.sessionID,
+            userMessageID,
+            assistantMessageID,
+            assistantPartID,
+            agent: input.agent,
+            providerID: input.providerID,
+            modelID: input.modelID,
+            variant: input.variant,
+            routeDirectory: input.routeDirectory,
+            plannedOutput: input.plannedOutput,
+            inputMode: input.inputMode,
+            modelVersion: input.modelVersion,
+            startedAt,
+            estimatedCredits,
+          },
+          initialProgress,
+        ),
       },
     } as MessageV2.TextPart)
     return {
@@ -1463,6 +1519,8 @@ function createCodeGoblin3DMessages(input: {
       plannedOutput: input.plannedOutput,
       inputMode: input.inputMode,
       modelVersion: input.modelVersion,
+      startedAt,
+      estimatedCredits,
     } satisfies CodeGoblin3DPersist
   })
 }
@@ -1475,21 +1533,19 @@ function updateCodeGoblin3DProgress(input: {
   modelVersion?: string
 }) {
   return Effect.gen(function* () {
+    const persist = {
+      ...input.persist,
+      inputMode: input.inputMode ?? input.persist.inputMode,
+      modelVersion: input.modelVersion ?? input.persist.modelVersion,
+    }
     yield* input.session.updatePart({
       id: input.persist.assistantPartID,
       sessionID: input.persist.sessionID,
       messageID: input.persist.assistantMessageID,
       type: "text",
-      text: input.message,
+      text: codeGoblin3DProgressText(persist, input.message),
       metadata: {
-        codegoblin: {
-          kind: "3d-progress",
-          output: input.persist.plannedOutput,
-          provider: input.persist.providerID,
-          model: input.persist.modelID,
-          inputMode: input.inputMode ?? input.persist.inputMode,
-          modelVersion: input.modelVersion ?? input.persist.modelVersion,
-        },
+        codegoblin: codeGoblin3DProgressMetadata(persist, input.message),
       },
     } as MessageV2.TextPart)
   })
@@ -1507,6 +1563,7 @@ function finishCodeGoblin3DMessages(input: {
     const output = input.result.output ?? input.persist.plannedOutput
     const inputMode = input.result.inputMode ?? input.persist.inputMode
     const modelVersion = input.result.modelVersion ?? input.persist.modelVersion
+    const credits = input.result.credits ?? input.persist.estimatedCredits
     const text = input.result.ok
       ? [
           "3D model generated.",
@@ -1514,6 +1571,7 @@ function finishCodeGoblin3DMessages(input: {
           inputMode ? `Input mode: ${inputMode}` : undefined,
           modelVersion ? `Tripo version: ${modelVersion}` : undefined,
           output ? `Saved to: ${output}` : undefined,
+          credits !== undefined ? `Tripo credits: ~${credits}.` : undefined,
           input.result.taskId ? `Tripo task: ${input.result.taskId}` : undefined,
         ]
           .filter(Boolean)
@@ -1541,6 +1599,7 @@ function finishCodeGoblin3DMessages(input: {
           inputMode,
           modelVersion,
           taskId: input.result.taskId,
+          credits,
         },
       },
     } as MessageV2.TextPart)

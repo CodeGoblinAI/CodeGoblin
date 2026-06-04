@@ -1,0 +1,109 @@
+import "@google/model-viewer"
+import { createEffect, createSignal, onCleanup, Show, type Component } from "solid-js"
+
+declare module "solid-js" {
+  namespace JSX {
+    interface IntrinsicElements {
+      "model-viewer": ModelViewerElement & {
+        children?: unknown
+        class?: string
+        style?: string | Record<string, string>
+      }
+    }
+  }
+}
+
+type ModelViewerElement = HTMLElement & {
+  src?: string
+  alt?: string
+  "camera-controls"?: boolean
+  "auto-rotate"?: boolean
+  "shadow-intensity"?: string
+  "interaction-prompt"?: string
+  loading?: "auto" | "lazy" | "eager"
+}
+
+export type CodeGoblinModelViewerProps = {
+  src: string
+  directory?: string
+  alt?: string
+}
+
+export const CodeGoblinModelViewer: Component<CodeGoblinModelViewerProps> = (props) => {
+  const [objectUrl, setObjectUrl] = createSignal<string>()
+  const [error, setError] = createSignal<string>()
+  const [loading, setLoading] = createSignal(true)
+
+  createEffect(() => {
+    const src = props.src
+    const directory = props.directory
+    if (!src) return
+
+    let cancelled = false
+    setLoading(true)
+    setError(undefined)
+
+    void (async () => {
+      try {
+        const headers: Record<string, string> = {}
+        if (directory) headers["x-opencode-directory"] = directory
+        const response = await fetch(src, { credentials: "same-origin", headers })
+        if (!response.ok) throw new Error(`Could not load 3D model (${response.status}).`)
+        const contentType = response.headers.get("content-type") ?? ""
+        if (contentType.includes("text/html") || contentType.includes("application/json")) {
+          throw new Error("Server returned an error page instead of a GLB file.")
+        }
+        const blob = await response.blob()
+        if (cancelled) return
+        const url = URL.createObjectURL(blob)
+        setObjectUrl((previous) => {
+          if (previous) URL.revokeObjectURL(previous)
+          return url
+        })
+        setError(undefined)
+      } catch (cause) {
+        if (cancelled) return
+        setObjectUrl((previous) => {
+          if (previous) URL.revokeObjectURL(previous)
+          return undefined
+        })
+        setError(cause instanceof Error ? cause.message : "Could not load 3D preview.")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    onCleanup(() => {
+      cancelled = true
+      setObjectUrl((previous) => {
+        if (previous) URL.revokeObjectURL(previous)
+        return undefined
+      })
+    })
+  })
+
+  return (
+    <>
+      <Show when={loading() && !objectUrl()}>
+        <div data-slot="codegoblin-3d-preview-loading">Loading 3D preview…</div>
+      </Show>
+      <Show when={error()}>
+        {(message) => <div data-slot="codegoblin-3d-preview-error">{message()}</div>}
+      </Show>
+      <Show when={objectUrl()}>
+        {(url) => (
+          <model-viewer
+            src={url()}
+            alt={props.alt ?? "Generated 3D model"}
+            camera-controls
+            auto-rotate
+            shadow-intensity="1"
+            interaction-prompt="none"
+            loading="eager"
+            style={{ width: "100%", height: "360px", "background-color": "var(--background-base, #111)" }}
+          />
+        )}
+      </Show>
+    </>
+  )
+}
