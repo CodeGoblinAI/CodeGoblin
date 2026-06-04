@@ -68,7 +68,7 @@ const INTERNAL_PLUGINS: PluginInstance[] = [
   AzureAuthPlugin,
   DigitalOceanAuthPlugin,
   XaiAuthPlugin,
-]
+] as unknown as PluginInstance[]
 
 function isServerPlugin(value: unknown): value is PluginInstance {
   return typeof value === "function"
