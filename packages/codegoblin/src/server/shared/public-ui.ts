@@ -3,8 +3,8 @@
 // the manifest icons even when a server password is configured.
 export const PUBLIC_UI_PATHS = new Set<string>([
   "/site.webmanifest",
-  "/web-app-manifest-192x192.png",
-  "/web-app-manifest-512x512.png",
+  "/favicon-v3.svg",
+  "/favicon.svg",
 ])
 
 export function isPublicUIPath(method: string, pathname: string) {
