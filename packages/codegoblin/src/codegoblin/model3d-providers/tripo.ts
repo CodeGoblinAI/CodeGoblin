@@ -10,6 +10,17 @@ const MODEL_VERSIONS = [
   { id: "v3.0-20250812", name: "Tripo H3 v3.0" },
 ] as const
 
+/** Tripo bills in credits; these are observed defaults for H3 v3.0/v3.1. */
+const TRIPO_CREDIT_ESTIMATES: Record<string, { text: number; image: number }> = {
+  "v3.1-20260211": { text: 20, image: 30 },
+  "v3.0-20250812": { text: 20, image: 30 },
+}
+
+export function estimateTripoCredits(inputMode: "text" | "image", modelVersion: string) {
+  const table = TRIPO_CREDIT_ESTIMATES[modelVersion] ?? { text: 20, image: 30 }
+  return inputMode === "image" ? table.image : table.text
+}
+
 type TripoTaskResponse = {
   code?: number
   data?: {
@@ -177,7 +188,8 @@ async function generateTripo(request: Model3DGenerateRequest): Promise<Model3DGe
 
     await request.onProgress?.("Downloading 3D model…")
     const bytes = await downloadModel(downloadUrl)
-    return { ok: true, bytes, taskId, downloadUrl }
+    const credits = estimateTripoCredits(request.inputMode, modelVersion)
+    return { ok: true, bytes, taskId, downloadUrl, credits }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Tripo 3D generation failed.", taskId }
   }
@@ -209,5 +221,6 @@ export const tripoProvider: Model3DProvider = {
   fileExtension(outputFormat: string) {
     return outputFormat === "obj" ? "obj" : "glb"
   },
+  estimateCredits: estimateTripoCredits,
   generate: generateTripo,
 }

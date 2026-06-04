@@ -893,6 +893,7 @@ const ProviderModalities = Schema.Struct({
   image: Schema.Boolean,
   video: Schema.Boolean,
   pdf: Schema.Boolean,
+  model3d: Schema.optional(Schema.Boolean),
 })
 
 const ProviderInterleaved = Schema.Union([

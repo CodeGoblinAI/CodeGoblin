@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { CodeGoblin3DCommand } from "@/codegoblin/model3d-command"
+import { estimateTripoCredits } from "@/codegoblin/model3d-providers/tripo"
 
 describe("CodeGoblin 3D command model routing", () => {
   test("does not route 3D prompts through non-3D models", () => {
@@ -63,7 +64,9 @@ describe("CodeGoblin 3D command model routing", () => {
 
   test("reports missing Tripo key without sending a request", async () => {
     const previous = process.env.TRIPO_API_KEY
+    const previousDisable = process.env.CODEGOBLIN_MODEL3D_DISABLE_CONNECTED_AUTH
     delete process.env.TRIPO_API_KEY
+    process.env.CODEGOBLIN_MODEL3D_DISABLE_CONNECTED_AUTH = "1"
     try {
       const result = await CodeGoblin3DCommand.generate({
         prompt: "wooden chair",
@@ -76,6 +79,15 @@ describe("CodeGoblin 3D command model routing", () => {
       expect(result.message).toContain("TRIPO_API_KEY")
     } finally {
       if (previous) process.env.TRIPO_API_KEY = previous
+      else delete process.env.TRIPO_API_KEY
+      if (previousDisable) process.env.CODEGOBLIN_MODEL3D_DISABLE_CONNECTED_AUTH = previousDisable
+      else delete process.env.CODEGOBLIN_MODEL3D_DISABLE_CONNECTED_AUTH
     }
+  })
+
+  test("estimates Tripo credits by input mode", () => {
+    expect(CodeGoblin3DCommand.estimateCredits("tripo", "text", "v3.0-20250812")).toBe(20)
+    expect(CodeGoblin3DCommand.estimateCredits("tripo", "image", "v3.0-20250812")).toBe(30)
+    expect(estimateTripoCredits("text", "v3.1-20260211")).toBe(20)
   })
 })
