@@ -12,6 +12,7 @@ export type Model3DCommandResult = {
   modelVersion?: string
   inputMode?: Model3DInputMode
   taskId?: string
+  credits?: number
   requires3DModel?: boolean
 }
 
@@ -87,6 +88,12 @@ export const CodeGoblin3DCommand = {
   },
   looksLike3DIntent(prompt: string) {
     return looksLike3DIntent(prompt)
+  },
+  estimateCredits(provider?: string, inputMode?: Model3DInputMode, modelVersion?: string) {
+    const resolved = getModel3DProvider(provider)
+    const mode = inputMode ?? "text"
+    const version = resolved.normalizeModelVersion(modelVersion)
+    return resolved.estimateCredits?.(mode, version)
   },
 }
 
@@ -175,6 +182,8 @@ async function generateModel3D(input: GenerateInput): Promise<Model3DCommandResu
     onProgress: input.onProgress,
   })
 
+  const estimatedCredits = provider.estimateCredits?.(inputMode, modelVersion)
+
   if (!result.ok) {
     return {
       ok: false,
@@ -184,12 +193,15 @@ async function generateModel3D(input: GenerateInput): Promise<Model3DCommandResu
       inputMode,
       output,
       taskId: result.taskId,
+      credits: estimatedCredits,
       message: result.message,
     }
   }
 
   await fs.mkdir(path.dirname(output), { recursive: true })
   await fs.writeFile(output, Buffer.from(result.bytes))
+  const credits = result.credits ?? estimatedCredits
+  const creditLine = credits !== undefined ? ` Tripo credits: ~${credits}.` : ""
   return {
     ok: true,
     provider: provider.id,
@@ -198,7 +210,8 @@ async function generateModel3D(input: GenerateInput): Promise<Model3DCommandResu
     inputMode,
     output,
     taskId: result.taskId,
-    message: `3D model generated with ${provider.id}/${model} (${inputMode}, ${modelVersion}) and saved to ${output}.`,
+    credits,
+    message: `3D model generated with ${provider.id}/${model} (${inputMode}, ${modelVersion}) and saved to ${output}.${creditLine}`,
   }
 }
 

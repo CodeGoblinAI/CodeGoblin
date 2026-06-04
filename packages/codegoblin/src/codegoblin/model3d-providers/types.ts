@@ -19,7 +19,7 @@ export type Model3DGenerateRequest = {
 }
 
 export type Model3DGenerateOutput =
-  | { ok: true; bytes: Uint8Array; taskId: string; downloadUrl?: string }
+  | { ok: true; bytes: Uint8Array; taskId: string; downloadUrl?: string; credits?: number }
   | { ok: false; message: string; taskId?: string }
 
 export type Model3DProviderModel = {
@@ -41,5 +41,6 @@ export type Model3DProvider = {
   normalizeModel: (model?: string) => string
   normalizeModelVersion: (variant?: string) => string
   fileExtension: (outputFormat: string) => string
+  estimateCredits?: (inputMode: Model3DInputMode, modelVersion: string) => number
   generate: (request: Model3DGenerateRequest) => Promise<Model3DGenerateOutput>
 }
