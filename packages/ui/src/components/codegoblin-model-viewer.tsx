@@ -7,7 +7,6 @@ declare module "solid-js" {
       "model-viewer": ModelViewerElement & {
         children?: unknown
         class?: string
-        style?: string | Record<string, string>
       }
     }
   }
@@ -100,7 +99,6 @@ export const CodeGoblinModelViewer: Component<CodeGoblinModelViewerProps> = (pro
             shadow-intensity="1"
             interaction-prompt="none"
             loading="eager"
-            style={{ width: "100%", height: "360px", "background-color": "var(--background-base, #111)" }}
           />
         )}
       </Show>
