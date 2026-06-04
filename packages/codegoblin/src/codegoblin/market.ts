@@ -1,6 +1,8 @@
 import path from "path"
 import { applyEdits, modify } from "jsonc-parser"
 import { Filesystem } from "../util/filesystem"
+import { Process } from "../util/process"
+import { which } from "../util/which"
 import type { ConfigMCP } from "../config/mcp"
 
 export type MarketKind = "mcp" | "skill" | "plugin"
@@ -144,15 +146,38 @@ export const Market = {
   },
   async resolveConfigPath(baseDir: string): Promise<string> {
     const candidates = [
-      path.join(baseDir, "opencode.json"),
+      path.join(baseDir, "codegoblin.jsonc"),
+      path.join(baseDir, "codegoblin.json"),
       path.join(baseDir, "opencode.jsonc"),
-      path.join(baseDir, ".opencode", "opencode.json"),
+      path.join(baseDir, "opencode.json"),
+      path.join(baseDir, "config.json"),
+      path.join(baseDir, ".codegoblin", "codegoblin.jsonc"),
+      path.join(baseDir, ".codegoblin", "codegoblin.json"),
       path.join(baseDir, ".opencode", "opencode.jsonc"),
+      path.join(baseDir, ".opencode", "opencode.json"),
     ]
     for (const candidate of candidates) {
       if (await Filesystem.exists(candidate)) return candidate
     }
     return candidates[0]
+  },
+  firebaseLoginCommand(): string[] {
+    const npx =
+      process.platform === "win32" ? (which("npx.cmd") ?? which("npx") ?? "npx.cmd") : (which("npx") ?? "npx")
+    return [npx, "-y", "firebase-tools", "login"]
+  },
+  /** Open Firebase CLI login in a new terminal so the user can complete browser auth. */
+  startFirebaseLogin(cwd?: string): void {
+    const cmd = Market.firebaseLoginCommand()
+    if (process.platform === "win32") {
+      Process.spawn(["cmd", "/c", "start", "Firebase Login", "cmd", "/k", ...cmd], { cwd, stdin: "ignore" })
+      return
+    }
+    if (process.platform === "darwin") {
+      Process.spawn(["open", "-a", "Terminal", ...cmd], { cwd, stdin: "ignore" })
+      return
+    }
+    Process.spawn(cmd, { cwd, stdin: "inherit", stdout: "inherit", stderr: "inherit" })
   },
   /** Write a catalog MCP entry into the project config, returning the config path. */
   async addToConfig(entry: MarketEntry, baseDir: string): Promise<string> {
