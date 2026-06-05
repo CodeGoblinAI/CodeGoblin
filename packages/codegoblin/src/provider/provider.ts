@@ -28,7 +28,7 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { augmentAudioModelCatalog, augmentImageModelCatalog, codeGoblinProviderInfo } from "@/codegoblin/provider"
+import { augmentAudioModelCatalog, augmentImageModelCatalog, augment3DModelCatalog, codeGoblinProviderInfo } from "@/codegoblin/provider"
 
 const log = Log.create({ service: "provider" })
 
@@ -893,6 +893,7 @@ const ProviderModalities = Schema.Struct({
   image: Schema.Boolean,
   video: Schema.Boolean,
   pdf: Schema.Boolean,
+  model3d: Schema.optional(Schema.Boolean),
 })
 
 const ProviderInterleaved = Schema.Union([
@@ -1241,6 +1242,7 @@ export const layer = Layer.effect(
         database[codeGoblin.id] = toPublicInfo(codeGoblin)
         augmentImageModelCatalog(database)
         augmentAudioModelCatalog(database)
+        augment3DModelCatalog(database)
 
         const providers: Record<ProviderID, Info> = {} as Record<ProviderID, Info>
         const languages = new Map<string, LanguageModelV3>()

@@ -753,6 +753,9 @@ export const dict = {
   "settings.general.row.audioAutoApprove.title": "Auto-approve audio generation",
   "settings.general.row.audioAutoApprove.description":
     "Skip the audio confirmation and reuse the last saved voice, format, and tuning settings.",
+  "settings.general.row.model3dAutoApprove.title": "Auto-approve 3D generation",
+  "settings.general.row.model3dAutoApprove.description":
+    "Skip the Tripo confirmation and reuse the last saved model version and output format.",
   "settings.general.row.appearance.title": "Appearance",
   "settings.general.row.appearance.description": "Customise how CodeGoblin looks on your device",
   "settings.general.row.colorScheme.title": "Color scheme",

@@ -58,7 +58,13 @@ const createEmbeddedWebUIBundle = async () => {
   console.log(`Building Web UI to embed in the binary`)
   const appDir = path.join(import.meta.dirname, "../../app")
   const dist = path.join(appDir, "dist")
-  await $`OPENCODE_CHANNEL=${Script.channel} bun run --cwd ${appDir} build`
+  const { resolveViteNodeExecutable, viteBuildEnv, logViteNodeChoice, viteCliPath } = await import(
+    "../../../script/resolve-vite-node.ts"
+  )
+  const node = resolveViteNodeExecutable()
+  logViteNodeChoice(node)
+  const viteCli = viteCliPath(appDir)
+  await $`OPENCODE_CHANNEL=${Script.channel} ${node} ${viteCli} build`.cwd(appDir).env(viteBuildEnv(node))
   const files = (await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: dist })))
     .map((file) => file.replaceAll("\\", "/"))
     .filter((file) => !file.endsWith(".map"))
@@ -164,6 +170,32 @@ const targets = singleFlag
     })
   : allTargets
 
+const nativeCrateDir = path.resolve(dir, "../codegoblin-native")
+const nativeExeName = process.platform === "win32" ? "codegoblin-native.exe" : "codegoblin-native"
+const nativeReleasePath = path.join(nativeCrateDir, "target", "release", nativeExeName)
+
+async function buildNativeSidecar(): Promise<string | undefined> {
+  try {
+    const cargo = Bun.which("cargo")
+    if (!cargo) {
+      console.warn("cargo not found; skipping codegoblin-native build (TS memory fallback will be used)")
+      return undefined
+    }
+    console.log("Building codegoblin-native sidecar")
+    await $`cargo build --release`.cwd(nativeCrateDir)
+    if (!fs.existsSync(nativeReleasePath)) {
+      console.warn(`codegoblin-native build did not produce ${nativeReleasePath}`)
+      return undefined
+    }
+    return nativeReleasePath
+  } catch (e) {
+    console.warn("codegoblin-native build failed; continuing without sidecar:", e)
+    return undefined
+  }
+}
+
+const nativeSidecar = await buildNativeSidecar()
+
 await $`rm -rf dist`
 
 const binaries: Record<string, string> = {}
@@ -240,6 +272,11 @@ for (const item of targets) {
   }
 
   await $`rm -rf ./dist/${name}/bin/tui`
+  if (nativeSidecar && fs.existsSync(nativeSidecar)) {
+    const sidecarDest = path.join(dir, `dist/${name}/bin`, nativeExeName)
+    await fs.promises.copyFile(nativeSidecar, sidecarDest)
+    console.log(`Bundled native sidecar -> dist/${name}/bin/${nativeExeName}`)
+  }
   await Bun.file(`dist/${name}/package.json`).write(
     JSON.stringify(
       {

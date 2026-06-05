@@ -33,8 +33,10 @@ import { DbCommand } from "./cli/cmd/db"
 import { MemoryCommand } from "./cli/cmd/memory"
 import { OpenCommand } from "./cli/cmd/open"
 import { MarketCommand } from "./cli/cmd/market"
+import { StatusCommand } from "./cli/cmd/status"
 import { AudioCommand } from "./cli/cmd/audio"
 import { ImageCommand } from "./cli/cmd/image"
+import { Model3DCommand } from "./cli/cmd/model3d"
 import path from "path"
 import { Global } from "@codegoblin/core/global"
 import { JsonMigration } from "@/storage/json-migration"
@@ -180,6 +182,7 @@ const cli = yargs(args)
   .command(WebCommand)
   .command(AudioCommand)
   .command(ImageCommand)
+  .command(Model3DCommand)
   .command(ModelsCommand)
   .command(StatsCommand)
   .command(ExportCommand)
@@ -192,6 +195,7 @@ const cli = yargs(args)
   .command(MemoryCommand)
   .command(OpenCommand)
   .command(MarketCommand)
+  .command(StatusCommand)
   .fail((msg, err) => {
     if (
       msg?.startsWith("Unknown argument") ||

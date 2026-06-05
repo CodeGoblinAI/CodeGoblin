@@ -31,9 +31,19 @@ import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@codegoblin/core/cross-spawn-spawner"
+import { which } from "@/util/which"
 
 const log = Log.create({ service: "mcp" })
 const DEFAULT_TIMEOUT = 30_000
+
+/** Resolve npm shims like `npx` to their `.cmd` counterparts on Windows. */
+function resolveLocalMcpCommand(command: string[]): string[] {
+  if (command.length === 0) return command
+  const [cmd, ...args] = command
+  if (process.platform !== "win32") return command
+  const resolved = which(cmd) ?? which(`${cmd}.cmd`) ?? which(`${cmd}.exe`) ?? cmd
+  return [resolved, ...args]
+}
 
 const TolerantListToolsResultSchema = ListToolsResultSchema.extend({
   tools: ToolSchema.omit({ outputSchema: true }).array(),
@@ -422,7 +432,7 @@ export const layer = Layer.effect(
       key: string,
       mcp: ConfigMCP.Info & { type: "local" },
     ) {
-      const [cmd, ...args] = mcp.command
+      const [cmd, ...args] = resolveLocalMcpCommand(mcp.command)
       const cwd = yield* InstanceState.directory
       const transport = new StdioClientTransport({
         stderr: "pipe",

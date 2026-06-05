@@ -95,6 +95,8 @@ import { fenceLayer } from "./middleware/fence"
 import { schemaErrorLayer } from "./middleware/schema-error"
 import { CodeGoblinImageCommand, type ImageInput } from "@/codegoblin/image-command"
 import { CodeGoblinAudioCommand, type AudioVoiceSettings } from "@/codegoblin/audio-command"
+import { CodeGoblin3DCommand, type Model3DInputMode } from "@/codegoblin/model3d-command"
+import type { Model3DInputImage } from "@/codegoblin/model3d-providers"
 import { Market } from "@/codegoblin/market"
 import { Process } from "@/util/process"
 
@@ -124,6 +126,50 @@ type CodeGoblinAudioPersist = {
   plannedOutput?: string
   voice?: string
   outputFormat?: string
+}
+
+type CodeGoblin3DPersist = {
+  sessionID: SessionID
+  userMessageID: MessageID
+  assistantMessageID: MessageID
+  assistantPartID: PartID
+  agent: string
+  providerID: string
+  modelID: string
+  variant?: string
+  routeDirectory: string
+  plannedOutput?: string
+  inputMode?: Model3DInputMode
+  modelVersion?: string
+  startedAt: number
+  estimatedCredits?: number
+}
+
+function codeGoblin3DProgressText(persist: CodeGoblin3DPersist, progressMessage: string) {
+  return [
+    `CodeGoblin is generating a 3D model with ${persist.providerID}/${persist.modelID}.`,
+    persist.inputMode ? `Input mode: ${persist.inputMode}.` : undefined,
+    persist.modelVersion ? `Tripo version: ${persist.modelVersion}.` : undefined,
+    progressMessage,
+    "Usually takes 1–5 minutes.",
+    persist.estimatedCredits !== undefined ? `Estimated Tripo credits: ~${persist.estimatedCredits}.` : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n")
+}
+
+function codeGoblin3DProgressMetadata(persist: CodeGoblin3DPersist, progressMessage: string) {
+  return {
+    kind: "3d-progress" as const,
+    output: persist.plannedOutput,
+    provider: persist.providerID,
+    model: persist.modelID,
+    inputMode: persist.inputMode,
+    modelVersion: persist.modelVersion,
+    progressMessage,
+    credits: persist.estimatedCredits,
+    startedAt: persist.startedAt,
+  }
 }
 
 export const context = Context.makeUnsafe<unknown>(new Map())
@@ -231,6 +277,30 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         })
       }),
     )
+    yield* router.add("GET", "/codegoblin/output-model3d", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const output = new URL(request.url, "http://localhost").searchParams.get("output") ?? ""
+        const model3d = yield* Effect.promise(async () => {
+          try {
+            return await readCodeGoblinOutputModel3D(route.directory, output)
+          } catch (error) {
+            return {
+              ok: false as const,
+              message: error instanceof Error ? error.message : "Could not read CodeGoblin output 3D model.",
+            }
+          }
+        })
+        if (!model3d.ok) return HttpServerResponse.jsonUnsafe(model3d, { status: 404 })
+        const headers = new Headers({
+          "cache-control": "no-store",
+          "content-type": model3d.mime,
+          "x-content-type-options": "nosniff",
+          "content-disposition": `inline; filename="${model3d.filename}"`,
+        })
+        return HttpServerResponse.raw(model3d.body, { headers })
+      }),
+    )
     yield* router.add("GET", "/codegoblin/audio/voices", (request) =>
       Effect.gen(function* () {
         const route = yield* WorkspaceRouteContext
@@ -275,6 +345,13 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           }
         })
         return HttpServerResponse.jsonUnsafe(installed, { status: installed.ok ? 200 : 400 })
+      }),
+    )
+    yield* router.add("POST", "/codegoblin/market/firebase-login", () =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        yield* Effect.sync(() => Market.startFirebaseLogin(route.directory))
+        return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 })
       }),
     )
     yield* router.add("POST", "/codegoblin/open-output", (request) =>
@@ -394,6 +471,123 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
 
         if (persist) {
           yield* finishCodeGoblinAudioMessages({ session, sessionStatus, persist, result })
+        }
+
+        return HttpServerResponse.jsonUnsafe(persist ? { ...result, sessionID: persist.sessionID } : result, {
+          status: result.ok ? 200 : 400,
+        })
+      }),
+    )
+    yield* router.add("POST", "/codegoblin/model3d", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const text = yield* Effect.orDie(request.text)
+        let body: any
+        try {
+          body = text ? JSON.parse(text) : {}
+        } catch {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Invalid JSON body." }, { status: 400 })
+        }
+
+        const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : ""
+        const inputImages: Model3DInputImage[] = Array.isArray(body?.inputImages)
+          ? body.inputImages
+              .filter((item: any) => item && typeof item === "object")
+              .map((item: any) => ({
+                dataUrl: typeof item.dataUrl === "string" ? item.dataUrl : undefined,
+                path: typeof item.path === "string" ? item.path : undefined,
+                mime: typeof item.mime === "string" ? item.mime : undefined,
+                filename: typeof item.filename === "string" ? item.filename : undefined,
+              }))
+          : []
+        if (!prompt && inputImages.length === 0) {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "3D prompt or image input is required." }, { status: 400 })
+        }
+
+        const agent = typeof body?.agent === "string" && body.agent.trim() ? body.agent.trim() : "Agent"
+        const variant = typeof body?.variant === "string" ? body.variant : undefined
+        const requestProvider = typeof body?.provider === "string" ? body.provider : "tripo"
+        const requestModel = typeof body?.model === "string" ? body.model : undefined
+        const modelVersion = typeof body?.modelVersion === "string" ? body.modelVersion : variant
+
+        let preview: ReturnType<typeof CodeGoblin3DCommand.describe>
+        try {
+          preview = CodeGoblin3DCommand.describe({
+            prompt,
+            cwd: route.directory,
+            provider: requestProvider,
+            output: typeof body?.output === "string" ? body.output : undefined,
+            model: requestModel,
+            modelVersion,
+            inputImages,
+            outputFormat: typeof body?.outputFormat === "string" ? body.outputFormat : undefined,
+          })
+        } catch (error) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: error instanceof Error ? error.message : "3D output path is invalid." },
+            { status: 400 },
+          )
+        }
+
+        const persist = typeof body?.sessionID === "string"
+          ? yield* createCodeGoblin3DMessages({
+              session,
+              sessionStatus,
+              sessionID: SessionID.make(body.sessionID),
+              messageID: typeof body?.messageID === "string" ? MessageID.make(body.messageID) : undefined,
+              userPartID: typeof body?.userPartID === "string" ? PartID.make(body.userPartID) : undefined,
+              assistantMessageID:
+                typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
+              assistantPartID: typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
+              agent,
+              providerID: preview.provider,
+              modelID: preview.model,
+              variant,
+              routeDirectory: route.directory,
+              input: prompt || (preview.inputMode === "image" ? "Generate 3D model from attached image" : ""),
+              inputImages,
+              plannedOutput: preview.output,
+              inputMode: preview.inputMode,
+              modelVersion: preview.modelVersion,
+            })
+          : undefined
+
+        const result = yield* Effect.promise(async () => {
+          try {
+            return await CodeGoblin3DCommand.generate({
+              prompt,
+              cwd: route.directory,
+              provider: requestProvider,
+              output: typeof body?.output === "string" ? body.output : undefined,
+              model: requestModel,
+              modelVersion,
+              inputImages,
+              outputFormat: typeof body?.outputFormat === "string" ? body.outputFormat : undefined,
+              keyFile: typeof body?.keyFile === "string" ? body.keyFile : undefined,
+              onProgress: persist
+                ? async (message) => {
+                    await Effect.runPromise(
+                      updateCodeGoblin3DProgress({
+                        session,
+                        persist,
+                        message,
+                        inputMode: preview.inputMode,
+                        modelVersion: preview.modelVersion,
+                      }),
+                    ).catch(() => undefined)
+                  }
+                : undefined,
+            })
+          } catch (error) {
+            return {
+              ok: false,
+              message: error instanceof Error ? error.message : "CodeGoblin 3D generation failed.",
+            }
+          }
+        })
+
+        if (persist) {
+          yield* finishCodeGoblin3DMessages({ session, sessionStatus, persist, result })
         }
 
         return HttpServerResponse.jsonUnsafe(persist ? { ...result, sessionID: persist.sessionID } : result, {
@@ -586,15 +780,7 @@ export async function openCodeGoblinOutput(
 }
 
 export async function readCodeGoblinOutputImage(root: string, output: string) {
-  if (!output.trim()) throw new Error("CodeGoblin output path is required.")
-
-  const rootPath = path.resolve(root)
-  const target = path.resolve(rootPath, output)
-  const rel = path.relative(rootPath, target)
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error("CodeGoblin output path must stay inside the current project directory.")
-  }
-
+  const target = resolveCodeGoblinOutputTarget(root, output)
   const stat = await fs.stat(target).catch(() => undefined)
   if (!stat || !stat.isFile()) throw new Error("CodeGoblin output image does not exist yet.")
 
@@ -609,14 +795,7 @@ export async function readCodeGoblinOutputImage(root: string, output: string) {
 }
 
 export async function readCodeGoblinOutputAudio(root: string, output: string) {
-  if (!output.trim()) throw new Error("CodeGoblin output path is required.")
-
-  const rootPath = path.resolve(root)
-  const target = path.resolve(rootPath, output)
-  const rel = path.relative(rootPath, target)
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error("CodeGoblin output path must stay inside the current project directory.")
-  }
+  const target = resolveCodeGoblinOutputTarget(root, output)
 
   const stat = await fs.stat(target).catch(() => undefined)
   if (!stat || !stat.isFile()) throw new Error("CodeGoblin output audio does not exist yet.")
@@ -626,6 +805,33 @@ export async function readCodeGoblinOutputAudio(root: string, output: string) {
     body: await fs.readFile(target),
     mime: audioMimeType(target),
   }
+}
+
+export async function readCodeGoblinOutputModel3D(root: string, output: string) {
+  const target = resolveCodeGoblinOutputTarget(root, output)
+
+  const stat = await fs.stat(target).catch(() => undefined)
+  if (!stat || !stat.isFile()) throw new Error("CodeGoblin output 3D model does not exist yet.")
+
+  return {
+    ok: true as const,
+    body: await fs.readFile(target),
+    mime: model3dMimeType(target),
+    filename: path.basename(target),
+  }
+}
+
+function resolveCodeGoblinOutputTarget(root: string, output: string) {
+  const trimmed = output.trim()
+  if (!trimmed) throw new Error("CodeGoblin output path is required.")
+
+  const rootPath = path.resolve(root)
+  const target = path.isAbsolute(trimmed) ? path.normalize(trimmed) : path.resolve(rootPath, trimmed)
+  const rel = path.relative(rootPath, target)
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("CodeGoblin output path must stay inside the current project directory.")
+  }
+  return target
 }
 
 function imageMimeType(file: string) {
@@ -642,6 +848,13 @@ function audioMimeType(file: string) {
   if (ext === ".pcm") return "application/octet-stream"
   if (ext === ".ulaw" || ext === ".mulaw") return "audio/basic"
   return "audio/mpeg"
+}
+
+function model3dMimeType(file: string) {
+  const ext = path.extname(file).toLowerCase()
+  if (ext === ".glb") return "model/gltf-binary"
+  if (ext === ".obj") return "text/plain"
+  return "application/octet-stream"
 }
 
 function imagePathsFromBody(body: any) {
@@ -1138,6 +1351,255 @@ function finishCodeGoblinAudioMessages(input: {
           model: modelID,
           voice,
           outputFormat,
+        },
+      },
+    } as MessageV2.TextPart)
+    yield* input.session.updateMessage({
+      id: input.persist.assistantMessageID,
+      parentID: input.persist.userMessageID,
+      role: "assistant",
+      mode: input.persist.agent,
+      agent: input.persist.agent,
+      variant: input.persist.variant,
+      path: { cwd: input.persist.routeDirectory, root: input.persist.routeDirectory },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      modelID,
+      providerID,
+      time: { created: Date.now(), completed: Date.now() },
+      sessionID: input.persist.sessionID,
+    } as MessageV2.Assistant)
+    yield* input.sessionStatus.set(input.persist.sessionID, { type: "idle" })
+  })
+}
+
+function createCodeGoblin3DMessages(input: {
+  session: Session.Interface
+  sessionStatus: SessionStatus.Interface
+  sessionID: SessionID
+  messageID?: MessageID
+  userPartID?: PartID
+  assistantMessageID?: MessageID
+  assistantPartID?: PartID
+  agent: string
+  providerID: string
+  modelID: string
+  variant?: string
+  routeDirectory: string
+  input: string
+  inputImages: Model3DInputImage[]
+  plannedOutput?: string
+  inputMode?: Model3DInputMode
+  modelVersion?: string
+}) {
+  return Effect.gen(function* () {
+    const userMessageID = input.messageID ?? MessageID.ascending()
+    const userPartID = input.userPartID ?? PartID.ascending()
+    const assistantMessageID = input.assistantMessageID ?? MessageID.ascending()
+    const assistantPartID = input.assistantPartID ?? PartID.ascending()
+    const now = Date.now()
+    yield* input.sessionStatus.set(input.sessionID, { type: "busy" })
+    yield* input.session.updateMessage({
+      id: userMessageID,
+      role: "user",
+      sessionID: input.sessionID,
+      time: { created: now },
+      agent: input.agent,
+      model: {
+        providerID: input.providerID,
+        modelID: input.modelID,
+        variant: input.variant,
+      },
+    } as MessageV2.User)
+    yield* input.session.updatePart({
+      id: userPartID,
+      sessionID: input.sessionID,
+      messageID: userMessageID,
+      type: "text",
+      text: input.input,
+      metadata: {
+        codegoblin: {
+          kind: "3d-request",
+          inputMode: input.inputMode,
+          modelVersion: input.modelVersion,
+        },
+      },
+    } as MessageV2.TextPart)
+    for (const image of input.inputImages) {
+      const embedded = yield* embeddedImageInput(input.routeDirectory, image)
+      if (!embedded) continue
+      yield* input.session.updatePart({
+        id: PartID.ascending(),
+        sessionID: input.sessionID,
+        messageID: userMessageID,
+        type: "file",
+        mime: embedded.mime,
+        filename: embedded.filename,
+        url: embedded.url,
+      } as MessageV2.FilePart)
+    }
+    yield* input.session.updateMessage({
+      id: assistantMessageID,
+      parentID: userMessageID,
+      role: "assistant",
+      mode: input.agent,
+      agent: input.agent,
+      variant: input.variant,
+      path: { cwd: input.routeDirectory, root: input.routeDirectory },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      modelID: input.modelID,
+      providerID: input.providerID,
+      time: { created: Date.now() },
+      sessionID: input.sessionID,
+    } as MessageV2.Assistant)
+    const startedAt = Date.now()
+    const estimatedCredits = CodeGoblin3DCommand.estimateCredits(
+      input.providerID,
+      input.inputMode,
+      input.modelVersion,
+    )
+    const initialProgress = "Starting Tripo task…"
+    yield* input.session.updatePart({
+      id: assistantPartID,
+      sessionID: input.sessionID,
+      messageID: assistantMessageID,
+      type: "text",
+      text: codeGoblin3DProgressText(
+        {
+          sessionID: input.sessionID,
+          userMessageID,
+          assistantMessageID,
+          assistantPartID,
+          agent: input.agent,
+          providerID: input.providerID,
+          modelID: input.modelID,
+          variant: input.variant,
+          routeDirectory: input.routeDirectory,
+          plannedOutput: input.plannedOutput,
+          inputMode: input.inputMode,
+          modelVersion: input.modelVersion,
+          startedAt,
+          estimatedCredits,
+        },
+        initialProgress,
+      ),
+      metadata: {
+        codegoblin: codeGoblin3DProgressMetadata(
+          {
+            sessionID: input.sessionID,
+            userMessageID,
+            assistantMessageID,
+            assistantPartID,
+            agent: input.agent,
+            providerID: input.providerID,
+            modelID: input.modelID,
+            variant: input.variant,
+            routeDirectory: input.routeDirectory,
+            plannedOutput: input.plannedOutput,
+            inputMode: input.inputMode,
+            modelVersion: input.modelVersion,
+            startedAt,
+            estimatedCredits,
+          },
+          initialProgress,
+        ),
+      },
+    } as MessageV2.TextPart)
+    return {
+      sessionID: input.sessionID,
+      userMessageID,
+      assistantMessageID,
+      assistantPartID,
+      agent: input.agent,
+      providerID: input.providerID,
+      modelID: input.modelID,
+      variant: input.variant,
+      routeDirectory: input.routeDirectory,
+      plannedOutput: input.plannedOutput,
+      inputMode: input.inputMode,
+      modelVersion: input.modelVersion,
+      startedAt,
+      estimatedCredits,
+    } satisfies CodeGoblin3DPersist
+  })
+}
+
+function updateCodeGoblin3DProgress(input: {
+  session: Session.Interface
+  persist: CodeGoblin3DPersist
+  message: string
+  inputMode?: Model3DInputMode
+  modelVersion?: string
+}) {
+  return Effect.gen(function* () {
+    const persist = {
+      ...input.persist,
+      inputMode: input.inputMode ?? input.persist.inputMode,
+      modelVersion: input.modelVersion ?? input.persist.modelVersion,
+    }
+    yield* input.session.updatePart({
+      id: input.persist.assistantPartID,
+      sessionID: input.persist.sessionID,
+      messageID: input.persist.assistantMessageID,
+      type: "text",
+      text: codeGoblin3DProgressText(persist, input.message),
+      metadata: {
+        codegoblin: codeGoblin3DProgressMetadata(persist, input.message),
+      },
+    } as MessageV2.TextPart)
+  })
+}
+
+function finishCodeGoblin3DMessages(input: {
+  session: Session.Interface
+  sessionStatus: SessionStatus.Interface
+  persist: CodeGoblin3DPersist
+  result: Awaited<ReturnType<typeof CodeGoblin3DCommand.generate>>
+}) {
+  return Effect.gen(function* () {
+    const providerID = input.result.provider ?? input.persist.providerID
+    const modelID = input.result.model ?? input.persist.modelID
+    const output = input.result.output ?? input.persist.plannedOutput
+    const inputMode = input.result.inputMode ?? input.persist.inputMode
+    const modelVersion = input.result.modelVersion ?? input.persist.modelVersion
+    const credits = input.result.credits ?? input.persist.estimatedCredits
+    const text = input.result.ok
+      ? [
+          "3D model generated.",
+          `Model: ${providerID}/${modelID}`,
+          inputMode ? `Input mode: ${inputMode}` : undefined,
+          modelVersion ? `Tripo version: ${modelVersion}` : undefined,
+          output ? `Saved to: ${output}` : undefined,
+          credits !== undefined ? `Tripo credits: ~${credits}.` : undefined,
+          input.result.taskId ? `Tripo task: ${input.result.taskId}` : undefined,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : [
+          `3D generation failed with ${providerID}/${modelID}.`,
+          output ? `Planned output: ${output}` : undefined,
+          input.result.message,
+        ]
+          .filter(Boolean)
+          .join("\n")
+
+    yield* input.session.updatePart({
+      id: input.persist.assistantPartID,
+      sessionID: input.persist.sessionID,
+      messageID: input.persist.assistantMessageID,
+      type: "text",
+      text,
+      metadata: {
+        codegoblin: {
+          kind: input.result.ok ? "3d-result" : "3d-error",
+          output,
+          provider: providerID,
+          model: modelID,
+          inputMode,
+          modelVersion,
+          taskId: input.result.taskId,
+          credits,
         },
       },
     } as MessageV2.TextPart)

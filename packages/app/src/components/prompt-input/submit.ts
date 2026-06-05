@@ -92,6 +92,12 @@ const audioModelSelected = (model: { id: string; provider: { id: string }; famil
   return raw.includes("elevenlabs") || raw.includes("text-to-speech") || raw.includes("tts")
 }
 
+const model3DSelected = (model: { id: string; provider: { id: string }; family?: string; capabilities?: any }) => {
+  if (model.capabilities?.output?.model3d) return true
+  const raw = `${model.provider.id}/${model.id} ${model.family ?? ""}`.toLowerCase()
+  return raw.includes("tripo") || raw.includes("text-to-model") || raw.includes("image-to-model")
+}
+
 const legacyImageAutoApprove = () => {
   if (typeof window === "undefined") return false
   try {
@@ -124,10 +130,23 @@ export type AudioGenerationSettings = {
   languageTextNormalization?: boolean
 }
 
+export type Model3DGenerationSettings = {
+  modelVersion: string
+  outputFormat: string
+}
+
 type ConfirmAudioGenerationInput = {
   provider: string
   model: string
   text: string
+  autoApprove: boolean
+}
+
+type ConfirmModel3DGenerationInput = {
+  provider: string
+  model: string
+  text: string
+  inputMode: "text" | "image"
   autoApprove: boolean
 }
 
@@ -176,6 +195,29 @@ const fallbackConfirmAudioGeneration = (input: ConfirmAudioGenerationInput) => {
   return defaultAudioSettings()
 }
 
+const defaultModel3DSettings = (): Model3DGenerationSettings => ({
+  modelVersion: "v3.1-20260211",
+  outputFormat: "glb",
+})
+
+const fallbackConfirmModel3DGeneration = (input: ConfirmModel3DGenerationInput) => {
+  if (input.autoApprove) return defaultModel3DSettings()
+  if (typeof globalThis.confirm !== "function") return false
+  if (
+    !globalThis.confirm(
+      [
+        `Generate a 3D model with ${input.provider}/${input.model} (${input.inputMode})?`,
+        "",
+        input.text.slice(0, 240) || "Attached image input",
+        "",
+        "Tripo credits apply. Turn on Auto-approve 3D generation in Settings > General to skip this confirmation.",
+      ].join("\n"),
+    )
+  )
+    return false
+  return defaultModel3DSettings()
+}
+
 const defaultImageOutput = () => `codegoblin-output/images/${new Date().toISOString().replace(/[:.]/g, "-")}.png`
 
 const audioExtension = (outputFormat: string | undefined) => {
@@ -187,6 +229,9 @@ const audioExtension = (outputFormat: string | undefined) => {
 
 const defaultAudioOutput = (outputFormat: string | undefined) =>
   `codegoblin-output/audio/${new Date().toISOString().replace(/[:.]/g, "-")}.${audioExtension(outputFormat)}`
+
+const defaultModel3DOutput = (outputFormat: string | undefined) =>
+  `codegoblin-output/models/${new Date().toISOString().replace(/[:.]/g, "-")}.${outputFormat?.trim() || "glb"}`
 
 const slashImageOutput = (input: string) => {
   const match = /(?:^|\s)--output(?:=|\s+)(?:"([^"]+)"|'([^']+)'|(\S+))/i.exec(input)
@@ -343,6 +388,9 @@ type PromptSubmitInput = {
   onSubmit?: () => void
   confirmImageGeneration?: (input: ConfirmImageGenerationInput) => Promise<boolean> | boolean
   confirmAudioGeneration?: (input: ConfirmAudioGenerationInput) => Promise<AudioGenerationSettings | false> | AudioGenerationSettings | false
+  confirmModel3DGeneration?: (
+    input: ConfirmModel3DGenerationInput,
+  ) => Promise<Model3DGenerationSettings | false> | Model3DGenerationSettings | false
 }
 
 type CommentItem = {
@@ -466,13 +514,23 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
 
     let audioSettings: AudioGenerationSettings | undefined
+    let model3dSettings: Model3DGenerationSettings | undefined
 
     if (mode === "normal") {
       const trimmed = text.trimStart()
       const isImageSlash = trimmed.startsWith("/image")
+      const isModel3DSlash = trimmed.startsWith("/model3d")
       const selectedAudioModel = audioModelSelected(currentModel)
       const selectedImageModel = imageModelSelected(currentModel)
+      const selected3DModel = model3DSelected(currentModel)
       const looksLikeImageRequest = imageIntent(trimmed)
+      if (isModel3DSlash && !model3DSelected(currentModel)) {
+        showToast({
+          title: "Select a 3D model",
+          description: "Pick tripo/text-to-model or tripo/image-to-model in /models first.",
+        })
+        return
+      }
       if (selectedAudioModel) {
         if (images.length > 0) {
           showToast({
@@ -496,14 +554,46 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         }
         audioSettings = confirmed
       }
-      if (!selectedAudioModel && !isImageSlash && selectedImageModel && casualText(trimmed)) {
+      if (selected3DModel) {
+        const inputMode = images.length > 0 ? "image" : "text"
+        if (inputMode === "text" && !trimmed && !isModel3DSlash) {
+          showToast({
+            title: "3D model selected",
+            description: "Add a text prompt or attach an image for Tripo 3D generation.",
+          })
+          return
+        }
+        const confirmed = await (input.confirmModel3DGeneration ?? fallbackConfirmModel3DGeneration)({
+          provider: currentModel.provider.id,
+          model: currentModel.id,
+          text: isModel3DSlash ? trimmed.replace(/^\/model3d\b/, "").trim() : trimmed,
+          inputMode,
+          autoApprove: settings.permissions.model3dGenerationAutoApprove(),
+        })
+        if (!confirmed) {
+          showToast({
+            title: "3D generation not sent",
+            description: "CodeGoblin did not spend Tripo credits.",
+          })
+          return
+        }
+        model3dSettings = confirmed
+      }
+      if (!selectedAudioModel && !selected3DModel && !isImageSlash && !isModel3DSlash && selectedImageModel && casualText(trimmed)) {
         showToast({
           title: "Image model selected",
           description: "Switch to a text model for casual chat, or describe the image you want CodeGoblin to make.",
         })
         return
       }
-      if (!selectedAudioModel && !isImageSlash && looksLikeImageRequest && !selectedImageModel) {
+      if (!selectedAudioModel && !isImageSlash && !isModel3DSlash && selected3DModel && casualText(trimmed) && images.length === 0) {
+        showToast({
+          title: "3D model selected",
+          description: "Switch to a text model for casual chat, or describe the 3D model you want CodeGoblin to make.",
+        })
+        return
+      }
+      if (!selectedAudioModel && !selected3DModel && !isImageSlash && !isModel3DSlash && looksLikeImageRequest && !selectedImageModel) {
         showToast({
           title: "Select an image model",
           description:
@@ -513,7 +603,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       }
       if (
         !selectedAudioModel &&
+        !selected3DModel &&
         !isImageSlash &&
+        !isModel3DSlash &&
         selectedImageModel &&
         !(await (input.confirmImageGeneration ?? fallbackConfirmImageGeneration)({
           provider: currentModel.provider.id,
@@ -656,8 +748,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     if (mode === "normal") {
       const trimmed = text.trimStart()
       const isImageSlash = trimmed.startsWith("/image")
+      const isModel3DSlash = trimmed.startsWith("/model3d")
       const selectedAudioModel = audioModelSelected(currentModel)
       const selectedImageModel = imageModelSelected(currentModel)
+      const selected3DModel = model3DSelected(currentModel)
       if (selectedAudioModel && audioSettings) {
         const activeServer = server.current
         const headers: Record<string, string> = {
@@ -806,6 +900,185 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             void sync.session.sync?.(session.id, { force: true })
             showToast({
               title: "Audio generation failed",
+              description: errorMessage(err),
+            })
+          })
+        return
+      }
+      if ((isModel3DSlash || selected3DModel) && model3dSettings) {
+        const activeServer = server.current
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+          "x-opencode-directory": sessionDirectory,
+        }
+        if (activeServer?.http.password) {
+          headers.authorization = `Basic ${authTokenFromCredentials({
+            username: activeServer.http.username,
+            password: activeServer.http.password,
+          })}`
+        }
+
+        const userMessageID = Identifier.ascending("message")
+        const userPartID = Identifier.ascending("part")
+        const assistantMessageID = Identifier.ascending("message")
+        const assistantPartID = Identifier.ascending("part")
+        const now = Date.now()
+        const requestText = isModel3DSlash ? trimmed.replace(/^\/model3d\b/, "").trim() : text.trim()
+        const inputMode = images.length > 0 ? "image" : "text"
+        const plannedOutput = defaultModel3DOutput(model3dSettings.outputFormat)
+        const plannedOutputDisplay = displayImageOutput(sessionDirectory, plannedOutput)
+        const inputImages = [
+          ...images.map((attachment) => ({
+            dataUrl: attachment.dataUrl,
+            mime: attachment.mime,
+            filename: attachment.filename,
+          })),
+          ...context
+            .filter((item) => item.type === "file" && imageFilePath(item.path))
+            .map((item) => ({ path: item.path })),
+        ]
+        const optimisticUser: Message = {
+          id: userMessageID,
+          sessionID: session.id,
+          role: "user",
+          time: { created: now },
+          agent,
+          model: { ...model, variant },
+        }
+        const optimisticUserParts: Part[] = [
+          {
+            id: userPartID,
+            sessionID: session.id,
+            messageID: userMessageID,
+            type: "text",
+            text: requestText || (inputMode === "image" ? "Generate 3D model from attached image" : ""),
+          } as Part,
+          ...images.map(
+            (attachment) =>
+              ({
+                id: Identifier.ascending("part"),
+                sessionID: session.id,
+                messageID: userMessageID,
+                type: "file",
+                mime: attachment.mime,
+                url: attachment.dataUrl,
+                filename: attachment.filename,
+              }) as Part,
+          ),
+        ]
+        const optimisticAssistant: Message = {
+          id: assistantMessageID,
+          parentID: userMessageID,
+          sessionID: session.id,
+          role: "assistant",
+          mode: agent,
+          agent,
+          variant,
+          providerID: currentModel.provider.id,
+          modelID: currentModel.id,
+          path: { cwd: sessionDirectory, root: sessionDirectory },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now + 1 },
+        } as Message
+        const optimisticAssistantParts: Part[] = [
+          {
+            id: assistantPartID,
+            sessionID: session.id,
+            messageID: assistantMessageID,
+            type: "text",
+            text: [
+              `CodeGoblin is generating a 3D model with ${currentModel.provider.id}/${currentModel.id}.`,
+              `Input: ${inputMode}`,
+              `Tripo version: ${model3dSettings.modelVersion}`,
+              plannedOutputDisplay ? `Saving to: ${plannedOutputDisplay}` : "The final output path will stay in this chat.",
+            ].join("\n"),
+            metadata: {
+              codegoblin: {
+                kind: "3d-progress",
+                provider: currentModel.provider.id,
+                model: currentModel.id,
+                output: plannedOutput,
+                inputMode,
+                modelVersion: model3dSettings.modelVersion,
+                progressMessage: "Starting Tripo task…",
+                credits: inputMode === "image" ? 30 : 20,
+                startedAt: now,
+              },
+            },
+          } as Part,
+        ]
+        batch(() => {
+          const [, setDirectoryStore] = globalSync.child(sessionDirectory)
+          setDirectoryStore("session_status", session.id, { type: "busy" })
+          sync.session.optimistic.add({
+            directory: sessionDirectory,
+            sessionID: session.id,
+            message: optimisticUser,
+            parts: optimisticUserParts,
+          })
+          sync.session.optimistic.add({
+            directory: sessionDirectory,
+            sessionID: session.id,
+            message: optimisticAssistant,
+            parts: optimisticAssistantParts,
+          })
+        })
+        clearInput()
+        clearContext()
+        showToast({
+          title: "3D generation started",
+          description: `CodeGoblin is using ${currentModel.provider.id}/${currentModel.id}. The output path will stay in this chat.`,
+        })
+
+        setTimeout(() => {
+          void sync.session.sync?.(session.id, { force: true })
+        }, 500)
+
+        fetch(`${sdk.url}/codegoblin/model3d`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            sessionID: session.id,
+            messageID: userMessageID,
+            userPartID,
+            assistantMessageID,
+            assistantPartID,
+            agent,
+            variant,
+            prompt: requestText,
+            output: plannedOutput,
+            provider: currentModel.provider.id,
+            model: currentModel.id,
+            inputImages,
+            modelVersion: model3dSettings.modelVersion,
+            outputFormat: model3dSettings.outputFormat,
+            require3DModel: true,
+          }),
+        })
+          .then(async (response) => {
+            const result = (await response.json().catch(() => undefined)) as
+              | { ok?: boolean; message?: string; requires3DModel?: boolean }
+              | undefined
+            void sync.session.sync?.(session.id, { force: true })
+            if (!response.ok || !result?.ok) {
+              showToast({
+                title: result?.requires3DModel ? "Select a 3D model" : "3D generation failed",
+                description: "The details were written to the chat.",
+              })
+              return
+            }
+            showToast({
+              title: "3D model generated",
+              description: "The saved file path was written to the chat.",
+            })
+          })
+          .catch((err) => {
+            const [, setDirectoryStore] = globalSync.child(sessionDirectory)
+            setDirectoryStore("session_status", session.id, { type: "idle" })
+            void sync.session.sync?.(session.id, { force: true })
+            showToast({
+              title: "3D generation failed",
               description: errorMessage(err),
             })
           })

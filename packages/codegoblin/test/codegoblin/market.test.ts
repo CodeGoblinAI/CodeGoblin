@@ -28,14 +28,29 @@ test("categories are sorted and unique", () => {
   expect([...categories].sort()).toEqual(categories)
 })
 
-test("addToConfig writes the MCP entry into opencode.json", async () => {
+test("addToConfig writes the MCP entry into codegoblin.jsonc by default", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codegoblin-market-"))
   try {
     const entry = Market.get("supabase")!
     const configPath = await Market.addToConfig(entry, root)
-    expect(configPath).toBe(path.join(root, "opencode.json"))
+    expect(configPath).toBe(path.join(root, "codegoblin.jsonc"))
     const config = JSON.parse(await readFile(configPath, "utf8"))
     expect(config.mcp.supabase).toEqual(entry.mcp)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("addToConfig writes into an existing codegoblin.jsonc", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codegoblin-market-existing-"))
+  try {
+    const configPath = path.join(root, "codegoblin.jsonc")
+    await Bun.write(configPath, '{"agent":{}}')
+    const entry = Market.get("firebase")!
+    const resolved = await Market.addToConfig(entry, root)
+    expect(resolved).toBe(configPath)
+    const config = JSON.parse(await readFile(configPath, "utf8"))
+    expect(config.mcp.firebase).toEqual(entry.mcp)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

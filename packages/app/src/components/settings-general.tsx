@@ -355,6 +355,18 @@ export const SettingsGeneral: Component = () => {
         </SettingsRow>
 
         <SettingsRow
+          title={language.t("settings.general.row.model3dAutoApprove.title")}
+          description={language.t("settings.general.row.model3dAutoApprove.description")}
+        >
+          <div data-action="settings-model3d-generation-auto-approve">
+            <Switch
+              checked={settings.permissions.model3dGenerationAutoApprove()}
+              onChange={(checked) => settings.permissions.setModel3dGenerationAutoApprove(checked)}
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
           title={language.t("settings.general.row.shell.title")}
           description={language.t("settings.general.row.shell.description")}
         >

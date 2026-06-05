@@ -39,6 +39,19 @@ describe("CodeGoblin model buckets", () => {
     expect(isDefaultChatModel(model)).toBe(false)
   })
 
+  test("places 3D-only models in the 3D bucket", () => {
+    const model = {
+      family: "tripo-h3",
+      capabilities: {
+        input: { text: true, image: true },
+        output: { model3d: true },
+      },
+    }
+    expect(modelBucket("text-to-model", model)).toBe("3D models")
+    expect(isChatSelectableModel(model)).toBe(true)
+    expect(isDefaultChatModel(model)).toBe(false)
+  })
+
   test("sorts favorites before recents and regular buckets", () => {
     const categories = ["Recent · Image models", "Text models · OpenAI", "Favorites · Text models"].sort(
       sortModelCategories,

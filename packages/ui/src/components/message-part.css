@@ -251,7 +251,8 @@
 }
 
 [data-component="codegoblin-image-status"],
-[data-component="codegoblin-audio-status"] {
+[data-component="codegoblin-audio-status"],
+[data-component="codegoblin-3d-status"] {
   width: min(100%, 720px);
   border: 1px solid color-mix(in srgb, var(--border-success-selected) 55%, var(--border-weak-base));
   border-left: 4px solid var(--border-success-selected);
@@ -267,7 +268,8 @@
 }
 
 [data-component="codegoblin-image-status"][data-status="error"],
-[data-component="codegoblin-audio-status"][data-status="error"] {
+[data-component="codegoblin-audio-status"][data-status="error"],
+[data-component="codegoblin-3d-status"][data-status="error"] {
   border-color: color-mix(in srgb, var(--border-critical-selected) 55%, var(--border-weak-base));
   border-left-color: var(--border-critical-selected);
   background:
@@ -276,7 +278,8 @@
 }
 
 [data-slot="codegoblin-image-header"],
-[data-slot="codegoblin-audio-header"] {
+[data-slot="codegoblin-audio-header"],
+[data-slot="codegoblin-3d-header"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -285,7 +288,8 @@
 }
 
 [data-slot="codegoblin-image-title"],
-[data-slot="codegoblin-audio-title"] {
+[data-slot="codegoblin-audio-title"],
+[data-slot="codegoblin-3d-title"] {
   min-width: 0;
   display: inline-flex;
   align-items: center;
@@ -295,7 +299,8 @@
 }
 
 [data-slot="codegoblin-image-model"],
-[data-slot="codegoblin-audio-model"] {
+[data-slot="codegoblin-audio-model"],
+[data-slot="codegoblin-3d-model"] {
   flex: 0 0 auto;
   color: var(--text-weak);
   font-size: 12px;
@@ -303,7 +308,8 @@
 }
 
 [data-slot="codegoblin-image-output"],
-[data-slot="codegoblin-audio-output"] {
+[data-slot="codegoblin-audio-output"],
+[data-slot="codegoblin-3d-output"] {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -383,12 +389,58 @@
 }
 
 [data-slot="codegoblin-image-detail"],
-[data-slot="codegoblin-audio-detail"] {
+[data-slot="codegoblin-audio-detail"],
+[data-slot="codegoblin-3d-detail"] {
   color: var(--text-weak);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.45;
+}
+
+[data-slot="codegoblin-3d-progress"] {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-base);
+  font-size: 12px;
+}
+
+[data-slot="codegoblin-3d-progress-elapsed"] {
+  color: var(--text-weak);
+  font-family: var(--font-family-mono);
+}
+
+[data-slot="codegoblin-3d-preview"] {
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--border-weak-base);
+  background: var(--background-base);
+}
+
+[data-slot="codegoblin-3d-preview"] model-viewer {
+  display: block;
+  width: 100%;
+  height: 360px;
+  background-color: var(--background-base, #111);
+}
+
+[data-slot="codegoblin-3d-download"] {
+  color: var(--text-interactive-base);
+  font-size: 12px;
+  text-decoration: underline;
+  width: fit-content;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+[data-slot="codegoblin-3d-preview-loading"],
+[data-slot="codegoblin-3d-preview-error"] {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-weak);
 }
 
 [data-component="compaction-part"] {

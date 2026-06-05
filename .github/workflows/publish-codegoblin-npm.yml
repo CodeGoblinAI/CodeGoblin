@@ -18,8 +18,66 @@ permissions:
   id-token: write
 
 jobs:
+  build:
+    if: github.repository == 'shawnisikli/CodeGoblin' || github.repository == 'codegoblin/codegoblin'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+          - os: ubuntu-latest
+            platform: linux
+            arch: arm64
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+          - os: macos-13
+            platform: darwin
+            arch: x64
+          - os: windows-latest
+            platform: win32
+            arch: x64
+          - os: windows-latest
+            platform: win32
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+
+      - uses: ./.github/actions/setup-bun
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build CodeGoblin CLI package
+        shell: bash
+        env:
+          OPENCODE_VERSION: ${{ inputs.version }}
+          OPENCODE_CHANNEL: latest
+        run: |
+          EMBED_FLAG=""
+          if [ "${{ inputs.dry_run }}" != "true" ]; then
+            EMBED_FLAG=""
+          else
+            EMBED_FLAG="--skip-embed-web-ui"
+          fi
+          bun ./packages/codegoblin/script/build.ts --single --skip-install $EMBED_FLAG
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: codegoblin-dist-${{ matrix.platform }}-${{ matrix.arch }}
+          path: packages/codegoblin/dist/
+          if-no-files-found: error
+
   publish-npm:
     if: github.repository == 'shawnisikli/CodeGoblin' || github.repository == 'codegoblin/codegoblin'
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
@@ -31,12 +89,20 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Build native CLI packages
+      - name: Download all dist artifacts
+        uses: actions/download-artifact@d3f86a159357d2845a17789a388ed2e7bae1e5de # v4.3.0
+        with:
+          path: artifacts
+          pattern: codegoblin-dist-*
+          merge-multiple: true
+
+      - name: Merge platform packages into dist
         shell: bash
-        env:
-          OPENCODE_VERSION: ${{ inputs.version }}
-          OPENCODE_CHANNEL: latest
-        run: bun ./packages/codegoblin/script/build.ts --single --skip-install --skip-embed-web-ui
+        run: |
+          mkdir -p packages/codegoblin/dist
+          cp -R artifacts/* packages/codegoblin/dist/ 2>/dev/null || true
+          find artifacts -mindepth 1 -maxdepth 2 -type d -name 'codegoblin-*' -exec cp -R {} packages/codegoblin/dist/ \;
+          ls -la packages/codegoblin/dist/
 
       - name: Pack or publish CodeGoblin npm packages
         shell: bash

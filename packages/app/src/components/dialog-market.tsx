@@ -22,7 +22,7 @@ type MarketEntry = {
   mcp?: { type?: string } | unknown
 }
 
-type MarketAction = "add" | "connect" | "disconnect" | "authenticate"
+type MarketAction = "add" | "connect" | "disconnect" | "authenticate" | "firebase-login"
 
 const statusLabels: Record<string, string> = {
   connected: "Connected",
@@ -66,6 +66,13 @@ export const DialogMarket: Component = () => {
 
   const refresh = () => queryClient.refetchQueries(queryOptions.mcp(pathKey(sync.directory)))
 
+  const mcpStatusFromAdd = (result: { data?: Record<string, { status?: string; error?: string }> }, name: string) => {
+    const status = result.data?.[name]
+    if (!status) throw new Error("Server did not return MCP status.")
+    if (status.status === "failed") throw new Error(status.error ?? "Could not connect this MCP server.")
+    return status
+  }
+
   const action = useMutation(() => ({
     mutationFn: async (input: { entry: MarketEntry; action: MarketAction }) => {
       const { entry } = input
@@ -81,8 +88,51 @@ export const DialogMarket: Component = () => {
         if (!response.ok || !body?.ok || !body.config) {
           throw new Error(body?.message ?? "Could not add this server.")
         }
-        await sdk.client.mcp.add({ name: body.name ?? entry.id, config: body.config })
-        showToast({ title: `${entry.name} added`, description: "Connecting now." })
+        const name = body.name ?? entry.id
+        const addResult = await sdk.client.mcp.add({ name, config: body.config })
+        if ("error" in addResult && addResult.error) {
+          throw new Error("Could not connect this MCP server.")
+        }
+        const status = mcpStatusFromAdd(addResult, name)
+        if (status.status === "needs_auth" || status.status === "needs_client_registration") {
+          await sdk.client.mcp.auth.authenticate({ name })
+          showToast({
+            title: `Authenticating ${entry.name}`,
+            description: "Complete sign-in in your browser.",
+          })
+          return
+        }
+        if (entry.id === "firebase") {
+          const login = await fetch(`${sdk.url}/codegoblin/market/firebase-login`, {
+            method: "POST",
+            headers: headers(),
+          })
+          const loginBody = (await login.json().catch(() => undefined)) as { ok?: boolean; message?: string } | undefined
+          if (!login.ok || !loginBody?.ok) {
+            throw new Error(loginBody?.message ?? "Could not open Firebase sign-in.")
+          }
+          showToast({
+            title: "Firebase sign-in",
+            description: "Complete login in the terminal window that just opened.",
+          })
+          return
+        }
+        showToast({ title: `${entry.name} added`, description: "Connected." })
+        return
+      }
+      if (input.action === "firebase-login") {
+        const response = await fetch(`${sdk.url}/codegoblin/market/firebase-login`, {
+          method: "POST",
+          headers: headers(),
+        })
+        const body = (await response.json().catch(() => undefined)) as { ok?: boolean; message?: string } | undefined
+        if (!response.ok || !body?.ok) {
+          throw new Error(body?.message ?? "Could not open Firebase sign-in.")
+        }
+        showToast({
+          title: "Firebase sign-in",
+          description: "Complete login in the terminal window that just opened.",
+        })
         return
       }
       if (input.action === "disconnect") {
@@ -137,14 +187,24 @@ export const DialogMarket: Component = () => {
                     { action: "authenticate", label: "Re-authenticate", variant: "ghost" },
                     { action: "disconnect", label: "Disconnect", variant: "ghost" },
                   ]
-                : [{ action: "disconnect", label: "Disconnect", variant: "ghost" }]
+                : entry.id === "firebase"
+                  ? [
+                      { action: "firebase-login", label: "Sign in", variant: "ghost" },
+                      { action: "disconnect", label: "Disconnect", variant: "ghost" },
+                    ]
+                  : [{ action: "disconnect", label: "Disconnect", variant: "ghost" }]
             // failed / disabled / other
             return isRemote()
               ? [
                   { action: "connect", label: "Connect", variant: "primary" },
                   { action: "authenticate", label: "Authenticate", variant: "ghost" },
                 ]
-              : [{ action: "connect", label: "Connect", variant: "primary" }]
+              : entry.id === "firebase"
+                ? [
+                    { action: "connect", label: "Connect", variant: "primary" },
+                    { action: "firebase-login", label: "Sign in", variant: "ghost" },
+                  ]
+                : [{ action: "connect", label: "Connect", variant: "primary" }]
           }
           return (
             <div class="w-full flex items-center justify-between gap-x-3">

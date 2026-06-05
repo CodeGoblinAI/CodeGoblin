@@ -60,7 +60,7 @@ import {
   type PromptHistoryStoredEntry,
   promptLength,
 } from "./prompt-input/history"
-import { createPromptSubmit, type AudioGenerationSettings, type FollowupDraft } from "./prompt-input/submit"
+import { createPromptSubmit, type AudioGenerationSettings, type FollowupDraft, type Model3DGenerationSettings } from "./prompt-input/submit"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
@@ -1145,6 +1145,28 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     } catch {}
   }
 
+  const defaultModel3DSettings = (): Model3DGenerationSettings => ({
+    modelVersion: "v3.1-20260211",
+    outputFormat: "glb",
+  })
+
+  const loadModel3DSettings = (): Model3DGenerationSettings => {
+    if (typeof window === "undefined") return defaultModel3DSettings()
+    try {
+      const saved = JSON.parse(window.localStorage.getItem("codegoblin.model3d.settings") ?? "{}")
+      return { ...defaultModel3DSettings(), ...saved }
+    } catch {
+      return defaultModel3DSettings()
+    }
+  }
+
+  const saveModel3DSettings = (settings: Model3DGenerationSettings) => {
+    if (typeof window === "undefined") return
+    try {
+      window.localStorage.setItem("codegoblin.model3d.settings", JSON.stringify(settings))
+    } catch {}
+  }
+
   const confirmImageGeneration = (input: { provider: string; model: string; text: string; autoApprove: boolean }) => {
     if (input.autoApprove) return true
     return new Promise<boolean>((resolve) => {
@@ -1375,6 +1397,99 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   }
 
+  const confirmModel3DGeneration = (input: {
+    provider: string
+    model: string
+    text: string
+    inputMode: "text" | "image"
+    autoApprove: boolean
+  }) => {
+    if (input.autoApprove) return loadModel3DSettings()
+    return new Promise<Model3DGenerationSettings | false>((resolve) => {
+      const [model3d, setModel3d] = createStore(loadModel3DSettings())
+      const versions = ["v3.1-20260211", "v3.0-20250812"]
+      const formats = ["glb", "obj"]
+      let settled = false
+      const done = (value: Model3DGenerationSettings | false) => {
+        if (settled) return
+        settled = true
+        if (value) saveModel3DSettings(value)
+        dialog.close()
+        resolve(value)
+      }
+      dialog.show(
+        () => (
+          <Dialog
+            title="Generate 3D model?"
+            description="Review the Tripo request before CodeGoblin spends credits."
+            action={
+              <Button variant="ghost" size="normal" onClick={() => done(false)}>
+                Not now
+              </Button>
+            }
+          >
+            <div class="flex h-full flex-col gap-4 text-13-regular text-text-base">
+              <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1 pb-1">
+                <div class="rounded-lg border border-border-base bg-surface-raised px-4 py-3 text-12-regular text-text-muted">
+                  Tripo credits apply. Turn on Auto-approve 3D generation in Settings &gt; General to skip this dialog.
+                </div>
+                <div class="grid gap-3 rounded-lg border border-border-base bg-surface-raised px-4 py-3 sm:grid-cols-2">
+                  <label class="flex flex-col gap-1">
+                    <span class="text-12-medium uppercase tracking-wide text-text-muted">Model</span>
+                    <span class="font-mono text-12-regular text-text-strong">{input.provider}/{input.model}</span>
+                  </label>
+                  <label class="flex flex-col gap-1">
+                    <span class="text-12-medium uppercase tracking-wide text-text-muted">Input mode</span>
+                    <span class="text-12-regular text-text-strong">{input.inputMode}</span>
+                  </label>
+                  <label class="flex flex-col gap-1">
+                    <span class="text-12-medium uppercase tracking-wide text-text-muted">Tripo version</span>
+                    <select
+                      class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
+                      value={model3d.modelVersion}
+                      onChange={(event) => setModel3d("modelVersion", event.currentTarget.value)}
+                    >
+                      {versions.map((version) => (
+                        <option value={version}>{version}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label class="flex flex-col gap-1">
+                    <span class="text-12-medium uppercase tracking-wide text-text-muted">Output format</span>
+                    <select
+                      class="rounded-md border border-border-base bg-surface-raised-stronger px-2 py-1 text-12-regular text-text-strong outline-none"
+                      value={model3d.outputFormat}
+                      onChange={(event) => setModel3d("outputFormat", event.currentTarget.value)}
+                    >
+                      {formats.map((format) => (
+                        <option value={format}>{format.toUpperCase()}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div class="rounded-lg border border-border-base bg-surface-raised px-4 py-3">
+                  <div class="text-12-medium uppercase tracking-wide text-text-muted">Prompt</div>
+                  <div class="mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap text-text-base">
+                    {input.text.slice(0, 500) || "Attached image input"}
+                  </div>
+                </div>
+              </div>
+              <div class="flex flex-shrink-0 items-center justify-end gap-2 border-t border-border-base px-1 pt-3">
+                <Button variant="ghost" size="normal" onClick={() => done(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" size="normal" onClick={() => done({ ...model3d })}>
+                  Generate 3D model
+                </Button>
+              </div>
+            </div>
+          </Dialog>
+        ),
+        () => done(false),
+      )
+    })
+  }
+
   const { abort, handleSubmit } = createPromptSubmit({
     info,
     imageAttachments,
@@ -1399,6 +1514,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onSubmit: props.onSubmit,
     confirmImageGeneration,
     confirmAudioGeneration,
+    confirmModel3DGeneration,
   })
 
   const handleKeyDown = (event: KeyboardEvent) => {

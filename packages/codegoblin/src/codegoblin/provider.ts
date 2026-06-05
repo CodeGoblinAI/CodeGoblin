@@ -211,6 +211,119 @@ export function augmentImageModelCatalog(catalog: Record<string, Info>) {
   })
 }
 
+export const TripoProvider = {
+  id: ProviderID.make("tripo"),
+  name: "Tripo 3D",
+  env: ["TRIPO_API_KEY", "CODEGOBLIN_TRIPO_API_KEY"],
+  baseURL: "https://api.tripo3d.ai/v2/openapi",
+} as const
+
+export function tripoProviderInfo(): Info {
+  return {
+    id: TripoProvider.id,
+    name: TripoProvider.name,
+    source: "custom",
+    env: [...TripoProvider.env],
+    options: {
+      baseURL: TripoProvider.baseURL,
+      name: "tripo",
+    },
+    models: {},
+  }
+}
+
+export function augment3DModelCatalog(catalog: Record<string, Info>) {
+  ensureTripoProvider(catalog)
+  add3DModel(catalog, "tripo", "text-to-model", {
+    name: "Tripo Text to 3D",
+    family: "tripo-h3",
+    inputImage: false,
+  })
+  add3DModel(catalog, "tripo", "image-to-model", {
+    name: "Tripo Image to 3D",
+    family: "tripo-h3",
+    inputImage: true,
+  })
+}
+
+function ensureTripoProvider(catalog: Record<string, Info>) {
+  catalog.tripo ??= tripoProviderInfo()
+  const provider = catalog.tripo
+  for (const env of TripoProvider.env) {
+    if (!provider.env.includes(env)) provider.env.push(env)
+  }
+  provider.options.baseURL ??= TripoProvider.baseURL
+  provider.options.name ??= "tripo"
+}
+
+function add3DModel(
+  catalog: Record<string, Info>,
+  providerID: string,
+  modelID: string,
+  opts: {
+    name: string
+    family: string
+    inputImage: boolean
+  },
+) {
+  const provider = catalog[providerID]
+  if (!provider || provider.models[modelID]) return
+  const id = ProviderID.make(providerID)
+  provider.models[modelID] = {
+    id: ModelID.make(modelID),
+    providerID: id,
+    name: opts.name,
+    family: opts.family,
+    api: {
+      id: modelID,
+      npm: "@ai-sdk/openai-compatible",
+      url: TripoProvider.baseURL,
+    },
+    status: "active",
+    headers: {},
+    options: {},
+    capabilities: {
+      temperature: false,
+      reasoning: false,
+      attachment: false,
+      toolcall: false,
+      input: {
+        text: !opts.inputImage,
+        audio: false,
+        image: opts.inputImage,
+        video: false,
+        pdf: false,
+      },
+      output: {
+        text: false,
+        audio: false,
+        image: false,
+        video: false,
+        pdf: false,
+        model3d: true,
+      } as Model["capabilities"]["output"],
+      interleaved: false,
+    },
+    cost: {
+      input: 0,
+      output: 0,
+      cache: {
+        read: 0,
+        write: 0,
+      },
+    },
+    limit: {
+      context: 2_000,
+      output: 0,
+    },
+    release_date: "",
+    variants: {
+      "v3.1-20260211": { name: "Tripo H3 v3.1" },
+      "v3.0-20250812": { name: "Tripo H3 v3.0" },
+    },
+  }
+}
+
 export function augmentAudioModelCatalog(catalog: Record<string, Info>) {
   ensureAudioProvider(catalog, "elevenlabs")
   addAudioModel(catalog, "elevenlabs", "eleven_multilingual_v2", {
