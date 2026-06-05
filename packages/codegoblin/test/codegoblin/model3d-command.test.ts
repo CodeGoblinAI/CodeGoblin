@@ -62,6 +62,28 @@ describe("CodeGoblin 3D command model routing", () => {
     expect(result.requires3DModel).toBe(true)
   })
 
+  test("does not fall through to Tripo when HTTP-style require3DModel rejects the model", async () => {
+    const previous = process.env.TRIPO_API_KEY
+    delete process.env.TRIPO_API_KEY
+    process.env.CODEGOBLIN_MODEL3D_DISABLE_CONNECTED_AUTH = "1"
+    try {
+      const result = await CodeGoblin3DCommand.generate({
+        prompt: "wooden chair",
+        provider: "deepseek",
+        model: "deepseek-v4-flash",
+        cwd: process.cwd(),
+        require3DModel: true,
+      })
+      expect(result.ok).toBe(false)
+      expect(result.requires3DModel).toBe(true)
+      expect(result.message).not.toContain("TRIPO_API_KEY")
+    } finally {
+      if (previous) process.env.TRIPO_API_KEY = previous
+      else delete process.env.TRIPO_API_KEY
+      delete process.env.CODEGOBLIN_MODEL3D_DISABLE_CONNECTED_AUTH
+    }
+  })
+
   test("reports missing Tripo key without sending a request", async () => {
     const previous = process.env.TRIPO_API_KEY
     const previousDisable = process.env.CODEGOBLIN_MODEL3D_DISABLE_CONNECTED_AUTH

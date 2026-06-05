@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
+import { Global } from "@codegoblin/core/global"
 import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
 
 describe("CodeGoblin image command model routing", () => {
@@ -208,6 +209,43 @@ describe("CodeGoblin image command model routing", () => {
     } finally {
       restoreEnv(previous)
       globalThis.fetch = originalFetch
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("loads connected provider keys from Global.Path.data", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codegoblin-image-connected-auth-"))
+    const previous = {
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      CODEGOBLIN_IMAGE_DISABLE_CONNECTED_AUTH: process.env.CODEGOBLIN_IMAGE_DISABLE_CONNECTED_AUTH,
+    }
+    delete process.env.OPENAI_API_KEY
+    delete process.env.CODEGOBLIN_IMAGE_DISABLE_CONNECTED_AUTH
+    const authPath = path.join(Global.Path.data, "auth.json")
+    const originalFetch = globalThis.fetch
+    try {
+      await mkdir(Global.Path.data, { recursive: true })
+      await writeFile(authPath, JSON.stringify({ openai: { type: "api", key: "connected-openai-key" } }))
+      globalThis.fetch = (async () =>
+        Response.json({
+          data: [{ url: "https://example.com/generated.png" }],
+        })) as unknown as typeof fetch
+      const result = await CodeGoblinImageCommand.generate({
+        prompt: "generate an image of a horse",
+        provider: "openai",
+        model: "gpt-image-1",
+        cwd: root,
+        output: "horse.png",
+      })
+      expect(result.ok).toBe(true)
+      expect(result.provider).toBe("openai")
+    } finally {
+      globalThis.fetch = originalFetch
+      await rm(authPath, { force: true }).catch(() => undefined)
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
       await rm(root, { recursive: true, force: true })
     }
   })
