@@ -95,8 +95,11 @@ async function readImageBytes(image: Model3DInputImage, root?: string): Promise<
 
 async function uploadImage(apiKey: string, image: Model3DInputImage, root?: string) {
   const { bytes, filename } = await readImageBytes(image, root)
+  const format = imageFormat(image, bytes)
+  const mimeType =
+    image.mime ?? (format === "jpeg" ? "image/jpeg" : format === "webp" ? "image/webp" : "image/png")
   const form = new FormData()
-  const blob = new Blob([Buffer.from(bytes)], { type: image.mime ?? "image/png" })
+  const blob = new Blob([Buffer.from(bytes)], { type: mimeType })
   form.append("file", blob, filename)
 
   const response = await fetch(`${API_BASE}/upload/sts`, {
@@ -161,7 +164,7 @@ async function generateTripo(request: Model3DGenerateRequest): Promise<Model3DGe
       const image = request.inputImages?.[0]
       if (!image) return { ok: false, message: "Image-to-3D requires an attached image." }
       await request.onProgress?.("Uploading image to Tripo…")
-      const uploaded = await uploadImage(request.apiKey, image)
+      const uploaded = await uploadImage(request.apiKey, image, request.cwd)
       const filePayload =
         "bucket" in uploaded && uploaded.bucket && uploaded.key
           ? { object: { bucket: uploaded.bucket, key: uploaded.key } }

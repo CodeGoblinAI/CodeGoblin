@@ -15,6 +15,7 @@ export type Model3DGenerateRequest = {
   inputImages?: Model3DInputImage[]
   outputFormat: string
   apiKey: string
+  cwd?: string
   onProgress?: (message: string) => void | Promise<void>
 }
 

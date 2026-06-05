@@ -1,6 +1,7 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import { Global } from "@codegoblin/core/global"
 import { getModel3DProvider, type Model3DInputImage, type Model3DInputMode } from "./model3d-providers"
 
 export type { Model3DInputMode } from "./model3d-providers"
@@ -182,6 +183,7 @@ async function generateModel3D(input: GenerateInput): Promise<Model3DCommandResu
     inputImages: input.inputImages,
     outputFormat,
     apiKey: key.value,
+    cwd: root,
     onProgress: input.onProgress,
   })
 
@@ -306,7 +308,7 @@ async function findModel3DKey(env: Record<string, string | undefined>, envKeys: 
 }
 
 async function authKey(provider: string) {
-  const file = path.join(os.homedir(), ".local", "share", "opencode", "auth.json")
+  const file = path.join(Global.Path.data, "auth.json")
   const raw = await fs.readFile(file, "utf8").catch(() => "")
   if (!raw) return
   try {

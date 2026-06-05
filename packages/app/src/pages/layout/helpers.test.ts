@@ -14,6 +14,7 @@ import {
   errorMessage,
   hasProjectPermissions,
   latestRootSession,
+  projectForSession,
 } from "./helpers"
 import { pathKey } from "@/utils/path-key"
 
@@ -221,5 +222,30 @@ describe("layout workspace helpers", () => {
     expect(errorMessage({ data: { message: "boom" } }, "fallback")).toBe("boom")
     expect(errorMessage(new Error("broken"), "fallback")).toBe("broken")
     expect(errorMessage("unknown", "fallback")).toBe("fallback")
+  })
+
+  test("ignores global project id when directory match is missing", () => {
+    const projects = [{ id: "global", worktree: "/nowhere" }]
+    const byID = new Map(projects.map((project) => [project.id, project]))
+    const result = projectForSession(
+      session({ id: "s1", directory: "/workspace", projectID: "global" }),
+      projects,
+      byID,
+    )
+    expect(result).toBeUndefined()
+  })
+
+  test("prefers directory match over global project id", () => {
+    const projects = [
+      { id: "global", worktree: "/nowhere" },
+      { id: "real", worktree: "/workspace" },
+    ]
+    const byID = new Map(projects.map((project) => [project.id, project]))
+    const result = projectForSession(
+      session({ id: "s1", directory: "/workspace", projectID: "global" }),
+      projects,
+      byID,
+    )
+    expect(result?.id).toBe("real")
   })
 })

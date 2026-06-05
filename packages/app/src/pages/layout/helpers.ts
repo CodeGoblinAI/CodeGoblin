@@ -77,7 +77,7 @@ export function projectForSession<T extends { id?: string; worktree: string; san
   if (byDirectory) return byDirectory
 
   const direct = session.projectID ? byID.get(session.projectID) : undefined
-  if (direct && direct.id !== "global") return direct
+  if (direct?.id === "global") return undefined
   return direct
 }
 
