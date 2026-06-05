@@ -1,5 +1,6 @@
 import type { CommandModule } from "yargs"
 import { collectRuntimeStatus, formatRuntimeStatus } from "@/codegoblin/runtime-status"
+import { discoverLocalModels, formatLocalModels } from "@/codegoblin/local-models"
 
 type Args = {
   json?: boolean
@@ -15,11 +16,11 @@ export const StatusCommand = {
       default: false,
     }),
   handler: async (args) => {
-    const status = await collectRuntimeStatus()
+    const [status, localModels] = await Promise.all([collectRuntimeStatus(), discoverLocalModels()])
     if (args.json) {
-      console.log(JSON.stringify(status, null, 2))
+      console.log(JSON.stringify({ ...status, localModels }, null, 2))
       return
     }
-    console.log(formatRuntimeStatus(status))
+    console.log(`${formatRuntimeStatus(status)}\n${formatLocalModels(localModels)}`)
   },
 } satisfies CommandModule<object, Args>
