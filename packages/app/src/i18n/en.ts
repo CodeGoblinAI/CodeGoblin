@@ -312,6 +312,9 @@ export const dict = {
 
   "dialog.directory.search.placeholder": "Search folders",
   "dialog.directory.empty": "No folders found",
+  "dialog.directory.browse": "Browse…",
+  "dialog.directory.browse.hint": "Or pick a folder with your system file browser",
+  "dialog.directory.browse.failed": "Could not open the system folder picker.",
 
   "app.server.unreachable": "Could not reach {{server}}",
   "app.server.retrying": "Retrying automatically...",

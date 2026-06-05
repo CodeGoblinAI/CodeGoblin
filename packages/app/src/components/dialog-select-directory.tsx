@@ -3,13 +3,17 @@ import { Dialog } from "@codegoblin/ui/dialog"
 import { FileIcon } from "@codegoblin/ui/file-icon"
 import { List } from "@codegoblin/ui/list"
 import type { ListRef } from "@codegoblin/ui/list"
+import { Button } from "@codegoblin/ui/button"
+import { showToast } from "@codegoblin/ui/toast"
 import { getDirectory, getFilename } from "@codegoblin/core/util/path"
 import fuzzysort from "fuzzysort"
-import { createMemo, createResource, createSignal } from "solid-js"
+import { createMemo, createResource, createSignal, Show } from "solid-js"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
+import { useServer } from "@/context/server"
+import { authTokenFromCredentials } from "@/utils/server"
 
 interface DialogSelectDirectoryProps {
   title?: string
@@ -268,8 +272,10 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
   const layout = useLayout()
   const dialog = useDialog()
   const language = useLanguage()
+  const server = useServer()
 
   const [filter, setFilter] = createSignal("")
+  const [browsing, setBrowsing] = createSignal(false)
   let list: ListRef | undefined
 
   const missingBase = createMemo(() => !(sync.data.path.home || sync.data.path.directory))
@@ -345,8 +351,72 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
     return true
   }
 
+  async function browseNative() {
+    if (browsing()) return
+    setBrowsing(true)
+    try {
+      const activeServer = server.current
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        "x-opencode-directory": sync.data.path.directory ?? "",
+      }
+      if (activeServer?.http.password) {
+        headers.authorization = `Basic ${authTokenFromCredentials({
+          username: activeServer.http.username,
+          password: activeServer.http.password,
+        })}`
+      }
+      const response = await fetch(`${sdk.url}/codegoblin/pick-directory`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          title: props.title ?? language.t("command.project.open"),
+          multiple: props.multiple === true,
+          startDir: start(),
+        }),
+      })
+      const body = (await response.json().catch(() => undefined)) as
+        | { ok?: boolean; paths?: string[]; message?: string }
+        | undefined
+      if (!response.ok || !body?.ok) {
+        showToast({
+          variant: "error",
+          icon: "circle-x",
+          title: body?.message ?? language.t("dialog.directory.browse.failed"),
+        })
+        return
+      }
+      const paths = (body.paths ?? []).filter((item): item is string => typeof item === "string" && item.length > 0)
+      if (paths.length === 0) return // user cancelled the native dialog
+      if (props.multiple) {
+        props.onSelect(paths)
+        dialog.close()
+        return
+      }
+      resolve(paths[0])
+    } catch (error) {
+      showToast({
+        variant: "error",
+        icon: "circle-x",
+        title: error instanceof Error ? error.message : language.t("dialog.directory.browse.failed"),
+      })
+    } finally {
+      setBrowsing(false)
+    }
+  }
+
   return (
     <Dialog title={props.title ?? language.t("command.project.open")}>
+      <Show when={server.isLocal()}>
+        <div class="flex items-center justify-between gap-x-2 px-2 pb-2">
+          <span class="text-11-regular text-text-weaker truncate">
+            {language.t("dialog.directory.browse.hint")}
+          </span>
+          <Button size="small" variant="secondary" disabled={browsing()} onClick={browseNative}>
+            {language.t("dialog.directory.browse")}
+          </Button>
+        </div>
+      </Show>
       <List
         search={{ placeholder: language.t("dialog.directory.search.placeholder"), autofocus: true }}
         emptyMessage={language.t("dialog.directory.empty")}

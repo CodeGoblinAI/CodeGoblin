@@ -99,6 +99,7 @@ import { CodeGoblin3DCommand, type Model3DInputMode } from "@/codegoblin/model3d
 import type { Model3DInputImage } from "@/codegoblin/model3d-providers"
 import { Market } from "@/codegoblin/market"
 import { Process } from "@/util/process"
+import { pickCodeGoblinDirectory } from "./pick-directory"
 
 type CodeGoblinImagePersist = {
   sessionID: SessionID
@@ -378,6 +379,29 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           }
         })
         return HttpServerResponse.jsonUnsafe(opened, { status: opened.ok ? 200 : 400 })
+      }),
+    )
+    yield* router.add("POST", "/codegoblin/pick-directory", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const text = yield* Effect.orDie(request.text)
+        let body: any
+        try {
+          body = text ? JSON.parse(text) : {}
+        } catch {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Invalid JSON body." }, { status: 400 })
+        }
+
+        const startDir =
+          typeof body?.startDir === "string" && body.startDir.trim() ? body.startDir.trim() : route.directory
+        const picked = yield* Effect.promise(() =>
+          pickCodeGoblinDirectory({
+            title: typeof body?.title === "string" ? body.title : undefined,
+            multiple: body?.multiple === true,
+            startDir,
+          }),
+        )
+        return HttpServerResponse.jsonUnsafe(picked, { status: picked.ok ? 200 : 400 })
       }),
     )
     yield* router.add("POST", "/codegoblin/audio", (request) =>
