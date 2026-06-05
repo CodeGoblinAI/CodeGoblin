@@ -1,14 +1,21 @@
 //! CLI entry point for the CodeGoblin native efficiency layer.
 //!
-//! Reads a single JSON request from stdin and writes a single JSON response to
-//! stdout. This keeps integration runtime-agnostic: the TypeScript side spawns
-//! the binary and pipes JSON, with a pure-TS fallback when the binary is absent.
+//! Two modes:
+//!   - **one-shot** (default): reads a single JSON request from stdin and writes
+//!     a single JSON response to stdout (memory `scan`/`rank`). Runtime-agnostic;
+//!     the TypeScript side spawns the binary and pipes JSON, falling back to a
+//!     pure-TS implementation when the binary is absent.
+//!   - **serve**: `codegoblin-native serve` runs the first-party local runtime —
+//!     an OpenAI-compatible HTTP API on `127.0.0.1:8787` (see `serve`/`inference`).
 //!
-//! Requests:
+//! One-shot requests:
 //!   {"op":"scan","contents":["..."]}
 //!     -> {"ok":true,"reasons":[null,"contains ..."]}
 //!   {"op":"rank","query":"...","entries":[{"id":"1","content":"...","pinned":false}]}
 //!     -> {"ok":true,"ranked":[{"id":"1","score":3.0}]}
+
+mod inference;
+mod serve;
 
 use std::io::{Read, Write};
 
@@ -31,6 +38,23 @@ enum Response {
 }
 
 fn main() {
+    let mut args = std::env::args().skip(1);
+    match args.next().as_deref() {
+        Some("serve") => {
+            let addr =
+                std::env::var("CODEGOBLIN_NATIVE_ADDR").unwrap_or_else(|_| "127.0.0.1:8787".to_string());
+            let model = std::env::var("CODEGOBLIN_NATIVE_MODEL_LABEL")
+                .unwrap_or_else(|_| "codegoblin-local".to_string());
+            if let Err(err) = serve::run(&addr, &model) {
+                eprintln!("codegoblin-native serve: {err}");
+                std::process::exit(1);
+            }
+        }
+        _ => run_oneshot(),
+    }
+}
+
+fn run_oneshot() {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
         emit(&Response::Error { ok: false, message: "failed to read stdin".into() });
