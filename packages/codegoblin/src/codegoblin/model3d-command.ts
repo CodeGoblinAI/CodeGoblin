@@ -1,8 +1,8 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { Global } from "@codegoblin/core/global"
 import { getModel3DProvider, type Model3DInputImage, type Model3DInputMode } from "./model3d-providers"
+import { readConnectedProviderKey } from "./connected-auth"
 
 export type { Model3DInputMode } from "./model3d-providers"
 
@@ -302,20 +302,9 @@ async function findModel3DKey(env: Record<string, string | undefined>, envKeys: 
     .find(Boolean)
   if (local) return local
   if (env.CODEGOBLIN_MODEL3D_DISABLE_CONNECTED_AUTH === "1" || !authProviderID) return
-  const key = await authKey(authProviderID)
+  const key = await readConnectedProviderKey(authProviderID)
   if (!key) return
   return { value: key, source: `connected ${authProviderID} provider` }
-}
-
-async function authKey(provider: string) {
-  const file = path.join(Global.Path.data, "auth.json")
-  const raw = await fs.readFile(file, "utf8").catch(() => "")
-  if (!raw) return
-  try {
-    const data = JSON.parse(raw)
-    const item = data?.[provider]
-    if (item?.type === "api" && typeof item.key === "string") return item.key
-  } catch {}
 }
 
 function envFilesUp(root: string) {
