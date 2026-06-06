@@ -79,6 +79,13 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
+// Lean CHAT system prompt for small local GGUF models. They run on-device with a tiny trained
+// context and are not agents, so the full coding-agent instructions/skills/environment do not fit
+// and only confuse them. Keep this short and set clear expectations (no tools / no file access).
+const LOCAL_CHAT_SYSTEM_PROMPT = `You are CodeGoblin, a helpful AI assistant running entirely on the user's own machine via a local model.
+
+You are in chat mode: you have NO tools, NO file or shell access, and cannot run code or take actions — you answer from your own knowledge. Be direct, clear, and concise. If a request needs editing files, running commands, browsing, or other agentic work, briefly say it requires a cloud/agent model in CodeGoblin and answer what you can in plain text.`
+
 const log = Log.create({ service: "session.prompt" })
 const elog = EffectLogger.create({ service: "session.prompt" })
 
@@ -1437,7 +1444,11 @@ export const layer = Layer.effect(
               sys.memory({ sessionID, query: memoryQuery }),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
-            const system = [...env, ...instructions, ...(skills ? [skills] : []), ...(memory ? [memory] : [])]
+            // Local GGUF models run a lean chat prompt (no coding-agent instructions/skills/env dump)
+            // so they fit a small context and behave as a chat assistant rather than a confused agent.
+            const system = isLocalRuntimeModel(model)
+              ? [LOCAL_CHAT_SYSTEM_PROMPT, ...(memory ? [memory] : [])]
+              : [...env, ...instructions, ...(skills ? [skills] : []), ...(memory ? [memory] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
