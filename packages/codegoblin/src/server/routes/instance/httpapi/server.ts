@@ -100,6 +100,7 @@ import type { Model3DInputImage } from "@/codegoblin/model3d-providers"
 import { Market } from "@/codegoblin/market"
 import { Process } from "@/util/process"
 import { pickCodeGoblinDirectory } from "./pick-directory"
+import { isHostOnlyHttpRequest } from "@/server/shared/loopback"
 
 type CodeGoblinImagePersist = {
   sessionID: SessionID
@@ -383,6 +384,12 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
     )
     yield* router.add("POST", "/codegoblin/pick-directory", (request) =>
       Effect.gen(function* () {
+        if (!isHostOnlyHttpRequest(request.headers)) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: "The folder picker is only available on the local server." },
+            { status: 403 },
+          )
+        }
         const route = yield* WorkspaceRouteContext
         const text = yield* Effect.orDie(request.text)
         let body: any
