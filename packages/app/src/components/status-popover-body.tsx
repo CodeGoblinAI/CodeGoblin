@@ -206,6 +206,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
   const mcpNames = createMemo(() => Object.keys(sync.data.mcp ?? {}).sort((a, b) => a.localeCompare(b)))
   const mcpStatus = (name: string) => sync.data.mcp?.[name]?.status
   const mcpConnected = createMemo(() => mcpNames().filter((name) => mcpStatus(name) === "connected").length)
+  const mcpLoading = () => !sync.data.mcp_ready
   const lspItems = createMemo(() => sync.data.lsp ?? [])
   const lspCount = createMemo(() => lspItems().length)
   const plugins = createMemo(() =>
@@ -312,6 +313,14 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
           <div class="flex flex-col px-2 pb-2">
             <div class="flex flex-col p-3 bg-background-base rounded-sm min-h-14">
               <Show
+                when={!mcpLoading()}
+                fallback={
+                  <div class="text-14-regular text-text-weaker text-center my-auto">
+                    {language.t("status.popover.mcp.connecting")}
+                  </div>
+                }
+              >
+              <Show
                 when={mcpNames().length > 0}
                 fallback={
                   <div class="text-14-regular text-text-base text-center my-auto">{language.t("dialog.mcp.empty")}</div>
@@ -365,6 +374,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                     )
                   }}
                 </For>
+              </Show>
               </Show>
             </div>
           </div>
