@@ -30,7 +30,13 @@ describe("firebaseLoginTerminalCommand", () => {
   test("Linux falls back to xterm -e when gnome-terminal/konsole are absent", () => {
     const which = (cmd: string) => (cmd === "xterm" ? "/usr/bin/xterm" : null)
     const result = firebaseLoginTerminalCommand("linux", CMD, which)
-    expect(result.argv).toEqual(["/usr/bin/xterm", "-e", ...CMD])
+    expect(result.argv).toEqual(["/usr/bin/xterm", "-e", "npx -y firebase-tools login"])
+  })
+
+  test("Linux konsole uses a single -e command string", () => {
+    const which = (cmd: string) => (cmd === "konsole" ? "/usr/bin/konsole" : null)
+    const result = firebaseLoginTerminalCommand("linux", CMD, which)
+    expect(result.argv).toEqual(["/usr/bin/konsole", "-e", "npx -y firebase-tools login"])
   })
 
   test("Linux with no terminal emulator runs inline and inherits stdio", () => {

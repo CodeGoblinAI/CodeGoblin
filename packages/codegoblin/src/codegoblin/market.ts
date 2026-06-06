@@ -196,6 +196,10 @@ function shellQuote(value: string) {
   return /^[\w./-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`
 }
 
+function shellCommand(cmd: string[]) {
+  return cmd.map(shellQuote).join(" ")
+}
+
 /**
  * Builds the command that runs `cmd` in a visible terminal so the user can complete Firebase's
  * browser auth.
@@ -225,8 +229,8 @@ export function firebaseLoginTerminalCommand(
   const gnome = whichFn("gnome-terminal")
   if (gnome) return { argv: [gnome, "--", ...cmd], stdin: "ignore" }
   const konsole = whichFn("konsole")
-  if (konsole) return { argv: [konsole, "-e", ...cmd], stdin: "ignore" }
+  if (konsole) return { argv: [konsole, "-e", shellCommand(cmd)], stdin: "ignore" }
   const xterm = whichFn("x-terminal-emulator") ?? whichFn("xterm")
-  if (xterm) return { argv: [xterm, "-e", ...cmd], stdin: "ignore" }
+  if (xterm) return { argv: [xterm, "-e", shellCommand(cmd)], stdin: "ignore" }
   return { argv: [...cmd], stdin: "inherit" }
 }
