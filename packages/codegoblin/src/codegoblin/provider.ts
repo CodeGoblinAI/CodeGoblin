@@ -1,6 +1,6 @@
 import { ModelID, ProviderID } from "@/provider/schema"
 import type { Info, Model } from "@/provider/provider"
-import { listInstalledModels } from "./local-runtime"
+import { listInstalledModels, readRuntimeState, resolveRuntimeCtx } from "./local-runtime"
 
 export const CodeGoblinProvider = {
   id: ProviderID.make("codegoblin"),
@@ -163,11 +163,17 @@ export function codeGoblinProviderInfo(): Info {
   }
 }
 
+/** True for a locally-served GGUF model (`codegoblin/<gguf>` from `codegoblin runtime`). */
+export function isLocalRuntimeModel(model: { providerID?: string; family?: string }): boolean {
+  return model.providerID === CodeGoblinProvider.id && model.family === "local"
+}
+
 function localRuntimeModel(id: string, baseURL: string, context: number): Model {
   return {
     id: ModelID.make(id),
     providerID: CodeGoblinProvider.id,
-    name: id,
+    // Suffix so local GGUF models are instantly distinguishable from cloud/API models in pickers.
+    name: `${id} (local)`,
     family: "local",
     api: { id, npm: "@ai-sdk/openai-compatible", url: baseURL },
     status: "active",
@@ -206,10 +212,14 @@ export async function augmentLocalRuntimeModels(
   }
   if (installed.length === 0) return
   const baseURL = process.env.CODEGOBLIN_GATEWAY_URL || CodeGoblinProvider.baseURL
+  // Advertise the SAME context the runtime was actually started with (persisted in runtime.json),
+  // so the agent's compaction (session/overflow.ts) trims before llama-server hard-rejects.
+  const state = await readRuntimeState().catch(() => ({}) as Awaited<ReturnType<typeof readRuntimeState>>)
+  const context = state.ctx && state.ctx > 0 ? state.ctx : resolveRuntimeCtx()
   for (const target of [catalog[CodeGoblinProvider.id], database[CodeGoblinProvider.id]]) {
     if (!target) continue
     for (const item of installed) {
-      target.models[item.id] = localRuntimeModel(item.id, baseURL, 32768)
+      target.models[item.id] = localRuntimeModel(item.id, baseURL, context)
     }
   }
 }

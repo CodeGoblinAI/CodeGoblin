@@ -28,7 +28,9 @@ impl Default for LlamaArgs {
             host: "127.0.0.1".to_string(),
             port: 8787,
             ngl: 99,
-            ctx: 4096,
+            // Large default so agent-mode prompts fit; the TS layer always passes --ctx explicitly
+            // (configurable / CODEGOBLIN_RUNTIME_CTX). llama.cpp accepts 0 = the model's trained n_ctx.
+            ctx: 32768,
             passthrough: Vec::new(),
         }
     }
@@ -195,7 +197,7 @@ mod tests {
         assert_eq!(parsed.host, "127.0.0.1");
         assert_eq!(parsed.port, 8787);
         assert_eq!(parsed.ngl, 99);
-        assert_eq!(parsed.ctx, 4096);
+        assert_eq!(parsed.ctx, 32768);
     }
 
     #[test]

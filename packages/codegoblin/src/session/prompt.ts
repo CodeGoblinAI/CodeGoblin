@@ -7,6 +7,7 @@ import { SessionRevert } from "./revert"
 import * as Session from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
+import { isLocalRuntimeModel } from "@/codegoblin/provider"
 import { ModelID, ProviderID } from "../provider/schema"
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -1383,6 +1384,13 @@ export const layer = Layer.effect(
               Effect.provideService(MCP.Service, mcp),
               Effect.provideService(Truncate.Service, truncate),
             )
+
+            // Small local GGUF models (served by `codegoblin runtime`) have a trained context too
+            // small to fit the full tool/MCP schema set (~38k tokens). Strip tools so they run as a
+            // lean chat assistant instead of overflowing the context and emitting gibberish.
+            if (isLocalRuntimeModel(model)) {
+              for (const key of Object.keys(tools)) delete tools[key]
+            }
 
             if (lastUser.format?.type === "json_schema") {
               tools["StructuredOutput"] = createStructuredOutputTool({

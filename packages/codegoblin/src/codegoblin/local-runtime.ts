@@ -92,8 +92,20 @@ export function runtimeStatePath(env?: Record<string, string | undefined>): stri
 }
 
 export const DEFAULT_RUNTIME_PORT = 8787
+/**
+ * Default context window for the local runtime. Large so agent-mode prompts (big system prompt +
+ * tool schemas) fit; the agent's compaction (session/overflow.ts) trims against the model's
+ * limit.context, which we reconcile to this same value. Override with CODEGOBLIN_RUNTIME_CTX or
+ * `runtime start --ctx` (lower it if VRAM is tight).
+ */
+export const DEFAULT_RUNTIME_CTX = 32768
 
-export type RuntimeState = { model?: string; port?: number }
+export function resolveRuntimeCtx(env: Record<string, string | undefined> = process.env): number {
+  const raw = Number(env.CODEGOBLIN_RUNTIME_CTX)
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_RUNTIME_CTX
+}
+
+export type RuntimeState = { model?: string; port?: number; ctx?: number }
 
 export async function readRuntimeState(env?: Record<string, string | undefined>): Promise<RuntimeState> {
   const raw = await fs.readFile(runtimeStatePath(env), "utf8").catch(() => "")
@@ -103,6 +115,7 @@ export async function readRuntimeState(env?: Record<string, string | undefined>)
     return {
       model: typeof parsed?.model === "string" ? parsed.model : undefined,
       port: typeof parsed?.port === "number" ? parsed.port : undefined,
+      ctx: typeof parsed?.ctx === "number" ? parsed.ctx : undefined,
     }
   } catch {
     return {}

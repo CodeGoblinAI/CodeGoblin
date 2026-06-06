@@ -15,6 +15,7 @@ import {
   listInstalledModels,
   modelPath,
   readRuntimeState,
+  resolveRuntimeCtx,
   runtimeDir,
   selectEngineAssets,
   writeRuntimeState,
@@ -143,7 +144,7 @@ async function runUse(id: string): Promise<void> {
   console.log(`Default local model set to ${match.id}`)
 }
 
-async function runStart(opts: { model?: string; port?: number; ngl?: number }): Promise<void> {
+async function runStart(opts: { model?: string; port?: number; ngl?: number; ctx?: number }): Promise<void> {
   if (!(await isEngineInstalled())) throw new Error("llama.cpp engine not installed. Run 'codegoblin runtime install' first.")
   const state = await readRuntimeState()
   const modelId = opts.model ?? state.model
@@ -153,10 +154,20 @@ async function runStart(opts: { model?: string; port?: number; ngl?: number }): 
   const native = resolveNativeBin()
   if (!native) throw new Error("codegoblin-native binary not found. Build it or set CODEGOBLIN_NATIVE_BIN.")
   const port = opts.port ?? state.port ?? DEFAULT_RUNTIME_PORT
-  await writeRuntimeState({ model: match.id, port })
-  console.log(`Starting CodeGoblin local runtime: ${match.id} on http://127.0.0.1:${port}/v1`)
+  const ctx = opts.ctx && opts.ctx > 0 ? opts.ctx : resolveRuntimeCtx()
+  // Persist ctx so the codegoblin provider advertises the SAME context to the agent's compaction
+  // (otherwise the agent trims against the wrong limit and the server hard-rejects oversized prompts).
+  await writeRuntimeState({ model: match.id, port, ctx })
+  console.log(`Starting CodeGoblin local runtime: ${match.id} on http://127.0.0.1:${port}/v1 (ctx ${ctx})`)
   const proc = Process.spawn(
-    [native, "llama", "--model", match.path, "--engine", enginePath(), "--port", String(port), "--ngl", String(opts.ngl ?? 99)],
+    [
+      native, "llama",
+      "--model", match.path,
+      "--engine", enginePath(),
+      "--port", String(port),
+      "--ngl", String(opts.ngl ?? 99),
+      "--ctx", String(ctx),
+    ],
     { stdin: "ignore", stdout: "inherit", stderr: "inherit" },
   )
   await proc.exited
@@ -176,7 +187,7 @@ async function runStatus(): Promise<void> {
   console.log(`Runtime running:  ${running ? `yes (127.0.0.1:${port})` : "no"}`)
 }
 
-type Args = { force?: boolean; id?: string; model?: string; port?: number; ngl?: number }
+type Args = { force?: boolean; id?: string; model?: string; port?: number; ngl?: number; ctx?: number }
 
 export const RuntimeCommand = {
   command: "runtime <command>",
@@ -209,8 +220,9 @@ export const RuntimeCommand = {
           y
             .option("model", { type: "string", describe: "model id (defaults to selected)" })
             .option("port", { type: "number", default: DEFAULT_RUNTIME_PORT })
-            .option("ngl", { type: "number", default: 99, describe: "GPU layers to offload" }),
-        async (args) => runStart({ model: args.model, port: args.port, ngl: args.ngl }),
+            .option("ngl", { type: "number", default: 99, describe: "GPU layers to offload" })
+            .option("ctx", { type: "number", default: 0, describe: "context window (0 = default/CODEGOBLIN_RUNTIME_CTX; lower if VRAM is tight)" }),
+        async (args) => runStart({ model: args.model, port: args.port, ngl: args.ngl, ctx: args.ctx }),
       )
       .command("status", "show local runtime status", {}, async () => runStatus())
       .demandCommand(1),
