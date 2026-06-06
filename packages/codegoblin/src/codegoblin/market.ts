@@ -269,10 +269,10 @@ export const Market = {
       const provided = env?.[varName]?.trim() ?? env?.[key]?.trim()
       if (provided) next[key] = provided
     }
-    return {
-      ...mcp,
-      environment: entry.id === "notion" ? augmentNotionEnvironment(next) : next,
-    }
+    // Do NOT bake OPENAPI_MCP_HEADERS (which embeds a second copy of the Bearer token) into the
+    // persisted config — it is re-derived from NOTION_TOKEN at spawn time (see mcp/index.ts
+    // localSpawnEnvironment). Keeping a single secret copy in config avoids duplicating it on disk.
+    return { ...mcp, environment: next }
   },
   validateEnv(entry: MarketEntry, env?: Record<string, string>): string | undefined {
     for (const item of entry.env ?? []) {
@@ -326,7 +326,7 @@ export const Market = {
     const edits = modify(text, ["mcp", entry.id], mcp, {
       formattingOptions: { tabSize: 2, insertSpaces: true },
     })
-    await Filesystem.write(configPath, applyEdits(text, edits))
+    await Filesystem.write(configPath, applyEdits(text, edits), 0o600)
     return configPath
   },
   /** Remove a catalog MCP entry from every config file in a directory that defines it. */
@@ -340,7 +340,7 @@ export const Market = {
       const edits = modify(text, ["mcp", id], undefined, {
         formattingOptions: { tabSize: 2, insertSpaces: true },
       })
-      await Filesystem.write(configPath, applyEdits(text, edits))
+      await Filesystem.write(configPath, applyEdits(text, edits), 0o600)
       removedPath = configPath
     }
     return removedPath

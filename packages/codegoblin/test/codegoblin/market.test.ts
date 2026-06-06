@@ -74,14 +74,21 @@ test("validateEnv requires catalog env fields", () => {
   expect(Market.validateEnv(playwright, undefined)).toBeUndefined()
 })
 
-test("materializeMcp substitutes env placeholders with literal secrets", () => {
+test("materializeMcp substitutes env placeholders with a single secret copy (no baked headers)", () => {
   const notion = Market.get("notion")!
   const mcp = Market.materializeMcp(notion, { NOTION_TOKEN: "secret_notion" })
   expect(mcp.type).toBe("local")
   if (mcp.type !== "local") return
   expect(mcp.environment?.NOTION_TOKEN).toBe("secret_notion")
-  expect(mcp.environment?.OPENAPI_MCP_HEADERS).toContain("Bearer secret_notion")
-  expect(mcp.environment?.OPENAPI_MCP_HEADERS).toContain("2022-06-28")
+  // OPENAPI_MCP_HEADERS must NOT be persisted (it duplicates the token on disk); it is re-derived
+  // at spawn time by augmentNotionEnvironment.
+  expect(mcp.environment?.OPENAPI_MCP_HEADERS).toBeUndefined()
+})
+
+test("augmentNotionEnvironment adds OPENAPI_MCP_HEADERS at spawn time from NOTION_TOKEN", () => {
+  const next = Market.augmentNotionEnvironment({ NOTION_TOKEN: "secret_notion" })
+  expect(next.OPENAPI_MCP_HEADERS).toContain("Bearer secret_notion")
+  expect(next.OPENAPI_MCP_HEADERS).toContain("2022-06-28")
 })
 
 test("addToConfig rejects env-required entries without secrets", async () => {
