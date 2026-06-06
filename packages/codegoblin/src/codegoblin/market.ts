@@ -168,16 +168,12 @@ export const Market = {
   },
   /** Open Firebase CLI login in a new terminal so the user can complete browser auth. */
   startFirebaseLogin(cwd?: string): void {
-    const cmd = Market.firebaseLoginCommand()
-    if (process.platform === "win32") {
-      Process.spawn(["cmd", "/c", "start", "Firebase Login", "cmd", "/k", ...cmd], { cwd, stdin: "ignore" })
-      return
-    }
-    if (process.platform === "darwin") {
-      Process.spawn(["open", "-a", "Terminal", ...cmd], { cwd, stdin: "ignore" })
-      return
-    }
-    Process.spawn(cmd, { cwd, stdin: "inherit", stdout: "inherit", stderr: "inherit" })
+    const spawn = firebaseLoginTerminalCommand(process.platform, Market.firebaseLoginCommand())
+    const opts =
+      spawn.stdin === "inherit"
+        ? ({ cwd, stdin: "inherit", stdout: "inherit", stderr: "inherit" } as const)
+        : ({ cwd, stdin: "ignore" } as const)
+    Process.spawn(spawn.argv, opts)
   },
   /** Write a catalog MCP entry into the project config, returning the config path. */
   async addToConfig(entry: MarketEntry, baseDir: string): Promise<string> {
@@ -192,4 +188,49 @@ export const Market = {
     await Filesystem.write(configPath, applyEdits(text, edits))
     return configPath
   },
+}
+
+export type FirebaseLoginSpawn = { argv: string[]; stdin: "ignore" | "inherit" }
+
+function shellQuote(value: string) {
+  return /^[\w./-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`
+}
+
+function shellCommand(cmd: string[]) {
+  return cmd.map(shellQuote).join(" ")
+}
+
+/**
+ * Builds the command that runs `cmd` in a visible terminal so the user can complete Firebase's
+ * browser auth.
+ *
+ * - **Windows**: a new `cmd` window via `start`.
+ * - **macOS**: AppleScript `do script` — plain `open -a Terminal <args>` opens the args as files
+ *   instead of running them.
+ * - **Linux**: the first available terminal emulator; falls back to inheriting the server's stdio
+ *   when none is found (best effort when running on a TTY).
+ */
+export function firebaseLoginTerminalCommand(
+  platform: NodeJS.Platform,
+  cmd: string[],
+  whichFn: (command: string) => string | null = which,
+): FirebaseLoginSpawn {
+  if (platform === "win32") {
+    return { argv: ["cmd", "/c", "start", "Firebase Login", "cmd", "/k", ...cmd], stdin: "ignore" }
+  }
+  if (platform === "darwin") {
+    const shellCommand = cmd.map(shellQuote).join(" ")
+    const appleScript = `tell application "Terminal" to do script "${shellCommand.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+    return {
+      argv: ["osascript", "-e", 'tell application "Terminal" to activate', "-e", appleScript],
+      stdin: "ignore",
+    }
+  }
+  const gnome = whichFn("gnome-terminal")
+  if (gnome) return { argv: [gnome, "--", ...cmd], stdin: "ignore" }
+  const konsole = whichFn("konsole")
+  if (konsole) return { argv: [konsole, "-e", shellCommand(cmd)], stdin: "ignore" }
+  const xterm = whichFn("x-terminal-emulator") ?? whichFn("xterm")
+  if (xterm) return { argv: [xterm, "-e", shellCommand(cmd)], stdin: "ignore" }
+  return { argv: [...cmd], stdin: "inherit" }
 }
