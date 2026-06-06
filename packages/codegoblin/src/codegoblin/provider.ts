@@ -1,5 +1,6 @@
 import { ModelID, ProviderID } from "@/provider/schema"
 import type { Info, Model } from "@/provider/provider"
+import { listInstalledModels } from "./local-runtime"
 
 export const CodeGoblinProvider = {
   id: ProviderID.make("codegoblin"),
@@ -159,6 +160,57 @@ export function codeGoblinProviderInfo(): Info {
       "elevenlabs-tts": model("elevenlabs-tts"),
       "elevenlabs-music": model("elevenlabs-music"),
     },
+  }
+}
+
+function localRuntimeModel(id: string, baseURL: string, context: number): Model {
+  return {
+    id: ModelID.make(id),
+    providerID: CodeGoblinProvider.id,
+    name: id,
+    family: "local",
+    api: { id, npm: "@ai-sdk/openai-compatible", url: baseURL },
+    status: "active",
+    headers: {},
+    options: {},
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: false,
+      toolcall: true,
+      input: { text: true, audio: false, image: false, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context, output: Math.min(context, 4096) },
+    release_date: "",
+    variants: {},
+  }
+}
+
+/**
+ * Surface installed local GGUF models (served by `codegoblin runtime start` on :8787)
+ * as `codegoblin/<id>` entries so they appear in the model picker. Best-effort: never
+ * throws, no-ops when nothing is installed.
+ */
+export async function augmentLocalRuntimeModels(
+  catalog: Record<string, Info>,
+  database: Record<string, Info>,
+): Promise<void> {
+  let installed: Awaited<ReturnType<typeof listInstalledModels>>
+  try {
+    installed = await listInstalledModels()
+  } catch {
+    return
+  }
+  if (installed.length === 0) return
+  const baseURL = process.env.CODEGOBLIN_GATEWAY_URL || CodeGoblinProvider.baseURL
+  for (const target of [catalog[CodeGoblinProvider.id], database[CodeGoblinProvider.id]]) {
+    if (!target) continue
+    for (const item of installed) {
+      target.models[item.id] = localRuntimeModel(item.id, baseURL, 32768)
+    }
   }
 }
 
