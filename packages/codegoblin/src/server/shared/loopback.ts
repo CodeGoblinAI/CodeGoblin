@@ -1,11 +1,20 @@
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1"])
 
+function parseHost(host: string): string {
+  const bare = host.trim().split(",")[0]?.trim() ?? ""
+  if (bare.startsWith("[")) {
+    const end = bare.indexOf("]")
+    return end > 0 ? bare.slice(1, end).toLowerCase() : bare.toLowerCase()
+  }
+  if (/^\d+\.\d+\.\d+\.\d+:/.test(bare)) return bare.split(":")[0]!.toLowerCase()
+  if (bare.includes(":") && !bare.includes("::")) return bare.split(":")[0]!.toLowerCase()
+  return bare.toLowerCase()
+}
+
 /** True when `host` is a loopback name (strips port and IPv6 brackets). */
 export function isLoopbackHost(host: string | undefined): boolean {
   if (!host?.trim()) return true
-  const bare = host.trim().split(",")[0]?.trim() ?? ""
-  const name = bare.replace(/^\[|\]$/g, "").split(":")[0]?.toLowerCase() ?? ""
-  return LOOPBACK.has(name)
+  return LOOPBACK.has(parseHost(host))
 }
 
 type HeaderBag = Record<string, string | string[] | undefined>
