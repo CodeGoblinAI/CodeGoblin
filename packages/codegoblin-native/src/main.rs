@@ -15,6 +15,7 @@
 //!     -> {"ok":true,"ranked":[{"id":"1","score":3.0}]}
 
 mod inference;
+mod llama;
 mod serve;
 
 use std::io::{Read, Write};
@@ -50,6 +51,18 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("llama") => match llama::parse_args(args) {
+            Ok(parsed) => {
+                if let Err(err) = llama::run(parsed) {
+                    eprintln!("codegoblin-native llama: {err}");
+                    std::process::exit(1);
+                }
+            }
+            Err(err) => {
+                eprintln!("codegoblin-native llama: {err}");
+                std::process::exit(2);
+            }
+        },
         _ => run_oneshot(),
     }
 }
