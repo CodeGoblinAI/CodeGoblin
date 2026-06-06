@@ -261,12 +261,16 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   )
                 },
                 removeTab: (href: string) => {
+                  const activeHref =
+                    params.dir && params.id ? makeSessionHref(params.dir, params.id) : undefined
+                  const closingActive = href === activeHref
                   startTransition(() => {
                     setStore(
                       produce((tabs) => {
                         const index = tabs.findIndex((t) => t.href === href)
                         if (index === -1) return
                         tabs.splice(index, 1)
+                        if (!closingActive) return
                         const nextTab = tabs[index] ?? tabs[tabs.length - 1]
                         if (nextTab) navigate(nextTab.href)
                         else navigate("/")
@@ -443,7 +447,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                     </For>
                   </div>
                   <Show
-                    when={creating() && params.dir}
+                    when={creating() && params.dir && tabsEnriched().length === 0}
                     fallback={
                       <IconButtonV2
                         type="button"
@@ -696,13 +700,23 @@ function TabNavItem(props: {
             "--active-bg": "linear-gradient(90deg, transparent 0%, var(--tab-bg) 25%)",
           }}
         />
-        <IconButtonV2
-          size="small"
-          variant="ghost-muted"
-          class="opacity-0 group-hover:opacity-100 group-data-[active='true']:opacity-100"
-          onClick={props.onClose}
-          icon={<IconV2 name="xmark-small" />}
-        />
+        <Show when={!props.hideClose}>
+          <IconButtonV2
+            size="small"
+            variant="ghost-muted"
+            class="opacity-0 group-hover:opacity-100 group-data-[active='true']:opacity-100"
+            onMouseDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              props.onClose()
+            }}
+            icon={<IconV2 name="xmark-small" />}
+          />
+        </Show>
       </div>
     </div>
   )

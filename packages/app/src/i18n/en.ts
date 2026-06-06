@@ -480,6 +480,7 @@ export const dict = {
   "error.page.circular": "[Circular]",
   "error.page.report.prefix": "Please report this CodeGoblin error",
   "error.page.report.discord": "on Discord",
+  "error.page.report.github": "on GitHub",
   "error.page.version": "Version: {{version}}",
 
   "error.dev.rootNotFound":
@@ -620,6 +621,7 @@ export const dict = {
   "status.popover.ariaLabel": "Server configurations",
   "status.popover.tab.servers": "Servers",
   "status.popover.tab.mcp": "MCP",
+  "status.popover.mcp.connecting": "Connecting MCP servers…",
   "status.popover.tab.lsp": "LSP",
   "status.popover.tab.plugins": "Plugins",
   "status.popover.action.manageServers": "Manage servers",
