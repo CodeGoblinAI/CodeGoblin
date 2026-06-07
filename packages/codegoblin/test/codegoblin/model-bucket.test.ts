@@ -52,6 +52,16 @@ describe("CodeGoblin model buckets", () => {
     expect(isDefaultChatModel(model)).toBe(false)
   })
 
+  test("places local GGUF models in the Local models bucket (not mixed with cloud text)", () => {
+    const model = {
+      name: "Qwen3-0.6B-Q4_K_M (local)",
+      family: "local",
+      capabilities: { input: { text: true }, output: { text: true } },
+    }
+    expect(modelBucket("Qwen3-0.6B-Q4_K_M", model)).toBe("Local models")
+    expect(isChatSelectableModel(model)).toBe(true)
+  })
+
   test("sorts favorites before recents and regular buckets", () => {
     const categories = ["Recent · Image models", "Text models · OpenAI", "Favorites · Text models"].sort(
       sortModelCategories,

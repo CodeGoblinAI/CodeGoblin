@@ -178,13 +178,24 @@ export type ParsedAPICallError =
       metadata?: Record<string, string>
     }
 
+// For the local runtime (codegoblin/llama.cpp) turn the raw "exceeds the available context size
+// (N tokens), try increasing it" into an actionable message the user can act on.
+export function contextOverflowMessage(providerID: ProviderID, raw: string): string {
+  if (!String(providerID).startsWith("codegoblin")) return raw
+  const match = raw.match(/request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)/i)
+  if (match) {
+    return `This message (~${match[1]} tokens) is too long for the local model's ${match[2]}-token context. Send a shorter message, restart the runtime with a larger context (e.g. \`codegoblin runtime start --ctx 8192\`), or pick a cloud model for long inputs.`
+  }
+  return `The local model's context window was exceeded. Send a shorter message or restart the runtime with a larger \`--ctx\`.`
+}
+
 export function parseAPICallError(input: { providerID: ProviderID; error: APICallError }): ParsedAPICallError {
   const m = message(input.providerID, input.error)
   const body = json(input.error.responseBody)
   if (isOverflow(m) || input.error.statusCode === 413 || body?.error?.code === "context_length_exceeded") {
     return {
       type: "context_overflow",
-      message: m,
+      message: contextOverflowMessage(input.providerID, m),
       responseBody: input.error.responseBody,
     }
   }
