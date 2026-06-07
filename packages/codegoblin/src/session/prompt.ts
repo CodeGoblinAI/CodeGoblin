@@ -81,10 +81,13 @@ const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested struc
 
 // Lean CHAT system prompt for small local GGUF models. They run on-device with a tiny trained
 // context and are not agents, so the full coding-agent instructions/skills/environment do not fit
-// and only confuse them. Keep this short and set clear expectations (no tools / no file access).
-const LOCAL_CHAT_SYSTEM_PROMPT = `You are CodeGoblin, a helpful AI assistant running entirely on the user's own machine via a local model.
+// and only confuse them. NOTE (tested on gemma-3n / Qwen3): a strong identity like "You are
+// CodeGoblin" makes small models confabulate about themselves instead of answering, and without an
+// explicit "no tool JSON" rule they hallucinate tool-call output. This neutral, plain-text-only
+// wording was verified to fix both.
+const LOCAL_CHAT_SYSTEM_PROMPT = `You are a helpful AI assistant running locally on the user's own machine. Answer the user directly and concisely in plain conversational text.
 
-You are in chat mode: you have NO tools, NO file or shell access, and cannot run code or take actions — you answer from your own knowledge. Be direct, clear, and concise. If a request needs editing files, running commands, browsing, or other agentic work, briefly say it requires a cloud/agent model in CodeGoblin and answer what you can in plain text.`
+You have no tools and cannot run commands, edit files, or browse the web — never output JSON, function calls, or tool invocations. If a request truly needs those actions, briefly say so and offer what help you can in plain text.`
 
 const log = Log.create({ service: "session.prompt" })
 const elog = EffectLogger.create({ service: "session.prompt" })
@@ -1444,10 +1447,11 @@ export const layer = Layer.effect(
               sys.memory({ sessionID, query: memoryQuery }),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
-            // Local GGUF models run a lean chat prompt (no coding-agent instructions/skills/env dump)
-            // so they fit a small context and behave as a chat assistant rather than a confused agent.
+            // Local GGUF models run a lean chat prompt only (no coding-agent instructions/skills/env
+            // dump, and NOT the memory recall — small models echo/confabulate from injected context,
+            // tested on gemma-3n). Keeps them a clean chat assistant that fits a small context.
             const system = isLocalRuntimeModel(model)
-              ? [LOCAL_CHAT_SYSTEM_PROMPT, ...(memory ? [memory] : [])]
+              ? [LOCAL_CHAT_SYSTEM_PROMPT]
               : [...env, ...instructions, ...(skills ? [skills] : []), ...(memory ? [memory] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
