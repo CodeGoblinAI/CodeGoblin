@@ -1,53 +1,91 @@
 # CodeGoblin local runtime (first-party inference)
 
 CodeGoblin ships its **own** on-device inference runtime rather than depending on Ollama or
-LM Studio. It lives inside the existing `codegoblin-native` Rust sidecar and speaks the
-OpenAI-compatible HTTP API the `codegoblin` provider already targets (`http://127.0.0.1:8787/v1`).
+LM Studio. It bundles a prebuilt [llama.cpp](https://github.com/ggml-org/llama.cpp) engine that
+the `codegoblin-native` Rust sidecar supervises, serving the OpenAI-compatible HTTP API the
+`codegoblin` provider already targets (`http://127.0.0.1:8787/v1`).
+
+## Quick start
+
+```bash
+codegoblin runtime install        # download the llama.cpp engine for this machine (CUDA when an NVIDIA GPU is present)
+codegoblin runtime pull qwen3-0.6b
+codegoblin runtime use qwen3-0.6b
+codegoblin runtime start          # serves http://127.0.0.1:8787/v1 (leave running)
+```
+
+Then pick the model in the TUI/web model selector — local GGUFs appear under a dedicated
+**Local models** group, named `<id> (local)` — and chat. Generation runs on your GPU/CPU;
+nothing leaves your machine.
+
+`codegoblin runtime list` shows installed models + the pull catalog; `codegoblin runtime status`
+shows engine/model/server state.
 
 ## Architecture
 
 ```
 codegoblin (TUI/web)
-   │  OpenAI-compatible HTTP
+   │  OpenAI-compatible HTTP (:8787/v1)
    ▼
-codegoblin-native serve   ──►  inference::generate()
-  /v1/models                     ├─ default build: stub message
-  /v1/chat/completions           └─ --features inference: llama.cpp (Slice 2)
-  /health
+codegoblin runtime start            (TS CLI: packages/codegoblin/src/cli/cmd/runtime.ts)
+   └─► codegoblin-native llama      (Rust supervisor: packages/codegoblin-native/src/llama.rs)
+         └─► llama-server           (bundled prebuilt llama.cpp engine, GPU offload)
 ```
 
-`codegoblin-native` has two modes:
+- The engine installs to `<data>/runtime/engine` (override the root with
+  `CODEGOBLIN_RUNTIME_DIR`); models live in `<runtime>/models/*.gguf` (`CODEGOBLIN_MODELS_DIR`).
+- `runtime install` resolves the latest llama.cpp release and picks the asset for this
+  platform/acceleration (lowest CUDA version for driver compatibility; CPU build otherwise —
+  force with `CODEGOBLIN_RUNTIME_ACCEL=cpu|cuda`).
+- The selected model + port + context persist in `<runtime>/runtime.json`, and the `codegoblin`
+  provider reads that file so the model picker and the agent's context handling match what the
+  server was actually started with.
+
+## Context window
+
+The runtime starts llama-server with a 32768-token context by default (the trained context of
+the catalog models — do not exceed a model's trained context). Override per start with
+`codegoblin runtime start --ctx 16384` or `CODEGOBLIN_RUNTIME_CTX` (lower it if VRAM is tight).
+If a single message exceeds the context, CodeGoblin surfaces an actionable error instead of
+hanging.
+
+## Chat mode (not an agent)
+
+Small local models are **chat assistants, not coding agents**. When a local model is selected,
+CodeGoblin automatically:
+
+- strips the agent tool/MCP/skill schemas (~38k tokens — larger than these models' contexts), and
+- swaps in a lean neutral chat system prompt (~545 tokens) with no tools and no memory injection.
+
+They answer questions in plain text and decline agentic requests gracefully; pick a cloud model
+for tool-using/agentic work.
+
+## codegoblin-native modes
 
 - **one-shot** (default, unchanged): `echo '{"op":"rank",...}' | codegoblin-native` — memory
-  ranking / injection scanning over stdin. This is how `memory-native.ts` already uses it.
-- **serve**: `codegoblin-native serve` — the local runtime HTTP server.
+  ranking / injection-guard scanning over stdin (used by `memory-native.ts`).
+- **`llama`**: `codegoblin-native llama --model <gguf> [--engine <llama-server>] [--port 8787]
+  [--ngl 99] [--ctx 32768]` — resolves the bundled engine (`--engine` →
+  `CODEGOBLIN_LLAMA_SERVER` → sibling `engine/` dir → `CODEGOBLIN_RUNTIME_DIR/engine`) and
+  supervises `llama-server`. This is what `codegoblin runtime start` launches.
+- **`serve`**: minimal built-in OpenAI-compatible server with a feature-gated inference stub.
+  Kept as scaffolding for a possible future static embed (`--features inference` via
+  `llama-cpp-2`); the bundled-engine path above is the production route.
 
-```bash
-# defaults: 127.0.0.1:8787, label "codegoblin-local"
-codegoblin-native serve
-CODEGOBLIN_NATIVE_ADDR=127.0.0.1:8787 CODEGOBLIN_NATIVE_MODEL_LABEL=my-model codegoblin-native serve
-```
+## Model catalog
 
-## Slices
-
-- **Slice 1 (this PR):** serving plumbing — OpenAI-compatible `/v1/models`,
-  `/v1/chat/completions` (streaming + non-streaming), `/health`. Generation is feature-gated;
-  the default build returns a clear "no inference backend" message so the whole path is testable
-  without compiling llama.cpp.
-- **Slice 2:** real generation behind `--features inference`. Wire `llama-cpp-2`, load a GGUF
-  model from `CODEGOBLIN_NATIVE_MODEL`, build the prompt from the chat messages, and stream
-  decoded tokens. Built/tuned on an NVIDIA box (CUDA), CPU fallback otherwise. The integration
-  point is `inference::generate()` — the HTTP layer does not change.
-- **Slice 3:** CLI launcher (`codegoblin` spawns `codegoblin-native serve`), provider activation,
-  model management (download/list GGUF), and real token streaming.
+`codegoblin runtime pull <id>` downloads non-gated GGUFs (see `LOCAL_MODEL_CATALOG` in
+`packages/codegoblin/src/codegoblin/local-runtime.ts`): `gemma-3n-e2b`, `qwen3-0.6b`,
+`qwen3-1.7b`, `qwen2.5-0.5b`. All verified on an RTX 4060 Ti (88–222 tok/s, ≤3.6 GB VRAM at
+32k context).
 
 ## Build
 
-The default build is dependency-light (`serde` + `tiny_http`) and compiles on any platform with
-no native toolchain beyond Rust. The `inference` feature is what pulls in llama.cpp and its CUDA
-build requirements, so CI and normal installs stay fast.
+The default `codegoblin-native` build stays dependency-light (`serde` + `tiny_http`) — no C++
+toolchain, no CUDA at build time. The heavy lifting ships as the prebuilt engine downloaded at
+`runtime install` time.
 
 ```bash
-cargo build --release                     # serving plumbing, stub generation
-cargo build --release --features inference # Slice 2: real llama.cpp backend
+cargo build --release                      # sidecar: one-shot + llama supervisor + serve stub
+cargo build --release --features inference # optional future static embed (stub today)
 ```
