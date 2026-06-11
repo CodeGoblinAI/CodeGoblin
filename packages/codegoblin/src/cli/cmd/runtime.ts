@@ -34,6 +34,14 @@ function resolveNativeBin(): string | undefined {
 
 async function downloadFile(url: string, dest: string): Promise<void> {
   await fs.mkdir(path.dirname(dest), { recursive: true })
+  // Prefer curl (ships with Windows 10+/macOS/most Linux): it streams to disk with retries.
+  // The compiled binary's fetch + Bun.write(Response) buffers in memory and has shown
+  // indefinite stalls on large GitHub release downloads.
+  const curl = which("curl")
+  if (curl) {
+    await Process.run([curl, "-fsSL", "--retry", "3", "-o", dest, url])
+    return
+  }
   const response = await fetch(url, { redirect: "follow", headers: { "user-agent": "codegoblin-runtime" } })
   if (!response.ok || !response.body) throw new Error(`Download failed (${response.status}): ${url}`)
   await Bun.write(dest, response)
