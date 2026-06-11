@@ -7,6 +7,7 @@ import { SessionRevert } from "./revert"
 import * as Session from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
+import { isLocalRuntimeModel } from "@/codegoblin/provider"
 import { ModelID, ProviderID } from "../provider/schema"
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -77,6 +78,16 @@ IMPORTANT:
 - This tool provides your final answer - no further actions are taken after calling it`
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
+
+// Lean CHAT system prompt for small local GGUF models. They run on-device with a tiny trained
+// context and are not agents, so the full coding-agent instructions/skills/environment do not fit
+// and only confuse them. NOTE (tested on gemma-3n / Qwen3): a strong identity like "You are
+// CodeGoblin" makes small models confabulate about themselves instead of answering, and without an
+// explicit "no tool JSON" rule they hallucinate tool-call output. This neutral, plain-text-only
+// wording was verified to fix both.
+const LOCAL_CHAT_SYSTEM_PROMPT = `You are a helpful AI assistant running locally on the user's own machine. Answer the user directly and concisely in plain conversational text.
+
+You have no tools and cannot run commands, edit files, or browse the web — never output JSON, function calls, or tool invocations. If a request truly needs those actions, briefly say so and offer what help you can in plain text.`
 
 const log = Log.create({ service: "session.prompt" })
 const elog = EffectLogger.create({ service: "session.prompt" })
@@ -1384,6 +1395,13 @@ export const layer = Layer.effect(
               Effect.provideService(Truncate.Service, truncate),
             )
 
+            // Small local GGUF models (served by `codegoblin runtime`) have a trained context too
+            // small to fit the full tool/MCP schema set (~38k tokens). Strip tools so they run as a
+            // lean chat assistant instead of overflowing the context and emitting gibberish.
+            if (isLocalRuntimeModel(model)) {
+              for (const key of Object.keys(tools)) delete tools[key]
+            }
+
             if (lastUser.format?.type === "json_schema") {
               tools["StructuredOutput"] = createStructuredOutputTool({
                 schema: lastUser.format.schema,
@@ -1429,7 +1447,12 @@ export const layer = Layer.effect(
               sys.memory({ sessionID, query: memoryQuery }),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
-            const system = [...env, ...instructions, ...(skills ? [skills] : []), ...(memory ? [memory] : [])]
+            // Local GGUF models run a lean chat prompt only (no coding-agent instructions/skills/env
+            // dump, and NOT the memory recall — small models echo/confabulate from injected context,
+            // tested on gemma-3n). Keeps them a clean chat assistant that fits a small context.
+            const system = isLocalRuntimeModel(model)
+              ? [LOCAL_CHAT_SYSTEM_PROMPT]
+              : [...env, ...instructions, ...(skills ? [skills] : []), ...(memory ? [memory] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({

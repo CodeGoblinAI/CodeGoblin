@@ -56,4 +56,16 @@ describe("web model buckets", () => {
     expect(isChatSelectableModel(model)).toBe(true)
     expect(isDefaultChatModel(model)).toBe(false)
   })
+
+  test("places local GGUF models in the Local models bucket", () => {
+    const model = {
+      id: "gemma-3n-E2B-it-Q4_K_M",
+      name: "gemma-3n-E2B-it-Q4_K_M (local)",
+      family: "local",
+      capabilities: { input: { text: true }, output: { text: true } },
+    }
+    expect(modelBucket(model)).toBe("Local models")
+    expect(isChatSelectableModel(model)).toBe(true)
+    expect(isDefaultChatModel(model)).toBe(true)
+  })
 })

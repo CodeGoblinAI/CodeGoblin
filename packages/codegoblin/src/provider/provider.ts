@@ -28,7 +28,7 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { augmentAudioModelCatalog, augmentImageModelCatalog, augment3DModelCatalog, codeGoblinProviderInfo } from "@/codegoblin/provider"
+import { augmentAudioModelCatalog, augmentImageModelCatalog, augment3DModelCatalog, augmentLocalRuntimeModels, codeGoblinProviderInfo } from "@/codegoblin/provider"
 
 const log = Log.create({ service: "provider" })
 
@@ -1243,6 +1243,7 @@ export const layer = Layer.effect(
         augmentImageModelCatalog(database)
         augmentAudioModelCatalog(database)
         augment3DModelCatalog(database)
+        yield* Effect.promise(() => augmentLocalRuntimeModels(catalog, database))
 
         const providers: Record<ProviderID, Info> = {} as Record<ProviderID, Info>
         const languages = new Map<string, LanguageModelV3>()
