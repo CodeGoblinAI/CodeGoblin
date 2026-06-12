@@ -349,8 +349,14 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         return HttpServerResponse.jsonUnsafe(installed, { status: installed.ok ? 200 : 400 })
       }),
     )
-    yield* router.add("POST", "/codegoblin/market/firebase-login", () =>
+    yield* router.add("POST", "/codegoblin/market/firebase-login", (request) =>
       Effect.gen(function* () {
+        if (!isHostOnlyHttpRequest(request.headers)) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: "Firebase login can only be started from the local server." },
+            { status: 403 },
+          )
+        }
         const route = yield* WorkspaceRouteContext
         yield* Effect.sync(() => Market.startFirebaseLogin(route.directory))
         return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 })
@@ -594,6 +600,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
               modelVersion,
               inputImages,
               outputFormat: typeof body?.outputFormat === "string" ? body.outputFormat : undefined,
+              require3DModel: body?.require3DModel !== false,
               keyFile: typeof body?.keyFile === "string" ? body.keyFile : undefined,
               onProgress: persist
                 ? async (message) => {

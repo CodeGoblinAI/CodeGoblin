@@ -1,4 +1,4 @@
-export const MODEL_BUCKET_ORDER = ["Text models", "Image models", "3D models", "Voice & audio models", "Other models"] as const
+export const MODEL_BUCKET_ORDER = ["Text models", "Local models", "Image models", "3D models", "Voice & audio models", "Other models"] as const
 
 const SECTION_ORDER = ["Favorites", "Recent"] as const
 
@@ -41,6 +41,7 @@ export function isDefaultChatModel(info: BucketModelInfo) {
 }
 
 export function modelBucket(modelID: string, info: BucketModelInfo) {
+  if (info.family === "local") return "Local models"
   if (info.capabilities?.output?.model3d || is3DGenerationModel(modelID, info)) return "3D models"
   if (info.capabilities?.output?.audio || isAudioGenerationModel(modelID, info)) return "Voice & audio models"
   if (info.capabilities?.output?.image || isImageGenerationModel(modelID, info)) return "Image models"
