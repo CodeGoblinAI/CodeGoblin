@@ -21,6 +21,27 @@ export function estimateTripoCredits(inputMode: "text" | "image", modelVersion: 
   return inputMode === "image" ? table.image : table.text
 }
 
+/**
+ * Maps a terminal Tripo task status to an actionable error message, preferring Tripo's own
+ * message when present. `failed` most often means the account is out of credits.
+ */
+export function describeTripoFailure(status: string, message?: string): string {
+  const detail = message?.trim()
+  if (detail) return detail
+  switch (status) {
+    case "banned":
+      return "Tripo rejected this request under its content policy. Try a different prompt or image."
+    case "cancelled":
+      return "The Tripo task was cancelled before it finished."
+    case "failed":
+      return "Tripo could not generate the 3D model. This usually means your Tripo credits are exhausted — check your balance and try again."
+    case "unknown":
+      return "Tripo returned an unknown task status."
+    default:
+      return `Tripo task ${status}.`
+  }
+}
+
 type TripoTaskResponse = {
   code?: number
   data?: {
@@ -142,7 +163,7 @@ async function pollTask(apiKey: string, taskId: string, onProgress?: (message: s
     await onProgress?.(`Tripo task ${taskId}: ${status}`)
     if (status === "success") return json.data
     if (status === "failed" || status === "cancelled" || status === "banned") {
-      throw new Error(json.message ?? `Tripo task ${status}.`)
+      throw new Error(describeTripoFailure(status, json.message))
     }
     await new Promise((resolve) => setTimeout(resolve, Math.min(3000 + attempt * 250, 8000)))
   }

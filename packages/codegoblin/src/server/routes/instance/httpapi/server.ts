@@ -570,6 +570,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
               modelVersion,
               inputImages,
               outputFormat: typeof body?.outputFormat === "string" ? body.outputFormat : undefined,
+              require3DModel: body?.require3DModel !== false,
               keyFile: typeof body?.keyFile === "string" ? body.keyFile : undefined,
               onProgress: persist
                 ? async (message) => {
