@@ -39,7 +39,7 @@ export interface Interface {
   readonly memory: (input: { sessionID?: string; query?: string }) => Effect.Effect<string | undefined>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
+export class Service extends Context.Service<Service, Interface>()("@codegoblin/SystemPrompt") {}
 
 export const layer = Layer.effect(
   Service,

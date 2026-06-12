@@ -166,7 +166,7 @@ export interface GenerateMethod {
   <T extends Tools>(options: ToolRuntime.RunOptions<T>): Effect.Effect<LLMResponse, LLMError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/LLMClient") {}
+export class Service extends Context.Service<Service, Interface>()("@codegoblin/LLMClient") {}
 
 const resolveRequestOptions = (request: LLMRequest) =>
   LLMRequest.update(request, {

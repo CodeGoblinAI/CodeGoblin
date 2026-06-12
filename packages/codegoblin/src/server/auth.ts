@@ -14,7 +14,7 @@ export type DecodedCredentials = {
   readonly password: Redacted.Redacted
 }
 
-export class Config extends ConfigService.Service<Config>()("@opencode/ServerAuthConfig", {
+export class Config extends ConfigService.Service<Config>()("@codegoblin/ServerAuthConfig", {
   password: EffectConfig.string("CODEGOBLIN_SERVER_PASSWORD").pipe(
     EffectConfig.orElse(() => EffectConfig.string("OPENCODE_SERVER_PASSWORD")),
     EffectConfig.option,

@@ -116,7 +116,7 @@ export interface Interface {
   readonly forService: (serviceID: ServiceID) => Effect.Effect<Info[], Error>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Account") {}
+export class Service extends Context.Service<Service, Interface>()("@codegoblin/v2/Account") {}
 
 export const layer = Layer.effect(
   Service,
