@@ -31,6 +31,7 @@ import { pathKey } from "@/utils/path-key"
 import { messageAgentColor } from "@/utils/agent"
 import { sessionPermissionRequest } from "@/pages/session/composer/session-request-tree"
 import { CodeGoblinLogoMark } from "@/components/codegoblin-logo"
+import { showToast } from "@codegoblin/ui/toast"
 
 const USE_HOME_DESIGN = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
 const HOME_SESSION_LIMIT = 15
@@ -179,7 +180,14 @@ function HomeDesign() {
 
   function openMemory() {
     const directory = selectedProject()?.worktree ?? projects()[0]?.worktree
-    if (!directory) return
+    if (!directory) {
+      showToast({
+        title: "Add a project first",
+        description: "Memory is scoped to a project folder. Choose one to continue.",
+      })
+      void chooseProject()
+      return
+    }
     void import("@/components/dialog-memory").then((x) => {
       dialog.show(() => (
         <SDKProvider directory={directory}>
@@ -191,7 +199,14 @@ function HomeDesign() {
 
   function openMarket() {
     const directory = selectedProject()?.worktree ?? projects()[0]?.worktree
-    if (!directory) return
+    if (!directory) {
+      showToast({
+        title: "Add a project first",
+        description: "Market installs MCP servers into a project config. Choose a folder to continue.",
+      })
+      void chooseProject()
+      return
+    }
     void import("@/components/dialog-market").then((x) => {
       dialog.show(() => (
         <SDKProvider directory={directory}>

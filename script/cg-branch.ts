@@ -7,6 +7,9 @@
  *   bun run cg:branch web          → web UI (full build, embeds app)
  *   bun run cg:branch status       → any cg subcommand
  *   bun run cg:branch --rebuild    → force rebuild first
+ *
+ * cg:branch uses a stable session DB (opencode-dev.db by default) so sessions
+ * survive branch rebuilds. Override with CODEGOBLIN_DB if needed.
  */
 import { spawnSync } from "node:child_process"
 import fs from "node:fs"
@@ -65,5 +68,13 @@ if (!fs.existsSync(bin)) {
 }
 
 const runArgs = args.length ? args : []
-const result = spawnSync(bin, runArgs, { stdio: "inherit", cwd: process.cwd() })
+const branchEnv = {
+  ...process.env,
+  // Keep cg:branch sessions in one DB instead of a new file per git branch at build time.
+  CODEGOBLIN_DB: process.env.CODEGOBLIN_DB ?? process.env.OPENCODE_DB ?? "opencode-dev.db",
+}
+if (!process.env.CODEGOBLIN_DB && !process.env.OPENCODE_DB) {
+  console.log(`Using stable session database: ${branchEnv.CODEGOBLIN_DB}`)
+}
+const result = spawnSync(bin, runArgs, { stdio: "inherit", cwd: process.cwd(), env: branchEnv })
 process.exit(result.status ?? 0)

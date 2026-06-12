@@ -32,6 +32,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@codegoblin/core/cross-spawn-spawner"
 import { which } from "@/util/which"
+import { augmentNotionEnvironment } from "./notion-env"
 
 const log = Log.create({ service: "mcp" })
 const DEFAULT_TIMEOUT = 30_000
@@ -257,7 +258,7 @@ export interface Interface {
   readonly resources: () => Effect.Effect<Record<string, ResourceInfo & { client: string }>>
   readonly add: (name: string, mcp: ConfigMCP.Info) => Effect.Effect<{ status: Record<string, Status> | Status }>
   readonly connect: (name: string) => Effect.Effect<void, NotFoundError>
-  readonly disconnect: (name: string) => Effect.Effect<void, NotFoundError>
+  readonly disconnect: (name: string, options?: { purge?: boolean }) => Effect.Effect<void, NotFoundError>
   readonly getPrompt: (
     clientName: string,
     name: string,
@@ -428,6 +429,9 @@ export const layer = Layer.effect(
       }
     })
 
+    const localSpawnEnvironment = (mcp: ConfigMCP.Info & { type: "local" }) =>
+      augmentNotionEnvironment(mcp.environment ?? {})
+
     const connectLocal = Effect.fn("MCP.connectLocal")(function* (
       key: string,
       mcp: ConfigMCP.Info & { type: "local" },
@@ -442,7 +446,7 @@ export const layer = Layer.effect(
         env: {
           ...process.env,
           ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
-          ...mcp.environment,
+          ...localSpawnEnvironment(mcp),
         },
       })
       transport.stderr?.on("data", (chunk: Buffer) => {
@@ -629,6 +633,11 @@ export const layer = Layer.effect(
         result[key] = s.status[key] ?? { status: "disabled" }
       }
 
+      for (const [key, live] of Object.entries(s.status)) {
+        if (key in result) continue
+        result[key] = live
+      }
+
       return result
     })
 
@@ -662,12 +671,17 @@ export const layer = Layer.effect(
       yield* createAndStore(name, { ...mcp, enabled: true })
     })
 
-    const disconnect = Effect.fn("MCP.disconnect")(function* (name: string) {
-      yield* requireMcpConfig(name)
+    const disconnect = Effect.fn("MCP.disconnect")(function* (name: string, options?: { purge?: boolean }) {
       const s = yield* InstanceState.get(state)
       yield* closeClient(s, name)
       delete s.clients[name]
-      s.status[name] = { status: "disabled" }
+      delete s.defs[name]
+      const mcpConfig = yield* getMcpConfig(name)
+      if (mcpConfig && !options?.purge) {
+        s.status[name] = { status: "disabled" }
+        return
+      }
+      delete s.status[name]
     })
 
     const tools = Effect.fn("MCP.tools")(function* () {

@@ -231,6 +231,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
     const sessionStatus = yield* SessionStatus.Service
+    const config = yield* Config.Service
     yield* router.add("GET", "/codegoblin/output-image", (request) =>
       Effect.gen(function* () {
         const route = yield* WorkspaceRouteContext
@@ -319,9 +320,12 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
     )
     yield* router.add("GET", "/codegoblin/market", (request) =>
       Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
         const url = new URL(request.url, "http://localhost")
         const kind = url.searchParams.get("kind") ?? undefined
-        const entries = Market.list(kind ? { kind: kind as any } : undefined)
+        const entries = yield* Effect.promise(() =>
+          Market.listWithStatus(kind ? { kind: kind as any } : undefined, route.directory),
+        )
         return HttpServerResponse.jsonUnsafe({ ok: true, entries }, { status: 200 })
       }),
     )
@@ -338,15 +342,55 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         const id = typeof body?.id === "string" ? body.id : ""
         const entry = id ? Market.get(id) : undefined
         if (!entry) return HttpServerResponse.jsonUnsafe({ ok: false, message: "Unknown market entry." }, { status: 404 })
+        const env =
+          body?.env && typeof body.env === "object" && !Array.isArray(body.env)
+            ? (Object.fromEntries(
+                Object.entries(body.env).filter(
+                  ([key, value]) => typeof key === "string" && typeof value === "string",
+                ),
+              ) as Record<string, string>)
+            : undefined
         const installed = yield* Effect.promise(async () => {
           try {
-            const configPath = await Market.addToConfig(entry, route.directory)
-            return { ok: true as const, configPath, name: entry.id, config: entry.mcp }
+            const missing = Market.validateEnv(entry, env)
+            if (missing) return { ok: false as const, message: missing }
+            const configPath = await Market.addToGlobalConfig(entry, env)
+            const config = Market.materializeMcp(entry, env)
+            return { ok: true as const, configPath, name: entry.id, config, scope: "global" as const }
           } catch (error) {
             return { ok: false as const, message: error instanceof Error ? error.message : "Could not add to config." }
           }
         })
+        if (installed.ok) yield* config.invalidate()
         return HttpServerResponse.jsonUnsafe(installed, { status: installed.ok ? 200 : 400 })
+      }),
+    )
+    yield* router.add("POST", "/codegoblin/market/uninstall", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const text = yield* Effect.orDie(request.text)
+        let body: any
+        try {
+          body = text ? JSON.parse(text) : {}
+        } catch {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Invalid JSON body." }, { status: 400 })
+        }
+        const id = typeof body?.id === "string" ? body.id : ""
+        const entry = id ? Market.get(id) : undefined
+        if (!entry) return HttpServerResponse.jsonUnsafe({ ok: false, message: "Unknown market entry." }, { status: 404 })
+        const removed = yield* Effect.promise(async () => {
+          try {
+            const result = await Market.removeFromAllScopes(id, route.directory)
+            return { ok: true as const, ...result, name: entry.id }
+          } catch (error) {
+            return { ok: false as const, message: error instanceof Error ? error.message : "Could not remove from config." }
+          }
+        })
+        if (removed.ok) {
+          yield* config.invalidate()
+          yield* MCP.Service.use((mcp) => mcp.disconnect(id, { purge: true })).pipe(Effect.ignore)
+        }
+        return HttpServerResponse.jsonUnsafe(removed, { status: removed.ok ? 200 : 400 })
       }),
     )
     yield* router.add("POST", "/codegoblin/market/firebase-login", (request) =>
@@ -357,9 +401,16 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
             { status: 403 },
           )
         }
+        const login = yield* Effect.promise(() => Market.readFirebaseLoginStatus())
+        if (login.loggedIn) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: true, alreadyLoggedIn: true, email: login.email },
+            { status: 200 },
+          )
+        }
         const route = yield* WorkspaceRouteContext
         yield* Effect.sync(() => Market.startFirebaseLogin(route.directory))
-        return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 })
+        return HttpServerResponse.jsonUnsafe({ ok: true, started: true }, { status: 200 })
       }),
     )
     yield* router.add("POST", "/codegoblin/open-output", (request) =>
