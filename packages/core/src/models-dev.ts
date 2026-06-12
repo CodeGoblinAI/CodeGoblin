@@ -14,6 +14,8 @@ export type CatalogModelStatus = typeof CatalogModelStatus.Type
 
 const USER_AGENT = `${process.env.CODEGOBLIN_CLI_NAME || (process.env.CODEGOBLIN === "1" ? "codegoblin" : "opencode")}/${InstallationChannel}/${InstallationVersion}/${Flag.OPENCODE_CLIENT}`
 
+const MODELS_FALLBACK_SOURCE = "https://models.dev"
+
 function defaultModelsSource() {
   const configured = Flag.OPENCODE_MODELS_URL
   if (configured) return configured
@@ -164,12 +166,37 @@ export const layer = Layer.effect(
       return Date.now() - mtime < Duration.toMillis(ttl)
     })
 
-    const fetchApi = Effect.fn("ModelsDev.fetchApi")(function* () {
-      return yield* HttpClientRequest.get(`${source}/api.json`).pipe(
+    const fetchFrom = Effect.fn("ModelsDev.fetchFrom")(function* (base: string) {
+      const text = yield* HttpClientRequest.get(`${base}/api.json`).pipe(
         HttpClientRequest.setHeader("User-Agent", USER_AGENT),
         http.execute,
-        Effect.flatMap((res) => res.text),
+        Effect.flatMap((res) =>
+          res.status >= 200 && res.status < 300
+            ? res.text
+            : Effect.fail(new Error(`models catalog ${base}/api.json returned HTTP ${res.status}`)),
+        ),
         Effect.timeout("10 seconds"),
+      )
+      // A proxy/404 page that isn't JSON would otherwise be cached to disk and crash every
+      // subsequent startup at JSON.parse.
+      yield* Effect.try({
+        try: () => JSON.parse(text),
+        catch: () => new Error(`models catalog ${base}/api.json is not valid JSON`),
+      })
+      return text
+    })
+
+    const fetchApi = Effect.fn("ModelsDev.fetchApi")(function* () {
+      if (source === MODELS_FALLBACK_SOURCE) return yield* fetchFrom(source)
+      // The CodeGoblin default catalog is repo-hosted; fall back to models.dev so a fresh
+      // install still gets providers when that URL is unreachable (private repo, offline, CDN).
+      return yield* fetchFrom(source).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning(`models catalog source ${source} failed; falling back to ${MODELS_FALLBACK_SOURCE}`).pipe(
+            Effect.annotateLogs("cause", String(cause)),
+            Effect.andThen(fetchFrom(MODELS_FALLBACK_SOURCE)),
+          ),
+        ),
       )
     })
 
