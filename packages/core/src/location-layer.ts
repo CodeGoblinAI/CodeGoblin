@@ -3,7 +3,7 @@ import { Location } from "./location"
 import { Catalog } from "./catalog"
 import { PluginBoot } from "./plugin/boot"
 
-export class LocationServiceMap extends LayerMap.Service<LocationServiceMap>()("@opencode/example/LocationServiceMap", {
+export class LocationServiceMap extends LayerMap.Service<LocationServiceMap>()("@codegoblin/example/LocationServiceMap", {
   lookup: (ref: Location.Ref) =>
     Layer.mergeAll(Catalog.defaultLayer, PluginBoot.defaultLayer).pipe(
       Layer.provide([Layer.succeed(Location.Service, Location.Service.of(ref))]),

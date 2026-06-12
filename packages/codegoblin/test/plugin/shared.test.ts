@@ -17,15 +17,15 @@ describe("parsePluginSpecifier", () => {
   })
 
   test("parses scoped npm package without version", () => {
-    expect(parsePluginSpecifier("@opencode/acme")).toEqual({
-      pkg: "@opencode/acme",
+    expect(parsePluginSpecifier("@codegoblin/acme")).toEqual({
+      pkg: "@codegoblin/acme",
       version: "latest",
     })
   })
 
   test("parses scoped npm package with version", () => {
-    expect(parsePluginSpecifier("@opencode/acme@1.0.0")).toEqual({
-      pkg: "@opencode/acme",
+    expect(parsePluginSpecifier("@codegoblin/acme@1.0.0")).toEqual({
+      pkg: "@codegoblin/acme",
       version: "1.0.0",
     })
   })
@@ -38,8 +38,8 @@ describe("parsePluginSpecifier", () => {
   })
 
   test("parses scoped package with git+https url", () => {
-    expect(parsePluginSpecifier("@opencode/acme@git+https://github.com/opencode/acme.git")).toEqual({
-      pkg: "@opencode/acme",
+    expect(parsePluginSpecifier("@codegoblin/acme@git+https://github.com/opencode/acme.git")).toEqual({
+      pkg: "@codegoblin/acme",
       version: "git+https://github.com/opencode/acme.git",
     })
   })
@@ -52,8 +52,8 @@ describe("parsePluginSpecifier", () => {
   })
 
   test("parses scoped package with git+ssh url containing another @", () => {
-    expect(parsePluginSpecifier("@opencode/acme@git+ssh://git@github.com/opencode/acme.git")).toEqual({
-      pkg: "@opencode/acme",
+    expect(parsePluginSpecifier("@codegoblin/acme@git+ssh://git@github.com/opencode/acme.git")).toEqual({
+      pkg: "@codegoblin/acme",
       version: "git+ssh://git@github.com/opencode/acme.git",
     })
   })
@@ -74,14 +74,14 @@ describe("parsePluginSpecifier", () => {
 
   test("parses bare npm protocol specifier using the target package", () => {
     expect(parsePluginSpecifier("npm:@opencode/acme@1.0.0")).toEqual({
-      pkg: "@opencode/acme",
+      pkg: "@codegoblin/acme",
       version: "1.0.0",
     })
   })
 
   test("parses unversioned npm protocol specifier", () => {
     expect(parsePluginSpecifier("npm:@opencode/acme")).toEqual({
-      pkg: "@opencode/acme",
+      pkg: "@codegoblin/acme",
       version: "latest",
     })
   })

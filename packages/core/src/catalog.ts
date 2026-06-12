@@ -73,7 +73,7 @@ export interface Interface {
   }
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Catalog") {}
+export class Service extends Context.Service<Service, Interface>()("@codegoblin/v2/Catalog") {}
 
 export const layer = Layer.effect(
   Service,

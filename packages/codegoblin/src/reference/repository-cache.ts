@@ -99,7 +99,7 @@ export interface Interface {
   ensure: (input: EnsureInput) => Effect.Effect<Result, Error>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/RepositoryCache") {}
+export class Service extends Context.Service<Service, Interface>()("@codegoblin/RepositoryCache") {}
 
 function statusForRepository(input: { reuse: boolean; refresh?: boolean; branchMatches?: boolean }) {
   if (!input.reuse) return "cloned" as const

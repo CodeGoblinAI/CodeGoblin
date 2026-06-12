@@ -205,7 +205,7 @@ export interface Interface {
   }) => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/SessionCompaction") {}
+export class Service extends Context.Service<Service, Interface>()("@codegoblin/SessionCompaction") {}
 
 export const use = serviceUse(Service)
 

@@ -37,7 +37,7 @@ export interface Interface {
   }) => Effect.Effect<void, AccountRepoError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/AccountRepo") {}
+export class Service extends Context.Service<Service, Interface>()("@codegoblin/AccountRepo") {}
 
 export const use = serviceUse(Service)
 

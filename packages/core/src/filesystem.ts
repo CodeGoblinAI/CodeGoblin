@@ -38,7 +38,7 @@ export namespace AppFileSystem {
     readonly globMatch: (pattern: string, filepath: string) => boolean
   }
 
-  export class Service extends Context.Service<Service, Interface>()("@opencode/FileSystem") {}
+  export class Service extends Context.Service<Service, Interface>()("@codegoblin/FileSystem") {}
 
   export const use = serviceUse(Service)
 
