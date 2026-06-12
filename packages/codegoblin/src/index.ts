@@ -34,6 +34,7 @@ import { MemoryCommand } from "./cli/cmd/memory"
 import { OpenCommand } from "./cli/cmd/open"
 import { MarketCommand } from "./cli/cmd/market"
 import { StatusCommand } from "./cli/cmd/status"
+import { RuntimeCommand } from "./cli/cmd/runtime"
 import { AudioCommand } from "./cli/cmd/audio"
 import { ImageCommand } from "./cli/cmd/image"
 import { Model3DCommand } from "./cli/cmd/model3d"
@@ -184,6 +185,7 @@ const cli = yargs(args)
   .command(ImageCommand)
   .command(Model3DCommand)
   .command(ModelsCommand)
+  .command(RuntimeCommand)
   .command(StatsCommand)
   .command(ExportCommand)
   .command(ImportCommand)

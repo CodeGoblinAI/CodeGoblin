@@ -1,6 +1,7 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import { Global } from "@codegoblin/core/global"
 import { getAudioProvider } from "./audio-providers"
 import type { AudioVoiceOption, AudioVoiceSettings } from "./audio-providers"
 import { readConnectedProviderKey } from "./connected-auth"
