@@ -50,3 +50,8 @@ codegoblin-output/
 codegoblin-generated/
 docs/*HANDOFF*.md
 docs/*CONTINUATION*.md
+
+# Local editor/agent state and build artifacts
+.cursor/
+packages/core/.artifacts/
+packages/storybook/*.log
