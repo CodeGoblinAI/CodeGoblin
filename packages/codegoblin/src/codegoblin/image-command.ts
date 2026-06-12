@@ -1,6 +1,7 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import { Global } from "@codegoblin/core/global"
 
 export type ImageCommandResult = {
   ok: boolean
@@ -895,7 +896,7 @@ function authProvider(provider: ImageProvider) {
 }
 
 async function authKey(provider: string) {
-  const file = path.join(os.homedir(), ".local", "share", "opencode", "auth.json")
+  const file = path.join(Global.Path.data, "auth.json")
   const raw = await fs.readFile(file, "utf8").catch(() => "")
   if (!raw) return
   try {

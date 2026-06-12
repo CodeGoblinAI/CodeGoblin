@@ -1,6 +1,7 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import { Global } from "@codegoblin/core/global"
 import { getAudioProvider } from "./audio-providers"
 import type { AudioVoiceOption, AudioVoiceSettings } from "./audio-providers"
 
@@ -213,7 +214,7 @@ async function findAudioKey(env: Env, envKeys: string[], authProviderID?: string
 }
 
 async function authKey(provider: string) {
-  const file = path.join(os.homedir(), ".local", "share", "opencode", "auth.json")
+  const file = path.join(Global.Path.data, "auth.json")
   const raw = await fs.readFile(file, "utf8").catch(() => "")
   if (!raw) return
   try {

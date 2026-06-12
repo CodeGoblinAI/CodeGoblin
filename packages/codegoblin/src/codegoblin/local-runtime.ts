@@ -105,7 +105,7 @@ export function resolveRuntimeCtx(env: Record<string, string | undefined> = proc
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_RUNTIME_CTX
 }
 
-export type RuntimeState = { model?: string; port?: number; ctx?: number }
+export type RuntimeState = { model?: string; port?: number; ctx?: number; pid?: number }
 
 export async function readRuntimeState(env?: Record<string, string | undefined>): Promise<RuntimeState> {
   const raw = await fs.readFile(runtimeStatePath(env), "utf8").catch(() => "")
@@ -116,6 +116,7 @@ export async function readRuntimeState(env?: Record<string, string | undefined>)
       model: typeof parsed?.model === "string" ? parsed.model : undefined,
       port: typeof parsed?.port === "number" ? parsed.port : undefined,
       ctx: typeof parsed?.ctx === "number" ? parsed.ctx : undefined,
+      pid: typeof parsed?.pid === "number" ? parsed.pid : undefined,
     }
   } catch {
     return {}

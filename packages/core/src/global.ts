@@ -1,16 +1,35 @@
 import path from "path"
 import fs from "fs/promises"
+import fsSync from "fs"
 import { xdgData, xdgCache, xdgConfig, xdgState } from "xdg-basedir"
 import os from "os"
 import { Context, Effect, Layer } from "effect"
 import { Flock } from "./util/flock"
 import { Flag } from "./flag/flag"
 
-const app = "opencode"
-const data = path.join(xdgData!, app)
-const cache = path.join(xdgCache!, app)
-const config = path.join(xdgConfig!, app)
-const state = path.join(xdgState!, app)
+const app = "codegoblin"
+const legacyApp = "opencode"
+
+/**
+ * CodeGoblin used to store its data under the upstream "opencode" directories. Adopt an existing
+ * legacy directory by renaming it the first time the branded path is missing — instant on the
+ * same volume and preserves sessions, auth, and the multi-GB local runtime. If the rename fails
+ * (e.g. an older binary still holds a database open), keep using the legacy path for this run.
+ */
+export function adoptLegacyDir(next: string, legacy: string): string {
+  if (fsSync.existsSync(next) || !fsSync.existsSync(legacy)) return next
+  try {
+    fsSync.renameSync(legacy, next)
+    return next
+  } catch {
+    return legacy
+  }
+}
+
+const data = adoptLegacyDir(path.join(xdgData!, app), path.join(xdgData!, legacyApp))
+const cache = adoptLegacyDir(path.join(xdgCache!, app), path.join(xdgCache!, legacyApp))
+const config = adoptLegacyDir(path.join(xdgConfig!, app), path.join(xdgConfig!, legacyApp))
+const state = adoptLegacyDir(path.join(xdgState!, app), path.join(xdgState!, legacyApp))
 const tmp = path.join(os.tmpdir(), app)
 
 const paths = {
