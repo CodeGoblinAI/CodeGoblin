@@ -4,6 +4,7 @@ import path from "path"
 import { Global } from "@codegoblin/core/global"
 import { getAudioProvider } from "./audio-providers"
 import type { AudioVoiceOption, AudioVoiceSettings } from "./audio-providers"
+import { readConnectedProviderKey } from "./connected-auth"
 
 export type { AudioVoiceOption, AudioVoiceSettings } from "./audio-providers"
 
@@ -208,20 +209,9 @@ async function findAudioKey(env: Env, envKeys: string[], authProviderID?: string
   if (local) return local
   if (env.CODEGOBLIN_AUDIO_DISABLE_CONNECTED_AUTH === "1" || !authProviderID) return
 
-  const key = await authKey(authProviderID)
+  const key = await readConnectedProviderKey(authProviderID)
   if (!key) return
   return { value: key, source: `connected ${authProviderID} provider` }
-}
-
-async function authKey(provider: string) {
-  const file = path.join(Global.Path.data, "auth.json")
-  const raw = await fs.readFile(file, "utf8").catch(() => "")
-  if (!raw) return
-  try {
-    const data = JSON.parse(raw)
-    const item = data?.[provider]
-    if (item?.type === "api" && typeof item.key === "string") return item.key
-  } catch {}
 }
 
 function envFilesUp(root: string) {

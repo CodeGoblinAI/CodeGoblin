@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { Global } from "@codegoblin/core/global"
+import { readConnectedProviderKey } from "./connected-auth"
 
 export type ImageCommandResult = {
   ok: boolean
@@ -870,7 +870,7 @@ async function findImageKey(provider: ImageProvider, env: Record<string, string 
   if (local) return local
   if (env.CODEGOBLIN_IMAGE_DISABLE_CONNECTED_AUTH === "1") return
 
-  const key = await authKey(authProvider(provider))
+  const key = await readConnectedProviderKey(authProvider(provider))
   if (!key) return
   return { value: key, source: `connected ${authProvider(provider)} provider` } satisfies ResolvedImageKey
 }
@@ -893,17 +893,6 @@ function localImageKey(provider: ImageProvider, env: Record<string, string | und
 function authProvider(provider: ImageProvider) {
   if (provider === "qwen") return "alibaba"
   return provider
-}
-
-async function authKey(provider: string) {
-  const file = path.join(Global.Path.data, "auth.json")
-  const raw = await fs.readFile(file, "utf8").catch(() => "")
-  if (!raw) return
-  try {
-    const data = JSON.parse(raw)
-    const item = data?.[provider]
-    if (item?.type === "api" && typeof item.key === "string") return item.key
-  } catch {}
 }
 
 function estimateCost(provider: string, model: string) {
