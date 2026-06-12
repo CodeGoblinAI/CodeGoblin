@@ -8,18 +8,22 @@ the `codegoblin-native` Rust sidecar supervises, serving the OpenAI-compatible H
 ## Quick start
 
 ```bash
-codegoblin runtime install        # download the llama.cpp engine for this machine (CUDA when an NVIDIA GPU is present)
+codegoblin runtime install        # one-time: download the llama.cpp engine (CUDA when an NVIDIA GPU is present)
 codegoblin runtime pull qwen3-0.6b
-codegoblin runtime use qwen3-0.6b
-codegoblin runtime start          # serves http://127.0.0.1:8787/v1 (leave running)
 ```
 
-Then pick the model in the TUI/web model selector — local GGUFs appear under a dedicated
-**Local models** group, named `<id> (local)` — and chat. Generation runs on your GPU/CPU;
-nothing leaves your machine.
+That's it — pick the model in the TUI/web model selector (local GGUFs appear under a dedicated
+**Local models** group, named `<id> (local)`) and chat. The runtime **starts automatically** on
+your first message, and **swaps automatically** when you pick a different local model (one model
+owns the GPU at a time; the first message after a switch waits a few seconds for the load).
+Generation runs on your GPU/CPU; nothing leaves your machine.
 
-`codegoblin runtime list` shows installed models + the pull catalog; `codegoblin runtime status`
-shows engine/model/server state.
+Models are discovered by folder scan, ComfyUI-style: drop any `*.gguf` into
+`<runtime>/models/` and it appears in the picker named after the file. `runtime pull` is just a
+convenience downloader for the curated catalog.
+
+Manual control when you want it: `codegoblin runtime start [--ctx N]` (foreground),
+`codegoblin runtime stop`, `codegoblin runtime status`, `codegoblin runtime list`.
 
 ## Architecture
 
@@ -32,14 +36,18 @@ codegoblin runtime start            (TS CLI: packages/codegoblin/src/cli/cmd/run
          └─► llama-server           (bundled prebuilt llama.cpp engine, GPU offload)
 ```
 
-- The engine installs to `<data>/runtime/engine` (override the root with
-  `CODEGOBLIN_RUNTIME_DIR`); models live in `<runtime>/models/*.gguf` (`CODEGOBLIN_MODELS_DIR`).
+- The engine installs to `<data>/runtime/engine` — `<data>` is `~/.local/share/codegoblin`
+  (legacy `opencode` data dirs are adopted automatically on first run; override the runtime root
+  with `CODEGOBLIN_RUNTIME_DIR`). Models live in `<runtime>/models/*.gguf`
+  (`CODEGOBLIN_MODELS_DIR`).
 - `runtime install` resolves the latest llama.cpp release and picks the asset for this
   platform/acceleration (lowest CUDA version for driver compatibility; CPU build otherwise —
   force with `CODEGOBLIN_RUNTIME_ACCEL=cpu|cuda`).
-- The selected model + port + context persist in `<runtime>/runtime.json`, and the `codegoblin`
-  provider reads that file so the model picker and the agent's context handling match what the
-  server was actually started with.
+- The selected model + port + context + supervisor pid persist in `<runtime>/runtime.json`. The
+  `codegoblin` provider reads it so the picker and the agent's context handling match the running
+  server, and the auto-start/swap manager (`local-runtime-manager.ts`) uses the pid to stop
+  exactly its own process tree when switching models — it never kills by port match. A server it
+  didn't start (no tracked pid) is reported as a conflict instead of killed.
 
 ## Context window
 

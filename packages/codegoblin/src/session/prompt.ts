@@ -8,6 +8,7 @@ import * as Session from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 import { isLocalRuntimeModel } from "@/codegoblin/provider"
+import { ensureLocalRuntime } from "@/codegoblin/local-runtime-manager"
 import { ModelID, ProviderID } from "../provider/schema"
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -1400,6 +1401,21 @@ export const layer = Layer.effect(
             // lean chat assistant instead of overflowing the context and emitting gibberish.
             if (isLocalRuntimeModel(model)) {
               for (const key of Object.keys(tools)) delete tools[key]
+              // Auto-start (or swap) the local runtime so picking a local model "just works" —
+              // no manual `codegoblin runtime start`, no restart dance when changing local models.
+              const failure = yield* Effect.tryPromise(() => ensureLocalRuntime(model.id)).pipe(
+                Effect.map(() => undefined),
+                Effect.catch((e: unknown) => {
+                  const inner = (e as { error?: unknown })?.error
+                  return Effect.succeed(inner instanceof Error ? inner : new Error(String(inner ?? e)))
+                }),
+              )
+              if (failure) {
+                handle.message.error = MessageV2.fromError(failure, { providerID: model.providerID })
+                handle.message.time.completed = Date.now()
+                yield* sessions.updateMessage(handle.message)
+                return "break" as const
+              }
             }
 
             if (lastUser.format?.type === "json_schema") {

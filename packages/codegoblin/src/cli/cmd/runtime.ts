@@ -163,9 +163,6 @@ async function runStart(opts: { model?: string; port?: number; ngl?: number; ctx
   if (!native) throw new Error("codegoblin-native binary not found. Build it or set CODEGOBLIN_NATIVE_BIN.")
   const port = opts.port ?? state.port ?? DEFAULT_RUNTIME_PORT
   const ctx = opts.ctx && opts.ctx > 0 ? opts.ctx : resolveRuntimeCtx()
-  // Persist ctx so the codegoblin provider advertises the SAME context to the agent's compaction
-  // (otherwise the agent trims against the wrong limit and the server hard-rejects oversized prompts).
-  await writeRuntimeState({ model: match.id, port, ctx })
   console.log(`Starting CodeGoblin local runtime: ${match.id} on http://127.0.0.1:${port}/v1 (ctx ${ctx})`)
   const proc = Process.spawn(
     [
@@ -178,6 +175,10 @@ async function runStart(opts: { model?: string; port?: number; ngl?: number; ctx
     ],
     { stdin: "ignore", stdout: "inherit", stderr: "inherit" },
   )
+  // Persist ctx so the codegoblin provider advertises the SAME context to the agent's compaction
+  // (otherwise the agent trims against the wrong limit and the server hard-rejects oversized
+  // prompts), and the pid so auto-swap / `runtime stop` can kill exactly this process tree.
+  await writeRuntimeState({ model: match.id, port, ctx, pid: proc.pid })
   await proc.exited
 }
 
@@ -232,6 +233,10 @@ export const RuntimeCommand = {
             .option("ctx", { type: "number", default: 0, describe: "context window (0 = default/CODEGOBLIN_RUNTIME_CTX; lower if VRAM is tight)" }),
         async (args) => runStart({ model: args.model, port: args.port, ngl: args.ngl, ctx: args.ctx }),
       )
+      .command("stop", "stop the local runtime server", {}, async () => {
+        const { stopLocalRuntime } = await import("@/codegoblin/local-runtime-manager")
+        console.log((await stopLocalRuntime()) ? "Local runtime stopped." : "No tracked local runtime is running.")
+      })
       .command("status", "show local runtime status", {}, async () => runStatus())
       .demandCommand(1),
   handler: () => {},
