@@ -151,9 +151,9 @@ jobs:
           signing-account-name: ${{ env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           certificate-profile-name: ${{ env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
           files: |
-            ${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-arm64\bin\opencode.exe
-            ${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64\bin\opencode.exe
-            ${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64-baseline\bin\opencode.exe
+            ${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-arm64\bin\codegoblin.exe
+            ${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64\bin\codegoblin.exe
+            ${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64-baseline\bin\codegoblin.exe
           exclude-environment-credential: true
           exclude-workload-identity-credential: true
           exclude-managed-identity-credential: true
@@ -169,9 +169,9 @@ jobs:
         shell: pwsh
         run: |
           $files = @(
-            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-arm64\bin\opencode.exe",
-            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64\bin\opencode.exe",
-            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64-baseline\bin\opencode.exe"
+            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-arm64\bin\codegoblin.exe",
+            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64\bin\codegoblin.exe",
+            "${{ github.workspace }}\packages\codegoblin\dist\codegoblin-windows-x64-baseline\bin\codegoblin.exe"
           )
 
           foreach ($file in $files) {
