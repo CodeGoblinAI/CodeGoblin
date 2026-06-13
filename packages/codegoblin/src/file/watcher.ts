@@ -73,7 +73,7 @@ export const layer = Layer.effect(
     const state = yield* InstanceState.make(
       Effect.fn("FileWatcher.state")(
         function* () {
-          if (yield* Flag.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER) return
+          if (yield* Flag.CODEGOBLIN_EXPERIMENTAL_DISABLE_FILEWATCHER) return
 
           const ctx = yield* InstanceState.context
 
@@ -122,7 +122,7 @@ export const layer = Layer.effect(
           const cfg = yield* config.get()
           const cfgIgnores = cfg.watcher?.ignore ?? []
 
-          if (yield* Flag.OPENCODE_EXPERIMENTAL_FILEWATCHER) {
+          if (yield* Flag.CODEGOBLIN_EXPERIMENTAL_FILEWATCHER) {
             yield* Effect.forkScoped(
               subscribe(ctx.directory, [...FileIgnore.PATTERNS, ...cfgIgnores, ...protecteds(ctx.directory)]),
             )

@@ -100,6 +100,7 @@ const cli = yargs(args)
   })
   .middleware(async (opts) => {
     if (opts.pure) {
+      process.env.CODEGOBLIN_PURE = "1"
       process.env.OPENCODE_PURE = "1"
     }
 
@@ -117,6 +118,7 @@ const cli = yargs(args)
 
     process.env.AGENT = "1"
     process.env.OPENCODE = "1"
+    process.env.CODEGOBLIN_PID = String(process.pid)
     process.env.OPENCODE_PID = String(process.pid)
     process.env.CODEGOBLIN = "1"
     process.env.CODEGOBLIN_PID = String(process.pid)

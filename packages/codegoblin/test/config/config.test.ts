@@ -2187,7 +2187,7 @@ describe("CodeGoblin env vars (Phase D)", () => {
       try {
         process.env.OPENCODE_CONFIG = "/legacy/path"
         process.env.CODEGOBLIN_CONFIG = "/primary/path"
-        expect(Flag.OPENCODE_CONFIG).toBe("/primary/path")
+        expect(Flag.CODEGOBLIN_CONFIG).toBe("/primary/path")
       } finally {
         if (prev.cg === undefined) delete process.env.CODEGOBLIN_CONFIG
         else process.env.CODEGOBLIN_CONFIG = prev.cg
@@ -2201,7 +2201,7 @@ describe("CodeGoblin env vars (Phase D)", () => {
       try {
         delete process.env.CODEGOBLIN_CONFIG_DIR
         process.env.OPENCODE_CONFIG_DIR = "/legacy/dir"
-        expect(Flag.OPENCODE_CONFIG_DIR).toBe("/legacy/dir")
+        expect(Flag.CODEGOBLIN_CONFIG_DIR).toBe("/legacy/dir")
       } finally {
         if (prev.cg === undefined) delete process.env.CODEGOBLIN_CONFIG_DIR
         else process.env.CODEGOBLIN_CONFIG_DIR = prev.cg

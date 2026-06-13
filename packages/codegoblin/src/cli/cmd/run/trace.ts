@@ -55,7 +55,7 @@ export function trace(): Trace | undefined {
     return state || undefined
   }
 
-  if (!process.env.OPENCODE_DIRECT_TRACE) {
+  if (!(process.env.CODEGOBLIN_DIRECT_TRACE ?? process.env.OPENCODE_DIRECT_TRACE)) {
     state = false
     return undefined
   }
