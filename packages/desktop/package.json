@@ -4,10 +4,10 @@
   "version": "1.15.10",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://opencode.ai",
+  "homepage": "https://github.com/shawnisikli/CodeGoblin",
   "author": {
-    "name": "OpenCode",
-    "email": "hello@opencode.ai"
+    "name": "CodeGoblin",
+    "email": "shawni627@gmail.com"
   },
   "scripts": {
     "typecheck": "tsgo -b",
