@@ -83,12 +83,12 @@ stdenv.mkDerivation (finalAttrs: {
     + lib.optionalString stdenv.hostPlatform.isDarwin ''
       mkdir -p $out/Applications
       mv dist/mac*/*.app $out/Applications
-      makeWrapper "$out/Applications/OpenCode.app/Contents/MacOS/OpenCode" $out/bin/opencode-desktop
+      makeWrapper "$out/Applications/CodeGoblin.app/Contents/MacOS/CodeGoblin" $out/bin/codegoblin-desktop
     ''
     + lib.optionalString stdenv.hostPlatform.isLinux ''
       mkdir -p $out/opt/opencode-desktop
       cp -r dist/linux*-unpacked/{resources,LICENSE*} $out/opt/opencode-desktop
-      makeWrapper ${lib.getExe electron} $out/bin/opencode-desktop \
+      makeWrapper ${lib.getExe electron} $out/bin/codegoblin-desktop \
         --inherit-argv0 \
         --set ELECTRON_FORCE_IS_PACKAGED 1 \
         --add-flags $out/opt/opencode-desktop/resources/app.asar \

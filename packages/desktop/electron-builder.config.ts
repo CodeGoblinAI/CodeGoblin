@@ -27,7 +27,7 @@ const channel = (() => {
 })()
 
 const getBase = (): Configuration => ({
-  artifactName: "opencode-desktop-${os}-${arch}.${ext}",
+  artifactName: "codegoblin-desktop-${os}-${arch}.${ext}",
   directories: {
     output: "dist",
     buildResources: "resources",
@@ -55,7 +55,7 @@ const getBase = (): Configuration => ({
   },
   protocols: {
     name: "CodeGoblin",
-    schemes: ["opencode"],
+    schemes: ["codegoblin", "opencode"],
   },
   win: {
     icon: `resources/icons/icon.ico`,
@@ -85,29 +85,29 @@ function getConfig() {
     case "dev": {
       return {
         ...base,
-        appId: "ai.opencode.desktop.dev",
+        appId: "io.codegoblin.desktop.dev",
         productName: "CodeGoblin Dev",
-        rpm: { packageName: "opencode-dev" },
+        rpm: { packageName: "codegoblin-dev" },
       }
     }
     case "beta": {
       return {
         ...base,
-        appId: "ai.opencode.desktop.beta",
+        appId: "io.codegoblin.desktop.beta",
         productName: "CodeGoblin Beta",
-        protocols: { name: "CodeGoblin Beta", schemes: ["opencode"] },
-        publish: { provider: "github", owner: "anomalyco", repo: "opencode-beta", channel: "latest" },
-        rpm: { packageName: "opencode-beta" },
+        protocols: { name: "CodeGoblin Beta", schemes: ["codegoblin", "opencode"] },
+        publish: { provider: "github", owner: "shawnisikli", repo: "CodeGoblin", channel: "latest" },
+        rpm: { packageName: "codegoblin-beta" },
       }
     }
     case "prod": {
       return {
         ...base,
-        appId: "ai.opencode.desktop",
+        appId: "io.codegoblin.desktop",
         productName: "CodeGoblin",
-        protocols: { name: "CodeGoblin", schemes: ["opencode"] },
-        publish: { provider: "github", owner: "anomalyco", repo: "opencode", channel: "latest" },
-        rpm: { packageName: "opencode" },
+        protocols: { name: "CodeGoblin", schemes: ["codegoblin", "opencode"] },
+        publish: { provider: "github", owner: "shawnisikli", repo: "CodeGoblin", channel: "latest" },
+        rpm: { packageName: "codegoblin" },
       }
     }
   }

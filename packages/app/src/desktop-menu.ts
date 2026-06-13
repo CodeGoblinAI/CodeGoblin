@@ -206,7 +206,6 @@ export const DESKTOP_MENU: DesktopMenu[] = [
         href: "https://github.com/shawnisikli/CodeGoblin/blob/dev/docs/CODEGOBLIN_UX_PASS_2026-05-29.md",
       },
       { type: "item", label: "Documentation", href: "https://github.com/shawnisikli/CodeGoblin#readme" },
-      { type: "item", label: "Upstream Community (opencode)", href: "https://discord.com/invite/opencode" },
       { type: "item", label: "Export Logs...", command: "logs.export" },
       { type: "separator" },
       {
