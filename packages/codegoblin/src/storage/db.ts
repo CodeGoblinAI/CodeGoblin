@@ -8,7 +8,7 @@ import { Global } from "@codegoblin/core/global"
 import * as Log from "@codegoblin/core/util/log"
 import { NamedError } from "@codegoblin/core/util/error"
 import path from "path"
-import { readFileSync, readdirSync, existsSync } from "fs"
+import { readFileSync, readdirSync, existsSync, renameSync } from "fs"
 import { Flag } from "@codegoblin/core/flag/flag"
 import { InstallationChannel } from "@codegoblin/core/installation/version"
 import { EffectBridge } from "@/effect/bridge"
@@ -28,11 +28,40 @@ type DatabaseFlags = Pick<RuntimeFlags.Info, "disableChannelDb" | "skipMigration
 const readRuntimeFlags = () =>
   Effect.runSync(RuntimeFlags.Service.useSync((flags) => flags).pipe(Effect.provide(RuntimeFlags.defaultLayer)))
 
+/**
+ * Prefer the codegoblin-named database, adopting an existing legacy opencode-named one by
+ * rename on first use. SQLite sidecars (-wal/-shm) move with the main file; if a sidecar is
+ * locked (an old binary still has the database open) the main rename is rolled back and the
+ * legacy path is used for this run so the database never splits from its journal.
+ */
+export function adoptLegacyDb(next: string, legacy: string): string {
+  if (existsSync(next) || !existsSync(legacy)) return next
+  try {
+    renameSync(legacy, next)
+  } catch {
+    return legacy
+  }
+  for (const ext of ["-wal", "-shm"]) {
+    try {
+      if (existsSync(legacy + ext)) renameSync(legacy + ext, next + ext)
+    } catch {
+      try {
+        renameSync(next, legacy)
+      } catch {}
+      return legacy
+    }
+  }
+  return next
+}
+
 export function getChannelPath(flags: Pick<DatabaseFlags, "disableChannelDb"> = readRuntimeFlags()) {
   if (["latest", "beta", "prod"].includes(InstallationChannel) || flags.disableChannelDb)
-    return path.join(Global.Path.data, "opencode.db")
+    return adoptLegacyDb(path.join(Global.Path.data, "codegoblin.db"), path.join(Global.Path.data, "opencode.db"))
   const safe = InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")
-  return path.join(Global.Path.data, `opencode-${safe}.db`)
+  return adoptLegacyDb(
+    path.join(Global.Path.data, `codegoblin-${safe}.db`),
+    path.join(Global.Path.data, `opencode-${safe}.db`),
+  )
 }
 
 export const getPath = (flags?: Pick<DatabaseFlags, "disableChannelDb">) => {
