@@ -32,7 +32,7 @@ import { testEffect } from "../lib/effect"
 
 void Log.init({ print: false })
 
-const originalWorkspaces = Flag.OPENCODE_EXPERIMENTAL_WORKSPACES
+const originalWorkspaces = Flag.CODEGOBLIN_EXPERIMENTAL_WORKSPACES
 const workspaceLayer = Workspace.defaultLayer.pipe(
   Layer.provide(InstanceStore.defaultLayer),
   Layer.provide(InstanceBootstrap.defaultLayer),
@@ -210,7 +210,7 @@ function requestJson<T>(path: string, init?: RequestInit) {
 }
 
 afterEach(async () => {
-  Flag.OPENCODE_EXPERIMENTAL_WORKSPACES = originalWorkspaces
+  Flag.CODEGOBLIN_EXPERIMENTAL_WORKSPACES = originalWorkspaces
   await disposeAllInstances()
   await resetDatabase()
 })
@@ -624,7 +624,7 @@ describe("session HttpApi", () => {
     () =>
       Effect.gen(function* () {
         const test = yield* TestInstance
-        Flag.OPENCODE_EXPERIMENTAL_WORKSPACES = true
+        Flag.CODEGOBLIN_EXPERIMENTAL_WORKSPACES = true
         const project = yield* Project.use.fromDirectory(test.directory)
         const workspace = yield* createLocalWorkspace({
           projectID: project.project.id,

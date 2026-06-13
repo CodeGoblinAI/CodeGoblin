@@ -15,15 +15,15 @@ import path from "path"
 // cache themselves and silence the eager refresh fork. Save/restore around
 // the suite — never leak the mutation to subsequent test files in the same
 // bun process.
-const ORIGINAL_MODELS_PATH = Flag.OPENCODE_MODELS_PATH
-const ORIGINAL_DISABLE_FETCH = Flag.OPENCODE_DISABLE_MODELS_FETCH
+const ORIGINAL_MODELS_PATH = Flag.CODEGOBLIN_MODELS_PATH
+const ORIGINAL_DISABLE_FETCH = Flag.CODEGOBLIN_DISABLE_MODELS_FETCH
 beforeAll(() => {
-  Flag.OPENCODE_MODELS_PATH = undefined
-  Flag.OPENCODE_DISABLE_MODELS_FETCH = true
+  Flag.CODEGOBLIN_MODELS_PATH = undefined
+  Flag.CODEGOBLIN_DISABLE_MODELS_FETCH = true
 })
 afterAll(() => {
-  Flag.OPENCODE_MODELS_PATH = ORIGINAL_MODELS_PATH
-  Flag.OPENCODE_DISABLE_MODELS_FETCH = ORIGINAL_DISABLE_FETCH
+  Flag.CODEGOBLIN_MODELS_PATH = ORIGINAL_MODELS_PATH
+  Flag.CODEGOBLIN_DISABLE_MODELS_FETCH = ORIGINAL_DISABLE_FETCH
 })
 
 const cacheFile = path.join(Global.Path.cache, "models.json")

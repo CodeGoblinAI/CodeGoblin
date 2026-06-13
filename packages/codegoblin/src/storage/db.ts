@@ -36,9 +36,9 @@ export function getChannelPath(flags: Pick<DatabaseFlags, "disableChannelDb"> = 
 }
 
 export const getPath = (flags?: Pick<DatabaseFlags, "disableChannelDb">) => {
-  if (Flag.OPENCODE_DB) {
-    if (Flag.OPENCODE_DB === ":memory:" || path.isAbsolute(Flag.OPENCODE_DB)) return Flag.OPENCODE_DB
-    return path.join(Global.Path.data, Flag.OPENCODE_DB)
+  if (Flag.CODEGOBLIN_DB) {
+    if (Flag.CODEGOBLIN_DB === ":memory:" || path.isAbsolute(Flag.CODEGOBLIN_DB)) return Flag.CODEGOBLIN_DB
+    return path.join(Global.Path.data, Flag.CODEGOBLIN_DB)
   }
   return getChannelPath(flags)
 }

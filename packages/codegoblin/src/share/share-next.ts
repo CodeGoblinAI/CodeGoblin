@@ -17,7 +17,7 @@ import * as Log from "@codegoblin/core/util/log"
 import { SessionShareTable } from "./share.sql"
 
 const log = Log.create({ service: "share-next" })
-const disabled = process.env["OPENCODE_DISABLE_SHARE"] === "true" || process.env["OPENCODE_DISABLE_SHARE"] === "1"
+const disabled = (process.env["CODEGOBLIN_DISABLE_SHARE"] ?? process.env["OPENCODE_DISABLE_SHARE"]) === "true" || (process.env["CODEGOBLIN_DISABLE_SHARE"] ?? process.env["OPENCODE_DISABLE_SHARE"]) === "1"
 
 export type Api = {
   create: string

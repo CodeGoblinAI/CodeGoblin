@@ -1091,8 +1091,8 @@ async function load(input: { api: Api; config: TuiConfig.Resolved; dispose?: () 
         return yield* RuntimeFlags.Service
       }).pipe(Effect.provide(RuntimeFlags.defaultLayer)),
     )
-    const records = Flag.OPENCODE_PURE ? [] : (config.plugin_origins ?? [])
-    if (Flag.OPENCODE_PURE && config.plugin_origins?.length) {
+    const records = Flag.CODEGOBLIN_PURE ? [] : (config.plugin_origins ?? [])
+    if (Flag.CODEGOBLIN_PURE && config.plugin_origins?.length) {
       log.info("skipping external tui plugins in pure mode", { count: config.plugin_origins.length })
     }
 

@@ -12,12 +12,12 @@ import { EventV2 } from "./event"
 export const CatalogModelStatus = Schema.Literals(["alpha", "beta", "deprecated"])
 export type CatalogModelStatus = typeof CatalogModelStatus.Type
 
-const USER_AGENT = `${process.env.CODEGOBLIN_CLI_NAME || (process.env.CODEGOBLIN === "1" ? "codegoblin" : "opencode")}/${InstallationChannel}/${InstallationVersion}/${Flag.OPENCODE_CLIENT}`
+const USER_AGENT = `${process.env.CODEGOBLIN_CLI_NAME || (process.env.CODEGOBLIN === "1" ? "codegoblin" : "opencode")}/${InstallationChannel}/${InstallationVersion}/${Flag.CODEGOBLIN_CLIENT}`
 
 const MODELS_FALLBACK_SOURCE = "https://models.dev"
 
 function defaultModelsSource() {
-  const configured = Flag.OPENCODE_MODELS_URL
+  const configured = Flag.CODEGOBLIN_MODELS_URL
   if (configured) return configured
   if (process.env.CODEGOBLIN === "1") {
     return (
@@ -200,7 +200,7 @@ export const layer = Layer.effect(
       )
     })
 
-    const loadFromDisk = fs.readJson(Flag.OPENCODE_MODELS_PATH ?? filepath).pipe(
+    const loadFromDisk = fs.readJson(Flag.CODEGOBLIN_MODELS_PATH ?? filepath).pipe(
       Effect.catch(() => Effect.succeed(undefined)),
       Effect.map((v) => v as Record<string, Provider> | undefined),
     )
@@ -220,7 +220,7 @@ export const layer = Layer.effect(
       if (fromDisk) return fromDisk
       const snapshot = yield* loadSnapshot
       if (snapshot) return snapshot
-      if (Flag.OPENCODE_DISABLE_MODELS_FETCH) return {}
+      if (Flag.CODEGOBLIN_DISABLE_MODELS_FETCH) return {}
       // Flock is cross-process: concurrent opencode CLIs can race on this cache file.
       const text = yield* Effect.scoped(
         Effect.gen(function* () {
@@ -255,7 +255,7 @@ export const layer = Layer.effect(
       )
     })
 
-    if (!Flag.OPENCODE_DISABLE_MODELS_FETCH && !process.argv.includes("--get-yargs-completions")) {
+    if (!Flag.CODEGOBLIN_DISABLE_MODELS_FETCH && !process.argv.includes("--get-yargs-completions")) {
       // Schedule.spaced runs the effect once, then waits between completions.
       yield* Effect.forkScoped(refresh().pipe(Effect.repeat(Schedule.spaced("60 minutes")), Effect.ignore))
     }

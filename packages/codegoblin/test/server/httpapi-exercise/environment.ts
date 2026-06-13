@@ -13,11 +13,11 @@ export const exerciseDataDirectory = path.join(exerciseGlobalRoot, "data", "open
 const preserveExerciseDatabase = !!process.env.OPENCODE_HTTPAPI_EXERCISE_DB
 export const exerciseDatabasePath = process.env.OPENCODE_HTTPAPI_EXERCISE_DB ?? process.env.OPENCODE_DB!
 process.env.OPENCODE_DB = exerciseDatabasePath
-Flag.OPENCODE_DB = exerciseDatabasePath
+Flag.CODEGOBLIN_DB = exerciseDatabasePath
 
 export const original = {
-  OPENCODE_SERVER_PASSWORD: Flag.OPENCODE_SERVER_PASSWORD,
-  OPENCODE_SERVER_USERNAME: Flag.OPENCODE_SERVER_USERNAME,
+  OPENCODE_SERVER_PASSWORD: Flag.CODEGOBLIN_SERVER_PASSWORD,
+  OPENCODE_SERVER_USERNAME: Flag.CODEGOBLIN_SERVER_USERNAME,
 }
 
 export const cleanupExercisePaths = Effect.promise(async () => {

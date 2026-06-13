@@ -446,7 +446,7 @@ export const layer = Layer.effect(
       let result: Info = {}
       // Seed the default global config with the schema for editor completion, but avoid writing when the user
       // explicitly routes config through env-provided paths or content.
-      if (!Flag.OPENCODE_CONFIG && !Flag.OPENCODE_CONFIG_DIR && !Flag.OPENCODE_CONFIG_CONTENT) {
+      if (!Flag.CODEGOBLIN_CONFIG && !Flag.CODEGOBLIN_CONFIG_DIR && !Flag.CODEGOBLIN_CONFIG_CONTENT) {
         const file = globalConfigFile()
         if (!existsSync(file)) {
           yield* fs
@@ -599,12 +599,12 @@ export const layer = Layer.effect(
         const global = Object.keys(authEnv).length ? yield* loadGlobal(authEnv) : yield* getGlobal()
         yield* merge(Global.Path.config, global, "global")
 
-        if (Flag.OPENCODE_CONFIG) {
-          yield* merge(Flag.OPENCODE_CONFIG, yield* loadFile(Flag.OPENCODE_CONFIG, authEnv))
-          log.debug("loaded custom config", { path: Flag.OPENCODE_CONFIG })
+        if (Flag.CODEGOBLIN_CONFIG) {
+          yield* merge(Flag.CODEGOBLIN_CONFIG, yield* loadFile(Flag.CODEGOBLIN_CONFIG, authEnv))
+          log.debug("loaded custom config", { path: Flag.CODEGOBLIN_CONFIG })
         }
 
-        if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+        if (!Flag.CODEGOBLIN_DISABLE_PROJECT_CONFIG) {
           for (const file of yield* ConfigPaths.files(["codegoblin", "opencode"], ctx.directory, ctx.worktree).pipe(
             Effect.orDie,
           )) {
@@ -618,8 +618,8 @@ export const layer = Layer.effect(
 
         const directories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree)
 
-        if (Flag.OPENCODE_CONFIG_DIR) {
-          log.debug("loading config from OPENCODE_CONFIG_DIR", { path: Flag.OPENCODE_CONFIG_DIR })
+        if (Flag.CODEGOBLIN_CONFIG_DIR) {
+          log.debug("loading config from OPENCODE_CONFIG_DIR", { path: Flag.CODEGOBLIN_CONFIG_DIR })
         }
 
         const deps: Fiber.Fiber<void>[] = []
@@ -635,7 +635,7 @@ export const layer = Layer.effect(
               ? ["codegoblin"]
               : base === ".opencode"
                 ? ["opencode"]
-                : dir === Flag.OPENCODE_CONFIG_DIR
+                : dir === Flag.CODEGOBLIN_CONFIG_DIR
                   ? ["opencode", "codegoblin"]
                   : []
           for (const name of brands) {
@@ -683,9 +683,9 @@ export const layer = Layer.effect(
           yield* mergePluginOrigins(dir, list)
         }
 
-        if (Flag.OPENCODE_CONFIG_CONTENT) {
+        if (Flag.CODEGOBLIN_CONFIG_CONTENT) {
           const source = "OPENCODE_CONFIG_CONTENT"
-          const next = yield* loadConfig(Flag.OPENCODE_CONFIG_CONTENT, {
+          const next = yield* loadConfig(Flag.CODEGOBLIN_CONFIG_CONTENT, {
             dir: ctx.directory,
             source,
           })
@@ -761,9 +761,9 @@ export const layer = Layer.effect(
           })
         }
 
-        if (Flag.OPENCODE_PERMISSION) {
+        if (Flag.CODEGOBLIN_PERMISSION) {
           try {
-            result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.OPENCODE_PERMISSION))
+            result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.CODEGOBLIN_PERMISSION))
           } catch (err) {
             log.warn("OPENCODE_PERMISSION contains invalid JSON, skipping", { err })
           }
@@ -788,10 +788,10 @@ export const layer = Layer.effect(
           result.share = "auto"
         }
 
-        if (Flag.OPENCODE_DISABLE_AUTOCOMPACT) {
+        if (Flag.CODEGOBLIN_DISABLE_AUTOCOMPACT) {
           result.compaction = { ...result.compaction, auto: false }
         }
-        if (Flag.OPENCODE_DISABLE_PRUNE) {
+        if (Flag.CODEGOBLIN_DISABLE_PRUNE) {
           result.compaction = { ...result.compaction, prune: false }
         }
 
