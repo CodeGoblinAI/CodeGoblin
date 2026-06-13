@@ -105,5 +105,4 @@ See also:
 - `NOTICE`
 - `UPSTREAM.md`
 - `docs/OPEN_SOURCE_BOUNDARIES.md`
-- `docs/MONETIZATION.md`
 - `SECURITY.md`

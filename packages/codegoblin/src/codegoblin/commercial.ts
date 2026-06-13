@@ -13,7 +13,7 @@ export const CodeGoblinCommercialBoundary = {
     "private provider contracts",
     "production secrets and dashboards",
   ],
-  docs: "docs/MONETIZATION.md",
+  docs: "docs/OPEN_SOURCE_BOUNDARIES.md",
 } as const
 
 export function codeGoblinCommercialNotice() {
