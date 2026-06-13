@@ -23,6 +23,7 @@ env:
 jobs:
   unit:
     name: unit (${{ matrix.settings.name }})
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -94,6 +95,7 @@ jobs:
           path: packages/*/.artifacts/unit/junit.xml
 
   e2e:
+    timeout-minutes: 45
     name: e2e (${{ matrix.settings.name }})
     strategy:
       fail-fast: false
