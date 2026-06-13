@@ -69,7 +69,7 @@ codegoblin --help
 cg --help
 ```
 
-If you need to inspect the raw artifact directly, it remains under `packages/codegoblin/dist/opencode-<platform>/bin/opencode`; replace `<platform>` with your platform (for example, `darwin-arm64` or `linux-x64`).
+If you need to inspect the raw artifact directly, it remains under `packages/codegoblin/dist/codegoblin-<platform>/bin/codegoblin`; replace `<platform>` with your platform (for example, `darwin-arm64` or `linux-x64`).
 
 - Core pieces:
   - `packages/codegoblin`: CodeGoblin's compatibility core package, server, and CLI internals.
