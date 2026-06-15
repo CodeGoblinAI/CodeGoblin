@@ -86,12 +86,12 @@ describe("encodeFilePath", () => {
 
   describe("macOS paths", () => {
     test("should handle macOS absolute path", () => {
-      const macPath = "/Users/kelvin/Projects/opencode/README.md"
+      const macPath = "/Users/dev/Projects/codegoblin/README.md"
       const result = encodeFilePath(macPath)
       const fileUrl = `file://${result}`
 
       expect(() => new URL(fileUrl)).not.toThrow()
-      expect(result).toBe("/Users/kelvin/Projects/opencode/README.md")
+      expect(result).toBe("/Users/dev/Projects/codegoblin/README.md")
     })
 
     test("should handle macOS path with spaces", () => {
