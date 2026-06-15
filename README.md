@@ -4,6 +4,17 @@ Your local AI goblin for code, images, and agents.
 
 CodeGoblin is a local-first AI coding agent with a terminal UI, web UI, and BYOK provider support. It keeps prompts, sessions, and generated assets on your machine by default, and adds goblin-branded workflows for image generation, local asset output, and simpler installation.
 
+## Documentation
+
+Full guides live in [`docs/`](docs/README.md):
+
+- [Getting started](docs/getting-started.md)
+- [Local models](docs/LOCAL_RUNTIME.md) — run small models on your own GPU/CPU
+- [Configuration](docs/configuration.md)
+- [Providers & models](docs/providers.md)
+- [Image, audio & 3D](docs/media.md)
+- [Themes](docs/themes.md)
+
 ## Install
 
 ```bash
@@ -95,6 +106,11 @@ The CodeGoblin npm package is generated from `packages/codegoblin/script/publish
 - native postinstall config is stored in generated package metadata
 
 Some internal paths and compatibility identifiers still use OpenCode names where broad renames would break existing configs. User-facing install and command surfaces prefer CodeGoblin names.
+
+## Themes
+
+CodeGoblin ships a goblin-green theme and supports switching and customizing the look in the TUI
+and web UI. See [docs/themes.md](docs/themes.md).
 
 ## Attribution
 
