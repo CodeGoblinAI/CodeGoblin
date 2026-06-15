@@ -128,7 +128,9 @@ export async function spawnLocalRuntime(input: {
       "--ngl", "99",
       "--ctx", String(input.ctx),
     ],
-    { detached: true, stdio: ["ignore", log, log] },
+    // windowsHide: don't pop a console window when the supervisor auto-starts (it runs in the
+    // background; logs go to llama.log). Without this, Windows opens a visible terminal each start.
+    { detached: true, stdio: ["ignore", log, log], windowsHide: true },
   )
   child.unref()
   const pid = child.pid

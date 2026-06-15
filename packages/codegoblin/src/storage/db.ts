@@ -9,6 +9,7 @@ import * as Log from "@codegoblin/core/util/log"
 import { NamedError } from "@codegoblin/core/util/error"
 import path from "path"
 import { readFileSync, readdirSync, existsSync, renameSync } from "fs"
+import { Database } from "bun:sqlite"
 import { Flag } from "@codegoblin/core/flag/flag"
 import { InstallationChannel } from "@codegoblin/core/installation/version"
 import { EffectBridge } from "@/effect/bridge"
@@ -34,8 +35,38 @@ const readRuntimeFlags = () =>
  * locked (an old binary still has the database open) the main rename is rolled back and the
  * legacy path is used for this run so the database never splits from its journal.
  */
+/**
+ * A legacy DB is safe to adopt only if its schema won't break our writes. A database written by a
+ * newer/divergent opencode can carry extra NOT NULL columns this code never populates (e.g.
+ * `session_message.seq`), which turn every insert into a constraint failure. The critical write
+ * path is `session_message`; if it declares a NOT NULL, no-default column we don't manage, the DB
+ * is from a different lineage — refuse adoption and start fresh, leaving the legacy file untouched.
+ */
+export function legacyDbWritable(legacyPath: string): boolean {
+  const KNOWN = new Set(["id", "session_id", "type", "time_created", "time_updated", "data"])
+  let db: Database | undefined
+  try {
+    db = new Database(legacyPath, { readonly: true })
+    const exists = db
+      .query("SELECT name FROM sqlite_master WHERE type='table' AND name='session_message'")
+      .get()
+    if (!exists) return true // no session_message yet (older/empty) — safe
+    const cols = db.query("PRAGMA table_info(session_message)").all() as Array<{
+      name: string
+      notnull: number
+      dflt_value: unknown
+    }>
+    return !cols.some((c) => !KNOWN.has(c.name) && c.notnull === 1 && c.dflt_value == null)
+  } catch {
+    return true // can't inspect — let the normal open/migrate path decide
+  } finally {
+    db?.close()
+  }
+}
+
 export function adoptLegacyDb(next: string, legacy: string): string {
   if (existsSync(next) || !existsSync(legacy)) return next
+  if (!legacyDbWritable(legacy)) return next // incompatible legacy DB — start fresh, leave it alone
   try {
     renameSync(legacy, next)
   } catch {
