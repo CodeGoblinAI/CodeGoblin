@@ -1088,15 +1088,15 @@ function TuiSidebarCompanionGoblin(props: {
     if (currentActivityKind() === "thinking") return "sorting thoughts into a reply"
     if (currentActivityKind() === "image") return "painting pixels into place"
     if (currentActivityKind() === "audio") return "mixing waveforms into audio"
-    return "ready with pockets empty"
+    return "by the hoard, ready to dig"
   })
   const companionHeadline = createMemo(() => {
-    if (actionActive()) return effectiveBurn()?.kind === "tokens" ? "CodeGoblin burns tokens" : "CodeGoblin adds spend"
-    if (currentActivityKind() === "thinking") return "CodeGoblin is thinking"
-    if (currentActivityKind() === "image") return "CodeGoblin paints pixels"
-    if (currentActivityKind() === "audio") return "CodeGoblin mixes audio"
-    if (props.active) return "CodeGoblin is working"
-    return "CodeGoblin companion"
+    if (actionActive()) return effectiveBurn()?.kind === "tokens" ? "Grik burns tokens" : "Grik adds spend"
+    if (currentActivityKind() === "thinking") return "Grik is thinking"
+    if (currentActivityKind() === "image") return "Grik paints pixels"
+    if (currentActivityKind() === "audio") return "Grik mixes audio"
+    if (props.active) return "Grik is digging"
+    return "Grik · your goblin"
   })
   const actionText = createMemo(() => {
     if (!actionActive()) {
@@ -1104,7 +1104,7 @@ function TuiSidebarCompanionGoblin(props: {
         if (companionPreviewEnabled && previewActivityKind !== "idle") return previewActivityText()
         return props.activityText
       }
-      return props.active ? props.activityText : "ready with pockets empty"
+      return props.active ? props.activityText : "by the hoard, ready to dig"
     }
     const burn = effectiveBurn()
     const delta = `+${effectiveBurnText() ?? lastBurnText() ?? "$0.00"}`
