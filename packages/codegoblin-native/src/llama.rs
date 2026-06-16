@@ -172,8 +172,17 @@ pub fn run(args: LlamaArgs) -> Result<(), String> {
         args.ngl,
         args.ctx
     );
-    let status = Command::new(&argv[0])
-        .args(&argv[1..])
+    let mut command = Command::new(&argv[0]);
+    command.args(&argv[1..]);
+    // Windows: run llama-server without spawning a visible console window. The TS launcher hides
+    // the supervisor; this suppresses the engine's own console (the verbose terminal users saw).
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let status = command
         .status()
         .map_err(|err| format!("failed to launch llama.cpp engine: {err}"))?;
     if !status.success() {
