@@ -3,7 +3,7 @@
 ## Install
 
 ```bash
-npm install -g codegoblin
+npm install -g @codegoblin-io/codegoblin
 ```
 
 This installs the `codegoblin` CLI (with a short `cg` alias). To build from a source checkout
