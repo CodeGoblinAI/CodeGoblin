@@ -13,7 +13,9 @@ const dryRun = process.argv.includes("--dry-run") || process.env.CODEGOBLIN_PUBL
 const product = {
   name: "CodeGoblin",
   npm: process.env.CODEGOBLIN_NPM_PACKAGE || "codegoblin",
-  npmScope: process.env.CODEGOBLIN_NPM_SCOPE,
+  // The unscoped "codegoblin" name is blocked by npm's similarity filter (an
+  // existing "code-goblin" package), so we publish under the org scope by default.
+  npmScope: process.env.CODEGOBLIN_NPM_SCOPE || "@codegoblin-io",
   binaryPrefix: process.env.CODEGOBLIN_BINARY_PACKAGE_PREFIX || "codegoblin",
   command: "codegoblin",
   shortCommand: "cg",
@@ -129,7 +131,7 @@ if (!fs.existsSync(native)) {
   console.error("that does not run postinstall scripts by default.")
   console.error("")
   console.error("To fix this, run:")
-  console.error("  cd node_modules/${product.npm} && node postinstall.mjs")
+  console.error("  cd node_modules/${publishedPackageName()} && node postinstall.mjs")
   process.exit(1)
 }
 
@@ -168,7 +170,7 @@ ${product.name} is an independent fork/customization of OpenCode and is not affi
 ## Install
 
 \`\`\`bash
-npm install -g ${product.npm}@${version}
+npm install -g ${publishedPackageName()}@${version}
 \`\`\`
 
 Then run:

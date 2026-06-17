@@ -18,7 +18,7 @@ Full guides live in [`docs/`](docs/README.md):
 ## Install
 
 ```bash
-npm install -g codegoblin
+npm install -g @codegoblin-io/codegoblin
 ```
 
 After install:
