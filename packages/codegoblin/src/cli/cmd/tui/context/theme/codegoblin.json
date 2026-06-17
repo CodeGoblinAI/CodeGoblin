@@ -1,10 +1,10 @@
 {
   "$schema": "https://opencode.ai/theme.json",
   "defs": {
-    "darkStep1": "#070b07",
-    "darkStep2": "#0b110b",
-    "darkStep3": "#10180f",
-    "darkStep4": "#16241a",
+    "darkStep1": "#0a140c",
+    "darkStep2": "#0e1c10",
+    "darkStep3": "#152818",
+    "darkStep4": "#1d3622",
     "darkStep5": "#132914",
     "darkStep6": "#1b3a1d",
     "darkStep7": "#28562b",

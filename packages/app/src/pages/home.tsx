@@ -278,35 +278,43 @@ function CodeGoblinWebHero(props: { openMemory: () => void; openMarket: () => vo
 
   return (
     <div class="col-span-full pt-8">
-      <div class="flex min-w-0 items-center justify-between gap-6 border-b border-[#2b6d31] pb-5">
-        <div class="flex min-w-0 items-center gap-4">
-          <CodeGoblinLogoMark size="md" />
-          <div class="min-w-0">
-            <div class="text-32-bold leading-tight text-[#62f56e]">CodeGoblin</div>
-            <div class="mt-1 max-w-[720px] text-13-regular text-[#d9f7da]">
-              Your local AI goblin for code, images, and agents. BYOK providers stay intact; image outputs save locally.
-            </div>
-            <div class="mt-3 flex flex-wrap gap-2 text-12-medium">
-              <span class={chipClass}>images -&gt; codegoblin-output/images</span>
-              <span class={chipClass}>usage hoard tracked locally</span>
-              <span class="rounded-[6px] border border-[#6f5413] bg-[#171203] px-2 py-1 text-[#f5c84b]">
-                BYOK providers intact
-              </span>
+      <div
+        class="relative overflow-hidden rounded-[14px] border border-[#2b6d31] px-6 py-5"
+        style={{
+          background: "radial-gradient(120% 140% at 12% 0%, #15301a 0%, #0c160e 55%, #0a120c 100%)",
+          "box-shadow": "inset 0 1px 0 0 rgba(146,255,155,0.08)",
+        }}
+      >
+        <div class="flex min-w-0 items-center justify-between gap-6">
+          <div class="flex min-w-0 items-center gap-4">
+            <CodeGoblinLogoMark size="md" />
+            <div class="min-w-0">
+              <div class="text-12-medium uppercase tracking-[0.2em] text-[#5f8a64]">welcome back to the den</div>
+              <div class="mt-0.5 text-32-bold leading-tight text-[#f0fff0]">
+                what are we building, <span class="text-[#62f56e]">goblin</span>?
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2 text-12-medium">
+                <span class="rounded-[6px] border border-[#6f5413] bg-[#1a1304] px-2 py-1 text-[#f5d76b]">
+                  the hoard tracks every token
+                </span>
+                <span class={chipClass}>images &#8594; codegoblin-output</span>
+                <span class={chipClass}>BYOK &middot; keys stay yours</span>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="hidden shrink-0 flex-col items-end gap-2 sm:flex">
-          <div class="flex gap-2">
-            <Button size="small" variant="secondary" onClick={() => props.openMemory()}>
-              Memory
-            </Button>
-            <Button size="small" variant="secondary" onClick={() => props.openMarket()}>
-              Market
-            </Button>
-          </div>
-          <div class="text-right text-12-medium leading-5 text-[#9bb09d]">
-            <div class="text-[#62f56e]">CG local</div>
-            <div>image jobs stay in chat</div>
+          <div class="hidden shrink-0 flex-col items-end gap-2 sm:flex">
+            <div class="flex gap-2">
+              <Button size="small" variant="secondary" onClick={() => props.openMemory()}>
+                Memory
+              </Button>
+              <Button size="small" variant="secondary" onClick={() => props.openMarket()}>
+                Market
+              </Button>
+            </div>
+            <div class="text-right text-12-medium leading-5 text-[#9bb09d]">
+              <div class="text-[#62f56e]">local &middot; pockets full</div>
+              <div>nothing leaves the cave</div>
+            </div>
           </div>
         </div>
       </div>
