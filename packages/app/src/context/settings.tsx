@@ -64,7 +64,9 @@ const terminalFallback =
   '"JetBrainsMono Nerd Font Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
 
 const monoBase = monoFallback
-const sansBase = sansFallback
+// CodeGoblin ships a mono-led UI by default (the bundled JetBrains Mono) for a
+// distinctive terminal/dev-tool voice instead of a generic system sans.
+const sansBase = `"JetBrainsMono Nerd Font Mono", ${monoFallback}`
 const terminalBase = terminalFallback
 
 function input(font: string | undefined) {
