@@ -17,6 +17,8 @@ function TuiGoblinHeader(props: { theme: any }) {
   const shadowColor = RGBA.fromInts(120, 125, 135)
   const vestColor = RGBA.fromInts(130, 80, 223)
   const eyeColor = props.theme.backgroundElement
+  const goldColor = RGBA.fromInts(245, 200, 75)
+  const borderColor = RGBA.fromInts(43, 109, 49)
 
   interface TextChunk {
     text: string
@@ -532,15 +534,15 @@ function TuiGoblinHeader(props: { theme: any }) {
   }
 
   const rows: JSX.Element[] = []
-  const borderLeft = <text fg={shadowColor}>│</text>
-  const borderRight = <text fg={shadowColor}>│</text>
+  const borderLeft = <text fg={borderColor}>│</text>
+  const borderRight = <text fg={borderColor}>│</text>
   const hasHelperText = Boolean(selectedVariant.helperTitle || selectedVariant.helperNotes?.length)
 
   rows.push(
     <box flexDirection="row">
-      <text fg={shadowColor}>┌</text>
-      <text fg={shadowColor}>{"─".repeat(interiorWidth)}</text>
-      <text fg={shadowColor}>┐</text>
+      <text fg={borderColor}>┌</text>
+      <text fg={borderColor}>{"─".repeat(interiorWidth)}</text>
+      <text fg={borderColor}>┐</text>
     </box>,
   )
 
@@ -582,15 +584,19 @@ function TuiGoblinHeader(props: { theme: any }) {
 
   rows.push(
     <box flexDirection="row">
-      <text fg={shadowColor}>└</text>
-      <text fg={shadowColor}>{"─".repeat(interiorWidth)}</text>
-      <text fg={shadowColor}>┘</text>
+      <text fg={borderColor}>└</text>
+      <text fg={borderColor}>{"─".repeat(interiorWidth)}</text>
+      <text fg={borderColor}>┘</text>
     </box>,
   )
 
   return (
     <box flexDirection="column" alignItems="center">
       {rows}
+      <box height={1} minHeight={0} />
+      <text fg={goldColor} attributes={TextAttributes.BOLD}>
+        your local AI goblin · the hoard stays in the cave
+      </text>
       {hasHelperText ? <box height={1} minHeight={0} /> : null}
       {selectedVariant.helperTitle ? <text fg={props.theme.textMuted}>{selectedVariant.helperTitle}</text> : null}
       {selectedVariant.helperNotes?.map((note) => (
