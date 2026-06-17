@@ -217,8 +217,8 @@ function HomeDesign() {
   }
 
   return (
-    <div class="mx-auto grid w-full h-full max-w-[1080px] gap-x-8 gap-y-5 px-6 pb-16 lg:grid-cols-[280px_minmax(0,720px)]">
-      <CodeGoblinWebHero openMemory={openMemory} openMarket={openMarket} />
+    <div class="mx-auto grid w-full h-full max-w-[1080px] content-start gap-x-8 gap-y-6 px-6 pb-16 lg:grid-cols-[280px_minmax(0,720px)]">
+      <CodeGoblinWebHero openMemory={openMemory} openMarket={openMarket} openNewSession={openNewSession} />
       <HomeProjectColumn
         projects={projects()}
         selected={selectedProject()?.worktree}
@@ -244,8 +244,22 @@ function HomeDesign() {
               <Show
                 when={groups().length > 0}
                 fallback={
-                  <div class="flex min-w-0 flex-col gap-4">
-                    <HomeSessionGroupHeader title={language.t("home.sessions.empty")} onNewSession={openNewSession} />
+                  <div class="mt-1 flex min-w-0 flex-col items-center justify-center gap-4 rounded-[14px] border border-dashed border-[#234a27] bg-[#08110a] px-6 py-12 text-center">
+                    <CodeGoblinLogoMark size="md" />
+                    <div>
+                      <div class="text-15-medium text-[#eafff0]">the hoard&rsquo;s empty</div>
+                      <div class="mt-1 text-13-regular text-[#7f9a82]">
+                        no sessions yet &mdash; grik&rsquo;s lantern is lit. start your first dig.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={openNewSession}
+                      class="inline-flex items-center gap-1.5 rounded-[9px] bg-[#9ADB35] px-4 py-2 text-13-medium font-medium text-[#08210c] transition-colors duration-[120ms] hover:bg-[#aef03f]"
+                    >
+                      <Icon name="edit" size="small" />
+                      new dig
+                    </button>
                   </div>
                 }
               >
@@ -273,40 +287,49 @@ function HomeDesign() {
   )
 }
 
-function CodeGoblinWebHero(props: { openMemory: () => void; openMarket: () => void }) {
-  const chipClass = "rounded-[6px] border border-[#214f24] bg-[#071107] px-2 py-1 text-[#b8f8bb]"
+function CodeGoblinWebHero(props: { openMemory: () => void; openMarket: () => void; openNewSession: () => void }) {
+  const hour = new Date().getHours()
+  const partOfDay = hour < 5 ? "late" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"
+  const creedDot = <span class="text-[#33502f]">·</span>
 
   return (
-    <div class="col-span-full pt-8">
-      <div class="flex min-w-0 items-center justify-between gap-6 border-b border-[#2b6d31] pb-5">
-        <div class="flex min-w-0 items-center gap-4">
-          <CodeGoblinLogoMark size="md" />
-          <div class="min-w-0">
-            <div class="text-32-bold leading-tight text-[#62f56e]">CodeGoblin</div>
-            <div class="mt-1 max-w-[720px] text-13-regular text-[#d9f7da]">
-              Your local AI goblin for code, images, and agents. BYOK providers stay intact; image outputs save locally.
-            </div>
-            <div class="mt-3 flex flex-wrap gap-2 text-12-medium">
-              <span class={chipClass}>images -&gt; codegoblin-output/images</span>
-              <span class={chipClass}>usage hoard tracked locally</span>
-              <span class="rounded-[6px] border border-[#6f5413] bg-[#171203] px-2 py-1 text-[#f5c84b]">
-                BYOK providers intact
+    <div class="col-span-full pt-6">
+      <div class="relative overflow-hidden rounded-[14px] border border-[#234a27] bg-[#08110a]">
+        <div class="pointer-events-none absolute -left-12 -top-20 h-44 w-44 rounded-full bg-[#9ADB35] opacity-[0.07] blur-[60px]" />
+        <div class="pointer-events-none absolute right-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-[#2f6a35] to-transparent" />
+        <div class="relative flex min-w-0 items-center gap-5 px-6 py-6">
+          <CodeGoblinLogoMark size="lg" />
+          <div class="min-w-0 flex-1">
+            <div class="text-13-regular text-[#7f9a82]">good {partOfDay}</div>
+            <div class="text-32-bold leading-tight text-[#eafff0]">what are we digging up?</div>
+            <div class="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-12-medium text-[#6f8a72]">
+              <span class="inline-flex items-center gap-1.5">
+                <span class="size-1.5 rounded-full bg-[#9ADB35] shadow-[0_0_6px_#9ADB35]" />
+                nothing leaves the cave
               </span>
+              {creedDot}
+              <span>BYOK intact</span>
+              {creedDot}
+              <span>images &rarr; codegoblin-output/</span>
             </div>
           </div>
-        </div>
-        <div class="hidden shrink-0 flex-col items-end gap-2 sm:flex">
-          <div class="flex gap-2">
-            <Button size="small" variant="secondary" onClick={() => props.openMemory()}>
-              Memory
-            </Button>
-            <Button size="small" variant="secondary" onClick={() => props.openMarket()}>
-              Market
-            </Button>
-          </div>
-          <div class="text-right text-12-medium leading-5 text-[#9bb09d]">
-            <div class="text-[#62f56e]">CG local</div>
-            <div>image jobs stay in chat</div>
+          <div class="hidden shrink-0 flex-col items-end gap-3 sm:flex">
+            <button
+              type="button"
+              onClick={() => props.openNewSession()}
+              class="inline-flex items-center gap-1.5 rounded-[9px] bg-[#9ADB35] px-4 py-2 text-13-medium font-medium text-[#08210c] transition-colors duration-[120ms] hover:bg-[#aef03f]"
+            >
+              <Icon name="edit" size="small" />
+              new dig
+            </button>
+            <div class="flex gap-2">
+              <Button size="small" variant="secondary" onClick={() => props.openMemory()}>
+                Memory
+              </Button>
+              <Button size="small" variant="secondary" onClick={() => props.openMarket()}>
+                Market
+              </Button>
+            </div>
           </div>
         </div>
       </div>
