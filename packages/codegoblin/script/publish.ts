@@ -43,7 +43,11 @@ async function publish(dir: string, name: string, version: string) {
     console.log(`[dry-run] would publish ${name}@${version}`)
     return
   }
-  await $`npm publish *.tgz --access public --tag ${Script.channel}`.cwd(dir)
+  // npm accounts with 2FA require an OTP (or a bypass-2FA token) to publish. Pass NPM_OTP when
+  // publishing locally from a 2FA account; CI uses a granular token with bypass-2FA instead.
+  const otp = process.env.NPM_OTP
+  if (otp) await $`npm publish *.tgz --access public --tag ${Script.channel} --otp ${otp}`.cwd(dir)
+  else await $`npm publish *.tgz --access public --tag ${Script.channel}`.cwd(dir)
 }
 
 async function copyDirectory(source: string, target: string) {
