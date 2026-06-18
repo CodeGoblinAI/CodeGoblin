@@ -217,72 +217,78 @@ function HomeDesign() {
   }
 
   return (
-    <div class="mx-auto grid w-full h-full max-w-[1080px] content-start gap-x-8 gap-y-6 px-6 pb-16 lg:grid-cols-[280px_minmax(0,720px)]">
-      <CodeGoblinWebHero openMemory={openMemory} openMarket={openMarket} openNewSession={openNewSession} />
-      <HomeProjectColumn
-        projects={projects()}
-        selected={selectedProject()?.worktree}
-        selectProject={selectProject}
-        chooseProject={() => void chooseProject()}
+    <div data-cg-home class="relative flex h-full w-full min-h-0 overflow-hidden">
+      <HomeRail
+        openNewSession={openNewSession}
         openSettings={openSettings}
         openHelp={() => platform.openLink("https://github.com/shawnisikli/CodeGoblin/issues")}
-        language={language}
       />
-
-      <section
-        class="min-w-0 flex-1 flex flex-col overflow-y-hidden pt-2"
-        aria-label={language.t("sidebar.project.recentSessions")}
-      >
-        <HomeSessionSearch
-          value={state.search}
-          placeholder={language.t("home.sessions.search.placeholder")}
-          onInput={(value) => setState("search", value)}
-        />
-        <div class="mt-3 overflow-auto flex-1">
-          <div class="pt-3 flex flex-col gap-6">
-            <Show when={!sessionLoad.isLoading} fallback={<HomeSessionSkeleton label={language.t("common.loading")} />}>
-              <Show
-                when={groups().length > 0}
-                fallback={
-                  <div class="mt-1 flex min-w-0 flex-col items-center justify-center gap-4 rounded-[14px] border border-dashed border-[#234a27] bg-[#08110a] px-6 py-12 text-center">
-                    <CodeGoblinLogoMark size="md" />
-                    <div>
-                      <div class="text-15-medium text-[#eafff0]">the hoard&rsquo;s empty</div>
-                      <div class="mt-1 text-13-regular text-[#7f9a82]">
-                        no sessions yet &mdash; grik&rsquo;s lantern is lit. start your first dig.
+      <div class="relative z-[1] min-w-0 flex-1 overflow-y-auto px-7 pb-16 pt-7">
+        <div class="mx-auto flex w-full max-w-[1180px] flex-col gap-7">
+          <CodeGoblinWebHero openMemory={openMemory} openMarket={openMarket} openNewSession={openNewSession} />
+          <div class="grid min-w-0 items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <section class="flex min-w-0 flex-col" aria-label={language.t("sidebar.project.recentSessions")}>
+              <div class="mb-3 flex items-center justify-between px-1">
+                <div class="text-12-medium uppercase tracking-[0.16em] text-[#5f7a62]">the dig log</div>
+                <button type="button" class="cg-stone-btn text-12-medium" onClick={openNewSession}>
+                  <Icon name="edit" size="small" />
+                  new dig
+                </button>
+              </div>
+              <HomeSessionSearch
+                value={state.search}
+                placeholder={language.t("home.sessions.search.placeholder")}
+                onInput={(value) => setState("search", value)}
+              />
+              <div class="mt-4 flex flex-col gap-6">
+                <Show when={!sessionLoad.isLoading} fallback={<HomeSessionSkeleton label={language.t("common.loading")} />}>
+                  <Show
+                    when={groups().length > 0}
+                    fallback={
+                      <div class="cg-panel mt-1 flex flex-col items-center justify-center gap-4 px-6 py-14 text-center">
+                        <CodeGoblinLogoMark size="md" />
+                        <div>
+                          <div class="text-15-medium text-[#eafff0]">the hoard&rsquo;s empty</div>
+                          <div class="mt-1 text-13-regular text-[#7f9a82]">
+                            no sessions yet &mdash; grik&rsquo;s lantern is lit. start your first dig.
+                          </div>
+                        </div>
+                        <button type="button" class="cg-gem-btn text-13-medium" onClick={openNewSession}>
+                          <Icon name="edit" size="small" />
+                          new dig
+                        </button>
                       </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={openNewSession}
-                      class="inline-flex items-center gap-1.5 rounded-[9px] bg-[#9ADB35] px-4 py-2 text-13-medium font-medium text-[#08210c] transition-colors duration-[120ms] hover:bg-[#aef03f]"
-                    >
-                      <Icon name="edit" size="small" />
-                      new dig
-                    </button>
-                  </div>
-                }
-              >
-                <For each={groups()}>
-                  {(group, index) => (
-                    <div class="flex min-w-0 flex-col gap-4">
-                      <HomeSessionGroupHeader
-                        title={group.title}
-                        onNewSession={index() === 0 ? openNewSession : undefined}
-                      />
-                      <div class="flex min-w-0 flex-col gap-px">
-                        <For each={group.sessions}>
-                          {(record) => <HomeSessionRow record={record} openSession={openSession} />}
-                        </For>
-                      </div>
-                    </div>
-                  )}
-                </For>
-              </Show>
-            </Show>
+                    }
+                  >
+                    <For each={groups()}>
+                      {(group, index) => (
+                        <div class="flex min-w-0 flex-col gap-3">
+                          <HomeSessionGroupHeader
+                            title={group.title}
+                            onNewSession={index() === 0 ? openNewSession : undefined}
+                          />
+                          <div class="flex min-w-0 flex-col gap-1">
+                            <For each={group.sessions}>
+                              {(record) => <HomeSessionRow record={record} openSession={openSession} />}
+                            </For>
+                          </div>
+                        </div>
+                      )}
+                    </For>
+                  </Show>
+                </Show>
+              </div>
+            </section>
+            <HomeTunnels
+              projects={projects()}
+              selected={selectedProject()?.worktree}
+              selectProject={selectProject}
+              chooseProject={() => void chooseProject()}
+              language={language}
+            />
           </div>
         </div>
-      </section>
+      </div>
     </div>
   )
 }
@@ -293,84 +299,95 @@ function CodeGoblinWebHero(props: { openMemory: () => void; openMarket: () => vo
   const creedDot = <span class="text-[#33502f]">·</span>
 
   return (
-    <div class="col-span-full pt-6">
-      <div class="relative overflow-hidden rounded-[14px] border border-[#234a27] bg-[#08110a]">
-        <div class="pointer-events-none absolute -left-12 -top-20 h-44 w-44 rounded-full bg-[#9ADB35] opacity-[0.07] blur-[60px]" />
-        <div class="pointer-events-none absolute right-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-[#2f6a35] to-transparent" />
-        <div class="relative flex min-w-0 items-center gap-5 px-6 py-6">
-          <CodeGoblinLogoMark size="lg" />
-          <div class="min-w-0 flex-1">
-            <div class="text-13-regular text-[#7f9a82]">good {partOfDay}</div>
-            <div class="text-32-bold leading-tight text-[#eafff0]">what are we digging up?</div>
-            <div class="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-12-medium text-[#6f8a72]">
-              <span class="inline-flex items-center gap-1.5">
-                <span class="size-1.5 rounded-full bg-[#9ADB35] shadow-[0_0_6px_#9ADB35]" />
-                nothing leaves the cave
-              </span>
-              {creedDot}
-              <span>BYOK intact</span>
-              {creedDot}
-              <span>images &rarr; codegoblin-output/</span>
-            </div>
+    <div class="cg-panel relative overflow-hidden px-8 py-7">
+      <div class="pointer-events-none absolute -right-16 -top-24 h-56 w-56 rounded-full bg-[#f5c84b] opacity-[0.05] blur-[70px]" />
+      <div class="pointer-events-none absolute -left-10 top-1/2 h-44 w-44 -translate-y-1/2 rounded-full bg-[#9ADB35] opacity-[0.06] blur-[60px]" />
+      <div class="relative flex flex-wrap items-end justify-between gap-6">
+        <div class="min-w-0">
+          <div class="text-12-medium uppercase tracking-[0.18em] text-[#5f7a62]">good {partOfDay}, goblin</div>
+          <div class="mt-1.5 text-[34px] font-bold leading-[1.05] text-[#eafff0]">what are we digging up?</div>
+          <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-12-medium text-[#6f8a72]">
+            <span class="inline-flex items-center gap-1.5">
+              <span class="size-1.5 rounded-full bg-[#9ADB35] shadow-[0_0_6px_#9ADB35]" />
+              nothing leaves the cave
+            </span>
+            {creedDot}
+            <span>BYOK intact</span>
+            {creedDot}
+            <span>images &rarr; codegoblin-output/</span>
           </div>
-          <div class="hidden shrink-0 flex-col items-end gap-3 sm:flex">
-            <button
-              type="button"
-              onClick={() => props.openNewSession()}
-              class="inline-flex items-center gap-1.5 rounded-[9px] bg-[#9ADB35] px-4 py-2 text-13-medium font-medium text-[#08210c] transition-colors duration-[120ms] hover:bg-[#aef03f]"
-            >
-              <Icon name="edit" size="small" />
-              new dig
-            </button>
-            <div class="flex gap-2">
-              <Button size="small" variant="secondary" onClick={() => props.openMemory()}>
-                Memory
-              </Button>
-              <Button size="small" variant="secondary" onClick={() => props.openMarket()}>
-                Market
-              </Button>
-            </div>
-          </div>
+        </div>
+        <div class="flex shrink-0 items-center gap-2.5">
+          <button type="button" class="cg-stone-btn text-13-medium" onClick={() => props.openMemory()}>
+            memory
+          </button>
+          <button type="button" class="cg-stone-btn text-13-medium" onClick={() => props.openMarket()}>
+            market
+          </button>
+          <button type="button" class="cg-gem-btn text-13-medium" onClick={() => props.openNewSession()}>
+            <Icon name="edit" size="small" />
+            new dig
+          </button>
         </div>
       </div>
     </div>
   )
 }
 
-function HomeProjectColumn(props: {
+function HomeRail(props: { openNewSession: () => void; openSettings: () => void; openHelp: () => void }) {
+  return (
+    <div class="relative z-[2] flex w-[72px] shrink-0 flex-col items-center gap-2.5 border-r border-[#122a16] bg-[#050a06]/70 py-5 backdrop-blur-sm">
+      <CodeGoblinLogoMark size="md" />
+      <div class="my-1 h-px w-7 bg-[#163019]" />
+      <button type="button" class="cg-rail-btn" data-active onClick={props.openNewSession} aria-label="new dig" title="new dig">
+        <Icon name="edit" size="small" />
+      </button>
+      <div class="mt-auto flex flex-col items-center gap-2.5">
+        <button type="button" class="cg-rail-btn" onClick={props.openSettings} aria-label="settings" title="settings">
+          <IconV2 name="settings-gear" size="small" />
+        </button>
+        <button type="button" class="cg-rail-btn" onClick={props.openHelp} aria-label="help" title="help">
+          <IconV2 name="help" size="small" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function HomeTunnels(props: {
   projects: LocalProject[]
   selected?: string
   selectProject: (directory: string) => void
   chooseProject: () => void
-  openSettings: () => void
-  openHelp: () => void
   language: ReturnType<typeof useLanguage>
 }) {
   return (
-    <aside class="flex min-w-0 flex-col lg:pt-0" aria-label={props.language.t("home.projects")}>
-      <div class="flex h-7 min-w-0 items-center justify-between pl-3">
-        <div class={HOME_SECTION_LABEL}>{props.language.t("home.projects")}</div>
-        <IconButtonV2
-          data-action="home-add-project"
-          variant="ghost-muted"
-          size="large"
-          class="titlebar-icon [&_[data-slot=icon-svg]]:text-v2-icon-icon-muted"
-          icon={<IconV2 name="folder-add-left" />}
+    <aside class="cg-panel flex min-w-0 flex-col gap-1 p-3" aria-label={props.language.t("home.projects")}>
+      <div class="flex items-center justify-between px-2 pb-1.5 pt-1">
+        <div class="text-12-medium uppercase tracking-[0.16em] text-[#5f7a62]">tunnels</div>
+        <button
+          type="button"
+          class="grid size-7 place-items-center rounded-lg border border-[#234a27] bg-[#0c170e] text-[#6f8a72] transition-colors duration-[120ms] hover:border-[#2b6d31] hover:text-[#cfe6d1]"
           onClick={props.chooseProject}
           aria-label={props.language.t("home.project.add")}
-        />
+          title="open a tunnel"
+        >
+          <IconV2 name="folder-add-left" size="small" />
+        </button>
       </div>
-      <div class="mt-4 flex max-h-[min(572px,calc(100vh_-_300px))] min-w-0 flex-col gap-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div class="flex max-h-[min(560px,calc(100vh_-_320px))] min-w-0 flex-col gap-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <Show
           when={props.projects.length > 0}
           fallback={
             <button
               type="button"
-              class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
+              class="cg-ledger-row flex items-center gap-2.5 px-3 py-2.5 text-left text-13-regular text-[#7f9a82]"
               onClick={props.chooseProject}
             >
-              <IconV2 name="folder-add-left" size="small" />
-              <span>{props.language.t("home.project.add")}</span>
+              <span class="grid size-5 shrink-0 place-items-center rounded-md border border-dashed border-[#2b6d31] text-[11px] text-[#9ADB35]">
+                +
+              </span>
+              open a tunnel
             </button>
           }
         >
@@ -379,36 +396,23 @@ function HomeProjectColumn(props: {
               <button
                 type="button"
                 data-component="home-project-row"
-                class={HOME_PROJECT_NAV_ROW}
-                classList={{ "bg-v2-overlay-simple-overlay-hover": props.selected === project.worktree }}
+                class="cg-ledger-row flex items-center gap-2.5 px-3 py-2 text-left"
+                classList={{ "bg-[#0e1a10]": props.selected === project.worktree }}
                 data-selected={props.selected === project.worktree ? "" : undefined}
                 aria-current={props.selected === project.worktree ? "page" : undefined}
                 onClick={() => props.selectProject(project.worktree)}
               >
-                <HomeProjectAvatar project={project} />
-                <span>{displayName(project)}</span>
+                <span
+                  class="grid size-5 shrink-0 place-items-center rounded-md border border-[#234a27] bg-[#0c170e] text-[11px] leading-none"
+                  classList={{ "text-[#9ADB35]": props.selected === project.worktree, "text-[#3b6d2b]": props.selected !== project.worktree }}
+                >
+                  &#9670;
+                </span>
+                <span class="min-w-0 truncate text-13-medium text-[#cfe6d1]">{displayName(project)}</span>
               </button>
             )}
           </For>
         </Show>
-      </div>
-      <div class="mt-4 flex min-w-0 flex-col gap-1">
-        <button
-          type="button"
-          class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
-          onClick={props.openSettings}
-        >
-          <IconV2 name="settings-gear" size="small" />
-          <span>{props.language.t("sidebar.settings")}</span>
-        </button>
-        <button
-          type="button"
-          class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
-          onClick={props.openHelp}
-        >
-          <IconV2 name="help" size="small" />
-          <span>{props.language.t("sidebar.help")}</span>
-        </button>
       </div>
     </aside>
   )

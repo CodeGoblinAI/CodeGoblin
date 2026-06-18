@@ -8,6 +8,99 @@
   font-style: normal;
 }
 
+/* CodeGoblin cave UI */
+[data-cg-home] {
+  position: relative;
+  background:
+    radial-gradient(110% 75% at 16% -8%, rgba(154, 219, 53, 0.12), transparent 52%),
+    radial-gradient(85% 55% at 88% 112%, rgba(245, 200, 75, 0.06), transparent 60%),
+    linear-gradient(180deg, #060c07, #04080500 40%),
+    #040805;
+}
+[data-cg-home]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(125% 95% at 50% 28%, transparent 52%, rgba(0, 0, 0, 0.6));
+  z-index: 0;
+}
+.cg-rail-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #6f8a72;
+  background: linear-gradient(180deg, #0e1a10, #0a130b);
+  border: 1px solid #1a3420;
+  box-shadow: inset 0 1px 0 rgba(154, 219, 53, 0.05);
+  transition: color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.cg-rail-btn:hover {
+  color: #cfe6d1;
+  border-color: #2b6d31;
+  box-shadow: 0 0 16px rgba(154, 219, 53, 0.14), inset 0 1px 0 rgba(154, 219, 53, 0.08);
+}
+.cg-rail-btn[data-active] {
+  color: #9adb35;
+  border-color: #2f6a35;
+  background: linear-gradient(180deg, #15311a, #0e1f12);
+  box-shadow: 0 0 18px rgba(154, 219, 53, 0.22), inset 0 1px 0 rgba(154, 219, 53, 0.12);
+}
+.cg-gem-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 17px;
+  border-radius: 11px;
+  font-weight: 500;
+  color: #06210a;
+  background: linear-gradient(180deg, #b6f24a, #7ec428);
+  border: 1px solid #6fb31f;
+  box-shadow: 0 5px 16px rgba(154, 219, 53, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: filter 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.cg-gem-btn:hover {
+  filter: brightness(1.07);
+  box-shadow: 0 8px 22px rgba(154, 219, 53, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transform: translateY(-1px);
+}
+.cg-stone-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  color: #cfe6d1;
+  font-weight: 500;
+  background: linear-gradient(180deg, rgba(20, 38, 22, 0.55), rgba(10, 19, 11, 0.85));
+  border: 1px solid #234a27;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.cg-stone-btn:hover {
+  border-color: #2f6a35;
+  background: linear-gradient(180deg, rgba(26, 49, 28, 0.7), rgba(14, 26, 16, 0.9));
+  box-shadow: 0 0 14px rgba(154, 219, 53, 0.1);
+}
+.cg-panel {
+  position: relative;
+  background: linear-gradient(180deg, rgba(14, 26, 16, 0.62), rgba(8, 16, 10, 0.62));
+  border: 1px solid #1a3420;
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(154, 219, 53, 0.04), 0 16px 40px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+}
+.cg-ledger-row {
+  border: 1px solid transparent;
+  border-radius: 11px;
+  transition: border-color 130ms ease, background 130ms ease;
+}
+.cg-ledger-row:hover {
+  border-color: #1d3a20;
+  background: linear-gradient(180deg, rgba(14, 26, 16, 0.7), rgba(10, 19, 11, 0.5));
+}
+
 @layer components {
   @keyframes session-progress-whip {
     0% {
