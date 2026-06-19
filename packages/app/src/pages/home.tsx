@@ -4,11 +4,9 @@ import { createStore } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
 import { Button } from "@codegoblin/ui/button"
 import { Spinner } from "@codegoblin/ui/spinner"
-import { Avatar as AvatarV2 } from "@codegoblin/ui/v2/components/avatar-v2.jsx"
 import { ButtonV2 } from "@codegoblin/ui/v2/components/button-v2.jsx"
 import { Icon as IconV2 } from "@codegoblin/ui/v2/components/icon.jsx"
-import { IconButtonV2 } from "@codegoblin/ui/v2/components/icon-button-v2.jsx"
-import { getAvatarColors, useLayout, type LocalProject } from "@/context/layout"
+import { useLayout, type LocalProject } from "@/context/layout"
 import { useNavigate } from "@solidjs/router"
 import { base64Encode } from "@codegoblin/core/util/encode"
 import { Icon } from "@codegoblin/ui/icon"
@@ -23,7 +21,7 @@ import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
-import { displayName, getProjectAvatarSource, projectForSession, sortedRootSessions } from "@/pages/layout/helpers"
+import { displayName, projectForSession, sortedRootSessions } from "@/pages/layout/helpers"
 import { pathKeysEqual } from "@/utils/path-key"
 import { getFilename } from "@codegoblin/core/util/path"
 import { sessionTitle } from "@/utils/session-title"
@@ -37,7 +35,6 @@ const USE_HOME_DESIGN = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
 const HOME_SESSION_LIMIT = 15
 const HOME_ROW =
   "flex min-w-0 w-full shrink-0 cursor-default items-center rounded-[6px] border-0 bg-transparent text-left [font-weight:530] text-v2-text-text-muted transition-colors duration-[120ms] ease-in-out hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
-const HOME_PROJECT_NAV_ROW = `${HOME_ROW} h-8 gap-1.5 px-3 [&>span]:min-w-0 [&>span]:overflow-hidden [&>span]:text-ellipsis [&>span]:whitespace-nowrap`
 const HOME_SECTION_LABEL = "text-v2-text-text-muted [font-weight:440]"
 
 type HomeSessionRecord = {
@@ -439,20 +436,6 @@ function HomeTunnels(props: {
         </Show>
       </div>
     </aside>
-  )
-}
-
-function HomeProjectAvatar(props: { project: LocalProject }) {
-  const name = createMemo(() => displayName(props.project))
-  return (
-    <AvatarV2
-      fallback={name()}
-      src={getProjectAvatarSource(props.project.id, props.project.icon)}
-      kind="org"
-      size="small"
-      {...getAvatarColors(props.project.icon?.color)}
-      class="size-4 rounded"
-    />
   )
 }
 
