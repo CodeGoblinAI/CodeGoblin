@@ -12,10 +12,37 @@
 [data-cg-home] {
   position: relative;
   background:
-    radial-gradient(110% 75% at 16% -8%, rgba(154, 219, 53, 0.12), transparent 52%),
-    radial-gradient(85% 55% at 88% 112%, rgba(245, 200, 75, 0.06), transparent 60%),
-    linear-gradient(180deg, #060c07, #04080500 40%),
+    radial-gradient(120% 80% at 14% -10%, rgba(154, 219, 53, 0.17), transparent 50%),
+    radial-gradient(70% 50% at 82% 120%, rgba(245, 200, 75, 0.09), transparent 60%),
+    radial-gradient(55% 38% at 50% -18%, rgba(245, 200, 75, 0.06), transparent 55%),
     #040805;
+}
+@keyframes cg-ember {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.8;
+  }
+  82% {
+    opacity: 0.45;
+  }
+  100% {
+    transform: translateY(-160px) scale(0.5);
+    opacity: 0;
+  }
+}
+.cg-ember {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #f5c84b;
+  box-shadow: 0 0 7px 1px rgba(245, 200, 75, 0.7);
+  animation: cg-ember linear infinite;
+  pointer-events: none;
+  z-index: 1;
 }
 [data-cg-home]::after {
   content: "";

@@ -218,12 +218,20 @@ function HomeDesign() {
 
   return (
     <div data-cg-home class="relative flex h-full w-full min-h-0 overflow-hidden">
+      <div class="pointer-events-none absolute right-[-48px] top-9 z-[1] opacity-[0.05]">
+        <GrikGlyph size={480} />
+      </div>
+      <span class="cg-ember" style="left:23%;bottom:13%;animation-duration:7.5s" />
+      <span class="cg-ember" style="left:47%;bottom:6%;animation-duration:9s;animation-delay:2.5s" />
+      <span class="cg-ember" style="left:72%;bottom:15%;animation-duration:8s;animation-delay:4s" />
+      <span class="cg-ember" style="left:88%;bottom:9%;animation-duration:10.5s;animation-delay:1.5s" />
+      <span class="cg-ember" style="left:35%;bottom:20%;animation-duration:11s;animation-delay:5.5s" />
       <HomeRail
         openNewSession={openNewSession}
         openSettings={openSettings}
         openHelp={() => platform.openLink("https://github.com/shawnisikli/CodeGoblin/issues")}
       />
-      <div class="relative z-[1] min-w-0 flex-1 overflow-y-auto px-7 pb-16 pt-7">
+      <div class="relative z-[2] min-w-0 flex-1 overflow-y-auto px-7 pb-16 pt-7">
         <div class="mx-auto flex w-full max-w-[1180px] flex-col gap-7">
           <CodeGoblinWebHero openMemory={openMemory} openMarket={openMarket} openNewSession={openNewSession} />
           <div class="grid min-w-0 items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -334,9 +342,25 @@ function CodeGoblinWebHero(props: { openMemory: () => void; openMarket: () => vo
   )
 }
 
+function GrikGlyph(props: { size?: number; class?: string }) {
+  const s = props.size ?? 64
+  return (
+    <svg width={s} height={s} viewBox="0 0 512 512" class={props.class} aria-hidden="true">
+      <path
+        d="M183 110h146l24 64 86 20c15 4 23 21 17 35l-39 87c-5 12-18 18-30 15l-57-13-20 84c-3 13-15 22-29 20l-87-10c-10-1-19-8-23-18l-31-73-49-35c-7-5-12-13-13-22l-10-87c-2-14 8-27 22-29l78-10 19-58Z"
+        fill="#9ADB35"
+      />
+      <path
+        d="M177 242c0-10 8-18 18-18h36c10 0 18 8 18 18v51c0 11-9 20-20 19l-35-3c-10-1-17-9-17-19v-48Zm161-18c10 0 18 8 18 18v42c0 10-7 18-17 19l-31 4c-11 1-20-7-20-18v-47c0-10 8-18 18-18h32Z"
+        fill="#040805"
+      />
+    </svg>
+  )
+}
+
 function HomeRail(props: { openNewSession: () => void; openSettings: () => void; openHelp: () => void }) {
   return (
-    <div class="relative z-[2] flex w-[72px] shrink-0 flex-col items-center gap-2.5 border-r border-[#122a16] bg-[#050a06]/70 py-5 backdrop-blur-sm">
+    <div class="relative z-[3] flex w-[72px] shrink-0 flex-col items-center gap-2.5 border-r border-[#122a16] bg-[#050a06]/70 py-5 backdrop-blur-sm">
       <CodeGoblinLogoMark size="md" />
       <div class="my-1 h-px w-7 bg-[#163019]" />
       <button type="button" class="cg-rail-btn" data-active onClick={props.openNewSession} aria-label="new dig" title="new dig">
