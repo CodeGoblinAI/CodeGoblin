@@ -9,7 +9,8 @@
 }
 
 /* CodeGoblin cave UI */
-[data-cg-home] {
+[data-cg-home],
+[data-cg-session] {
   position: relative;
   background:
     radial-gradient(120% 80% at 14% -10%, rgba(154, 219, 53, 0.17), transparent 50%),
@@ -44,7 +45,8 @@
   pointer-events: none;
   z-index: 1;
 }
-[data-cg-home]::after {
+[data-cg-home]::after,
+[data-cg-session]::after {
   content: "";
   position: absolute;
   inset: 0;
