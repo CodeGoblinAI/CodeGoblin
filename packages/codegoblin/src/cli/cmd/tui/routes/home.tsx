@@ -996,6 +996,16 @@ export function Home() {
             <Prompt ref={bind} right={<TuiPluginRuntime.Slot name="home_prompt_right" />} placeholders={placeholder} />
           </TuiPluginRuntime.Slot>
         </box>
+        <box height={1} minHeight={0} flexShrink={1} />
+        <box flexDirection="row" gap={2} flexShrink={0}>
+          <text fg={RGBA.fromInts(245, 200, 75)} attributes={TextAttributes.BOLD}>
+            &#9670; local
+          </text>
+          <text fg={theme.textMuted}>&middot;</text>
+          <text fg={RGBA.fromInts(154, 219, 53)}>nothing leaves the cave</text>
+          <text fg={theme.textMuted}>&middot;</text>
+          <text fg={theme.textMuted}>the hoard stays put</text>
+        </box>
         <TuiPluginRuntime.Slot name="home_bottom" />
         <box flexGrow={1} minHeight={0} />
         {showFooterAnimation ? <TuiGoblinRunner theme={theme} /> : null}
