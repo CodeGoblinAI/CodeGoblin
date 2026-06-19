@@ -540,9 +540,9 @@ function TuiGoblinHeader(props: { theme: any }) {
 
   rows.push(
     <box flexDirection="row">
-      <text fg={borderColor}>┌</text>
+      <text fg={goldColor}>┌</text>
       <text fg={borderColor}>{"─".repeat(interiorWidth)}</text>
-      <text fg={borderColor}>┐</text>
+      <text fg={goldColor}>┐</text>
     </box>,
   )
 
@@ -584,9 +584,9 @@ function TuiGoblinHeader(props: { theme: any }) {
 
   rows.push(
     <box flexDirection="row">
-      <text fg={borderColor}>└</text>
+      <text fg={goldColor}>└</text>
       <text fg={borderColor}>{"─".repeat(interiorWidth)}</text>
-      <text fg={borderColor}>┘</text>
+      <text fg={goldColor}>┘</text>
     </box>,
   )
 
@@ -601,7 +601,7 @@ function TuiGoblinHeader(props: { theme: any }) {
       {selectedVariant.helperTitle ? <text fg={props.theme.textMuted}>{selectedVariant.helperTitle}</text> : null}
       {selectedVariant.helperNotes?.map((note) => (
         <box flexDirection="row">
-          <text fg={skinColor} attributes={TextAttributes.BOLD}>{note.label.padEnd(8, " ")}</text>
+          <text fg={goldColor} attributes={TextAttributes.BOLD}>{note.label.padEnd(8, " ")}</text>
           <text fg={props.theme.textMuted}>{note.text}</text>
         </box>
       ))}
