@@ -1375,7 +1375,7 @@ function UserMessage(props: {
         <box
           id={props.message.id}
           border={["left"]}
-          borderColor={color()}
+          borderColor={theme.accent}
           customBorderChars={SplitBorder.customBorderChars}
           marginTop={props.index === 0 ? 0 : 1}
         >
@@ -1390,7 +1390,8 @@ function UserMessage(props: {
             paddingTop={1}
             paddingBottom={1}
             paddingLeft={2}
-            backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
+            paddingRight={2}
+            backgroundColor={hover() ? RGBA.fromInts(24, 44, 26) : RGBA.fromInts(15, 28, 17)}
             flexShrink={0}
           >
             <text fg={theme.text}>{text()}</text>

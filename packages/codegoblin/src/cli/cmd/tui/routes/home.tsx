@@ -88,12 +88,12 @@ function TuiGoblinHeader(props: { theme: any }) {
   const miniMascotGrid = [
     "....GGGG....",
     "..GGGGGGGG..",
-    "G.GGGGGGGG.G",
+    "GG.GGGGGG.GG",
     ".GGGGGGGGGG.",
-    "..GGBBGGBG..",
-    "..GGBBGGBG..",
+    ".GGBBGGBBGG.",
+    ".GGBBGGBBGG.",
+    "..GGGGGGGG..",
     "...GGGGGG...",
-    "....GGGG....",
   ]
 
   const detailedMiniMascotGrid = [
@@ -590,23 +590,7 @@ function TuiGoblinHeader(props: { theme: any }) {
     </box>,
   )
 
-  return (
-    <box flexDirection="column" alignItems="center">
-      {rows}
-      <box height={1} minHeight={0} />
-      <text fg={goldColor} attributes={TextAttributes.BOLD}>
-        your local AI goblin · the hoard stays in the cave
-      </text>
-      {hasHelperText ? <box height={1} minHeight={0} /> : null}
-      {selectedVariant.helperTitle ? <text fg={props.theme.textMuted}>{selectedVariant.helperTitle}</text> : null}
-      {selectedVariant.helperNotes?.map((note) => (
-        <box flexDirection="row">
-          <text fg={goldColor} attributes={TextAttributes.BOLD}>{note.label.padEnd(8, " ")}</text>
-          <text fg={props.theme.textMuted}>{note.text}</text>
-        </box>
-      ))}
-    </box>
-  )
+  return <box flexDirection="column" alignItems="center">{rows}</box>
 }
 
 function TuiGoblinRunner(props: { theme: any }) {
@@ -983,31 +967,20 @@ export function Home() {
   return (
     <>
       <box flexGrow={1} alignItems="center" paddingLeft={2} paddingRight={2}>
-        <box flexGrow={1} minHeight={0} />
         <box height={2} minHeight={0} flexShrink={1} />
         <box flexShrink={0}>
           <TuiPluginRuntime.Slot name="home_logo" mode="replace">
             <TuiGoblinHeader theme={theme} />
           </TuiPluginRuntime.Slot>
         </box>
-        <box height={1} minHeight={0} flexShrink={1} />
-        <box width="100%" maxWidth={75} zIndex={1000} paddingTop={1} flexShrink={0}>
+        <box flexGrow={1} minHeight={0} />
+        <box width="100%" maxWidth={86} minHeight={5} zIndex={1000} flexShrink={0}>
           <TuiPluginRuntime.Slot name="home_prompt" mode="replace" ref={bind}>
             <Prompt ref={bind} right={<TuiPluginRuntime.Slot name="home_prompt_right" />} placeholders={placeholder} />
           </TuiPluginRuntime.Slot>
         </box>
         <box height={1} minHeight={0} flexShrink={1} />
-        <box flexDirection="row" gap={2} flexShrink={0}>
-          <text fg={RGBA.fromInts(245, 200, 75)} attributes={TextAttributes.BOLD}>
-            &#9670; local
-          </text>
-          <text fg={theme.textMuted}>&middot;</text>
-          <text fg={RGBA.fromInts(154, 219, 53)}>nothing leaves the cave</text>
-          <text fg={theme.textMuted}>&middot;</text>
-          <text fg={theme.textMuted}>the hoard stays put</text>
-        </box>
         <TuiPluginRuntime.Slot name="home_bottom" />
-        <box flexGrow={1} minHeight={0} />
         {showFooterAnimation ? <TuiGoblinRunner theme={theme} /> : null}
         <Toast />
       </box>
