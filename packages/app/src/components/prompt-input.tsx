@@ -1699,7 +1699,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const designPlaceholder = () => {
     if (store.mode === "shell") return placeholder()
-    return "Ask anything, / for commands, @ for context..."
+    return "Ask the goblin... / for commands, @ for context..."
   }
 
   const modelControl = () => (

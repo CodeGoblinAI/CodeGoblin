@@ -8,6 +8,29 @@
   font-style: normal;
 }
 
+@font-face {
+  font-family: "Silkscreen";
+  src: url("/assets/Silkscreen-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pirata One";
+  src: url("/assets/PirataOne-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Distinctive display face for headlines (cave/hoard character). */
+.cg-display {
+  font-family: "Pirata One", var(--font-family-sans);
+  letter-spacing: 0.4px;
+  font-weight: 400;
+}
+
 /* CodeGoblin cave UI */
 [data-cg-home],
 [data-cg-session] {

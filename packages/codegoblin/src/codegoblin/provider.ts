@@ -165,7 +165,11 @@ export function codeGoblinProviderInfo(): Info {
 
 /** True for a locally-served GGUF model (`codegoblin/<gguf>` from `codegoblin runtime`). */
 export function isLocalRuntimeModel(model: { providerID?: string; family?: string }): boolean {
-  return model.providerID === CodeGoblinProvider.id && model.family === "local"
+  // The CodeGoblin provider serves only on-device GGUF runtime models, so the provider id alone
+  // identifies a local model. (family can be absent on rehydrated/partial model objects, which would
+  // otherwise mis-route a local model to the full coding-agent prompt and its "answer in <4 lines" rule.)
+  if (model.providerID !== CodeGoblinProvider.id) return false
+  return model.family === undefined || model.family === "local"
 }
 
 function localRuntimeModel(id: string, baseURL: string, context: number): Model {

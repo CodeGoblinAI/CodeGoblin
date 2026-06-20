@@ -86,7 +86,7 @@ const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested struc
 // CodeGoblin" makes small models confabulate about themselves instead of answering, and without an
 // explicit "no tool JSON" rule they hallucinate tool-call output. This neutral, plain-text-only
 // wording was verified to fix both.
-const LOCAL_CHAT_SYSTEM_PROMPT = `You are a helpful AI assistant running locally on the user's own machine. Answer the user directly and concisely in plain conversational text.
+const LOCAL_CHAT_SYSTEM_PROMPT = `You are a helpful AI assistant running locally on the user's own machine. Answer the user directly in plain conversational text. Match the length of your reply to the request: keep simple answers brief, but write full, detailed multi-sentence paragraphs whenever the user asks for length, detail, or a paragraph. There is no line limit — never refuse to write more on the grounds of being concise.
 
 You have no tools and cannot run commands, edit files, or browse the web — never output JSON, function calls, or tool invocations. If a request truly needs those actions, briefly say so and offer what help you can in plain text.`
 

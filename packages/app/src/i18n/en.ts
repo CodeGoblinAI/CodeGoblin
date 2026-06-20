@@ -26,7 +26,7 @@ export const dict = {
   "command.project.previous": "Previous project",
   "command.project.next": "Next project",
   "command.project.index": "Switch to project {{index}}",
-  "command.provider.connect": "Connect provider",
+  "command.provider.connect": "Connect a model",
   "command.server.switch": "Switch server",
   "command.settings.open": "Open settings",
   "command.session.previous": "Previous session",
@@ -232,8 +232,8 @@ export const dict = {
   "common.attachment": "attachment",
 
   "prompt.placeholder.shell": "Enter shell command... {{example}}",
-  "prompt.placeholder.normal": 'Ask anything... "{{example}}"',
-  "prompt.placeholder.simple": "Ask anything...",
+  "prompt.placeholder.normal": 'Ask the goblin... "{{example}}"',
+  "prompt.placeholder.simple": "Ask the goblin...",
   "prompt.placeholder.summarizeComments": "Summarize comments…",
   "prompt.placeholder.summarizeComment": "Summarize comment…",
   "prompt.mode.shell": "Shell",
@@ -440,7 +440,7 @@ export const dict = {
   "toast.permissions.autoaccept.off.description": "Permission requests will require approval",
 
   "toast.model.none.title": "No model selected",
-  "toast.model.none.description": "Connect a provider to summarize this session",
+  "toast.model.none.description": "Connect a model to summarize this session",
 
   "toast.file.loadFailed.title": "Failed to load file",
   "toast.file.listFailed.title": "Failed to list files",

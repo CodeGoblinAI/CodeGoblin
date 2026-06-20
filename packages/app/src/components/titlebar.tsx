@@ -773,7 +773,8 @@ function ChannelIndicator() {
   return (
     <>
       {["beta", "dev"].includes(import.meta.env.VITE_OPENCODE_CHANNEL) && (
-        <div class="bg-icon-interactive-base text-[#FFF] font-medium px-2 rounded-sm uppercase font-mono">
+        <div class="inline-flex items-center gap-1 rounded-md border border-[#2b6d31] bg-[#0c170e] px-2 py-px text-[11px] font-medium uppercase tracking-[0.12em] text-[#9ADB35] font-mono shadow-[0_0_10px_rgba(154,219,53,0.18)]">
+          <span class="text-[#f5c84b] text-[9px]">&#9670;</span>
           {import.meta.env.VITE_OPENCODE_CHANNEL.toUpperCase()}
         </div>
       )}
