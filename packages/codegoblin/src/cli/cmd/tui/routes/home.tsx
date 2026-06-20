@@ -967,7 +967,7 @@ export function Home() {
   return (
     <>
       <box flexGrow={1} alignItems="center" paddingLeft={2} paddingRight={2}>
-        <box height={2} minHeight={0} flexShrink={1} />
+        <box flexGrow={1} minHeight={0} />
         <box flexShrink={0}>
           <TuiPluginRuntime.Slot name="home_logo" mode="replace">
             <TuiGoblinHeader theme={theme} />

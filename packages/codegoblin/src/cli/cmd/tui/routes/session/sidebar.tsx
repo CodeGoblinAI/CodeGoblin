@@ -92,8 +92,8 @@ function TuiSidebarCompanionGoblin(props: {
     "...GGGGGGGG...",
     "G..GGGGGGGG..G",
     ".GGGGGGGGGGGG.",
-    ["..GGGBBGGBGG..", "..GGGBBGGBGGT.", "..GGGBBGGBT...", "..GGGBBGGBGG.."],
-    ["..GGGBBGGBGG..", "..GGGGBWWBGG..", "..GGGGBBBGTT..", "..GGGBBGGBGG.."],
+    ["..GGGBBGGBBG..", "..GGGBBGGBBGT.", "..GGGBBGGBBT..", "..GGGBBGGBBG.."],
+    ["..GGGBBGGBBG..", "..GGGGBWWBGG..", "..GGGGBBBGGG..", "..GGGBBGGBBG.."],
     "....GGGGGGG...",
   ]
 
