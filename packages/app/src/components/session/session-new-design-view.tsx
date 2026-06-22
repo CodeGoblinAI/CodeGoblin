@@ -66,7 +66,7 @@ export function NewSessionDesignView(props: { worktree: string; children: JSX.El
         <div class="w-full max-w-[720px]">
           <div class="flex flex-col items-center gap-3 text-center">
             <CodeGoblinLogoMark size="lg" />
-            <div class="cg-display text-[42px] leading-tight text-[#eafff0]">what are we digging up?</div>
+            <div class="cg-display text-[26px] leading-[1.25] text-[#eafff0]">what are we digging up?</div>
             <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] font-medium text-[#6f8a72]">
               <span class="inline-flex items-center gap-1.5">
                 <span class="size-1.5 rounded-full bg-[#9ADB35] shadow-[0_0_6px_#9ADB35]" />

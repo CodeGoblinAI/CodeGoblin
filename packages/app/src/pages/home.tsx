@@ -310,7 +310,7 @@ function CodeGoblinWebHero(props: { openMemory: () => void; openMarket: () => vo
       <div class="relative flex flex-wrap items-end justify-between gap-6">
         <div class="min-w-0">
           <div class="text-12-medium uppercase tracking-[0.18em] text-[#5f7a62]">good {partOfDay}, goblin</div>
-          <div class="cg-display mt-1 text-[42px] leading-[1.05] text-[#eafff0]">what are we digging up?</div>
+          <div class="cg-display mt-1 text-[26px] leading-[1.25] text-[#eafff0]">what are we digging up?</div>
           <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-12-medium text-[#6f8a72]">
             <span class="inline-flex items-center gap-1.5">
               <span class="size-1.5 rounded-full bg-[#9ADB35] shadow-[0_0_6px_#9ADB35]" />

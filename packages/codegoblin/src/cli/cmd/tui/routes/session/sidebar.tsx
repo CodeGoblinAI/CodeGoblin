@@ -87,14 +87,15 @@ function TuiSidebarCompanionGoblin(props: {
     "...GGGGGG...",
   ]
 
+  // Favicon-matched face: big square left eye, thin slit right eye, balanced + symmetric chin.
   const menuHeadWide: GoblinRow[] = [
     ".....GGGG.....",
     "...GGGGGGGG...",
     "G..GGGGGGGG..G",
     ".GGGGGGGGGGGG.",
-    ["..GGGBBGGBBG..", "..GGGBBGGBBGT.", "..GGGBBGGBBT..", "..GGGBBGGBBG.."],
-    ["..GGGBBGGBBG..", "..GGGGBWWBGG..", "..GGGGBBBGGG..", "..GGGBBGGBBG.."],
-    "....GGGGGGG...",
+    ["..GGBBGGGBGG..", "..GGBBGGGBGGT.", "..GGGGGGGGGG..", "..GGBBGGGBGG.."],
+    ["..GGBBGGGBGG..", "..GGBBGGGBGG..", "..GGGGGGGGGG..", "..GGBBGGGBGG.."],
+    "...GGGGGGGG...",
   ]
 
   const menuHeadSlim: GoblinRow[] = [
@@ -481,6 +482,7 @@ function TuiSidebarCompanionGoblin(props: {
   }
 
   const companionHeadWide = menuHeadWide.map(staticRow)
+  // Gentle idle sway: arms and feet shift a hair each frame so the goblin breathes instead of freezing.
   const companionIdleFrames = normalizeFrames([
     createCompanionFrame(
       ...companionHeadWide,
@@ -492,15 +494,15 @@ function TuiSidebarCompanionGoblin(props: {
     createCompanionFrame(
       ...companionHeadWide,
       "...GGPPGG...",
-      "..G.PPPP.G..",
-      "....G..G....",
+      "..GGPPPP.G..",
+      "...G...G....",
       "...G....G...",
     ),
     createCompanionFrame(
       ...companionHeadWide,
       "...GGPPGG...",
-      "..G.PPPP.G..",
-      "....G..G....",
+      "..G.PPPPGG..",
+      "....G...G...",
       "...G....G...",
     ),
     createCompanionFrame(

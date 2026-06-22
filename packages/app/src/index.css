@@ -24,11 +24,12 @@
   font-display: swap;
 }
 
-/* Distinctive display face for headlines (cave/hoard character). */
+/* Distinctive pixel display face for headlines — ties the web to the pixel favicon + TUI wordmark. */
 .cg-display {
-  font-family: "Pirata One", var(--font-family-sans);
-  letter-spacing: 0.4px;
+  font-family: "Silkscreen", var(--font-family-sans);
+  letter-spacing: 0.5px;
   font-weight: 400;
+  line-height: 1.25;
 }
 
 /* CodeGoblin cave UI */

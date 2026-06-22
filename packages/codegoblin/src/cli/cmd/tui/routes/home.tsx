@@ -52,13 +52,14 @@ function TuiGoblinHeader(props: { theme: any }) {
   }
 
   // Goblin mascot variants stay 8 rows high so the bordered header box remains compact.
+  // Matches the web favicon: big square left eye, thin slit right eye, eared crown, tapered chin.
   const baseMascotGrid = [
     "......GGGGGG......",
     "....GGGGGGGGGG....",
     "GG..GGGGGGGGGG..GG",
     ".GGGGGGGGGGGGGGGG.",
-    "..GGGGBBGGBBGGGG..",
-    "..GGGGBBGGBBGGGG..",
+    "..GGGBBBGGGGBGGG..",
+    "..GGGBBBGGGGBGGG..",
     "....GGGGGGGGGG....",
     "......GGGGGG......",
   ]
@@ -384,6 +385,10 @@ function TuiGoblinHeader(props: { theme: any }) {
 
   const solidSlantRows = buildFontRows("CODEGOBLIN", solidFiveFont, 1, [4, 3, 2, 1, 0])
   const solidLeftBiasRows = buildFontRows("CODEGOBLIN", solidFiveFont, 1, [5, 4, 2, 1, 0])
+  // Widen each glyph pixel to 2 chars so the wordmark renders square (like the mascot) instead of tall + stretched.
+  const widenPixels = (lines: string[]) =>
+    lines.map((line) => [...line].map((ch) => (ch === " " ? "  " : ch.repeat(2))).join(""))
+  const codeGoblinWordmark = widenPixels(buildFontRows("CODEGOBLIN", solidFiveFont, 1))
 
   const headerVariants: HeaderVariant[] = [
     makeVariant("01", "compact 4-row full word, right narrow goblin", buildFontRows("CODEGOBLIN", compactFourFont, 3), narrowMascotGrid, 60, 8),
@@ -395,7 +400,8 @@ function TuiGoblinHeader(props: { theme: any }) {
     makeVariant("07", "3-row half-block full word, left goblin", buildFontRows("CODEGOBLIN", halfBlockThreeFont, 3), baseMascotGrid, 60, 8, "left"),
     makeVariant("08", "5-row solid slant-cancel, mini goblin", solidSlantRows, miniMascotGrid, 60, 8),
     {
-      ...makeVariant("09", "5-row solid slant-cancel, left base goblin", solidLeftBiasRows, baseMascotGrid, 60, 8, "left"),
+      // Square (2-wide) single-line wordmark so CODEGOBLIN reads crisply at the mascot's scale instead of stretching tall.
+      ...makeVariant("09", "square pixel CODEGOBLIN, left base goblin", codeGoblinWordmark, baseMascotGrid, 60, 6, "left"),
       helperNotes: commandHelperNotes,
     },
     makeVariant("10", "4-row shaded full word, cheek goblin", buildFontRows("CODEGOBLIN", shadedFourFont, 2), cheekMascotGrid, 60, 8),
@@ -967,21 +973,21 @@ export function Home() {
   return (
     <>
       <box flexGrow={1} alignItems="center" paddingLeft={2} paddingRight={2}>
-        <box flexGrow={3} minHeight={0} />
+        <box flexGrow={2} minHeight={0} />
         <box flexShrink={0}>
           <TuiPluginRuntime.Slot name="home_logo" mode="replace">
             <TuiGoblinHeader theme={theme} />
           </TuiPluginRuntime.Slot>
         </box>
-        <box flexGrow={2} minHeight={0} />
+        <box flexGrow={3} minHeight={0} />
+        {showFooterAnimation ? <TuiGoblinRunner theme={theme} /> : null}
+        <TuiPluginRuntime.Slot name="home_bottom" />
+        <box height={1} minHeight={0} flexShrink={0} />
         <box width="100%" maxWidth={86} minHeight={5} zIndex={1000} flexShrink={0}>
           <TuiPluginRuntime.Slot name="home_prompt" mode="replace" ref={bind}>
             <Prompt ref={bind} right={<TuiPluginRuntime.Slot name="home_prompt_right" />} placeholders={placeholder} />
           </TuiPluginRuntime.Slot>
         </box>
-        <box height={1} minHeight={0} flexShrink={1} />
-        <TuiPluginRuntime.Slot name="home_bottom" />
-        {showFooterAnimation ? <TuiGoblinRunner theme={theme} /> : null}
         <Toast />
       </box>
       <box width="100%" flexShrink={0}>
