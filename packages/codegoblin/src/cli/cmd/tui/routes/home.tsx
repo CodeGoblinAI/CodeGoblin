@@ -52,16 +52,19 @@ function TuiGoblinHeader(props: { theme: any }) {
   }
 
   // Goblin mascot variants stay 8 rows high so the bordered header box remains compact.
-  // Matches the web favicon: pointed ears, big square left eye, thin slit right eye, head tapering to a chin point.
+  // Matches the web favicon, taller for near-square proportions: pointed ears, a clean eye band with a
+  // big square left eye + thin slit right eye, and a jaw tapering to a chin point.
   const baseMascotGrid = [
-    "GG..GGGGGGGGGG..GG",
-    ".GGGGGGGGGGGGGGGG.",
-    ".GGGGBBBGGGGBGGGG.",
-    ".GGGGBBBGGGGBGGGG.",
-    "..GGGGGGGGGGGGGG..",
-    "...GGGGGGGGGGGG...",
-    ".....GGGGGGGG.....",
-    ".......GGGG.......",
+    "...GGGGGGGG...",
+    "G.GGGGGGGGGG.G",
+    "GG.GGGGGGGG.GG",
+    "GGGGGGGGGGGGGG",
+    ".GGGBBGGGGBGG.",
+    ".GGGBBGGGGBGG.",
+    ".GGGGGGGGGGGG.",
+    "..GGGGGGGGGG..",
+    "...GGGGGGGG...",
+    ".....GGGG.....",
   ]
 
   const cheekMascotGrid = [
@@ -484,6 +487,10 @@ function TuiGoblinHeader(props: { theme: any }) {
   const mascotColumns = Math.max(...mascotGrid.map((row) => row.length))
   const mascotWidth = mascotColumns * 2
   const interiorWidth = 2 + brandPanelWidth + gap + mascotWidth + 2
+  // Let the mascot drive the header height so a taller (more square) goblin can match the favicon.
+  // The 8-row wordmark is vertically centred against it.
+  const artHeight = Math.max(8, mascotGrid.length)
+  const brandPad = Math.floor((artHeight - 8) / 2)
 
   function fitChunks(chunks: TextChunk[], width: number) {
     const fitted: TextChunk[] = []
@@ -560,7 +567,7 @@ function TuiGoblinHeader(props: { theme: any }) {
     </box>,
   )
 
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < artHeight; i++) {
     if (mascotSide === "left") {
       rows.push(
         <box flexDirection="row">
@@ -568,7 +575,7 @@ function TuiGoblinHeader(props: { theme: any }) {
           <text>  </text>
           {renderMascotRow(i)}
           <text>{" ".repeat(gap)}</text>
-          {renderBrandRow(i)}
+          {renderBrandRow(i - brandPad)}
           <text>  </text>
           {borderRight}
         </box>,
@@ -578,7 +585,7 @@ function TuiGoblinHeader(props: { theme: any }) {
         <box flexDirection="row">
           {borderLeft}
           <text>  </text>
-          {renderBrandRow(i)}
+          {renderBrandRow(i - brandPad)}
           <text>{" ".repeat(gap)}</text>
           {renderMascotRow(i)}
           <text>  </text>
@@ -925,7 +932,7 @@ function isFooterAnimationEnabled(value: string | undefined) {
 
 let once = false
 const placeholder = {
-  normal: ["Fix a TODO in the codebase", "What is the tech stack of this project?", "Fix broken tests"],
+  normal: ["Dig up a buried TODO", "Map out this project's stack", "Mend the broken tests"],
   shell: ["ls -la", "git status", "pwd"],
 }
 
