@@ -52,16 +52,16 @@ function TuiGoblinHeader(props: { theme: any }) {
   }
 
   // Goblin mascot variants stay 8 rows high so the bordered header box remains compact.
-  // Matches the web favicon: big square left eye, thin slit right eye, eared crown, tapered chin.
+  // Matches the web favicon: pointed ears, big square left eye, thin slit right eye, head tapering to a chin point.
   const baseMascotGrid = [
-    "......GGGGGG......",
-    "....GGGGGGGGGG....",
     "GG..GGGGGGGGGG..GG",
     ".GGGGGGGGGGGGGGGG.",
-    "..GGGBBBGGGGBGGG..",
-    "..GGGBBBGGGGBGGG..",
-    "....GGGGGGGGGG....",
-    "......GGGGGG......",
+    ".GGGGBBBGGGGBGGGG.",
+    ".GGGGBBBGGGGBGGGG.",
+    "..GGGGGGGGGGGGGG..",
+    "...GGGGGGGGGGGG...",
+    ".....GGGGGGGG.....",
+    ".......GGGG.......",
   ]
 
   const cheekMascotGrid = [
@@ -283,7 +283,7 @@ function TuiGoblinHeader(props: { theme: any }) {
     G: ["█████", "█    ", "█  ██", "█   █", "█████"],
     B: ["████ ", "█   █", "████ ", "█   █", "████ "],
     L: ["█    ", "█    ", "█    ", "█    ", "█████"],
-    I: ["███", " █ ", " █ ", " █ ", "███"],
+    I: ["█████", "  █  ", "  █  ", "  █  ", "█████"],
     N: ["█   █", "██  █", "█ █ █", "█  ██", "█   █"],
   }
 
@@ -983,7 +983,7 @@ export function Home() {
         {showFooterAnimation ? <TuiGoblinRunner theme={theme} /> : null}
         <TuiPluginRuntime.Slot name="home_bottom" />
         <box height={1} minHeight={0} flexShrink={0} />
-        <box width="100%" maxWidth={86} minHeight={5} zIndex={1000} flexShrink={0}>
+        <box width="100%" maxWidth={130} minHeight={3} zIndex={1000} flexShrink={0}>
           <TuiPluginRuntime.Slot name="home_prompt" mode="replace" ref={bind}>
             <Prompt ref={bind} right={<TuiPluginRuntime.Slot name="home_prompt_right" />} placeholders={placeholder} />
           </TuiPluginRuntime.Slot>

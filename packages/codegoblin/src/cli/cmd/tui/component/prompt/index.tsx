@@ -2117,7 +2117,7 @@ export function Prompt(props: PromptProps) {
               placeholderColor={theme.textMuted}
               textColor={leader() ? theme.textMuted : theme.text}
               focusedTextColor={leader() ? theme.textMuted : theme.text}
-              minHeight={3}
+              minHeight={1}
               maxHeight={8}
               onContentChange={() => {
                 const value = input.plainText
