@@ -50,7 +50,8 @@
       border-radius: var(--radius-xl);
       background: var(--surface-raised-stronger-non-alpha);
       background-clip: padding-box;
-      box-shadow: var(--shadow-lg-border-base);
+      border: 1px solid #234a27;
+      box-shadow: var(--shadow-lg-border-base), 0 0 0 1px rgba(154, 219, 53, 0.05), 0 0 34px rgba(154, 219, 53, 0.07);
 
       [data-slot="dialog-header"] {
         display: flex;
