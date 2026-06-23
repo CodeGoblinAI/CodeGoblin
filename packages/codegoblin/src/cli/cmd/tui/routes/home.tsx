@@ -1,5 +1,5 @@
 import { Prompt, type PromptRef } from "@tui/component/prompt"
-import { createEffect, createSignal, onCleanup, onMount } from "solid-js"
+import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useSync } from "../context/sync"
 import { Toast } from "../ui/toast"
@@ -52,18 +52,19 @@ function TuiGoblinHeader(props: { theme: any }) {
   }
 
   // Goblin mascot variants stay 8 rows high so the bordered header box remains compact.
-  // Matches the web favicon, taller for near-square proportions: pointed ears, a clean eye band with a
-  // big square left eye + thin slit right eye, and a jaw tapering to a chin point.
+  // Matches the web favicon (design-paneled): flat wide crown, bat-wing ears stabbing OUT sideways at
+  // eye level with a notch, a big 3x3 square left eye vs a 1x3 slit right eye, and a flat-bottomed chin.
   const baseMascotGrid = [
+    "....GGGGGG....",
     "...GGGGGGGG...",
-    "G.GGGGGGGGGG.G",
+    "...GGGGGGGG...",
     "GG.GGGGGGGG.GG",
-    "GGGGGGGGGGGGGG",
-    ".GGGBBGGGGBGG.",
-    ".GGGBBGGGGBGG.",
-    ".GGGGGGGGGGGG.",
-    "..GGGGGGGGGG..",
-    "...GGGGGGGG...",
+    ".G.GBBBGGBG.G.",
+    "...GBBBGGBG...",
+    "...GBBBGGBG...",
+    "....GGGGGG....",
+    "....GGGGGG....",
+    ".....GGGG.....",
     ".....GGGG.....",
   ]
 
@@ -480,17 +481,48 @@ function TuiGoblinHeader(props: { theme: any }) {
     headerVariants.find((variant) => variant.id === selectedVariantId) ??
     headerVariants.find((variant) => variant.id === "09") ??
     headerVariants[0]
-  const brandPanelWidth = selectedVariant.brandPanelWidth
-  const mascotGrid = selectedVariant.mascotGrid ?? baseMascotGrid
   const mascotSide = selectedVariant.mascotSide ?? "right"
-  const gap = selectedVariant.gap ?? 4
-  const mascotColumns = Math.max(...mascotGrid.map((row) => row.length))
-  const mascotWidth = mascotColumns * 2
-  const interiorWidth = 2 + brandPanelWidth + gap + mascotWidth + 2
-  // Let the mascot drive the header height so a taller (more square) goblin can match the favicon.
-  // The 8-row wordmark is vertically centred against it.
-  const artHeight = Math.max(8, mascotGrid.length)
-  const brandPad = Math.floor((artHeight - 8) / 2)
+  const dimensions = useTerminalDimensions()
+  // Compact single-line fallback wordmark (~half the width of the 2-wide default) for narrower terminals.
+  const compactWordmarkRows = buildFontRows("CODEGOBLIN", solidFiveFont, 1)
+  const compactBrandWidth = Math.max(...compactWordmarkRows.map((line) => line.length))
+
+  // Pick the largest logo that fits the current terminal width so the box never overflows / clips on resize.
+  // Box total width = brandPanelWidth + gap + mascotColumns*2 + 6 (2 borders + 2 inner pads on each side).
+  function pickLayout(termWidth: number) {
+    const fits = (brand: number, gap: number, cols: number) => termWidth >= brand + gap + cols * 2 + 6
+    const aGrid = selectedVariant.mascotGrid ?? baseMascotGrid
+    const aCols = Math.max(...aGrid.map((line) => line.length))
+    // Tier A: the selected variant's full (2-wide) wordmark + favicon mascot.
+    if (fits(selectedVariant.brandPanelWidth, selectedVariant.gap ?? 4, aCols))
+      return {
+        rows: selectedVariant.rows,
+        brandPanelWidth: selectedVariant.brandPanelWidth,
+        mascotGrid: aGrid,
+        gap: selectedVariant.gap ?? 4,
+        mascotColumns: aCols,
+      }
+    // Tier B: compact 1-wide CODEGOBLIN + the favicon mascot.
+    const bCols = Math.max(...baseMascotGrid.map((line) => line.length))
+    if (fits(compactBrandWidth, 4, bCols))
+      return {
+        rows: makeArtRows(compactWordmarkRows, compactBrandWidth),
+        brandPanelWidth: compactBrandWidth,
+        mascotGrid: baseMascotGrid,
+        gap: 4,
+        mascotColumns: bCols,
+      }
+    // Tier C: compact wordmark, no mascot — renderBrandRow's fitChunks hard-clips if even this is too wide.
+    return {
+      rows: makeArtRows(compactWordmarkRows, compactBrandWidth),
+      brandPanelWidth: Math.max(2, Math.min(compactBrandWidth, termWidth - 6)),
+      mascotGrid: blankMascotGrid,
+      gap: 0,
+      mascotColumns: 0,
+    }
+  }
+
+  type HeaderLayout = ReturnType<typeof pickLayout>
 
   function fitChunks(chunks: TextChunk[], width: number) {
     const fitted: TextChunk[] = []
@@ -505,16 +537,16 @@ function TuiGoblinHeader(props: { theme: any }) {
     return fitted
   }
 
-  function renderBrandRow(mascotRowIdx: number) {
-    const chunks = fitChunks(selectedVariant.rows[mascotRowIdx] ?? [], brandPanelWidth)
+  function renderBrandRow(layout: HeaderLayout, mascotRowIdx: number) {
+    const chunks = fitChunks(layout.rows[mascotRowIdx] ?? [], layout.brandPanelWidth)
     let totalLen = 0
     for (const part of chunks) {
       totalLen += part.text.length
     }
-    const paddingNeeded = Math.max(0, brandPanelWidth - totalLen)
+    const paddingNeeded = Math.max(0, layout.brandPanelWidth - totalLen)
 
     return (
-      <box flexDirection="row" width={brandPanelWidth}>
+      <box flexDirection="row" width={layout.brandPanelWidth}>
         {chunks.map((part) => (
           <text fg={part.fg ?? props.theme.textMuted} attributes={part.attributes}>
             {part.text}
@@ -525,8 +557,8 @@ function TuiGoblinHeader(props: { theme: any }) {
     )
   }
 
-  function renderMascotRow(rowIndex: number) {
-    const mascotRow = (mascotGrid[rowIndex] ?? "").padEnd(mascotColumns, ".")
+  function renderMascotRow(layout: HeaderLayout, rowIndex: number) {
+    const mascotRow = (layout.mascotGrid[rowIndex] ?? "").padEnd(layout.mascotColumns, ".")
     const elements: JSX.Element[] = []
     for (const char of mascotRow) {
       if (char === "G") {
@@ -546,64 +578,66 @@ function TuiGoblinHeader(props: { theme: any }) {
     return elements
   }
 
-  const rows: JSX.Element[] = []
-  const borderLeft = <text fg={borderColor}>│</text>
-  const borderRight = <text fg={borderColor}>│</text>
-  const hasHelperText = Boolean(selectedVariant.helperTitle || selectedVariant.helperNotes?.length)
+  // Reactive: re-runs whenever the terminal is resized so the logo always fits.
+  const rowEls = createMemo(() => {
+    const layout = pickLayout(Math.max(1, dimensions().width))
+    const interiorWidth = 2 + layout.brandPanelWidth + layout.gap + layout.mascotColumns * 2 + 2
+    const artHeight = Math.max(8, layout.mascotGrid.length)
+    const brandPad = Math.floor((artHeight - 8) / 2)
+    const out: JSX.Element[] = []
 
-  rows.push(
-    <box flexDirection="row">
-      <text fg={goldColor}>┌</text>
-      <text fg={borderColor}>{"─".repeat(interiorWidth)}</text>
-      <text fg={goldColor}>┐</text>
-    </box>,
-  )
-
-  rows.push(
-    <box flexDirection="row">
-      {borderLeft}
-      <text>{" ".repeat(interiorWidth)}</text>
-      {borderRight}
-    </box>,
-  )
-
-  for (let i = 0; i < artHeight; i++) {
-    if (mascotSide === "left") {
-      rows.push(
-        <box flexDirection="row">
-          {borderLeft}
-          <text>  </text>
-          {renderMascotRow(i)}
-          <text>{" ".repeat(gap)}</text>
-          {renderBrandRow(i - brandPad)}
-          <text>  </text>
-          {borderRight}
-        </box>,
-      )
-    } else {
-      rows.push(
-        <box flexDirection="row">
-          {borderLeft}
-          <text>  </text>
-          {renderBrandRow(i - brandPad)}
-          <text>{" ".repeat(gap)}</text>
-          {renderMascotRow(i)}
-          <text>  </text>
-          {borderRight}
-        </box>,
-      )
+    out.push(
+      <box flexDirection="row">
+        <text fg={goldColor}>┌</text>
+        <text fg={borderColor}>{"─".repeat(interiorWidth)}</text>
+        <text fg={goldColor}>┐</text>
+      </box>,
+    )
+    out.push(
+      <box flexDirection="row">
+        <text fg={borderColor}>│</text>
+        <text>{" ".repeat(interiorWidth)}</text>
+        <text fg={borderColor}>│</text>
+      </box>,
+    )
+    for (let i = 0; i < artHeight; i++) {
+      if (mascotSide === "left") {
+        out.push(
+          <box flexDirection="row">
+            <text fg={borderColor}>│</text>
+            <text>  </text>
+            {renderMascotRow(layout, i)}
+            <text>{" ".repeat(layout.gap)}</text>
+            {renderBrandRow(layout, i - brandPad)}
+            <text>  </text>
+            <text fg={borderColor}>│</text>
+          </box>,
+        )
+      } else {
+        out.push(
+          <box flexDirection="row">
+            <text fg={borderColor}>│</text>
+            <text>  </text>
+            {renderBrandRow(layout, i - brandPad)}
+            <text>{" ".repeat(layout.gap)}</text>
+            {renderMascotRow(layout, i)}
+            <text>  </text>
+            <text fg={borderColor}>│</text>
+          </box>,
+        )
+      }
     }
-  }
+    out.push(
+      <box flexDirection="row">
+        <text fg={goldColor}>└</text>
+        <text fg={borderColor}>{"─".repeat(interiorWidth)}</text>
+        <text fg={goldColor}>┘</text>
+      </box>,
+    )
+    return out
+  })
 
-  rows.push(
-    <box flexDirection="row">
-      <text fg={goldColor}>└</text>
-      <text fg={borderColor}>{"─".repeat(interiorWidth)}</text>
-      <text fg={goldColor}>┘</text>
-    </box>,
-  )
-
-  return <box flexDirection="column" alignItems="center">{rows}</box>
+  return <box flexDirection="column" alignItems="center">{rowEls()}</box>
 }
 
 function TuiGoblinRunner(props: { theme: any }) {
