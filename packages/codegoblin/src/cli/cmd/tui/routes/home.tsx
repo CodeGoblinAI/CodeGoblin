@@ -483,17 +483,20 @@ function TuiGoblinHeader(props: { theme: any }) {
     headerVariants[0]
   const mascotSide = selectedVariant.mascotSide ?? "right"
   const dimensions = useTerminalDimensions()
-  // Compact single-line fallback wordmark (~half the width of the 2-wide default) for narrower terminals.
-  const compactWordmarkRows = buildFontRows("CODEGOBLIN", solidFiveFont, 1)
-  const compactBrandWidth = Math.max(...compactWordmarkRows.map((line) => line.length))
+  // Narrower fallback that KEEPS the crisp 2-wide square pixels (no stretched 1-wide look):
+  // a compact single-line CODEGOBLIN. On very narrow terminals the mascot is dropped so the
+  // wordmark stays whole and readable rather than stacking (which collides) or clipping.
+  const compactRows = widenPixels(buildFontRows("CODEGOBLIN", compactFourFont, 1))
+  const compactWidth = Math.max(...compactRows.map((line) => line.length))
 
   // Pick the largest logo that fits the current terminal width so the box never overflows / clips on resize.
   // Box total width = brandPanelWidth + gap + mascotColumns*2 + 6 (2 borders + 2 inner pads on each side).
   function pickLayout(termWidth: number) {
     const fits = (brand: number, gap: number, cols: number) => termWidth >= brand + gap + cols * 2 + 6
+    const mascotCols = Math.max(...baseMascotGrid.map((line) => line.length))
     const aGrid = selectedVariant.mascotGrid ?? baseMascotGrid
     const aCols = Math.max(...aGrid.map((line) => line.length))
-    // Tier A: the selected variant's full (2-wide) wordmark + favicon mascot.
+    // Tier A: the selected variant's full 2-wide CODEGOBLIN + favicon mascot.
     if (fits(selectedVariant.brandPanelWidth, selectedVariant.gap ?? 4, aCols))
       return {
         rows: selectedVariant.rows,
@@ -502,20 +505,28 @@ function TuiGoblinHeader(props: { theme: any }) {
         gap: selectedVariant.gap ?? 4,
         mascotColumns: aCols,
       }
-    // Tier B: compact 1-wide CODEGOBLIN + the favicon mascot.
-    const bCols = Math.max(...baseMascotGrid.map((line) => line.length))
-    if (fits(compactBrandWidth, 4, bCols))
+    // Tier B: compact 2-wide single-line CODEGOBLIN + favicon mascot.
+    if (fits(compactWidth, 4, mascotCols))
       return {
-        rows: makeArtRows(compactWordmarkRows, compactBrandWidth),
-        brandPanelWidth: compactBrandWidth,
+        rows: makeArtRows(compactRows, compactWidth),
+        brandPanelWidth: compactWidth,
         mascotGrid: baseMascotGrid,
         gap: 4,
-        mascotColumns: bCols,
+        mascotColumns: mascotCols,
       }
-    // Tier C: compact wordmark, no mascot — renderBrandRow's fitChunks hard-clips if even this is too wide.
+    // Tier C: compact 2-wide single-line CODEGOBLIN, mascot dropped to keep the word whole.
+    if (fits(compactWidth, 0, 0))
+      return {
+        rows: makeArtRows(compactRows, compactWidth),
+        brandPanelWidth: compactWidth,
+        mascotGrid: blankMascotGrid,
+        gap: 0,
+        mascotColumns: 0,
+      }
+    // Tier D: ultra-narrow — fitChunks hard-clips the wordmark so it can never overflow the border.
     return {
-      rows: makeArtRows(compactWordmarkRows, compactBrandWidth),
-      brandPanelWidth: Math.max(2, Math.min(compactBrandWidth, termWidth - 6)),
+      rows: makeArtRows(compactRows, compactWidth),
+      brandPanelWidth: Math.max(2, Math.min(compactWidth, termWidth - 6)),
       mascotGrid: blankMascotGrid,
       gap: 0,
       mascotColumns: 0,
