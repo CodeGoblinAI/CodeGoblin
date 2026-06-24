@@ -1812,7 +1812,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             data-component={newSession() ? "session-new-composer" : "session-composer"}
             onSubmit={handleSubmit}
             classList={{
-              "group/prompt-input min-h-[96px] w-full rounded-xl bg-v2-background-bg-base shadow-[var(--v2-elevation-raised)]": true,
+              "group/prompt-input min-h-[96px] w-full rounded-xl bg-v2-background-bg-base border border-[#244a28] shadow-[var(--v2-elevation-raised)] transition-colors focus-within:border-[#3a7d3f]": true,
               "border-icon-info-active border-dashed": store.draggingType !== null,
               [props.class ?? ""]: !!props.class,
             }}
@@ -1936,6 +1936,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     />
                   </div>
                 </Show>
+                <div class="flex-1" />
                 {modelControl()}
               </div>
               <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
@@ -1946,10 +1947,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   tabIndex={store.mode === "normal" ? undefined : -1}
                   icon={stopping() ? "stop" : store.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
                   variant="primary"
-                  class="size-7 rounded-md p-[6px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
+                  class="size-7 rounded-full p-[6px] text-[#06210a] shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
                   style={{
                     "background-image":
-                      "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(90deg,var(--v2-background-bg-contrast) 0%,var(--v2-background-bg-contrast) 100%)",
+                      "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(135deg,#9ADB35 0%,#6fae28 100%)",
                   }}
                   aria-label={stopping() ? language.t("prompt.action.stop") : language.t("prompt.action.send")}
                 />
@@ -2145,7 +2146,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       {language.t("common.cancel")}
                     </Button>
                   </div>
-                  <div class="flex items-center gap-1.5 min-w-0 flex-1 h-7">
+                  <div class="flex items-center justify-end gap-1.5 min-w-0 flex-1 h-7">
                     <Show when={!agentsLoading()}>
                       <div
                         data-component="prompt-agent-control"
