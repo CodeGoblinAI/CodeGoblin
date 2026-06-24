@@ -481,174 +481,42 @@ function TuiGoblinHeader(props: { theme: any }) {
     headerVariants.find((variant) => variant.id === selectedVariantId) ??
     headerVariants.find((variant) => variant.id === "09") ??
     headerVariants[0]
-  const mascotSide = selectedVariant.mascotSide ?? "right"
   const dimensions = useTerminalDimensions()
-  // Narrower fallback that KEEPS the crisp 2-wide square pixels (no stretched 1-wide look):
-  // a compact single-line CODEGOBLIN. On very narrow terminals the mascot is dropped so the
-  // wordmark stays whole and readable rather than stacking (which collides) or clipping.
-  const compactRows = widenPixels(buildFontRows("CODEGOBLIN", compactFourFont, 1))
-  const compactWidth = Math.max(...compactRows.map((line) => line.length))
 
-  // Pick the largest logo that fits the current terminal width so the box never overflows / clips on resize.
-  // Box total width = brandPanelWidth + gap + mascotColumns*2 + 6 (2 borders + 2 inner pads on each side).
-  function pickLayout(termWidth: number) {
-    const fits = (brand: number, gap: number, cols: number) => termWidth >= brand + gap + cols * 2 + 6
-    const mascotCols = Math.max(...baseMascotGrid.map((line) => line.length))
-    const aGrid = selectedVariant.mascotGrid ?? baseMascotGrid
-    const aCols = Math.max(...aGrid.map((line) => line.length))
-    // Tier A: the selected variant's full 2-wide CODEGOBLIN + favicon mascot.
-    if (fits(selectedVariant.brandPanelWidth, selectedVariant.gap ?? 4, aCols))
-      return {
-        rows: selectedVariant.rows,
-        brandPanelWidth: selectedVariant.brandPanelWidth,
-        mascotGrid: aGrid,
-        gap: selectedVariant.gap ?? 4,
-        mascotColumns: aCols,
-      }
-    // Tier B: compact 2-wide single-line CODEGOBLIN + favicon mascot.
-    if (fits(compactWidth, 4, mascotCols))
-      return {
-        rows: makeArtRows(compactRows, compactWidth),
-        brandPanelWidth: compactWidth,
-        mascotGrid: baseMascotGrid,
-        gap: 4,
-        mascotColumns: mascotCols,
-      }
-    // Tier C: compact 2-wide single-line CODEGOBLIN, mascot dropped to keep the word whole.
-    if (fits(compactWidth, 0, 0))
-      return {
-        rows: makeArtRows(compactRows, compactWidth),
-        brandPanelWidth: compactWidth,
-        mascotGrid: blankMascotGrid,
-        gap: 0,
-        mascotColumns: 0,
-      }
-    // Tier D: ultra-narrow — fitChunks hard-clips the wordmark so it can never overflow the border.
-    return {
-      rows: makeArtRows(compactRows, compactWidth),
-      brandPanelWidth: Math.max(2, Math.min(compactWidth, termWidth - 6)),
-      mascotGrid: blankMascotGrid,
-      gap: 0,
-      mascotColumns: 0,
-    }
+  // Pad a block of figlet lines to equal width so they centre cleanly as one unit.
+  const padBlock = (rows: string[]) => {
+    const width = Math.max(0, ...rows.map((line) => line.length))
+    return rows.map((line) => line.padEnd(width, " "))
   }
+  // Clean, legible figlet wordmark — the pixel-block font + goblin mascot read as garbled blocks at
+  // this scale, so the logo is just the word, rendered in a proper readable font.
+  const bigWordmark = padBlock([
+    "   _____          _       _____       _     _ _",
+    "  / ____|        | |     / ____|     | |   | (_)",
+    " | |     ___   __| | ___| |  __  ___ | |__ | |_ _ __",
+    " | |    / _ \\ / _` |/ _ \\ | |_ |/ _ \\| '_ \\| | | '_ \\",
+    " | |___| (_) | (_| |  __/ |__| | (_) | |_) | | | | | |",
+    "  \\_____\\___/ \\__,_|\\___|\\_____|\\___/|_.__/|_|_|_| |_|",
+  ])
+  const smallWordmark = padBlock([
+    "   ___         _      ___     _    _ _",
+    "  / __|___  __| |___ / __|___| |__| (_)_ _",
+    " | (__/ _ \\/ _` / -_) (_ / _ \\ '_ \\ | | ' \\",
+    "  \\___\\___/\\__,_\\___|\\___\\___/_.__/_|_|_||_|",
+  ])
 
-  type HeaderLayout = ReturnType<typeof pickLayout>
-
-  function fitChunks(chunks: TextChunk[], width: number) {
-    const fitted: TextChunk[] = []
-    let remaining = width
-    for (const part of chunks) {
-      if (remaining <= 0) break
-      const text = part.text.slice(0, remaining)
-      if (!text) continue
-      fitted.push({ ...part, text })
-      remaining -= text.length
-    }
-    return fitted
-  }
-
-  function renderBrandRow(layout: HeaderLayout, mascotRowIdx: number) {
-    const chunks = fitChunks(layout.rows[mascotRowIdx] ?? [], layout.brandPanelWidth)
-    let totalLen = 0
-    for (const part of chunks) {
-      totalLen += part.text.length
-    }
-    const paddingNeeded = Math.max(0, layout.brandPanelWidth - totalLen)
-
-    return (
-      <box flexDirection="row" width={layout.brandPanelWidth}>
-        {chunks.map((part) => (
-          <text fg={part.fg ?? props.theme.textMuted} attributes={part.attributes}>
-            {part.text}
-          </text>
-        ))}
-        {paddingNeeded > 0 ? <text fg={props.theme.textMuted}>{" ".repeat(paddingNeeded)}</text> : null}
-      </box>
-    )
-  }
-
-  function renderMascotRow(layout: HeaderLayout, rowIndex: number) {
-    const mascotRow = (layout.mascotGrid[rowIndex] ?? "").padEnd(layout.mascotColumns, ".")
-    const elements: JSX.Element[] = []
-    for (const char of mascotRow) {
-      if (char === "G") {
-        elements.push(<text fg={skinColor}>██</text>)
-      } else if (char === "S") {
-        elements.push(<text fg={shadowColor}>██</text>)
-      } else if (char === "P") {
-        elements.push(<text fg={vestColor}>██</text>)
-      } else if (char === "B") {
-        elements.push(<text fg={eyeColor}>██</text>)
-      } else if (char === "M") {
-        elements.push(<text fg={props.theme.textMuted}>██</text>)
-      } else {
-        elements.push(<text>  </text>)
-      }
-    }
-    return elements
-  }
-
-  // Reactive: re-runs whenever the terminal is resized so the logo always fits.
-  const rowEls = createMemo(() => {
-    const layout = pickLayout(Math.max(1, dimensions().width))
-    const interiorWidth = 2 + layout.brandPanelWidth + layout.gap + layout.mascotColumns * 2 + 2
-    const artHeight = Math.max(8, layout.mascotGrid.length)
-    const brandPad = Math.floor((artHeight - 8) / 2)
-    const out: JSX.Element[] = []
-
-    out.push(
-      <box flexDirection="row">
-        <text fg={goldColor}>┌</text>
-        <text fg={borderColor}>{"─".repeat(interiorWidth)}</text>
-        <text fg={goldColor}>┐</text>
-      </box>,
-    )
-    out.push(
-      <box flexDirection="row">
-        <text fg={borderColor}>│</text>
-        <text>{" ".repeat(interiorWidth)}</text>
-        <text fg={borderColor}>│</text>
-      </box>,
-    )
-    for (let i = 0; i < artHeight; i++) {
-      if (mascotSide === "left") {
-        out.push(
-          <box flexDirection="row">
-            <text fg={borderColor}>│</text>
-            <text>  </text>
-            {renderMascotRow(layout, i)}
-            <text>{" ".repeat(layout.gap)}</text>
-            {renderBrandRow(layout, i - brandPad)}
-            <text>  </text>
-            <text fg={borderColor}>│</text>
-          </box>,
-        )
-      } else {
-        out.push(
-          <box flexDirection="row">
-            <text fg={borderColor}>│</text>
-            <text>  </text>
-            {renderBrandRow(layout, i - brandPad)}
-            <text>{" ".repeat(layout.gap)}</text>
-            {renderMascotRow(layout, i)}
-            <text>  </text>
-            <text fg={borderColor}>│</text>
-          </box>,
-        )
-      }
-    }
-    out.push(
-      <box flexDirection="row">
-        <text fg={goldColor}>└</text>
-        <text fg={borderColor}>{"─".repeat(interiorWidth)}</text>
-        <text fg={goldColor}>┘</text>
-      </box>,
-    )
-    return out
+  // Pick the largest wordmark that fits the terminal width; re-runs on resize so it never clips.
+  const lines = createMemo(() => {
+    const width = Math.max(1, dimensions().width)
+    const wordmark = width >= bigWordmark[0].length + 4 ? bigWordmark : smallWordmark
+    const rule = "─".repeat(wordmark[0].length)
+    return [
+      ...wordmark.map((line) => <text fg={skinColor}>{line}</text>),
+      <text fg={goldColor}>{rule}</text>,
+    ]
   })
 
-  return <box flexDirection="column" alignItems="center">{rowEls()}</box>
+  return <box flexDirection="column" alignItems="center">{lines()}</box>
 }
 
 function TuiGoblinRunner(props: { theme: any }) {
