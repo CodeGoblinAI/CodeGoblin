@@ -11,6 +11,7 @@ import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
 import { useEditorContext } from "@tui/context/editor"
 import { useTheme } from "../context/theme"
 import { RGBA } from "@opentui/core"
+import { HEADER_FONTS, SMALL_WORDMARK } from "./home-wordmarks"
 
 function TuiGoblinHeader(props: { theme: any }) {
   const skinColor = RGBA.fromInts(154, 219, 53)
@@ -22,27 +23,17 @@ function TuiGoblinHeader(props: { theme: any }) {
     const width = Math.max(0, ...rows.map((line) => line.length))
     return rows.map((line) => line.padEnd(width, " "))
   }
-  // Clean, legible figlet wordmark — the pixel-block font + goblin mascot read as garbled blocks at
-  // this scale, so the logo is just the word, rendered in a proper readable font.
-  const bigWordmark = padBlock([
-    "   _____          _       _____       _     _ _",
-    "  / ____|        | |     / ____|     | |   | (_)",
-    " | |     ___   __| | ___| |  __  ___ | |__ | |_ _ __",
-    " | |    / _ \\ / _` |/ _ \\ | |_ |/ _ \\| '_ \\| | | '_ \\",
-    " | |___| (_) | (_| |  __/ |__| | (_) | |_) | | | | | |",
-    "  \\_____\\___/ \\__,_|\\___|\\_____|\\___/|_.__/|_|_|_| |_|",
-  ])
-  const smallWordmark = padBlock([
-    "   ___         _      ___     _    _ _",
-    "  / __|___  __| |___ / __|___| |__| (_)_ _",
-    " | (__/ _ \\/ _` / -_) (_ / _ \\ '_ \\ | | ' \\",
-    "  \\___\\___/\\__,_\\___|\\___\\___/_.__/_|_|_||_|",
-  ])
+  // The wordmark font is selectable via CODEGOBLIN_HEADER_FONT
+  // (standard | big | slant | shadow | block | mega). On terminals too narrow for the chosen
+  // font, fall back to the compact wordmark so it never clips.
+  const fontKey = (process.env.CODEGOBLIN_HEADER_FONT ?? "big").trim().toLowerCase()
+  const wideWordmark = padBlock(HEADER_FONTS[fontKey] ?? HEADER_FONTS.big)
+  const smallWordmark = padBlock(SMALL_WORDMARK)
 
   // Pick the largest wordmark that fits the terminal width; re-runs on resize so it never clips.
   const lines = createMemo(() => {
     const width = Math.max(1, dimensions().width)
-    const wordmark = width >= bigWordmark[0].length + 4 ? bigWordmark : smallWordmark
+    const wordmark = width >= wideWordmark[0].length + 4 ? wideWordmark : smallWordmark
     const rule = "─".repeat(wordmark[0].length)
     return [
       ...wordmark.map((line) => <text fg={skinColor}>{line}</text>),
@@ -433,7 +424,7 @@ export function Home() {
             <TuiGoblinHeader theme={theme} />
           </TuiPluginRuntime.Slot>
         </box>
-        <box flexGrow={3} minHeight={0} />
+        <box flexGrow={1} minHeight={2} />
         {showFooterAnimation ? <TuiGoblinRunner theme={theme} /> : null}
         <TuiPluginRuntime.Slot name="home_bottom" />
         <box height={1} minHeight={0} flexShrink={0} />
@@ -442,6 +433,7 @@ export function Home() {
             <Prompt ref={bind} right={<TuiPluginRuntime.Slot name="home_prompt_right" />} placeholders={placeholder} />
           </TuiPluginRuntime.Slot>
         </box>
+        <box flexGrow={2} minHeight={0} />
         <Toast />
       </box>
       <box width="100%" flexShrink={0}>
