@@ -482,7 +482,8 @@ function TuiSidebarCompanionGoblin(props: {
   }
 
   const companionHeadWide = menuHeadWide.map(staticRow)
-  // Gentle idle sway: arms and feet shift a hair each frame so the goblin breathes instead of freezing.
+  // Calm at rest: the idle frames are identical so the resting goblin holds still (the constant sway
+  // read as fidgety). It still animates during real activity — thinking, spending, image/audio work.
   const companionIdleFrames = normalizeFrames([
     createCompanionFrame(
       ...companionHeadWide,
@@ -494,15 +495,15 @@ function TuiSidebarCompanionGoblin(props: {
     createCompanionFrame(
       ...companionHeadWide,
       "...GGPPGG...",
-      "..GGPPPP.G..",
-      "...G...G....",
+      "..G.PPPP.G..",
+      "....G..G....",
       "...G....G...",
     ),
     createCompanionFrame(
       ...companionHeadWide,
       "...GGPPGG...",
-      "..G.PPPPGG..",
-      "....G...G...",
+      "..G.PPPP.G..",
+      "....G..G....",
       "...G....G...",
     ),
     createCompanionFrame(

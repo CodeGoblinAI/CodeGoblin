@@ -10,7 +10,9 @@ function View(props: { api: TuiPluginApi }) {
   const list = createMemo(() => props.api.state.lsp())
   const off = createMemo(() => !props.api.state.config.lsp)
 
+  // Hide the LSP panel entirely when LSPs are disabled — no need to advertise a disabled feature.
   return (
+    <Show when={!off()}>
     <box>
       <box flexDirection="row" gap={1} onMouseDown={() => list().length > 2 && setOpen((x) => !x)}>
         <Show when={list().length > 2}>
@@ -43,6 +45,7 @@ function View(props: { api: TuiPluginApi }) {
         </For>
       </Show>
     </box>
+    </Show>
   )
 }
 

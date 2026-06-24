@@ -26,7 +26,7 @@ function TuiGoblinHeader(props: { theme: any }) {
   // The wordmark font is selectable via CODEGOBLIN_HEADER_FONT
   // (standard | big | slant | shadow | block | mega). On terminals too narrow for the chosen
   // font, fall back to the compact wordmark so it never clips.
-  const fontKey = (process.env.CODEGOBLIN_HEADER_FONT ?? "big").trim().toLowerCase()
+  const fontKey = (process.env.CODEGOBLIN_HEADER_FONT ?? "shadow").trim().toLowerCase()
   const wideWordmark = padBlock(HEADER_FONTS[fontKey] ?? HEADER_FONTS.big)
   const smallWordmark = padBlock(SMALL_WORDMARK)
 
@@ -424,7 +424,7 @@ export function Home() {
             <TuiGoblinHeader theme={theme} />
           </TuiPluginRuntime.Slot>
         </box>
-        <box flexGrow={1} minHeight={2} />
+        <box height={3} minHeight={0} flexShrink={0} />
         {showFooterAnimation ? <TuiGoblinRunner theme={theme} /> : null}
         <TuiPluginRuntime.Slot name="home_bottom" />
         <box height={1} minHeight={0} flexShrink={0} />
