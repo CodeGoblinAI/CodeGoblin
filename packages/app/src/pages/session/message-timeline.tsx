@@ -1110,8 +1110,8 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={row}>
             <Show when={message()}>
               {(message) => (
-                <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-                  <div data-slot="session-turn-message-content" aria-live="off">
+                <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5 flex justify-end">
+                  <div data-slot="session-turn-message-content" class="min-w-0 max-w-[85%]" aria-live="off">
                     <Message message={message()} parts={getMsgParts(row.userMessageID)} actions={props.actions} />
                   </div>
                 </div>
