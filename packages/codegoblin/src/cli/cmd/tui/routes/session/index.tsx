@@ -1372,13 +1372,16 @@ function UserMessage(props: {
   return (
     <>
       <Show when={text()}>
-        <box
-          id={props.message.id}
-          border={["left"]}
-          borderColor={theme.accent}
-          customBorderChars={SplitBorder.customBorderChars}
-          marginTop={props.index === 0 ? 0 : 1}
-        >
+        <box flexDirection="row" marginTop={props.index === 0 ? 0 : 1}>
+          <box flexGrow={1} flexShrink={1} minWidth={2} />
+          <box
+            id={props.message.id}
+            border={["right"]}
+            borderColor={theme.accent}
+            customBorderChars={SplitBorder.customBorderChars}
+            maxWidth={80}
+            flexShrink={1}
+          >
           <box
             onMouseOver={() => {
               setHover(true)
@@ -1430,6 +1433,7 @@ function UserMessage(props: {
                 <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
               </text>
             </Show>
+          </box>
           </box>
         </box>
       </Show>
