@@ -576,7 +576,15 @@ export default function Layout(props: ParentProps) {
     const last = server.projects.last()
 
     if (list.length === 0) {
-      openComposer(last)
+      // No projects yet → open a "quick chat" composer rooted at the server's
+      // working directory (or home) instead of dropping back to the home page.
+      // The /path query may still be resolving, so wait briefly for it.
+      let quickDir = last || globalSync.data.path.directory || globalSync.data.path.home
+      for (let i = 0; i < 30 && !quickDir; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        quickDir = globalSync.data.path.directory || globalSync.data.path.home
+      }
+      openComposer(quickDir)
     } else {
       const next = list.find((project) => project.worktree === last) ?? list[0]
       openComposer(next?.worktree)
