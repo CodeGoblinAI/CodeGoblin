@@ -37,6 +37,7 @@ import { Icon } from "@codegoblin/ui/icon"
 import { ProviderIcon } from "@codegoblin/ui/provider-icon"
 import { Tooltip, TooltipKeybind } from "@codegoblin/ui/tooltip"
 import { IconButton } from "@codegoblin/ui/icon-button"
+import { DropdownMenu } from "@codegoblin/ui/dropdown-menu"
 import { Select } from "@codegoblin/ui/select"
 import { useDialog } from "@codegoblin/ui/context/dialog"
 import { ModelSelectorPopover } from "@/components/dialog-select-model"
@@ -1085,6 +1086,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     readClipboardImage: platform.readClipboardImage,
   })
 
+  const attachFromClipboard = async () => {
+    const file = await platform.readClipboardImage?.()
+    if (file) await addAttachments([file])
+  }
+
   const fileAttachmentInput = () => (
     <input
       ref={(el) => (fileInputRef = el)}
@@ -1896,24 +1902,37 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             <div class="flex h-11 items-center px-2">
               <div class="flex min-w-0 flex-1 items-center gap-0">
                 {fileAttachmentInput()}
-                <TooltipKeybind
-                  placement="top"
-                  title={language.t("prompt.action.attachFile")}
-                  keybind={command.keybind("file.attach")}
-                >
-                  <IconButton
+                <DropdownMenu gutter={6} placement="top-start">
+                  <DropdownMenu.Trigger
+                    as={IconButton}
                     data-action="prompt-attach"
                     type="button"
                     icon="plus"
                     variant="ghost"
                     class="size-7 rounded-md p-[6px] text-v2-icon-icon-muted"
                     style={buttons()}
-                    onClick={pick}
                     disabled={store.mode !== "normal"}
                     tabIndex={store.mode === "normal" ? undefined : -1}
                     aria-label={language.t("prompt.action.attachFile")}
                   />
-                </TooltipKeybind>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content class="min-w-[200px]">
+                      <DropdownMenu.Group>
+                        <DropdownMenu.GroupLabel>Bring into the cave</DropdownMenu.GroupLabel>
+                        <DropdownMenu.Item onSelect={() => pick()}>
+                          <Icon name="open-file" class="text-[#9ADB35]" />
+                          <DropdownMenu.ItemLabel>{language.t("prompt.action.attachFile")}</DropdownMenu.ItemLabel>
+                        </DropdownMenu.Item>
+                        <Show when={platform.readClipboardImage}>
+                          <DropdownMenu.Item onSelect={() => void attachFromClipboard()}>
+                            <Icon name="cloud-upload" class="text-[#9ADB35]" />
+                            <DropdownMenu.ItemLabel>Paste image</DropdownMenu.ItemLabel>
+                          </DropdownMenu.Item>
+                        </Show>
+                      </DropdownMenu.Group>
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu>
                 <Show when={newSession()}>
                   <div class="relative">
                     <div class="pointer-events-none absolute left-2 top-1/2 z-10 flex size-4 -translate-y-1/2 items-center justify-center">
