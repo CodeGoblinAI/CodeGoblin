@@ -154,7 +154,10 @@ export default function Layout(props: ParentProps) {
   const currentDir = createMemo(() => route().dir)
 
   const [state, setState] = createStore({
-    autoselect: !initialDirectory && !USE_NEW_DESIGN,
+    // Skip the landing/home page: when launched without a specific directory,
+    // auto-open the last-used (or first) project straight into a fresh prompt.
+    // Home stays reachable by navigating back to "/".
+    autoselect: !initialDirectory,
     busyWorkspaces: {} as Record<string, boolean>,
     hoverProject: undefined as string | undefined,
     scrollSessionKey: undefined as string | undefined,
@@ -561,16 +564,22 @@ export default function Layout(props: ParentProps) {
     await layout.ready.promise
     if (!untrack(() => state.autoselect)) return
 
+    // Open the project into a FRESH new-session composer (a place to put a
+    // prompt) rather than resuming its last conversation.
+    const openComposer = (directory: string | undefined) => {
+      if (!directory) return
+      openProject(directory, false)
+      navigateWithSidebarReset(`/${base64Encode(directory)}/session`)
+    }
+
     const list = layout.projects.list()
     const last = server.projects.last()
 
     if (list.length === 0) {
-      if (!last) return
-      await openProject(last, true)
+      openComposer(last)
     } else {
       const next = list.find((project) => project.worktree === last) ?? list[0]
-      if (!next) return
-      await openProject(next.worktree, true)
+      openComposer(next?.worktree)
     }
   })
 
