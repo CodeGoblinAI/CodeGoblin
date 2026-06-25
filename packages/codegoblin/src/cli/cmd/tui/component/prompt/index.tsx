@@ -2250,13 +2250,46 @@ export function Prompt(props: PromptProps) {
             }
           />
         </box>
-        <box width="100%" flexDirection="row" justifyContent="flex-start" gap={2}>
+        <box width="100%" flexDirection="row" justifyContent="space-between" gap={2}>
+          <Show when={status().type !== "retry"}>
+            <box gap={2} flexDirection="row">
+              <Show when={editorContextLabelState() !== "none" ? editorFileLabelDisplay() : undefined}>
+                {(file) => (
+                  <text fg={editorContextLabelState() === "pending" ? theme.secondary : theme.textMuted}>{file()}</text>
+                )}
+              </Show>
+              <Switch>
+                <Match when={store.mode === "normal"}>
+                  <Switch>
+                    <Match when={usage() || tokenHoard()}>
+                      <text fg={theme.textMuted} wrapMode="none">
+                        {[usage()?.context, usage()?.cost, tokenHoard()].filter(Boolean).join(" · ")}
+                      </text>
+                    </Match>
+                    <Match when={true}>
+                      <text fg={theme.text}>
+                        {agentShortcut()} <span style={{ fg: theme.textMuted }}>agents</span>
+                      </text>
+                    </Match>
+                  </Switch>
+                  <text fg={theme.text}>
+                    {paletteShortcut()} <span style={{ fg: theme.textMuted }}>actions</span>
+                  </text>
+                </Match>
+                <Match when={store.mode === "shell"}>
+                  <text fg={theme.text}>
+                    esc <span style={{ fg: theme.textMuted }}>exit shell mode</span>
+                  </text>
+                </Match>
+              </Switch>
+            </box>
+          </Show>
           <Switch>
             <Match when={status().type !== "idle"}>
               <box
                 flexDirection="row"
                 gap={1}
-                flexGrow={1}
+                flexGrow={status().type === "retry" ? 1 : 0}
                 justifyContent={status().type === "retry" ? "space-between" : "flex-start"}
               >
                 <box flexShrink={0} flexDirection="row" gap={1}>
@@ -2372,39 +2405,6 @@ export function Prompt(props: PromptProps) {
             </Match>
             <Match when={true}>{props.hint ?? <text />}</Match>
           </Switch>
-          <Show when={status().type !== "retry"}>
-            <box gap={2} flexDirection="row">
-              <Show when={editorContextLabelState() !== "none" ? editorFileLabelDisplay() : undefined}>
-                {(file) => (
-                  <text fg={editorContextLabelState() === "pending" ? theme.secondary : theme.textMuted}>{file()}</text>
-                )}
-              </Show>
-              <Switch>
-                <Match when={store.mode === "normal"}>
-                  <Switch>
-                    <Match when={usage() || tokenHoard()}>
-                      <text fg={theme.textMuted} wrapMode="none">
-                        {[usage()?.context, usage()?.cost, tokenHoard()].filter(Boolean).join(" · ")}
-                      </text>
-                    </Match>
-                    <Match when={true}>
-                      <text fg={theme.text}>
-                        {agentShortcut()} <span style={{ fg: theme.textMuted }}>agents</span>
-                      </text>
-                    </Match>
-                  </Switch>
-                  <text fg={theme.text}>
-                    {paletteShortcut()} <span style={{ fg: theme.textMuted }}>actions</span>
-                  </text>
-                </Match>
-                <Match when={store.mode === "shell"}>
-                  <text fg={theme.text}>
-                    esc <span style={{ fg: theme.textMuted }}>exit shell mode</span>
-                  </text>
-                </Match>
-              </Switch>
-            </box>
-          </Show>
         </box>
       </box>
       <Autocomplete
