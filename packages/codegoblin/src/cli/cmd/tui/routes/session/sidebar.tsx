@@ -36,6 +36,7 @@ function TuiSidebarCompanionGoblin(props: {
   const skinColor = RGBA.fromInts(154, 219, 53)
   const shadowColor = RGBA.fromInts(120, 125, 135)
   const vestColor = RGBA.fromInts(130, 80, 223)
+  const facetColor = RGBA.fromInts(92, 138, 30)
   const eyeColor = props.theme.backgroundElement
   const spendColor = props.theme.warning
   const [tick, setTick] = createSignal(0)
@@ -502,15 +503,17 @@ function TuiSidebarCompanionGoblin(props: {
       "....G..G....",
     ]),
     createChatGoblinVariant("45", "gem", [
-      "....TTTTTT....",
-      "...TGWWWWGT...",
-      "..TGGWWWWGGT..",
-      ".TGGGWWWWGGGT.",
-      "..TGGGWWGGGT..",
-      "...TGGGGGGT...",
-      "....TGGGGT....",
-      ".....TGGT.....",
-      "......TT......",
+      ".....T.....",
+      "....TWT....",
+      "...TWGWT...",
+      "..TWGGGWT..",
+      ".TWGGGGGWT.",
+      "TWGGGGGGGWT",
+      ".TDGGGGGDT.",
+      "..TDGGGDT..",
+      "...TDGDT...",
+      "....TDT....",
+      ".....T.....",
     ]),
   ]
 
@@ -1232,6 +1235,8 @@ function TuiSidebarCompanionGoblin(props: {
         cells.push(<text fg={props.theme.text}>██</text>)
       } else if (char === "T") {
         cells.push(<text fg={spendColor}>██</text>)
+      } else if (char === "D") {
+        cells.push(<text fg={facetColor}>██</text>)
       } else {
         cells.push(<text>  </text>)
       }
