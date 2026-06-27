@@ -504,9 +504,9 @@ function TuiSidebarCompanionGoblin(props: {
     ]),
     createChatGoblinVariant("45", "gem", [
       "....T....",
-      "...TGT...",
-      "..TGWGT..",
-      ".TGGGGGT.",
+      ["...TGT...", "...TGT...", "...TWT...", "...TGT..."],
+      ["..TGGGT..", "..TGWGT..", "..TWWWT..", "..TGWGT.."],
+      [".TGGGGGT.", ".TGGGGGT.", ".TGGWGGT.", ".TGGGGGT."],
       "TGGGGGGGT",
       ".TGGGGGT.",
       ".TDGGGDT.",
