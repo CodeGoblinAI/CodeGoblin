@@ -1214,7 +1214,11 @@ function TuiSidebarCompanionGoblin(props: {
   function renderRow(rowIndex: number) {
     const currentFrames = frames()
     const currentWidth = width()
-    const animatedFrame = currentFrames[tick() % currentFrames.length] ?? currentFrames[0] ?? []
+    // Only animate while tokens/spend are in flight; otherwise hold the still frame.
+    const animate = actionActive() || currentActivityKind() !== "idle"
+    const animatedFrame = animate
+      ? (currentFrames[tick() % currentFrames.length] ?? currentFrames[0] ?? [])
+      : (currentFrames[0] ?? [])
     const fixedFrame = requestedFrameIndex !== undefined ? currentFrames[requestedFrameIndex] : undefined
     const frame = fixedFrame ?? animatedFrame
     const spriteRow = frame[rowIndex] ?? "".padEnd(currentWidth, ".")
