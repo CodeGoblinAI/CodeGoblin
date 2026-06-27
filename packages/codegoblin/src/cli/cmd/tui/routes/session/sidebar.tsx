@@ -503,17 +503,17 @@ function TuiSidebarCompanionGoblin(props: {
       "....G..G....",
     ]),
     createChatGoblinVariant("45", "gem", [
-      ".....T.....",
-      "....TWT....",
-      "...TWGWT...",
-      "..TWGGGWT..",
-      ".TWGGGGGWT.",
-      "TWGGGGGGGWT",
-      ".TDGGGGGDT.",
-      "..TDGGGDT..",
-      "...TDGDT...",
-      "....TDT....",
-      ".....T.....",
+      "....T....",
+      "...TGT...",
+      "..TGWGT..",
+      ".TGGGGGT.",
+      "TGGGGGGGT",
+      ".TGGGGGT.",
+      ".TDGGGDT.",
+      "..TDGDT..",
+      "..TDGDT..",
+      "...TDT...",
+      "....T....",
     ]),
   ]
 
@@ -1269,7 +1269,7 @@ function TuiSidebarCompanionGoblin(props: {
         </text>
       </box>
       {Array.from({ length: frames()[0]?.length ?? 0 }, (_, rowIndex) => (
-        <box flexDirection="row" width={width() * 2}>
+        <box flexDirection="row" width={width() * 2} justifyContent="center">
           {renderRow(rowIndex)}
         </box>
       ))}
