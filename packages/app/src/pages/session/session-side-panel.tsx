@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createEffect, createMemo, onCleanup, type JSX } from "solid-js"
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
 import { Tabs } from "@codegoblin/ui/tabs"
@@ -27,6 +27,9 @@ import { FileTabContent } from "@/pages/session/file-tabs"
 import { createOpenSessionFileTab, createSessionTabs, getTabReorderIndex, type Sizing } from "@/pages/session/helpers"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
+import { SessionActivityTab } from "@/pages/session/session-activity-tab"
+
+const NEW_DESIGN = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
 
 type RenderDiff = (SnapshotFileDiff & { file: string }) | VcsFileDiff
 
@@ -149,6 +152,37 @@ export function SessionSidePanel(props: {
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
 
+  // The new design defaults the right pane to the live "Activity" view. "activity"
+  // and "review" live outside the file-tab model, so we track them with a local
+  // override that yields the moment a real file/context tab becomes active.
+  const [override, setOverride] = createSignal<"activity" | "review" | undefined>(
+    NEW_DESIGN ? "activity" : undefined,
+  )
+  createEffect(() => {
+    const active = activeTab()
+    if (active !== "empty" && active !== "review") setOverride(undefined)
+  })
+  const shownTab = createMemo(() => {
+    const choice = override()
+    if (choice === "activity") return "activity"
+    if (choice === "review" && reviewTab() && props.canReview()) return "review"
+    const active = activeTab()
+    // Activity is the firm default for the new design — Review stays one click
+    // away on its own tab, but never auto-takes the pane.
+    if (NEW_DESIGN && (active === "empty" || active === "review")) return "activity"
+    return active
+  })
+  const onTabChange = (value: string) => {
+    if (value === "activity") return setOverride("activity")
+    if (value === "review") {
+      setOverride("review")
+      openReviewPanel()
+      return
+    }
+    setOverride(undefined)
+    openTab(value)
+  }
+
   const fileTreeTab = () => layout.fileTree.tab()
 
   const setFileTreeTabValue = (value: string) => {
@@ -240,7 +274,7 @@ export function SessionSidePanel(props: {
                 >
                   <DragDropSensors />
                   <ConstrainDragYAxis />
-                  <Tabs value={activeTab()} onChange={openTab}>
+                  <Tabs value={shownTab()} onChange={onTabChange}>
                     <div class="sticky top-0 shrink-0 flex">
                       <Tabs.List
                         ref={(el: HTMLDivElement) => {
@@ -248,6 +282,11 @@ export function SessionSidePanel(props: {
                           onCleanup(stop)
                         }}
                       >
+                        <Show when={NEW_DESIGN}>
+                          <Tabs.Trigger value="activity">
+                            <div class="flex items-center gap-1.5">{language.t("session.tab.activity")}</div>
+                          </Tabs.Trigger>
+                        </Show>
                         <Show when={reviewTab() && props.canReview()}>
                           <Tabs.Trigger value="review">
                             <div class="flex items-center gap-1.5">
@@ -312,9 +351,22 @@ export function SessionSidePanel(props: {
                       </Tabs.List>
                     </div>
 
+                    <Show when={NEW_DESIGN}>
+                      <Tabs.Content value="activity" class="flex flex-col h-full overflow-hidden contain-strict">
+                        <Show when={shownTab() === "activity"}>
+                          <SessionActivityTab
+                            sessionID={() => params.id}
+                            hasReview={props.hasReview}
+                            reviewCount={props.reviewCount}
+                            onOpenReview={() => onTabChange("review")}
+                          />
+                        </Show>
+                      </Tabs.Content>
+                    </Show>
+
                     <Show when={reviewTab() && props.canReview()}>
                       <Tabs.Content value="review" class="flex flex-col h-full overflow-hidden contain-strict">
-                        <Show when={reviewOpen() && activeTab() === "review"}>{props.reviewPanel()}</Show>
+                        <Show when={reviewOpen() && shownTab() === "review"}>{props.reviewPanel()}</Show>
                       </Tabs.Content>
                     </Show>
 
@@ -333,7 +385,7 @@ export function SessionSidePanel(props: {
 
                     <Show when={contextOpen()}>
                       <Tabs.Content value="context" class="flex flex-col h-full overflow-hidden contain-strict">
-                        <Show when={activeTab() === "context"}>
+                        <Show when={shownTab() === "context"}>
                           <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
                             <SessionContextTab />
                           </div>

@@ -540,6 +540,7 @@ export const dict = {
   "home.sessions.group.older": "Older",
 
   "session.tab.session": "Session",
+  "session.tab.activity": "Activity",
   "session.tab.review": "Review",
   "session.tab.context": "Context",
   "session.panel.reviewAndFiles": "Review and files",
