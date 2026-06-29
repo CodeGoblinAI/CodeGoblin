@@ -55,3 +55,9 @@ docs/*CONTINUATION*.md
 .cursor/
 packages/core/.artifacts/
 packages/storybook/*.log
+
+# never commit npm auth token file
+.npmrc
+**/.npmrc
+# dead SST stubs (hosted infra removed)
+sst-env.d.ts
