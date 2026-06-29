@@ -64,9 +64,10 @@ const terminalFallback =
   '"JetBrainsMono Nerd Font Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
 
 const monoBase = monoFallback
-// CodeGoblin ships a mono-led UI by default (the bundled JetBrains Mono) for a
-// distinctive terminal/dev-tool voice instead of a generic system sans.
-const sansBase = `"JetBrainsMono Nerd Font Mono", ${monoFallback}`
+// Clean-base UI: chrome uses Inter / the system sans (matching Codex / Claude /
+// Antigravity). Code and diffs stay mono via --font-family-mono. Goblin character
+// lives in the accent color + wording, not a terminal-wide monospace voice.
+const sansBase = `"Inter", ${sansFallback}`
 const terminalBase = terminalFallback
 
 function input(font: string | undefined) {

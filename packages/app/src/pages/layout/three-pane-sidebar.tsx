@@ -177,19 +177,7 @@ export function ThreePaneSidebar(props: {
         <div class="mt-1">
           <div class={SECTION_LABEL}>{language.t("home.projects")}</div>
           <div class="mt-1 flex flex-col gap-px">
-            <Show
-              when={props.projects().length > 0}
-              fallback={
-                <button
-                  type="button"
-                  class={`${ROW_BASE} h-8 gap-1.5 px-3 text-v2-text-text-faint`}
-                  onClick={props.onOpenProject}
-                >
-                  <IconV2 name="folder-add-left" size="small" class="[&_[data-slot=icon-svg]]:text-v2-icon-icon-muted" />
-                  <span>{language.t("home.project.add")}</span>
-                </button>
-              }
-            >
+            <Show when={props.projects().length > 0}>
               <For each={props.projects()}>
                 {(project) => {
                   const name = createMemo(() => displayName(project))

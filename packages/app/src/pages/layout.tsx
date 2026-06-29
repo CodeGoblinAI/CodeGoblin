@@ -155,10 +155,10 @@ export default function Layout(props: ParentProps) {
   const currentDir = createMemo(() => route().dir)
 
   const [state, setState] = createStore({
-    // Skip the landing/home page: when launched without a specific directory,
-    // auto-open the last-used (or first) project straight into a fresh prompt.
-    // Home stays reachable by navigating back to "/".
-    autoselect: !initialDirectory,
+    // The chat-first home (HomeDesign "What should we work on?") IS the entry now —
+    // do NOT auto-redirect away from "/". Project selection + quick-chat happen on
+    // the home itself, so launching lands on the centered chat box.
+    autoselect: false,
     busyWorkspaces: {} as Record<string, boolean>,
     hoverProject: undefined as string | undefined,
     scrollSessionKey: undefined as string | undefined,

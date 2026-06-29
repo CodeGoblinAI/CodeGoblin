@@ -32,15 +32,13 @@
   line-height: 1.25;
 }
 
-/* CodeGoblin cave UI */
+/* CodeGoblin entry surfaces — neutral dark base + a single whisper of goblin green. */
 [data-cg-home],
 [data-cg-session] {
   position: relative;
   background:
-    radial-gradient(120% 80% at 14% -10%, rgba(154, 219, 53, 0.17), transparent 50%),
-    radial-gradient(70% 50% at 82% 120%, rgba(245, 200, 75, 0.09), transparent 60%),
-    radial-gradient(55% 38% at 50% -18%, rgba(245, 200, 75, 0.06), transparent 55%),
-    #040805;
+    radial-gradient(90% 55% at 50% -12%, rgba(154, 219, 53, 0.05), transparent 60%),
+    var(--v2-background-bg-base);
 }
 @keyframes cg-ember {
   0% {
@@ -68,15 +66,6 @@
   animation: cg-ember linear infinite;
   pointer-events: none;
   z-index: 1;
-}
-[data-cg-home]::after,
-[data-cg-session]::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(125% 95% at 50% 28%, transparent 52%, rgba(0, 0, 0, 0.6));
-  z-index: 0;
 }
 .cg-rail-btn {
   width: 42px;

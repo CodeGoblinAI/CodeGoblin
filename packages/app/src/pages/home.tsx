@@ -117,13 +117,17 @@ function HomeDesign() {
 
   function startChat(prompt?: string) {
     const project = selectedProject()
-    if (!project) {
+    // Quick chat with no project: root the session at the server's working dir.
+    const dir = project?.worktree || sync.data.path.directory || sync.data.path.home
+    if (!dir) {
       void chooseProject()
       return
     }
-    layout.projects.open(project.worktree)
-    server.projects.touch(project.worktree)
-    const slug = base64Encode(project.worktree)
+    if (project) {
+      layout.projects.open(dir)
+      server.projects.touch(dir)
+    }
+    const slug = base64Encode(dir)
     if (prompt?.trim()) {
       navigate(`/${slug}/session?prompt=${encodeURIComponent(prompt.trim())}`)
     } else {
@@ -210,22 +214,12 @@ function HomeDesign() {
                 type="button"
                 class="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#62f56e] text-[#071107] transition-colors hover:bg-[#7fff8a] disabled:opacity-40"
                 onClick={() => startChat(state.prompt || undefined)}
-                disabled={!selectedProject()}
                 aria-label={language.t("command.session.new")}
               >
                 <Icon name="arrow-right" size="small" />
               </button>
             </div>
           </div>
-          <Show when={!selectedProject()}>
-            <button
-              type="button"
-              class="self-start rounded-[6px] border border-v2-border-border-weak px-3 py-1.5 text-[13px] font-medium text-v2-text-text-muted transition-colors hover:bg-v2-overlay-simple-overlay-hover"
-              onClick={() => void chooseProject()}
-            >
-              {language.t("home.project.add")}
-            </button>
-          </Show>
         </div>
 
         {/* Recent sessions */}
@@ -277,147 +271,6 @@ function HomeDesign() {
         </section>
       </div>
     </div>
-  )
-}
-
-function CodeGoblinWebHero(props: { openMemory: () => void; openMarket: () => void; openNewSession: () => void }) {
-  const hour = new Date().getHours()
-  const partOfDay = hour < 5 ? "late" : hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"
-  const creedDot = <span class="text-[#33502f]">·</span>
-
-  return (
-    <div class="cg-panel relative overflow-hidden px-8 py-7">
-      <div class="pointer-events-none absolute -right-16 -top-24 h-56 w-56 rounded-full bg-[#f5c84b] opacity-[0.05] blur-[70px]" />
-      <div class="pointer-events-none absolute -left-10 top-1/2 h-44 w-44 -translate-y-1/2 rounded-full bg-[#9ADB35] opacity-[0.06] blur-[60px]" />
-      <div class="relative flex flex-wrap items-end justify-between gap-6">
-        <div class="min-w-0">
-          <div class="text-12-medium uppercase tracking-[0.18em] text-[#5f7a62]">good {partOfDay}, goblin</div>
-          <div class="cg-display mt-1 text-[26px] leading-[1.25] text-[#eafff0]">what are we digging up?</div>
-          <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-12-medium text-[#6f8a72]">
-            <span class="inline-flex items-center gap-1.5">
-              <span class="size-1.5 rounded-full bg-[#9ADB35] shadow-[0_0_6px_#9ADB35]" />
-              nothing leaves the cave
-            </span>
-            {creedDot}
-            <span>BYOK intact</span>
-            {creedDot}
-            <span>images &rarr; codegoblin-output/</span>
-          </div>
-        </div>
-        <div class="flex shrink-0 items-center gap-2.5">
-          <button type="button" class="cg-stone-btn text-13-medium" onClick={() => props.openMemory()}>
-            memory
-          </button>
-          <button type="button" class="cg-stone-btn text-13-medium" onClick={() => props.openMarket()}>
-            market
-          </button>
-          <button type="button" class="cg-gem-btn text-13-medium" onClick={() => props.openNewSession()}>
-            <Icon name="edit" size="small" />
-            new dig
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function GrikGlyph(props: { size?: number; class?: string }) {
-  const s = props.size ?? 64
-  return (
-    <svg width={s} height={s} viewBox="0 0 512 512" class={props.class} aria-hidden="true">
-      <path
-        d="M183 110h146l24 64 86 20c15 4 23 21 17 35l-39 87c-5 12-18 18-30 15l-57-13-20 84c-3 13-15 22-29 20l-87-10c-10-1-19-8-23-18l-31-73-49-35c-7-5-12-13-13-22l-10-87c-2-14 8-27 22-29l78-10 19-58Z"
-        fill="#9ADB35"
-      />
-      <path
-        d="M177 242c0-10 8-18 18-18h36c10 0 18 8 18 18v51c0 11-9 20-20 19l-35-3c-10-1-17-9-17-19v-48Zm161-18c10 0 18 8 18 18v42c0 10-7 18-17 19l-31 4c-11 1-20-7-20-18v-47c0-10 8-18 18-18h32Z"
-        fill="#040805"
-      />
-    </svg>
-  )
-}
-
-function HomeRail(props: { openNewSession: () => void; openSettings: () => void; openHelp: () => void }) {
-  return (
-    <div class="relative z-[3] flex w-[72px] shrink-0 flex-col items-center gap-2.5 border-r border-[#122a16] bg-[#050a06]/70 py-5 backdrop-blur-sm">
-      <CodeGoblinLogoMark size="md" />
-      <div class="my-1 h-px w-7 bg-[#163019]" />
-      <button type="button" class="cg-rail-btn" data-active onClick={props.openNewSession} aria-label="new dig" title="new dig">
-        <Icon name="edit" size="small" />
-      </button>
-      <div class="mt-auto flex flex-col items-center gap-2.5">
-        <button type="button" class="cg-rail-btn" onClick={props.openSettings} aria-label="settings" title="settings">
-          <IconV2 name="settings-gear" size="small" />
-        </button>
-        <button type="button" class="cg-rail-btn" onClick={props.openHelp} aria-label="help" title="help">
-          <IconV2 name="help" size="small" />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function HomeTunnels(props: {
-  projects: LocalProject[]
-  selected?: string
-  selectProject: (directory: string) => void
-  chooseProject: () => void
-  language: ReturnType<typeof useLanguage>
-}) {
-  return (
-    <aside class="cg-panel flex min-w-0 flex-col gap-1 p-3" aria-label={props.language.t("home.projects")}>
-      <div class="flex items-center justify-between px-2 pb-1.5 pt-1">
-        <div class="text-12-medium uppercase tracking-[0.16em] text-[#5f7a62]">tunnels</div>
-        <button
-          type="button"
-          class="grid size-7 place-items-center rounded-lg border border-[#234a27] bg-[#0c170e] text-[#6f8a72] transition-colors duration-[120ms] hover:border-[#2b6d31] hover:text-[#cfe6d1]"
-          onClick={props.chooseProject}
-          aria-label={props.language.t("home.project.add")}
-          title="open a tunnel"
-        >
-          <IconV2 name="folder-add-left" size="small" />
-        </button>
-      </div>
-      <div class="flex max-h-[min(560px,calc(100vh_-_320px))] min-w-0 flex-col gap-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <Show
-          when={props.projects.length > 0}
-          fallback={
-            <button
-              type="button"
-              class="cg-ledger-row flex items-center gap-2.5 px-3 py-2.5 text-left text-13-regular text-[#7f9a82]"
-              onClick={props.chooseProject}
-            >
-              <span class="grid size-5 shrink-0 place-items-center rounded-md border border-dashed border-[#2b6d31] text-[11px] text-[#9ADB35]">
-                +
-              </span>
-              open a tunnel
-            </button>
-          }
-        >
-          <For each={props.projects}>
-            {(project) => (
-              <button
-                type="button"
-                data-component="home-project-row"
-                class="cg-ledger-row flex items-center gap-2.5 px-3 py-2 text-left"
-                classList={{ "bg-[#0e1a10]": props.selected === project.worktree }}
-                data-selected={props.selected === project.worktree ? "" : undefined}
-                aria-current={props.selected === project.worktree ? "page" : undefined}
-                onClick={() => props.selectProject(project.worktree)}
-              >
-                <span
-                  class="grid size-5 shrink-0 place-items-center rounded-md border border-[#234a27] bg-[#0c170e] text-[11px] leading-none"
-                  classList={{ "text-[#9ADB35]": props.selected === project.worktree, "text-[#3b6d2b]": props.selected !== project.worktree }}
-                >
-                  &#9670;
-                </span>
-                <span class="min-w-0 truncate text-13-medium text-[#cfe6d1]">{displayName(project)}</span>
-              </button>
-            )}
-          </For>
-        </Show>
-      </div>
-    </aside>
   )
 }
 
