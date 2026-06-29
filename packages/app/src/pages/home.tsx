@@ -62,12 +62,11 @@ function HomeDesign() {
   const navigate = useNavigate()
   const server = useServer()
   const language = useLanguage()
-  const [state, setState] = createStore({ search: "", project: undefined as string | undefined })
+  const [state, setState] = createStore({ search: "", prompt: "" })
 
   const projects = createMemo(() => layout.projects.list())
-  const selectedProject = createMemo(
-    () => projects().find((project) => project.worktree === state.project) ?? projects()[0],
-  )
+  const selectedProject = createMemo(() => projects()[0])
+
   const projectDirectories = createMemo(() => {
     const dirs = new Set<string>()
     for (const project of projects()) {
@@ -100,11 +99,7 @@ function HomeDesign() {
       .flatMap((session) => {
         const project = projectForSession(session, projects(), projectByID())
         if (!project) return []
-        return {
-          session,
-          project,
-          projectName: displayName(project),
-        }
+        return { session, project, projectName: displayName(project) }
       })
       .filter((record) => {
         const value = search().toLowerCase()
@@ -115,18 +110,12 @@ function HomeDesign() {
   )
   const groups = createMemo(() => groupSessions(records(), language))
 
-  function selectProject(directory: string) {
-    if (!projects().some((project) => pathKeysEqual(project.worktree, directory))) return
-    setState("project", directory)
-  }
-
   function addProject(directory: string) {
     layout.projects.open(directory)
     server.projects.touch(directory)
-    setState("project", directory)
   }
 
-  function openNewSession() {
+  function startChat(prompt?: string) {
     const project = selectedProject()
     if (!project) {
       void chooseProject()
@@ -134,7 +123,12 @@ function HomeDesign() {
     }
     layout.projects.open(project.worktree)
     server.projects.touch(project.worktree)
-    navigate(`/${base64Encode(project.worktree)}/session`)
+    const slug = base64Encode(project.worktree)
+    if (prompt?.trim()) {
+      navigate(`/${slug}/session?prompt=${encodeURIComponent(prompt.trim())}`)
+    } else {
+      navigate(`/${slug}/session`)
+    }
   }
 
   function openSession(session: Session) {
@@ -148,7 +142,6 @@ function HomeDesign() {
     function resolve(result: string | string[] | null) {
       if (Array.isArray(result)) {
         result.forEach(addProject)
-        if (result[0]) setState("project", result[0])
         return
       }
       if (result) addProject(result)
@@ -169,130 +162,119 @@ function HomeDesign() {
     )
   }
 
-  function openSettings() {
-    void import("@/components/dialog-settings").then((x) => {
-      dialog.show(() => <x.DialogSettings />)
-    })
-  }
-
-  function openMemory() {
-    const directory = selectedProject()?.worktree ?? projects()[0]?.worktree
-    if (!directory) {
-      showToast({
-        title: "Add a project first",
-        description: "Memory is scoped to a project folder. Choose one to continue.",
-      })
-      void chooseProject()
-      return
-    }
-    void import("@/components/dialog-memory").then((x) => {
-      dialog.show(() => (
-        <SDKProvider directory={directory}>
-          <x.DialogMemory />
-        </SDKProvider>
-      ))
-    })
-  }
-
-  function openMarket() {
-    const directory = selectedProject()?.worktree ?? projects()[0]?.worktree
-    if (!directory) {
-      showToast({
-        title: "Add a project first",
-        description: "Market installs MCP servers into a project config. Choose a folder to continue.",
-      })
-      void chooseProject()
-      return
-    }
-    void import("@/components/dialog-market").then((x) => {
-      dialog.show(() => (
-        <SDKProvider directory={directory}>
-          <x.DialogMarket />
-        </SDKProvider>
-      ))
-    })
-  }
-
   return (
-    <div data-cg-home class="relative flex h-full w-full min-h-0 overflow-hidden">
-      <div class="pointer-events-none absolute right-[-48px] top-9 z-[1] opacity-[0.05]">
-        <GrikGlyph size={480} />
-      </div>
-      <span class="cg-ember" style="left:23%;bottom:13%;animation-duration:7.5s" />
-      <span class="cg-ember" style="left:47%;bottom:6%;animation-duration:9s;animation-delay:2.5s" />
-      <span class="cg-ember" style="left:72%;bottom:15%;animation-duration:8s;animation-delay:4s" />
-      <span class="cg-ember" style="left:88%;bottom:9%;animation-duration:10.5s;animation-delay:1.5s" />
-      <span class="cg-ember" style="left:35%;bottom:20%;animation-duration:11s;animation-delay:5.5s" />
-      <HomeRail
-        openNewSession={openNewSession}
-        openSettings={openSettings}
-        openHelp={() => platform.openLink("https://github.com/shawnisikli/CodeGoblin/issues")}
-      />
-      <div class="relative z-[2] min-w-0 flex-1 overflow-y-auto px-7 pb-16 pt-7">
-        <div class="mx-auto flex w-full max-w-[1180px] flex-col gap-7">
-          <CodeGoblinWebHero openMemory={openMemory} openMarket={openMarket} openNewSession={openNewSession} />
-          <div class="grid min-w-0 items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
-            <section class="flex min-w-0 flex-col" aria-label={language.t("sidebar.project.recentSessions")}>
-              <div class="mb-3 flex items-center justify-between px-1">
-                <div class="text-12-medium uppercase tracking-[0.16em] text-[#5f7a62]">the dig log</div>
-                <button type="button" class="cg-stone-btn text-12-medium" onClick={openNewSession}>
-                  <Icon name="edit" size="small" />
-                  new dig
-                </button>
-              </div>
-              <HomeSessionSearch
-                value={state.search}
-                placeholder={language.t("home.sessions.search.placeholder")}
-                onInput={(value) => setState("search", value)}
-              />
-              <div class="mt-4 flex flex-col gap-6">
-                <Show when={!sessionLoad.isLoading} fallback={<HomeSessionSkeleton label={language.t("common.loading")} />}>
-                  <Show
-                    when={groups().length > 0}
-                    fallback={
-                      <div class="cg-panel mt-1 flex flex-col items-center justify-center gap-4 px-6 py-14 text-center">
-                        <CodeGoblinLogoMark size="md" />
-                        <div>
-                          <div class="text-15-medium text-[#eafff0]">the hoard&rsquo;s empty</div>
-                          <div class="mt-1 text-13-regular text-[#7f9a82]">
-                            no sessions yet &mdash; grik&rsquo;s lantern is lit. start your first dig.
-                          </div>
-                        </div>
-                        <button type="button" class="cg-gem-btn text-13-medium" onClick={openNewSession}>
-                          <Icon name="edit" size="small" />
-                          new dig
-                        </button>
-                      </div>
-                    }
-                  >
-                    <For each={groups()}>
-                      {(group, index) => (
-                        <div class="flex min-w-0 flex-col gap-3">
-                          <HomeSessionGroupHeader
-                            title={group.title}
-                            onNewSession={index() === 0 ? openNewSession : undefined}
-                          />
-                          <div class="flex min-w-0 flex-col gap-1">
-                            <For each={group.sessions}>
-                              {(record) => <HomeSessionRow record={record} openSession={openSession} />}
-                            </For>
-                          </div>
-                        </div>
-                      )}
-                    </For>
-                  </Show>
+    <div data-cg-home class="size-full overflow-auto">
+      <div class="mx-auto flex w-full max-w-[660px] flex-col px-6 pb-16 pt-[12vh]">
+        {/* Chat-first composer */}
+        <div class="flex flex-col gap-3">
+          <h1 class="text-center text-[22px] font-semibold text-v2-text-text-base">
+            What should we work on?
+          </h1>
+          <div class="rounded-[12px] border border-v2-border-border-weak bg-v2-background-bg-deep shadow-[var(--v2-elevation-raised)] p-3">
+            <textarea
+              class="w-full resize-none bg-transparent text-[14px] text-v2-text-text-base outline-none placeholder:text-v2-text-text-faint"
+              placeholder="Ask the goblin..."
+              rows={3}
+              value={state.prompt}
+              onInput={(e) => setState("prompt", e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  startChat(state.prompt || undefined)
+                }
+              }}
+            />
+            <div class="mt-2 flex items-center justify-between gap-2">
+              <div class="min-w-0 flex items-center gap-2">
+                <Show
+                  when={selectedProject()}
+                  fallback={
+                    <button
+                      type="button"
+                      class="flex items-center gap-1.5 rounded-[6px] px-2 py-1 text-[13px] text-v2-text-text-faint hover:bg-v2-overlay-simple-overlay-hover transition-colors"
+                      onClick={() => void chooseProject()}
+                    >
+                      <IconV2 name="folder-add-left" size="small" />
+                      {language.t("home.project.add")}
+                    </button>
+                  }
+                >
+                  {(project) => (
+                    <span class="max-w-[240px] truncate text-[13px] text-v2-text-text-faint">
+                      {displayName(project())}
+                    </span>
+                  )}
                 </Show>
               </div>
-            </section>
-            <HomeTunnels
-              projects={projects()}
-              selected={selectedProject()?.worktree}
-              selectProject={selectProject}
-              chooseProject={() => void chooseProject()}
-              language={language}
-            />
+              <button
+                type="button"
+                class="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#62f56e] text-[#071107] transition-colors hover:bg-[#7fff8a] disabled:opacity-40"
+                onClick={() => startChat(state.prompt || undefined)}
+                disabled={!selectedProject()}
+                aria-label={language.t("command.session.new")}
+              >
+                <Icon name="arrow-right" size="small" />
+              </button>
+            </div>
           </div>
+          <Show when={!selectedProject()}>
+            <button
+              type="button"
+              class="self-start rounded-[6px] border border-v2-border-border-weak px-3 py-1.5 text-[13px] font-medium text-v2-text-text-muted transition-colors hover:bg-v2-overlay-simple-overlay-hover"
+              onClick={() => void chooseProject()}
+            >
+              {language.t("home.project.add")}
+            </button>
+          </Show>
         </div>
+
+        {/* Recent sessions */}
+        <section class="mt-8 flex flex-col" aria-label={language.t("sidebar.project.recentSessions")}>
+          <div class="mb-3 flex items-center justify-between px-1">
+            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-v2-text-text-faint">
+              {language.t("sidebar.project.recentSessions")}
+            </div>
+            <button type="button" class="flex items-center gap-1 text-[13px] text-v2-text-text-muted hover:text-v2-text-text-base transition-colors" onClick={() => startChat()}>
+              <IconV2 name="edit" size="small" />
+              {language.t("command.session.new")}
+            </button>
+          </div>
+          <HomeSessionSearch
+            value={state.search}
+            placeholder={language.t("home.sessions.search.placeholder")}
+            onInput={(value) => setState("search", value)}
+          />
+          <div class="mt-4 flex flex-col gap-6">
+            <Show when={!sessionLoad.isLoading} fallback={<HomeSessionSkeleton label={language.t("common.loading")} />}>
+              <Show
+                when={groups().length > 0}
+                fallback={
+                  <div class="flex flex-col items-center justify-center gap-4 px-6 py-14 text-center">
+                    <div class="text-[14px] font-medium text-v2-text-text-muted">
+                      {language.t("home.sessions.empty")}
+                    </div>
+                  </div>
+                }
+              >
+                <For each={groups()}>
+                  {(group, index) => (
+                    <div class="flex min-w-0 flex-col gap-3">
+                      <HomeSessionGroupHeader
+                        title={group.title}
+                        onNewSession={index() === 0 ? () => startChat() : undefined}
+                      />
+                      <div class="flex min-w-0 flex-col gap-1">
+                        <For each={group.sessions}>
+                          {(record) => <HomeSessionRow record={record} openSession={openSession} />}
+                        </For>
+                      </div>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </Show>
+          </div>
+        </section>
       </div>
     </div>
   )
