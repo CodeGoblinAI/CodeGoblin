@@ -155,10 +155,12 @@ export default function Layout(props: ParentProps) {
   const currentDir = createMemo(() => route().dir)
 
   const [state, setState] = createStore({
-    // The chat-first home (HomeDesign "What should we work on?") IS the entry now —
-    // do NOT auto-redirect away from "/". Project selection + quick-chat happen on
-    // the home itself, so launching lands on the centered chat box.
-    autoselect: false,
+    // Launch straight into the new-session composer ("What should we work on?"
+    // with the inline model + project/branch pickers) for the last/first project
+    // — or a quick-chat composer at the server dir when there are no projects.
+    // This is the Codex/Claude entry: one composer with a model picker, and the
+    // session list lives in the left sidebar (not a separate home page).
+    autoselect: true,
     busyWorkspaces: {} as Record<string, boolean>,
     hoverProject: undefined as string | undefined,
     scrollSessionKey: undefined as string | undefined,
@@ -558,6 +560,20 @@ export default function Layout(props: ParentProps) {
     if (!root) return
 
     return projects.find((p) => p.worktree === root)
+  })
+
+  // Ensure the directory we're currently in shows up in the left sidebar (its
+  // project + sessions). Covers entry paths that don't go through openProject
+  // (direct URL, deep link). Guarded so it only adds once and never loops.
+  createEffect(() => {
+    const dir = currentDir()
+    if (!dir) return
+    const key = pathKey(dir)
+    const known = layout.projects
+      .list()
+      .some((p) => pathKey(p.worktree) === key || p.sandboxes?.some((s) => pathKey(s) === key))
+    if (known) return
+    layout.projects.open(dir)
   })
 
   const [autoselecting] = createResource(async () => {
@@ -2385,7 +2401,11 @@ export default function Layout(props: ParentProps) {
     return (
       <div class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text">
         {autoselecting() ?? ""}
-        <Titlebar update={titlebarUpdate} />
+        {/* Web has its own browser chrome — no app titlebar (no tab strip / DEV
+            badge / grid button). Desktop keeps a minimal bar for window dragging. */}
+        <Show when={platform.platform === "desktop"}>
+          <Titlebar update={titlebarUpdate} />
+        </Show>
         <div class="flex-1 min-h-0 flex overflow-hidden">
           {/* Persistent left sidebar: projects + chats */}
           <ThreePaneSidebar

@@ -1,4 +1,4 @@
-import { createMemo, For, Show, type Accessor } from "solid-js"
+import { createEffect, createMemo, For, Show, type Accessor } from "solid-js"
 import { useNavigate, useParams } from "@solidjs/router"
 import { DateTime } from "luxon"
 import { base64Encode } from "@codegoblin/core/util/encode"
@@ -42,6 +42,16 @@ export function ThreePaneSidebar(props: {
   const projectByWorktree = createMemo(
     () => new Map(props.projects().map((p) => [pathKey(p.worktree), p])),
   )
+
+  // Pull the session list for every sidebar project (and the active dir) so the
+  // chat list actually populates. globalSync.child uses bootstrap:false, so the
+  // lists never load on their own; loadSessions is deduped, safe to call here.
+  createEffect(() => {
+    const dirs = new Set(props.projects().map((p) => p.worktree))
+    const current = props.currentDir()
+    if (current) dirs.add(current)
+    for (const dir of dirs) void globalSync.project.loadSessions(dir)
+  })
 
   const sidebarSessions = createMemo(() => {
     const now = Date.now()

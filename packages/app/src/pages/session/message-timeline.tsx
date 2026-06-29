@@ -47,7 +47,7 @@ import { SessionContextUsage } from "@/components/session-context-usage"
 import { useDialog } from "@codegoblin/ui/context/dialog"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLanguage } from "@/context/language"
-import { useSessionKey } from "@/pages/session/session-layout"
+import { useSessionKey, useSessionLayout } from "@/pages/session/session-layout"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
@@ -280,6 +280,8 @@ export function MessageTimeline(props: {
   const dialog = useDialog()
   const language = useLanguage()
   const { params, sessionKey } = useSessionKey()
+  const { view } = useSessionLayout()
+  const newDesign = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
   const platform = usePlatform()
 
   let virtualizer: VirtualizerHandle | undefined
@@ -1347,6 +1349,17 @@ export function MessageTimeline(props: {
                 {(id) => (
                   <div class="shrink-0 flex items-center gap-3">
                     <SessionContextUsage placement="bottom" />
+                    <Show when={newDesign}>
+                      <IconButton
+                        icon="layout-right"
+                        variant="ghost"
+                        class="hidden md:inline-flex size-6 rounded-md"
+                        classList={{ "bg-surface-base-active": view().reviewPanel.opened() }}
+                        onClick={() => view().reviewPanel.toggle()}
+                        aria-label={language.t("session.panel.toggle")}
+                        aria-pressed={view().reviewPanel.opened()}
+                      />
+                    </Show>
                     <Show when={!parentID()}>
                       <DropdownMenu
                         gutter={4}
