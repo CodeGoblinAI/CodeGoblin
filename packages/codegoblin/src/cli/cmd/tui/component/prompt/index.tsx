@@ -2211,8 +2211,8 @@ export function Prompt(props: PromptProps) {
             }
           />
         </box>
-        {/* Agent · model · provider — under the input bar (Crush-style), left-aligned */}
-        <box flexDirection="row" flexShrink={0} paddingLeft={2} gap={1}>
+        {/* Agent · model · provider — under the input bar (Crush-style), right-aligned to match the bar's right edge */}
+        <box width="100%" flexDirection="row" flexShrink={0} justifyContent="flex-end" paddingRight={2} gap={1}>
           <Show when={local.agent.current()} fallback={<box height={1} />}>
             {(agent) => (
               <>
