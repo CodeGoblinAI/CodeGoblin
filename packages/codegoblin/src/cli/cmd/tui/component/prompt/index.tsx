@@ -2107,7 +2107,6 @@ export function Prompt(props: PromptProps) {
           <box
             paddingLeft={2}
             paddingRight={2}
-            paddingTop={1}
             flexShrink={0}
             backgroundColor={theme.backgroundElement}
             flexGrow={1}
@@ -2184,44 +2183,6 @@ export function Prompt(props: PromptProps) {
               cursorColor={props.disabled ? theme.backgroundElement : theme.text}
               syntaxStyle={syntax()}
             />
-            <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="flex-end">
-              <box flexDirection="row" gap={1}>
-                <Show when={local.agent.current()} fallback={<box height={1} />}>
-                  {(agent) => (
-                    <>
-                      <text fg={fadeColor(highlight(), agentMetaAlpha())}>
-                        {store.mode === "shell" ? "Shell" : displayAgentName(agent().name)}
-                      </text>
-                      <Show when={store.mode === "normal"}>
-                        <box flexDirection="row" gap={1}>
-                          <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
-                          <text
-                            flexShrink={0}
-                            fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}
-                          >
-                            {local.model.parsed().model}
-                          </text>
-                          <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
-                          <Show when={showVariant()}>
-                            <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
-                            <text>
-                              <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
-                                {local.model.variant.current()}
-                              </span>
-                            </text>
-                          </Show>
-                        </box>
-                      </Show>
-                    </>
-                  )}
-                </Show>
-              </box>
-              <Show when={hasRightContent()}>
-                <box flexDirection="row" gap={1} alignItems="center">
-                  {props.right}
-                </box>
-              </Show>
-            </box>
           </box>
         </box>
         <box
@@ -2249,6 +2210,43 @@ export function Prompt(props: PromptProps) {
                   }
             }
           />
+        </box>
+        {/* Agent · model · provider — under the input bar (Crush-style), left-aligned */}
+        <box flexDirection="row" flexShrink={0} paddingLeft={2} gap={1}>
+          <Show when={local.agent.current()} fallback={<box height={1} />}>
+            {(agent) => (
+              <>
+                <text fg={fadeColor(highlight(), agentMetaAlpha())}>
+                  {store.mode === "shell" ? "Shell" : displayAgentName(agent().name)}
+                </text>
+                <Show when={store.mode === "normal"}>
+                  <box flexDirection="row" gap={1}>
+                    <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
+                    <text
+                      flexShrink={0}
+                      fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}
+                    >
+                      {local.model.parsed().model}
+                    </text>
+                    <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
+                    <Show when={showVariant()}>
+                      <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
+                      <text>
+                        <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
+                          {local.model.variant.current()}
+                        </span>
+                      </text>
+                    </Show>
+                  </box>
+                </Show>
+              </>
+            )}
+          </Show>
+          <Show when={hasRightContent()}>
+            <box flexDirection="row" gap={1} alignItems="center">
+              {props.right}
+            </box>
+          </Show>
         </box>
         <box width="100%" flexDirection="row" justifyContent="space-between" gap={2}>
           <Show when={status().type !== "retry"}>
