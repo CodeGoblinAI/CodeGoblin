@@ -20,6 +20,7 @@ import { FileIcon } from "@codegoblin/ui/file-icon"
 import { Icon } from "@codegoblin/ui/icon"
 import { IconButton } from "@codegoblin/ui/icon-button"
 import { DropdownMenu } from "@codegoblin/ui/dropdown-menu"
+import { Tooltip } from "@codegoblin/ui/tooltip"
 import { Dialog } from "@codegoblin/ui/dialog"
 import { InlineInput } from "@codegoblin/ui/inline-input"
 import { Spinner } from "@codegoblin/ui/spinner"
@@ -1350,15 +1351,24 @@ export function MessageTimeline(props: {
                   <div class="shrink-0 flex items-center gap-3">
                     <SessionContextUsage placement="bottom" />
                     <Show when={newDesign}>
-                      <IconButton
-                        icon="layout-right"
-                        variant="ghost"
-                        class="hidden md:inline-flex size-6 rounded-md"
-                        classList={{ "bg-surface-base-active": view().reviewPanel.opened() }}
-                        onClick={() => view().reviewPanel.toggle()}
-                        aria-label={language.t("session.panel.toggle")}
-                        aria-pressed={view().reviewPanel.opened()}
-                      />
+                      <Tooltip
+                        placement="bottom"
+                        value={
+                          view().reviewPanel.opened()
+                            ? language.t("session.panel.hide")
+                            : language.t("session.panel.show")
+                        }
+                      >
+                        <IconButton
+                          icon="layout-right"
+                          variant="ghost"
+                          class="hidden md:inline-flex size-6 rounded-md"
+                          classList={{ "bg-surface-base-active": view().reviewPanel.opened() }}
+                          onClick={() => view().reviewPanel.toggle()}
+                          aria-label={language.t("session.panel.toggle")}
+                          aria-pressed={view().reviewPanel.opened()}
+                        />
+                      </Tooltip>
                     </Show>
                     <Show when={!parentID()}>
                       <DropdownMenu

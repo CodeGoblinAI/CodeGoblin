@@ -19,6 +19,9 @@ export const DialogSettings: Component = () => {
         <Tabs.List>
           <div class="flex flex-col justify-between h-full w-full">
             <div class="flex flex-col gap-3 w-full pt-3">
+              <div class="px-2 pb-1 text-[15px] font-semibold text-text-strong">
+                {language.t("sidebar.settings")}
+              </div>
               <div class="flex flex-col gap-3">
                 <div class="flex flex-col gap-1.5">
                   <Tabs.SectionTitle>{language.t("settings.section.desktop")}</Tabs.SectionTitle>

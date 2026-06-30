@@ -3,7 +3,7 @@ import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
 import { Tabs } from "@codegoblin/ui/tabs"
 import { IconButton } from "@codegoblin/ui/icon-button"
-import { TooltipKeybind } from "@codegoblin/ui/tooltip"
+import { Tooltip, TooltipKeybind } from "@codegoblin/ui/tooltip"
 import { ResizeHandle } from "@codegoblin/ui/resize-handle"
 import { Mark } from "@codegoblin/ui/logo"
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
@@ -328,7 +328,7 @@ export function SessionSidePanel(props: {
                         <SortableProvider ids={openedTabs()}>
                           <For each={openedTabs()}>{(tab) => <SortableTab tab={tab} onTabClose={tabs().close} />}</For>
                         </SortableProvider>
-                        <div class="bg-background-stronger h-full shrink-0 sticky right-0 z-10 flex items-center justify-center pr-3">
+                        <div class="bg-background-stronger h-full shrink-0 sticky right-0 z-10 flex items-center justify-center gap-0.5 pr-2">
                           <TooltipKeybind
                             title={language.t("command.file.open")}
                             keybind={command.keybind("file.open")}
@@ -347,6 +347,18 @@ export function SessionSidePanel(props: {
                               aria-label={language.t("command.file.open")}
                             />
                           </TooltipKeybind>
+                          <Show when={NEW_DESIGN}>
+                            <Tooltip placement="bottom" value={language.t("session.panel.hide")}>
+                              <IconButton
+                                icon="layout-right-full"
+                                variant="ghost"
+                                iconSize="small"
+                                class="!rounded-md"
+                                onClick={() => view().reviewPanel.close()}
+                                aria-label={language.t("session.panel.hide")}
+                              />
+                            </Tooltip>
+                          </Show>
                         </div>
                       </Tabs.List>
                     </div>
