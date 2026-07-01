@@ -132,7 +132,7 @@ describe("run runtime boot", () => {
 
     expect(result.leader).toBe("ctrl+x")
     expect(result.leaderTimeout).toBe(2000)
-    expect(formatBindings(result.commandList, result.leader)).toBe("ctrl+p")
+    expect(formatBindings(result.commandList, result.leader)).toBe("ctrl+g, ctrl+shift+g")
     expect(formatBindings(result.variantCycle, result.leader)).toBe("ctrl+t")
     expect(formatBindings(result.interrupt, result.leader)).toBe("esc")
     expect(formatBindings(result.historyPrevious, result.leader)).toBe("up")
