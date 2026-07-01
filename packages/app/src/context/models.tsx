@@ -13,6 +13,7 @@ type User = ModelKey & { visibility: Visibility; favorite?: boolean }
 type Store = {
   user: User[]
   recent: ModelKey[]
+  favorite?: ModelKey[]
   variant?: Record<string, string | undefined>
 }
 
@@ -32,6 +33,7 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       createStore<Store>({
         user: [],
         recent: [],
+        favorite: [],
         variant: {},
       }),
     )
@@ -132,6 +134,22 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       setStore("recent", uniq)
     }
 
+    const favoriteList = createMemo(() => store.favorite ?? [])
+    const favoriteSet = createMemo(() => new Set(favoriteList().map(modelKey)))
+    const isFavorite = (model: ModelKey) => favoriteSet().has(modelKey(model))
+    const toggleFavorite = (model: ModelKey) => {
+      const key = modelKey(model)
+      const current = store.favorite ?? []
+      if (current.some((x) => modelKey(x) === key)) {
+        setStore(
+          "favorite",
+          current.filter((x) => modelKey(x) !== key),
+        )
+        return
+      }
+      setStore("favorite", [{ providerID: model.providerID, modelID: model.modelID }, ...current])
+    }
+
     const variantKey = (model: ModelKey) => `${model.providerID}/${model.modelID}`
     const getVariant = (model: ModelKey) => store.variant?.[variantKey(model)]
 
@@ -153,6 +171,11 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       recent: {
         list: createMemo(() => store.recent),
         push,
+      },
+      favorite: {
+        list: favoriteList,
+        has: isFavorite,
+        toggle: toggleFavorite,
       },
       variant: {
         get: getVariant,

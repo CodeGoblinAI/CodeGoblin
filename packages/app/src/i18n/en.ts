@@ -200,6 +200,8 @@ export const dict = {
 
   "model.tag.free": "Free",
   "model.tag.latest": "Latest",
+  "model.favorite.add": "Add to favorites",
+  "model.favorite.remove": "Remove from favorites",
   "model.provider.anthropic": "Anthropic",
   "model.provider.openai": "OpenAI",
   "model.provider.google": "Google",
