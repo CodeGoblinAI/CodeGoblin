@@ -930,6 +930,27 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     queueScroll()
   }
 
+  // "+" menu → Mentions: drop an "@" at the end of the prompt and open the
+  // file/agent picker (same path as typing "@").
+  const openMentionPicker = () => {
+    const existing = editorRef.textContent ?? ""
+    const needsSpace = existing.length > 0 && !existing.endsWith(" ")
+    setEditorText(existing + (needsSpace ? " @" : "@"))
+    requestAnimationFrame(() => {
+      editorRef.focus()
+      const range = document.createRange()
+      const selection = window.getSelection()
+      range.selectNodeContents(editorRef)
+      range.collapse(false)
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      handleInput()
+    })
+  }
+
+  // "+" menu → Actions: open the command palette.
+  const openCommandPalette = () => command.show()
+
   const addPart = (part: ContentPart) => {
     if (part.type === "image") return false
 
@@ -1929,6 +1950,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                             <DropdownMenu.ItemLabel>Paste image</DropdownMenu.ItemLabel>
                           </DropdownMenu.Item>
                         </Show>
+                        <DropdownMenu.Item onSelect={openMentionPicker}>
+                          <Icon name="bubble-5" class="text-[#9ADB35]" />
+                          <DropdownMenu.ItemLabel>Mention a file or agent</DropdownMenu.ItemLabel>
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={openCommandPalette}>
+                          <Icon name="terminal" class="text-[#9ADB35]" />
+                          <DropdownMenu.ItemLabel>Run a command</DropdownMenu.ItemLabel>
+                        </DropdownMenu.Item>
                       </DropdownMenu.Group>
                     </DropdownMenu.Content>
                   </DropdownMenu.Portal>
