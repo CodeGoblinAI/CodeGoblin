@@ -42,7 +42,8 @@ import { iife } from "@/util/iife"
 import { Locale } from "@/util/locale"
 import { formatDuration } from "@/util/format"
 import { createColors, createFrames } from "../../ui/spinner.ts"
-import { useDialog } from "@tui/ui/dialog"
+import { useDialog, type DialogContext } from "@tui/ui/dialog"
+import { DialogSelect } from "@tui/ui/dialog-select"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
 import { DialogConfirm } from "../../ui/dialog-confirm"
@@ -2093,6 +2094,53 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  // "+" attach menu (mirrors the web composer's "+"): a small pick-list that
+  // routes to the existing TUI actions — mention (@), clipboard paste, palette.
+  const startMention = () => {
+    if (!input || input.isDestroyed) return
+    input.focus()
+    input.insertText("@")
+    auto()?.onInput(input.plainText)
+  }
+  const openAttachMenu = () => {
+    if (props.disabled || store.mode !== "normal") return
+    dialog.replace(() => (
+      <DialogSelect
+        title="add to the prompt"
+        flat
+        options={[
+          {
+            title: "Mention a file or agent",
+            description: "Drop an @ to reference a file or @agent",
+            value: "mention",
+            onSelect: (ctx: DialogContext) => {
+              ctx.clear()
+              setTimeout(() => startMention(), 0)
+            },
+          },
+          {
+            title: "Paste from clipboard",
+            description: "Attach a copied image, or paste text",
+            value: "paste",
+            onSelect: (ctx: DialogContext) => {
+              ctx.clear()
+              keymap.dispatchCommand("prompt.paste")
+            },
+          },
+          {
+            title: "Run a command",
+            description: "Open the command palette",
+            value: "command",
+            onSelect: (ctx: DialogContext) => {
+              ctx.clear()
+              keymap.dispatchCommand("command.palette.show")
+            },
+          },
+        ]}
+      />
+    ))
+  }
+
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false}>
@@ -2105,7 +2153,7 @@ export function Prompt(props: PromptProps) {
           }}
         >
           <box
-            paddingLeft={2}
+            paddingLeft={1}
             paddingRight={2}
             paddingTop={1}
             paddingBottom={1}
@@ -2114,6 +2162,11 @@ export function Prompt(props: PromptProps) {
             backgroundColor={theme.backgroundElement}
             flexGrow={1}
           >
+           <box flexDirection="row" alignItems="flex-start">
+            <box onMouseUp={() => openAttachMenu()} flexShrink={0} paddingRight={1}>
+              <text fg={props.disabled ? theme.textMuted : theme.primary}>+</text>
+            </box>
+            <box flexGrow={1}>
             <textarea
               placeholder={placeholderText()}
               placeholderColor={theme.textMuted}
@@ -2186,6 +2239,8 @@ export function Prompt(props: PromptProps) {
               cursorColor={props.disabled ? theme.backgroundElement : theme.text}
               syntaxStyle={syntax()}
             />
+            </box>
+           </box>
           </box>
         </box>
         <box
