@@ -1,6 +1,26 @@
 import "@google/model-viewer"
 import { createEffect, createSignal, onCleanup, Show, type Component } from "solid-js"
 
+// The <model-viewer> web component isn't part of Solid's built-in JSX types.
+// Co-locate the augmentation with its only usage so the declaration is loaded
+// wherever this module is compiled — CI's `tsgo -b` (composite/rootDir-enforced)
+// doesn't pick up a standalone .d.ts reached via a cross-package reference.
+declare module "solid-js" {
+  namespace JSX {
+    interface IntrinsicElements {
+      "model-viewer": JSX.HTMLAttributes<HTMLElement> & {
+        src?: string
+        alt?: string
+        "camera-controls"?: boolean
+        "auto-rotate"?: boolean
+        "shadow-intensity"?: string
+        "interaction-prompt"?: string
+        loading?: "auto" | "lazy" | "eager"
+      }
+    }
+  }
+}
+
 export type CodeGoblinModelViewerProps = {
   src: string
   directory?: string
