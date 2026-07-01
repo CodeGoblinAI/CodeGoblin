@@ -50,7 +50,8 @@ cg --help
 On Windows, the embedded web build may need a newer Node first on `PATH`:
 
 ```powershell
-$env:PATH='C:\Users\shawn\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;' + $env:PATH
+# Put a recent Node 20+ first on PATH (any install location), then build:
+$env:PATH = "C:\path\to\node-20+\bin;" + $env:PATH
 npm run build
 ```
 
