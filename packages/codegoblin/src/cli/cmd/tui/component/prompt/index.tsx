@@ -2107,6 +2107,9 @@ export function Prompt(props: PromptProps) {
           <box
             paddingLeft={2}
             paddingRight={2}
+            paddingTop={1}
+            paddingBottom={1}
+            justifyContent="center"
             flexShrink={0}
             backgroundColor={theme.backgroundElement}
             flexGrow={1}
@@ -2211,8 +2214,8 @@ export function Prompt(props: PromptProps) {
             }
           />
         </box>
-        {/* Agent · model · provider — under the input bar (Crush-style), right-aligned to match the bar's right edge */}
-        <box width="100%" flexDirection="row" flexShrink={0} justifyContent="flex-end" paddingRight={2} gap={1}>
+        {/* Agent · model · provider — left-aligned under the bar, lined up with the tab/ctrl+g hints */}
+        <box flexDirection="row" flexShrink={0} gap={1}>
           <Show when={local.agent.current()} fallback={<box height={1} />}>
             {(agent) => (
               <>
