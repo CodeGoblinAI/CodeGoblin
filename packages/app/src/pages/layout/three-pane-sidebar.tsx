@@ -12,6 +12,7 @@ import { pathKey } from "@/utils/path-key"
 import { sessionTitle } from "@/utils/session-title"
 import { sortedRootSessions, displayName } from "@/pages/layout/helpers"
 import { CodeGoblinLogoMark } from "@/components/codegoblin-logo"
+import { DropdownMenu } from "@codegoblin/ui/dropdown-menu"
 import { Avatar as AvatarV2 } from "@codegoblin/ui/v2/components/avatar-v2.jsx"
 import { IconButtonV2 } from "@codegoblin/ui/v2/components/icon-button-v2.jsx"
 import { Icon as IconV2 } from "@codegoblin/ui/v2/components/icon.jsx"
@@ -29,6 +30,7 @@ export function ThreePaneSidebar(props: {
   currentDir: Accessor<string>
   onNewChat: () => void
   onOpenProject: () => void
+  onNoProject: () => void
   onOpenSettings: () => void
   onOpenHelp: () => void
 }) {
@@ -218,14 +220,27 @@ export function ThreePaneSidebar(props: {
               </For>
             </Show>
           </div>
-          <button
-            type="button"
-            class={`${ROW_BASE} mt-1 h-8 gap-1.5 px-3 text-v2-text-text-faint`}
-            onClick={props.onOpenProject}
-          >
-            <IconV2 name="folder-add-left" size="small" class="[&_[data-slot=icon-svg]]:text-v2-icon-icon-muted" />
-            <span>{language.t("home.project.add")}</span>
-          </button>
+          <DropdownMenu gutter={6} placement="bottom-start">
+            <DropdownMenu.Trigger class={`${ROW_BASE} mt-1 h-8 w-full gap-1.5 px-3 text-v2-text-text-faint`}>
+              <IconV2 name="folder-add-left" size="small" class="[&_[data-slot=icon-svg]]:text-v2-icon-icon-muted" />
+              <span>{language.t("home.project.add")}</span>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content class="min-w-[210px]">
+                <DropdownMenu.Group>
+                  <DropdownMenu.GroupLabel>Open a project</DropdownMenu.GroupLabel>
+                  <DropdownMenu.Item onSelect={() => props.onOpenProject()}>
+                    <IconV2 name="folder-add-left" />
+                    <DropdownMenu.ItemLabel>New project…</DropdownMenu.ItemLabel>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item onSelect={() => props.onNoProject()}>
+                    <IconV2 name="xmark-small" />
+                    <DropdownMenu.ItemLabel>No project</DropdownMenu.ItemLabel>
+                  </DropdownMenu.Item>
+                </DropdownMenu.Group>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu>
         </div>
       </div>
 

@@ -2423,6 +2423,11 @@ export default function Layout(props: ParentProps) {
               }
             }}
             onOpenProject={() => void chooseProject()}
+            onNoProject={() => {
+              // Work without a project: a scratch chat rooted at the home dir.
+              const dir = globalSync.data.path.home || globalSync.data.path.directory
+              if (dir) navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
+            }}
             onOpenSettings={() => openSettings()}
             onOpenHelp={() => platform.openLink("https://github.com/shawnisikli/CodeGoblin/issues/new?template=bug-report.yml")}
           />
