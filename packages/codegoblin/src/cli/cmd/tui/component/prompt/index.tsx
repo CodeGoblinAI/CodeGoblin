@@ -2214,43 +2214,6 @@ export function Prompt(props: PromptProps) {
             }
           />
         </box>
-        {/* Agent · model · provider — left-aligned under the bar, lined up with the tab/ctrl+g hints */}
-        <box flexDirection="row" flexShrink={0} gap={1}>
-          <Show when={local.agent.current()} fallback={<box height={1} />}>
-            {(agent) => (
-              <>
-                <text fg={fadeColor(highlight(), agentMetaAlpha())}>
-                  {store.mode === "shell" ? "Shell" : displayAgentName(agent().name)}
-                </text>
-                <Show when={store.mode === "normal"}>
-                  <box flexDirection="row" gap={1}>
-                    <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
-                    <text
-                      flexShrink={0}
-                      fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}
-                    >
-                      {local.model.parsed().model}
-                    </text>
-                    <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
-                    <Show when={showVariant()}>
-                      <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
-                      <text>
-                        <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
-                          {local.model.variant.current()}
-                        </span>
-                      </text>
-                    </Show>
-                  </box>
-                </Show>
-              </>
-            )}
-          </Show>
-          <Show when={hasRightContent()}>
-            <box flexDirection="row" gap={1} alignItems="center">
-              {props.right}
-            </box>
-          </Show>
-        </box>
         <box width="100%" flexDirection="row" justifyContent="space-between" gap={2}>
           <Show when={status().type !== "retry"}>
             <box gap={2} flexDirection="row">
@@ -2285,7 +2248,40 @@ export function Prompt(props: PromptProps) {
               </Switch>
             </box>
           </Show>
-          <Switch>
+          {/* RIGHT: agent · model on the same line as the left hints (when idle); the working status takes over here otherwise */}
+          <box flexDirection="row" flexShrink={0} gap={2} alignItems="center">
+            <Show when={status().type === "idle" && local.agent.current()}>
+              {(agent) => (
+                <box flexDirection="row" gap={1}>
+                  <text fg={fadeColor(highlight(), agentMetaAlpha())}>
+                    {store.mode === "shell" ? "Shell" : displayAgentName(agent().name)}
+                  </text>
+                  <Show when={store.mode === "normal"}>
+                    <box flexDirection="row" gap={1}>
+                      <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
+                      <text flexShrink={0} fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}>
+                        {local.model.parsed().model}
+                      </text>
+                      <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
+                      <Show when={showVariant()}>
+                        <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
+                        <text>
+                          <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
+                            {local.model.variant.current()}
+                          </span>
+                        </text>
+                      </Show>
+                    </box>
+                  </Show>
+                </box>
+              )}
+            </Show>
+            <Show when={status().type === "idle" && hasRightContent()}>
+              <box flexDirection="row" gap={1} alignItems="center">
+                {props.right}
+              </box>
+            </Show>
+            <Switch>
             <Match when={status().type !== "idle"}>
               <box
                 flexDirection="row"
@@ -2406,6 +2402,7 @@ export function Prompt(props: PromptProps) {
             </Match>
             <Match when={true}>{props.hint ?? <text />}</Match>
           </Switch>
+          </box>
         </box>
       </box>
       <Autocomplete
