@@ -88,6 +88,7 @@ import {
 } from "./layout/sidebar-workspace"
 import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
 import { SidebarContent } from "./layout/sidebar-shell"
+import { ThreePaneSidebar } from "./layout/three-pane-sidebar"
 
 const USE_NEW_DESIGN = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
 
@@ -154,7 +155,12 @@ export default function Layout(props: ParentProps) {
   const currentDir = createMemo(() => route().dir)
 
   const [state, setState] = createStore({
-    autoselect: !initialDirectory && !USE_NEW_DESIGN,
+    // Launch straight into the new-session composer ("What should we work on?"
+    // with the inline model + project/branch pickers) for the last/first project
+    // — or a quick-chat composer at the server dir when there are no projects.
+    // This is the Codex/Claude entry: one composer with a model picker, and the
+    // session list lives in the left sidebar (not a separate home page).
+    autoselect: true,
     busyWorkspaces: {} as Record<string, boolean>,
     hoverProject: undefined as string | undefined,
     scrollSessionKey: undefined as string | undefined,
@@ -556,21 +562,53 @@ export default function Layout(props: ParentProps) {
     return projects.find((p) => p.worktree === root)
   })
 
+  // Ensure the directory we're currently in shows up in the left sidebar (its
+  // project + sessions). Covers entry paths that don't go through openProject
+  // (direct URL, deep link). Guarded so it only adds once and never loops.
+  createEffect(() => {
+    const dir = currentDir()
+    if (!dir) return
+    const key = pathKey(dir)
+    // "No project" scratch chats are rooted at the home dir — keep them out of
+    // the project list so No-project stays truly project-less.
+    const home = globalSync.data.path.home
+    if (home && key === pathKey(home)) return
+    const known = layout.projects
+      .list()
+      .some((p) => pathKey(p.worktree) === key || p.sandboxes?.some((s) => pathKey(s) === key))
+    if (known) return
+    layout.projects.open(dir)
+  })
+
   const [autoselecting] = createResource(async () => {
     await ready.promise
     await layout.ready.promise
     if (!untrack(() => state.autoselect)) return
 
+    // Open the project into a FRESH new-session composer (a place to put a
+    // prompt) rather than resuming its last conversation.
+    const openComposer = (directory: string | undefined) => {
+      if (!directory) return
+      openProject(directory, false)
+      navigateWithSidebarReset(`/${base64Encode(directory)}/session`)
+    }
+
     const list = layout.projects.list()
     const last = server.projects.last()
 
     if (list.length === 0) {
-      if (!last) return
-      await openProject(last, true)
+      // No projects yet → open a "quick chat" composer rooted at the server's
+      // working directory (or home) instead of dropping back to the home page.
+      // The /path query may still be resolving, so wait briefly for it.
+      let quickDir = last || globalSync.data.path.directory || globalSync.data.path.home
+      for (let i = 0; i < 30 && !quickDir; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        quickDir = globalSync.data.path.directory || globalSync.data.path.home
+      }
+      openComposer(quickDir)
     } else {
       const next = list.find((project) => project.worktree === last) ?? list[0]
-      if (!next) return
-      await openProject(next.worktree, true)
+      openComposer(next?.worktree)
     }
   })
 
@@ -2367,17 +2405,71 @@ export default function Layout(props: ParentProps) {
     return (
       <div class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text">
         {autoselecting() ?? ""}
-        <Titlebar update={titlebarUpdate} />
-        <main
-          class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict bg-v2-background-bg-base"
-          classList={{
-            "m-2 mt-0 rounded-[10px] shadow-[var(--v2-elevation-raised)] overflow-hidden": !!params.id || !params.dir,
-          }}
-        >
-          <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>
-            {props.children}
-          </Show>
-        </main>
+        {/* Web has its own browser chrome — no app titlebar (no tab strip / DEV
+            badge / grid button). Desktop keeps a minimal bar for window dragging. */}
+        <Show when={platform.platform === "desktop"}>
+          <Titlebar update={titlebarUpdate} />
+        </Show>
+        <div class="flex-1 min-h-0 flex overflow-hidden">
+          {/* Persistent left sidebar: projects + chats */}
+          <ThreePaneSidebar
+            projects={projects}
+            currentDir={currentDir}
+            onNewChat={() => {
+              const project = currentProject()
+              const dir = project?.worktree ?? layout.projects.list()[0]?.worktree
+              if (dir) {
+                layout.projects.open(dir)
+                server.projects.touch(dir)
+                navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
+              } else {
+                navigateWithSidebarReset("/")
+              }
+            }}
+            onOpenProject={() => void chooseProject()}
+            onNoProject={() => {
+              // Work without a project: a scratch chat rooted at the home dir.
+              const dir = globalSync.data.path.home || globalSync.data.path.directory
+              if (dir) navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
+            }}
+            onQuickStart={() => {
+              // Ask the local server to make a fresh random-named scratch folder,
+              // then open it as a project.
+              void (async () => {
+                try {
+                  const res = await fetch(`${globalSDK.url}/codegoblin/create-scratch`, {
+                    method: "POST",
+                    headers: {
+                      "content-type": "application/json",
+                      "x-opencode-directory": globalSync.data.path.directory ?? "",
+                    },
+                    body: "{}",
+                  })
+                  const data = (await res.json()) as { ok?: boolean; directory?: string }
+                  if (data?.ok && data.directory) {
+                    openProject(data.directory, false)
+                    navigateWithSidebarReset(`/${base64Encode(data.directory)}/session`)
+                  }
+                } catch {
+                  // best-effort; ignore
+                }
+              })()
+            }}
+            onOpenSettings={() => openSettings()}
+            onOpenHelp={() => platform.openLink("https://github.com/shawnisikli/CodeGoblin/issues/new?template=bug-report.yml")}
+          />
+          {/* Center (and right) panel: home or session */}
+          <main
+            class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict bg-v2-background-bg-base"
+            classList={{
+              "m-2 ml-0 mt-0 rounded-[10px] shadow-[var(--v2-elevation-raised)] overflow-hidden": !!params.id || !params.dir,
+            }}
+          >
+            <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>
+              {props.children}
+            </Show>
+          </main>
+        </div>
         {import.meta.env.DEV && <DebugBar />}
         <Toast.Region />
       </div>

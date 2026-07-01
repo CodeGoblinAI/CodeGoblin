@@ -64,7 +64,10 @@ const terminalFallback =
   '"JetBrainsMono Nerd Font Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
 
 const monoBase = monoFallback
-const sansBase = sansFallback
+// Clean-base UI: chrome uses Inter / the system sans (matching Codex / Claude /
+// Antigravity). Code and diffs stay mono via --font-family-mono. Goblin character
+// lives in the accent color + wording, not a terminal-wide monospace voice.
+const sansBase = `"Inter", ${sansFallback}`
 const terminalBase = terminalFallback
 
 function input(font: string | undefined) {

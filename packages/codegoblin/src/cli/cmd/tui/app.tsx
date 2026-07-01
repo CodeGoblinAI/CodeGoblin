@@ -628,7 +628,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "provider.connect",
-        title: "Connect provider",
+        title: "Connect a model",
         suggested: !connected(),
         slashName: "connect",
         run: () => {

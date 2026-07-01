@@ -20,6 +20,7 @@ import { FileIcon } from "@codegoblin/ui/file-icon"
 import { Icon } from "@codegoblin/ui/icon"
 import { IconButton } from "@codegoblin/ui/icon-button"
 import { DropdownMenu } from "@codegoblin/ui/dropdown-menu"
+import { Tooltip } from "@codegoblin/ui/tooltip"
 import { Dialog } from "@codegoblin/ui/dialog"
 import { InlineInput } from "@codegoblin/ui/inline-input"
 import { Spinner } from "@codegoblin/ui/spinner"
@@ -47,7 +48,7 @@ import { SessionContextUsage } from "@/components/session-context-usage"
 import { useDialog } from "@codegoblin/ui/context/dialog"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLanguage } from "@/context/language"
-import { useSessionKey } from "@/pages/session/session-layout"
+import { useSessionKey, useSessionLayout } from "@/pages/session/session-layout"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
@@ -280,6 +281,8 @@ export function MessageTimeline(props: {
   const dialog = useDialog()
   const language = useLanguage()
   const { params, sessionKey } = useSessionKey()
+  const { view } = useSessionLayout()
+  const newDesign = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
   const platform = usePlatform()
 
   let virtualizer: VirtualizerHandle | undefined
@@ -1110,8 +1113,8 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={row}>
             <Show when={message()}>
               {(message) => (
-                <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-                  <div data-slot="session-turn-message-content" aria-live="off">
+                <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5 flex justify-end">
+                  <div data-slot="session-turn-message-content" class="min-w-0 max-w-[85%]" aria-live="off">
                     <Message message={message()} parts={getMsgParts(row.userMessageID)} actions={props.actions} />
                   </div>
                 </div>
@@ -1347,6 +1350,26 @@ export function MessageTimeline(props: {
                 {(id) => (
                   <div class="shrink-0 flex items-center gap-3">
                     <SessionContextUsage placement="bottom" />
+                    <Show when={newDesign}>
+                      <Tooltip
+                        placement="bottom"
+                        value={
+                          view().reviewPanel.opened()
+                            ? language.t("session.panel.hide")
+                            : language.t("session.panel.show")
+                        }
+                      >
+                        <IconButton
+                          icon="layout-right"
+                          variant="ghost"
+                          class="hidden md:inline-flex size-6 rounded-md"
+                          classList={{ "bg-surface-base-active": view().reviewPanel.opened() }}
+                          onClick={() => view().reviewPanel.toggle()}
+                          aria-label={language.t("session.panel.toggle")}
+                          aria-pressed={view().reviewPanel.opened()}
+                        />
+                      </Tooltip>
+                    </Show>
                     <Show when={!parentID()}>
                       <DropdownMenu
                         gutter={4}

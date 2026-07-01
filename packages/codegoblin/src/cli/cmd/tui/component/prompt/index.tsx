@@ -42,7 +42,8 @@ import { iife } from "@/util/iife"
 import { Locale } from "@/util/locale"
 import { formatDuration } from "@/util/format"
 import { createColors, createFrames } from "../../ui/spinner.ts"
-import { useDialog } from "@tui/ui/dialog"
+import { useDialog, type DialogContext } from "@tui/ui/dialog"
+import { DialogSelect } from "@tui/ui/dialog-select"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
 import { DialogConfirm } from "../../ui/dialog-confirm"
@@ -2043,7 +2044,7 @@ export function Prompt(props: PromptProps) {
       return `Run a command... "${example}"`
     }
     if (!list().length) return undefined
-    return `Ask anything... "${list()[store.placeholder % list().length]}"`
+    return `Ask the goblin... "${list()[store.placeholder % list().length]}"`
   })
 
   const workspaceLabel = createMemo<
@@ -2093,6 +2094,53 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  // "+" attach menu (mirrors the web composer's "+"): a small pick-list that
+  // routes to the existing TUI actions — mention (@), clipboard paste, palette.
+  const startMention = () => {
+    if (!input || input.isDestroyed) return
+    input.focus()
+    input.insertText("@")
+    auto()?.onInput(input.plainText)
+  }
+  const openAttachMenu = () => {
+    if (props.disabled || store.mode !== "normal") return
+    dialog.replace(() => (
+      <DialogSelect
+        title="add to the prompt"
+        flat
+        options={[
+          {
+            title: "Mention a file or agent",
+            description: "Drop an @ to reference a file or @agent",
+            value: "mention",
+            onSelect: (ctx: DialogContext) => {
+              ctx.clear()
+              setTimeout(() => startMention(), 0)
+            },
+          },
+          {
+            title: "Paste from clipboard",
+            description: "Attach a copied image, or paste text",
+            value: "paste",
+            onSelect: (ctx: DialogContext) => {
+              ctx.clear()
+              keymap.dispatchCommand("prompt.paste")
+            },
+          },
+          {
+            title: "Run a command",
+            description: "Open the command palette",
+            value: "command",
+            onSelect: (ctx: DialogContext) => {
+              ctx.clear()
+              keymap.dispatchCommand("command.palette.show")
+            },
+          },
+        ]}
+      />
+    ))
+  }
+
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false}>
@@ -2105,20 +2153,27 @@ export function Prompt(props: PromptProps) {
           }}
         >
           <box
-            paddingLeft={2}
+            paddingLeft={1}
             paddingRight={2}
             paddingTop={1}
+            paddingBottom={1}
+            justifyContent="center"
             flexShrink={0}
             backgroundColor={theme.backgroundElement}
             flexGrow={1}
           >
+           <box flexDirection="row" alignItems="flex-start">
+            <box onMouseUp={() => openAttachMenu()} flexShrink={0} paddingRight={1}>
+              <text fg={props.disabled ? theme.textMuted : theme.primary}>+</text>
+            </box>
+            <box flexGrow={1}>
             <textarea
               placeholder={placeholderText()}
               placeholderColor={theme.textMuted}
               textColor={leader() ? theme.textMuted : theme.text}
               focusedTextColor={leader() ? theme.textMuted : theme.text}
               minHeight={1}
-              maxHeight={6}
+              maxHeight={8}
               onContentChange={() => {
                 const value = input.plainText
                 setStore("prompt", "input", value)
@@ -2184,44 +2239,8 @@ export function Prompt(props: PromptProps) {
               cursorColor={props.disabled ? theme.backgroundElement : theme.text}
               syntaxStyle={syntax()}
             />
-            <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
-              <box flexDirection="row" gap={1}>
-                <Show when={local.agent.current()} fallback={<box height={1} />}>
-                  {(agent) => (
-                    <>
-                      <text fg={fadeColor(highlight(), agentMetaAlpha())}>
-                        {store.mode === "shell" ? "Shell" : displayAgentName(agent().name)}
-                      </text>
-                      <Show when={store.mode === "normal"}>
-                        <box flexDirection="row" gap={1}>
-                          <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
-                          <text
-                            flexShrink={0}
-                            fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}
-                          >
-                            {local.model.parsed().model}
-                          </text>
-                          <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
-                          <Show when={showVariant()}>
-                            <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
-                            <text>
-                              <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
-                                {local.model.variant.current()}
-                              </span>
-                            </text>
-                          </Show>
-                        </box>
-                      </Show>
-                    </>
-                  )}
-                </Show>
-              </box>
-              <Show when={hasRightContent()}>
-                <box flexDirection="row" gap={1} alignItems="center">
-                  {props.right}
-                </box>
-              </Show>
             </box>
+           </box>
           </box>
         </box>
         <box
@@ -2250,13 +2269,79 @@ export function Prompt(props: PromptProps) {
             }
           />
         </box>
-        <box width="100%" flexDirection="row" justifyContent="space-between">
-          <Switch>
+        <box width="100%" flexDirection="row" justifyContent="space-between" gap={2}>
+          <Show when={status().type !== "retry"}>
+            <box gap={2} flexDirection="row">
+              <Show when={editorContextLabelState() !== "none" ? editorFileLabelDisplay() : undefined}>
+                {(file) => (
+                  <text fg={editorContextLabelState() === "pending" ? theme.secondary : theme.textMuted}>{file()}</text>
+                )}
+              </Show>
+              <Switch>
+                <Match when={store.mode === "normal"}>
+                  <Switch>
+                    <Match when={usage() || tokenHoard()}>
+                      <text fg={theme.textMuted} wrapMode="none">
+                        {[usage()?.context, usage()?.cost, tokenHoard()].filter(Boolean).join(" · ")}
+                      </text>
+                    </Match>
+                    <Match when={true}>
+                      <text fg={theme.text}>
+                        {agentShortcut()} <span style={{ fg: theme.textMuted }}>agents</span>
+                      </text>
+                    </Match>
+                  </Switch>
+                  <text fg={theme.text}>
+                    {paletteShortcut()} <span style={{ fg: theme.textMuted }}>actions</span>
+                  </text>
+                </Match>
+                <Match when={store.mode === "shell"}>
+                  <text fg={theme.text}>
+                    esc <span style={{ fg: theme.textMuted }}>exit shell mode</span>
+                  </text>
+                </Match>
+              </Switch>
+            </box>
+          </Show>
+          {/* RIGHT: agent · model on the same line as the left hints (when idle); the working status takes over here otherwise */}
+          <box flexDirection="row" flexShrink={0} gap={2} alignItems="center">
+            <Show when={status().type === "idle" && local.agent.current()}>
+              {(agent) => (
+                <box flexDirection="row" gap={1}>
+                  <text fg={fadeColor(highlight(), agentMetaAlpha())}>
+                    {store.mode === "shell" ? "Shell" : displayAgentName(agent().name)}
+                  </text>
+                  <Show when={store.mode === "normal"}>
+                    <box flexDirection="row" gap={1}>
+                      <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
+                      <text flexShrink={0} fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}>
+                        {local.model.parsed().model}
+                      </text>
+                      <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
+                      <Show when={showVariant()}>
+                        <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
+                        <text>
+                          <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
+                            {local.model.variant.current()}
+                          </span>
+                        </text>
+                      </Show>
+                    </box>
+                  </Show>
+                </box>
+              )}
+            </Show>
+            <Show when={status().type === "idle" && hasRightContent()}>
+              <box flexDirection="row" gap={1} alignItems="center">
+                {props.right}
+              </box>
+            </Show>
+            <Switch>
             <Match when={status().type !== "idle"}>
               <box
                 flexDirection="row"
                 gap={1}
-                flexGrow={1}
+                flexGrow={status().type === "retry" ? 1 : 0}
                 justifyContent={status().type === "retry" ? "space-between" : "flex-start"}
               >
                 <box flexShrink={0} flexDirection="row" gap={1}>
@@ -2372,39 +2457,7 @@ export function Prompt(props: PromptProps) {
             </Match>
             <Match when={true}>{props.hint ?? <text />}</Match>
           </Switch>
-          <Show when={status().type !== "retry"}>
-            <box gap={2} flexDirection="row">
-              <Show when={editorContextLabelState() !== "none" ? editorFileLabelDisplay() : undefined}>
-                {(file) => (
-                  <text fg={editorContextLabelState() === "pending" ? theme.secondary : theme.textMuted}>{file()}</text>
-                )}
-              </Show>
-              <Switch>
-                <Match when={store.mode === "normal"}>
-                  <Switch>
-                    <Match when={usage() || tokenHoard()}>
-                      <text fg={theme.textMuted} wrapMode="none">
-                        {[usage()?.context, usage()?.cost, tokenHoard()].filter(Boolean).join(" · ")}
-                      </text>
-                    </Match>
-                    <Match when={true}>
-                      <text fg={theme.text}>
-                        {agentShortcut()} <span style={{ fg: theme.textMuted }}>agents</span>
-                      </text>
-                    </Match>
-                  </Switch>
-                  <text fg={theme.text}>
-                    {paletteShortcut()} <span style={{ fg: theme.textMuted }}>actions</span>
-                  </text>
-                </Match>
-                <Match when={store.mode === "shell"}>
-                  <text fg={theme.text}>
-                    esc <span style={{ fg: theme.textMuted }}>exit shell mode</span>
-                  </text>
-                </Match>
-              </Switch>
-            </box>
-          </Show>
+          </box>
         </box>
       </box>
       <Autocomplete

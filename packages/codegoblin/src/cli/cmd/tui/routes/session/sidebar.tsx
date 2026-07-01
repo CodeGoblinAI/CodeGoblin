@@ -36,6 +36,7 @@ function TuiSidebarCompanionGoblin(props: {
   const skinColor = RGBA.fromInts(154, 219, 53)
   const shadowColor = RGBA.fromInts(120, 125, 135)
   const vestColor = RGBA.fromInts(130, 80, 223)
+  const facetColor = RGBA.fromInts(92, 138, 30)
   const eyeColor = props.theme.backgroundElement
   const spendColor = props.theme.warning
   const [tick, setTick] = createSignal(0)
@@ -87,14 +88,15 @@ function TuiSidebarCompanionGoblin(props: {
     "...GGGGGG...",
   ]
 
+  // Favicon-matched face: big square left eye, thin slit right eye, balanced + symmetric chin.
   const menuHeadWide: GoblinRow[] = [
     ".....GGGG.....",
     "...GGGGGGGG...",
     "G..GGGGGGGG..G",
     ".GGGGGGGGGGGG.",
-    ["..GGGBBGGBGG..", "..GGGBBGGBGGT.", "..GGGBBGGBT...", "..GGGBBGGBGG.."],
-    ["..GGGBBGGBGG..", "..GGGGBWWBGG..", "..GGGGBBBGTT..", "..GGGBBGGBGG.."],
-    "....GGGGGGG...",
+    ["..GGBBGGGBGG..", "..GGBBGGGBGGT.", "..GGGGGGGGGG..", "..GGBBGGGBGG.."],
+    ["..GGBBGGGBGG..", "..GGBBGGGBGG..", "..GGGGGGGGGG..", "..GGBBGGGBGG.."],
+    "...GGGGGGGG...",
   ]
 
   const menuHeadSlim: GoblinRow[] = [
@@ -453,6 +455,66 @@ function TuiSidebarCompanionGoblin(props: {
       "....G..G....",
       "...G....G...",
     ]),
+    // --- Redesign candidates (Shawn to pick): select with CODEGOBLIN_CHAT_GOBLIN_VARIANT=41..45 ---
+    // Deliberately divergent silhouettes + colour balances, not variations on one body.
+    createChatGoblinVariant("41", "wraith", [
+      "....PPPP....",
+      "...PPPPPP...",
+      "..PPPPPPPP..",
+      "..PPPPPPPP..",
+      "..PGGPPGGP..",
+      "..PGGPPGGP..",
+      "..PPPPPPPP..",
+      "..PPPPPPPP..",
+      "...PPPPPP...",
+      "...PP..PP...",
+      "..PP....PP..",
+    ]),
+    createChatGoblinVariant("42", "hoarder", [
+      "...GGGGGG...",
+      "..GGGGGGGG..",
+      "..GBBGGBBG..",
+      "..GGGGGGGG..",
+      ".GGGGGGGGGG.",
+      ".GGGPPPPGGG.",
+      "TTTTTTTTTTTT",
+      "TTWTTTTWTTTT",
+      "TTTTTTTTTTTT",
+    ]),
+    createChatGoblinVariant("43", "miner", [
+      "..........TT.",
+      ".........TT..",
+      "........TT...",
+      ".GGGG..TT....",
+      "GGGGGGTT.....",
+      "GGBBGGGG.....",
+      "GGGGGGG......",
+      ".GGPPPGG.....",
+      ".GG.PP.GG....",
+    ]),
+    createChatGoblinVariant("44", "batimp", [
+      "P..........P",
+      "PP...GG...PP",
+      "PPP.GBBG.PPP",
+      "PPPGGGGGGPPP",
+      "PPP.GGGG.PPP",
+      "PP...GG...PP",
+      "P....GG....P",
+      "....G..G....",
+    ]),
+    createChatGoblinVariant("45", "gem", [
+      "....T....",
+      ["...TGT...", "...TGT...", "...TWT...", "...TGT..."],
+      ["..TGGGT..", "..TGWGT..", "..TWWWT..", "..TGWGT.."],
+      [".TGGGGGT.", ".TGGGGGT.", ".TGGWGGT.", ".TGGGGGT."],
+      "TGGGGGGGT",
+      ".TGGGGGT.",
+      ".TDGGGDT.",
+      "..TDGDT..",
+      "..TDGDT..",
+      "...TDT...",
+      "....T....",
+    ]),
   ]
 
   function normalizeChatGoblinVariantId(value: string | undefined) {
@@ -481,6 +543,8 @@ function TuiSidebarCompanionGoblin(props: {
   }
 
   const companionHeadWide = menuHeadWide.map(staticRow)
+  // Calm at rest: the idle frames are identical so the resting goblin holds still (the constant sway
+  // read as fidgety). It still animates during real activity — thinking, spending, image/audio work.
   const companionIdleFrames = normalizeFrames([
     createCompanionFrame(
       ...companionHeadWide,
@@ -1150,7 +1214,11 @@ function TuiSidebarCompanionGoblin(props: {
   function renderRow(rowIndex: number) {
     const currentFrames = frames()
     const currentWidth = width()
-    const animatedFrame = currentFrames[tick() % currentFrames.length] ?? currentFrames[0] ?? []
+    // Only animate while tokens/spend are in flight; otherwise hold the still frame.
+    const animate = actionActive() || currentActivityKind() !== "idle"
+    const animatedFrame = animate
+      ? (currentFrames[tick() % currentFrames.length] ?? currentFrames[0] ?? [])
+      : (currentFrames[0] ?? [])
     const fixedFrame = requestedFrameIndex !== undefined ? currentFrames[requestedFrameIndex] : undefined
     const frame = fixedFrame ?? animatedFrame
     const spriteRow = frame[rowIndex] ?? "".padEnd(currentWidth, ".")
@@ -1171,6 +1239,8 @@ function TuiSidebarCompanionGoblin(props: {
         cells.push(<text fg={props.theme.text}>██</text>)
       } else if (char === "T") {
         cells.push(<text fg={spendColor}>██</text>)
+      } else if (char === "D") {
+        cells.push(<text fg={facetColor}>██</text>)
       } else {
         cells.push(<text>  </text>)
       }
@@ -1203,7 +1273,7 @@ function TuiSidebarCompanionGoblin(props: {
         </text>
       </box>
       {Array.from({ length: frames()[0]?.length ?? 0 }, (_, rowIndex) => (
-        <box flexDirection="row" width={width() * 2}>
+        <box flexDirection="row" width={width() * 2} justifyContent="center">
           {renderRow(rowIndex)}
         </box>
       ))}

@@ -193,7 +193,10 @@ describe("installation", () => {
 
     testEffect(
       testLayer(
-        () => jsonResponse({}),
+        // Fail the curl install-script fetch so the curl path falls back to npm.
+        // On Linux the non-win32 curl branch runs and would otherwise "succeed"
+        // with the empty mock output; on Windows that branch is skipped entirely.
+        () => new Response("not found", { status: 404 }),
         (cmd) => {
           if (cmd === "npm") return { code: 1, stderr: "token=secret command output" }
           return ""

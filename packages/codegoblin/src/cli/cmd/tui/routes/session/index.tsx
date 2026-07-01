@@ -1151,6 +1151,26 @@ export function Session() {
         }}
       >
         <box flexDirection="row" flexGrow={1} minHeight={0}>
+          <Show when={sidebarVisible()}>
+            <Switch>
+              <Match when={wide()}>
+                <Sidebar sessionID={route.sessionID} />
+              </Match>
+              <Match when={!wide()}>
+                <box
+                  position="absolute"
+                  top={0}
+                  left={0}
+                  right={0}
+                  bottom={0}
+                  alignItems="flex-start"
+                  backgroundColor={RGBA.fromInts(0, 0, 0, 70)}
+                >
+                  <Sidebar sessionID={route.sessionID} />
+                </box>
+              </Match>
+            </Switch>
+          </Show>
           <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
             <Show when={session()}>
               <scrollbox
@@ -1303,26 +1323,6 @@ export function Session() {
             </Show>
             <Toast />
           </box>
-          <Show when={sidebarVisible()}>
-            <Switch>
-              <Match when={wide()}>
-                <Sidebar sessionID={route.sessionID} />
-              </Match>
-              <Match when={!wide()}>
-                <box
-                  position="absolute"
-                  top={0}
-                  left={0}
-                  right={0}
-                  bottom={0}
-                  alignItems="flex-end"
-                  backgroundColor={RGBA.fromInts(0, 0, 0, 70)}
-                >
-                  <Sidebar sessionID={route.sessionID} />
-                </box>
-              </Match>
-            </Switch>
-          </Show>
         </box>
       </context.Provider>
     </PathFormatterProvider>
@@ -1372,13 +1372,16 @@ function UserMessage(props: {
   return (
     <>
       <Show when={text()}>
-        <box
-          id={props.message.id}
-          border={["left"]}
-          borderColor={color()}
-          customBorderChars={SplitBorder.customBorderChars}
-          marginTop={props.index === 0 ? 0 : 1}
-        >
+        <box flexDirection="row" marginTop={props.index === 0 ? 0 : 1}>
+          <box flexGrow={1} flexShrink={1} minWidth={2} />
+          <box
+            id={props.message.id}
+            border={["right"]}
+            borderColor={theme.accent}
+            customBorderChars={SplitBorder.customBorderChars}
+            maxWidth={80}
+            flexShrink={1}
+          >
           <box
             onMouseOver={() => {
               setHover(true)
@@ -1390,7 +1393,8 @@ function UserMessage(props: {
             paddingTop={1}
             paddingBottom={1}
             paddingLeft={2}
-            backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
+            paddingRight={2}
+            backgroundColor={hover() ? RGBA.fromInts(24, 44, 26) : RGBA.fromInts(15, 28, 17)}
             flexShrink={0}
           >
             <text fg={theme.text}>{text()}</text>
@@ -1429,6 +1433,7 @@ function UserMessage(props: {
                 <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
               </text>
             </Show>
+          </box>
           </box>
         </box>
       </Show>

@@ -37,6 +37,7 @@ import { Icon } from "@codegoblin/ui/icon"
 import { ProviderIcon } from "@codegoblin/ui/provider-icon"
 import { Tooltip, TooltipKeybind } from "@codegoblin/ui/tooltip"
 import { IconButton } from "@codegoblin/ui/icon-button"
+import { DropdownMenu } from "@codegoblin/ui/dropdown-menu"
 import { Select } from "@codegoblin/ui/select"
 import { useDialog } from "@codegoblin/ui/context/dialog"
 import { ModelSelectorPopover } from "@/components/dialog-select-model"
@@ -929,6 +930,27 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     queueScroll()
   }
 
+  // "+" menu → Mentions: drop an "@" at the end of the prompt and open the
+  // file/agent picker (same path as typing "@").
+  const openMentionPicker = () => {
+    const existing = editorRef.textContent ?? ""
+    const needsSpace = existing.length > 0 && !existing.endsWith(" ")
+    setEditorText(existing + (needsSpace ? " @" : "@"))
+    requestAnimationFrame(() => {
+      editorRef.focus()
+      const range = document.createRange()
+      const selection = window.getSelection()
+      range.selectNodeContents(editorRef)
+      range.collapse(false)
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      handleInput()
+    })
+  }
+
+  // "+" menu → Actions: open the command palette.
+  const openCommandPalette = () => command.show()
+
   const addPart = (part: ContentPart) => {
     if (part.type === "image") return false
 
@@ -1084,6 +1106,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     addPart,
     readClipboardImage: platform.readClipboardImage,
   })
+
+  const attachFromClipboard = async () => {
+    const file = await platform.readClipboardImage?.()
+    if (file) await addAttachments([file])
+  }
 
   const fileAttachmentInput = () => (
     <input
@@ -1699,7 +1726,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const designPlaceholder = () => {
     if (store.mode === "shell") return placeholder()
-    return "Ask anything, / for commands, @ for context..."
+    return "Ask the goblin... / for commands, @ for context..."
   }
 
   const modelControl = () => (
@@ -1812,7 +1839,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             data-component={newSession() ? "session-new-composer" : "session-composer"}
             onSubmit={handleSubmit}
             classList={{
-              "group/prompt-input min-h-[96px] w-full rounded-xl bg-v2-background-bg-base shadow-[var(--v2-elevation-raised)]": true,
+              "group/prompt-input min-h-[96px] w-full rounded-xl bg-v2-background-bg-base border border-[#244a28] shadow-[var(--v2-elevation-raised)] transition-colors focus-within:border-[#3a7d3f]": true,
               "border-icon-info-active border-dashed": store.draggingType !== null,
               [props.class ?? ""]: !!props.class,
             }}
@@ -1896,24 +1923,45 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             <div class="flex h-11 items-center px-2">
               <div class="flex min-w-0 flex-1 items-center gap-0">
                 {fileAttachmentInput()}
-                <TooltipKeybind
-                  placement="top"
-                  title={language.t("prompt.action.attachFile")}
-                  keybind={command.keybind("file.attach")}
-                >
-                  <IconButton
+                <DropdownMenu gutter={6} placement="top-start">
+                  <DropdownMenu.Trigger
+                    as={IconButton}
                     data-action="prompt-attach"
                     type="button"
                     icon="plus"
                     variant="ghost"
                     class="size-7 rounded-md p-[6px] text-v2-icon-icon-muted"
                     style={buttons()}
-                    onClick={pick}
                     disabled={store.mode !== "normal"}
                     tabIndex={store.mode === "normal" ? undefined : -1}
                     aria-label={language.t("prompt.action.attachFile")}
                   />
-                </TooltipKeybind>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content class="min-w-[200px]">
+                      <DropdownMenu.Group>
+                        <DropdownMenu.GroupLabel>Bring into the cave</DropdownMenu.GroupLabel>
+                        <DropdownMenu.Item onSelect={() => pick()}>
+                          <Icon name="open-file" class="text-[#9ADB35]" />
+                          <DropdownMenu.ItemLabel>{language.t("prompt.action.attachFile")}</DropdownMenu.ItemLabel>
+                        </DropdownMenu.Item>
+                        <Show when={platform.readClipboardImage}>
+                          <DropdownMenu.Item onSelect={() => void attachFromClipboard()}>
+                            <Icon name="cloud-upload" class="text-[#9ADB35]" />
+                            <DropdownMenu.ItemLabel>Paste image</DropdownMenu.ItemLabel>
+                          </DropdownMenu.Item>
+                        </Show>
+                        <DropdownMenu.Item onSelect={openMentionPicker}>
+                          <Icon name="bubble-5" class="text-[#9ADB35]" />
+                          <DropdownMenu.ItemLabel>Mention a file or agent</DropdownMenu.ItemLabel>
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={openCommandPalette}>
+                          <Icon name="terminal" class="text-[#9ADB35]" />
+                          <DropdownMenu.ItemLabel>Run a command</DropdownMenu.ItemLabel>
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Group>
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu>
                 <Show when={newSession()}>
                   <div class="relative">
                     <div class="pointer-events-none absolute left-2 top-1/2 z-10 flex size-4 -translate-y-1/2 items-center justify-center">
@@ -1936,6 +1984,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     />
                   </div>
                 </Show>
+                <div class="flex-1" />
                 {modelControl()}
               </div>
               <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
@@ -1946,10 +1995,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   tabIndex={store.mode === "normal" ? undefined : -1}
                   icon={stopping() ? "stop" : store.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
                   variant="primary"
-                  class="size-7 rounded-md p-[6px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
+                  class="size-7 rounded-full p-[6px] text-[#06210a] shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
                   style={{
                     "background-image":
-                      "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(90deg,var(--v2-background-bg-contrast) 0%,var(--v2-background-bg-contrast) 100%)",
+                      "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(135deg,#9ADB35 0%,#6fae28 100%)",
                   }}
                   aria-label={stopping() ? language.t("prompt.action.stop") : language.t("prompt.action.send")}
                 />
@@ -2145,7 +2194,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       {language.t("common.cancel")}
                     </Button>
                   </div>
-                  <div class="flex items-center gap-1.5 min-w-0 flex-1 h-7">
+                  <div class="flex items-center justify-end gap-1.5 min-w-0 flex-1 h-7">
                     <Show when={!agentsLoading()}>
                       <div
                         data-component="prompt-agent-control"

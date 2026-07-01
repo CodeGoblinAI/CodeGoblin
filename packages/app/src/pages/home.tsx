@@ -4,11 +4,9 @@ import { createStore } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
 import { Button } from "@codegoblin/ui/button"
 import { Spinner } from "@codegoblin/ui/spinner"
-import { Avatar as AvatarV2 } from "@codegoblin/ui/v2/components/avatar-v2.jsx"
 import { ButtonV2 } from "@codegoblin/ui/v2/components/button-v2.jsx"
 import { Icon as IconV2 } from "@codegoblin/ui/v2/components/icon.jsx"
-import { IconButtonV2 } from "@codegoblin/ui/v2/components/icon-button-v2.jsx"
-import { getAvatarColors, useLayout, type LocalProject } from "@/context/layout"
+import { useLayout, type LocalProject } from "@/context/layout"
 import { useNavigate } from "@solidjs/router"
 import { base64Encode } from "@codegoblin/core/util/encode"
 import { Icon } from "@codegoblin/ui/icon"
@@ -23,7 +21,7 @@ import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
-import { displayName, getProjectAvatarSource, projectForSession, sortedRootSessions } from "@/pages/layout/helpers"
+import { displayName, projectForSession, sortedRootSessions } from "@/pages/layout/helpers"
 import { pathKeysEqual } from "@/utils/path-key"
 import { getFilename } from "@codegoblin/core/util/path"
 import { sessionTitle } from "@/utils/session-title"
@@ -37,7 +35,6 @@ const USE_HOME_DESIGN = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
 const HOME_SESSION_LIMIT = 15
 const HOME_ROW =
   "flex min-w-0 w-full shrink-0 cursor-default items-center rounded-[6px] border-0 bg-transparent text-left [font-weight:530] text-v2-text-text-muted transition-colors duration-[120ms] ease-in-out hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
-const HOME_PROJECT_NAV_ROW = `${HOME_ROW} h-8 gap-1.5 px-3 [&>span]:min-w-0 [&>span]:overflow-hidden [&>span]:text-ellipsis [&>span]:whitespace-nowrap`
 const HOME_SECTION_LABEL = "text-v2-text-text-muted [font-weight:440]"
 
 type HomeSessionRecord = {
@@ -65,12 +62,11 @@ function HomeDesign() {
   const navigate = useNavigate()
   const server = useServer()
   const language = useLanguage()
-  const [state, setState] = createStore({ search: "", project: undefined as string | undefined })
+  const [state, setState] = createStore({ search: "", prompt: "" })
 
   const projects = createMemo(() => layout.projects.list())
-  const selectedProject = createMemo(
-    () => projects().find((project) => project.worktree === state.project) ?? projects()[0],
-  )
+  const selectedProject = createMemo(() => projects()[0])
+
   const projectDirectories = createMemo(() => {
     const dirs = new Set<string>()
     for (const project of projects()) {
@@ -103,11 +99,7 @@ function HomeDesign() {
       .flatMap((session) => {
         const project = projectForSession(session, projects(), projectByID())
         if (!project) return []
-        return {
-          session,
-          project,
-          projectName: displayName(project),
-        }
+        return { session, project, projectName: displayName(project) }
       })
       .filter((record) => {
         const value = search().toLowerCase()
@@ -118,26 +110,29 @@ function HomeDesign() {
   )
   const groups = createMemo(() => groupSessions(records(), language))
 
-  function selectProject(directory: string) {
-    if (!projects().some((project) => pathKeysEqual(project.worktree, directory))) return
-    setState("project", directory)
-  }
-
   function addProject(directory: string) {
     layout.projects.open(directory)
     server.projects.touch(directory)
-    setState("project", directory)
   }
 
-  function openNewSession() {
+  function startChat(prompt?: string) {
     const project = selectedProject()
-    if (!project) {
+    // Quick chat with no project: root the session at the server's working dir.
+    const dir = project?.worktree || sync.data.path.directory || sync.data.path.home
+    if (!dir) {
       void chooseProject()
       return
     }
-    layout.projects.open(project.worktree)
-    server.projects.touch(project.worktree)
-    navigate(`/${base64Encode(project.worktree)}/session`)
+    if (project) {
+      layout.projects.open(dir)
+      server.projects.touch(dir)
+    }
+    const slug = base64Encode(dir)
+    if (prompt?.trim()) {
+      navigate(`/${slug}/session?prompt=${encodeURIComponent(prompt.trim())}`)
+    } else {
+      navigate(`/${slug}/session`)
+    }
   }
 
   function openSession(session: Session) {
@@ -151,7 +146,6 @@ function HomeDesign() {
     function resolve(result: string | string[] | null) {
       if (Array.isArray(result)) {
         result.forEach(addProject)
-        if (result[0]) setState("project", result[0])
         return
       }
       if (result) addProject(result)
@@ -172,91 +166,98 @@ function HomeDesign() {
     )
   }
 
-  function openSettings() {
-    void import("@/components/dialog-settings").then((x) => {
-      dialog.show(() => <x.DialogSettings />)
-    })
-  }
-
-  function openMemory() {
-    const directory = selectedProject()?.worktree ?? projects()[0]?.worktree
-    if (!directory) {
-      showToast({
-        title: "Add a project first",
-        description: "Memory is scoped to a project folder. Choose one to continue.",
-      })
-      void chooseProject()
-      return
-    }
-    void import("@/components/dialog-memory").then((x) => {
-      dialog.show(() => (
-        <SDKProvider directory={directory}>
-          <x.DialogMemory />
-        </SDKProvider>
-      ))
-    })
-  }
-
-  function openMarket() {
-    const directory = selectedProject()?.worktree ?? projects()[0]?.worktree
-    if (!directory) {
-      showToast({
-        title: "Add a project first",
-        description: "Market installs MCP servers into a project config. Choose a folder to continue.",
-      })
-      void chooseProject()
-      return
-    }
-    void import("@/components/dialog-market").then((x) => {
-      dialog.show(() => (
-        <SDKProvider directory={directory}>
-          <x.DialogMarket />
-        </SDKProvider>
-      ))
-    })
-  }
-
   return (
-    <div class="mx-auto grid w-full h-full max-w-[1080px] gap-x-8 gap-y-5 px-6 pb-16 lg:grid-cols-[280px_minmax(0,720px)]">
-      <CodeGoblinWebHero openMemory={openMemory} openMarket={openMarket} />
-      <HomeProjectColumn
-        projects={projects()}
-        selected={selectedProject()?.worktree}
-        selectProject={selectProject}
-        chooseProject={() => void chooseProject()}
-        openSettings={openSettings}
-        openHelp={() => platform.openLink("https://github.com/shawnisikli/CodeGoblin/issues")}
-        language={language}
-      />
+    <div data-cg-home class="size-full overflow-auto">
+      <div class="mx-auto flex w-full max-w-[660px] flex-col px-6 pb-16 pt-[12vh]">
+        {/* Chat-first composer */}
+        <div class="flex flex-col gap-3">
+          <h1 class="text-center text-[22px] font-semibold text-v2-text-text-base">
+            What should we work on?
+          </h1>
+          <div class="rounded-[12px] border border-v2-border-border-weak bg-v2-background-bg-deep shadow-[var(--v2-elevation-raised)] p-3">
+            <textarea
+              class="w-full resize-none bg-transparent text-[14px] text-v2-text-text-base outline-none placeholder:text-v2-text-text-faint"
+              placeholder="Ask the goblin..."
+              rows={3}
+              value={state.prompt}
+              onInput={(e) => setState("prompt", e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  startChat(state.prompt || undefined)
+                }
+              }}
+            />
+            <div class="mt-2 flex items-center justify-between gap-2">
+              <div class="min-w-0 flex items-center gap-2">
+                <Show
+                  when={selectedProject()}
+                  fallback={
+                    <button
+                      type="button"
+                      class="flex items-center gap-1.5 rounded-[6px] px-2 py-1 text-[13px] text-v2-text-text-faint hover:bg-v2-overlay-simple-overlay-hover transition-colors"
+                      onClick={() => void chooseProject()}
+                    >
+                      <IconV2 name="folder-add-left" size="small" />
+                      {language.t("home.project.add")}
+                    </button>
+                  }
+                >
+                  {(project) => (
+                    <span class="max-w-[240px] truncate text-[13px] text-v2-text-text-faint">
+                      {displayName(project())}
+                    </span>
+                  )}
+                </Show>
+              </div>
+              <button
+                type="button"
+                class="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#62f56e] text-[#071107] transition-colors hover:bg-[#7fff8a] disabled:opacity-40"
+                onClick={() => startChat(state.prompt || undefined)}
+                aria-label={language.t("command.session.new")}
+              >
+                <Icon name="arrow-right" size="small" />
+              </button>
+            </div>
+          </div>
+        </div>
 
-      <section
-        class="min-w-0 flex-1 flex flex-col overflow-y-hidden pt-2"
-        aria-label={language.t("sidebar.project.recentSessions")}
-      >
-        <HomeSessionSearch
-          value={state.search}
-          placeholder={language.t("home.sessions.search.placeholder")}
-          onInput={(value) => setState("search", value)}
-        />
-        <div class="mt-3 overflow-auto flex-1">
-          <div class="pt-3 flex flex-col gap-6">
+        {/* Recent sessions */}
+        <section class="mt-8 flex flex-col" aria-label={language.t("sidebar.project.recentSessions")}>
+          <div class="mb-3 flex items-center justify-between px-1">
+            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-v2-text-text-faint">
+              {language.t("sidebar.project.recentSessions")}
+            </div>
+            <button type="button" class="flex items-center gap-1 text-[13px] text-v2-text-text-muted hover:text-v2-text-text-base transition-colors" onClick={() => startChat()}>
+              <IconV2 name="edit" size="small" />
+              {language.t("command.session.new")}
+            </button>
+          </div>
+          <HomeSessionSearch
+            value={state.search}
+            placeholder={language.t("home.sessions.search.placeholder")}
+            onInput={(value) => setState("search", value)}
+          />
+          <div class="mt-4 flex flex-col gap-6">
             <Show when={!sessionLoad.isLoading} fallback={<HomeSessionSkeleton label={language.t("common.loading")} />}>
               <Show
                 when={groups().length > 0}
                 fallback={
-                  <div class="flex min-w-0 flex-col gap-4">
-                    <HomeSessionGroupHeader title={language.t("home.sessions.empty")} onNewSession={openNewSession} />
+                  <div class="flex flex-col items-center justify-center gap-4 px-6 py-14 text-center">
+                    <div class="text-[14px] font-medium text-v2-text-text-muted">
+                      {language.t("home.sessions.empty")}
+                    </div>
                   </div>
                 }
               >
                 <For each={groups()}>
                   {(group, index) => (
-                    <div class="flex min-w-0 flex-col gap-4">
+                    <div class="flex min-w-0 flex-col gap-3">
                       <HomeSessionGroupHeader
                         title={group.title}
-                        onNewSession={index() === 0 ? openNewSession : undefined}
+                        onNewSession={index() === 0 ? () => startChat() : undefined}
                       />
-                      <div class="flex min-w-0 flex-col gap-px">
+                      <div class="flex min-w-0 flex-col gap-1">
                         <For each={group.sessions}>
                           {(record) => <HomeSessionRow record={record} openSession={openSession} />}
                         </For>
@@ -267,141 +268,9 @@ function HomeDesign() {
               </Show>
             </Show>
           </div>
-        </div>
-      </section>
-    </div>
-  )
-}
-
-function CodeGoblinWebHero(props: { openMemory: () => void; openMarket: () => void }) {
-  const chipClass = "rounded-[6px] border border-[#214f24] bg-[#071107] px-2 py-1 text-[#b8f8bb]"
-
-  return (
-    <div class="col-span-full pt-8">
-      <div class="flex min-w-0 items-center justify-between gap-6 border-b border-[#2b6d31] pb-5">
-        <div class="flex min-w-0 items-center gap-4">
-          <CodeGoblinLogoMark size="md" />
-          <div class="min-w-0">
-            <div class="text-32-bold leading-tight text-[#62f56e]">CodeGoblin</div>
-            <div class="mt-1 max-w-[720px] text-13-regular text-[#d9f7da]">
-              Your local AI goblin for code, images, and agents. BYOK providers stay intact; image outputs save locally.
-            </div>
-            <div class="mt-3 flex flex-wrap gap-2 text-12-medium">
-              <span class={chipClass}>images -&gt; codegoblin-output/images</span>
-              <span class={chipClass}>usage hoard tracked locally</span>
-              <span class="rounded-[6px] border border-[#6f5413] bg-[#171203] px-2 py-1 text-[#f5c84b]">
-                BYOK providers intact
-              </span>
-            </div>
-          </div>
-        </div>
-        <div class="hidden shrink-0 flex-col items-end gap-2 sm:flex">
-          <div class="flex gap-2">
-            <Button size="small" variant="secondary" onClick={() => props.openMemory()}>
-              Memory
-            </Button>
-            <Button size="small" variant="secondary" onClick={() => props.openMarket()}>
-              Market
-            </Button>
-          </div>
-          <div class="text-right text-12-medium leading-5 text-[#9bb09d]">
-            <div class="text-[#62f56e]">CG local</div>
-            <div>image jobs stay in chat</div>
-          </div>
-        </div>
+        </section>
       </div>
     </div>
-  )
-}
-
-function HomeProjectColumn(props: {
-  projects: LocalProject[]
-  selected?: string
-  selectProject: (directory: string) => void
-  chooseProject: () => void
-  openSettings: () => void
-  openHelp: () => void
-  language: ReturnType<typeof useLanguage>
-}) {
-  return (
-    <aside class="flex min-w-0 flex-col lg:pt-0" aria-label={props.language.t("home.projects")}>
-      <div class="flex h-7 min-w-0 items-center justify-between pl-3">
-        <div class={HOME_SECTION_LABEL}>{props.language.t("home.projects")}</div>
-        <IconButtonV2
-          data-action="home-add-project"
-          variant="ghost-muted"
-          size="large"
-          class="titlebar-icon [&_[data-slot=icon-svg]]:text-v2-icon-icon-muted"
-          icon={<IconV2 name="folder-add-left" />}
-          onClick={props.chooseProject}
-          aria-label={props.language.t("home.project.add")}
-        />
-      </div>
-      <div class="mt-4 flex max-h-[min(572px,calc(100vh_-_300px))] min-w-0 flex-col gap-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <Show
-          when={props.projects.length > 0}
-          fallback={
-            <button
-              type="button"
-              class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
-              onClick={props.chooseProject}
-            >
-              <IconV2 name="folder-add-left" size="small" />
-              <span>{props.language.t("home.project.add")}</span>
-            </button>
-          }
-        >
-          <For each={props.projects}>
-            {(project) => (
-              <button
-                type="button"
-                data-component="home-project-row"
-                class={HOME_PROJECT_NAV_ROW}
-                classList={{ "bg-v2-overlay-simple-overlay-hover": props.selected === project.worktree }}
-                data-selected={props.selected === project.worktree ? "" : undefined}
-                aria-current={props.selected === project.worktree ? "page" : undefined}
-                onClick={() => props.selectProject(project.worktree)}
-              >
-                <HomeProjectAvatar project={project} />
-                <span>{displayName(project)}</span>
-              </button>
-            )}
-          </For>
-        </Show>
-      </div>
-      <div class="mt-4 flex min-w-0 flex-col gap-1">
-        <button
-          type="button"
-          class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
-          onClick={props.openSettings}
-        >
-          <IconV2 name="settings-gear" size="small" />
-          <span>{props.language.t("sidebar.settings")}</span>
-        </button>
-        <button
-          type="button"
-          class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
-          onClick={props.openHelp}
-        >
-          <IconV2 name="help" size="small" />
-          <span>{props.language.t("sidebar.help")}</span>
-        </button>
-      </div>
-    </aside>
-  )
-}
-
-function HomeProjectAvatar(props: { project: LocalProject }) {
-  const name = createMemo(() => displayName(props.project))
-  return (
-    <AvatarV2
-      fallback={name()}
-      src={getProjectAvatarSource(props.project.id, props.project.icon)}
-      kind="org"
-      size="small"
-      {...getAvatarColors(props.project.icon?.color)}
-      class="size-4 rounded"
-    />
   )
 }
 

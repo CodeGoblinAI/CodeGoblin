@@ -280,6 +280,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       ready: models.ready,
       current,
       recent,
+      favorites: createMemo(() => models.favorite.list().map(models.find).filter(Boolean)),
+      isFavorite: (item: ModelKey) => models.favorite.has(item),
+      toggleFavorite: (item: ModelKey) => models.favorite.toggle(item),
       list: models.list,
       cycle(direction: 1 | -1) {
         const items = recent()

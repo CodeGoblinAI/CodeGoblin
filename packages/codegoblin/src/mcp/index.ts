@@ -672,6 +672,7 @@ export const layer = Layer.effect(
     })
 
     const disconnect = Effect.fn("MCP.disconnect")(function* (name: string, options?: { purge?: boolean }) {
+      yield* requireMcpConfig(name)
       const s = yield* InstanceState.get(state)
       yield* closeClient(s, name)
       delete s.clients[name]

@@ -17,6 +17,8 @@ import { isChatSelectableModel, MODEL_BUCKET_ORDER, modelBucket } from "@/utils/
 const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "opencode" && (!cost || cost.input === 0)
 
+const FAVORITES_GROUP = "Favorites"
+
 type ModelState = ReturnType<typeof useLocal>["model"]
 
 const ModelList: Component<{
@@ -29,13 +31,16 @@ const ModelList: Component<{
   const model = props.model ?? useLocal().model
   const language = useLanguage()
 
-  const models = createMemo(() =>
-    model
+  const models = createMemo(() => {
+    // Read favorites so the List's grouping resource re-runs (favorites move to
+    // their own group) whenever a model is starred/unstarred.
+    void model.favorites()
+    return model
       .list()
       .filter((m) => model.visible({ modelID: m.id, providerID: m.provider.id }))
-        .filter(isChatSelectableModel)
-      .filter((m) => (props.provider ? m.provider.id === props.provider : true)),
-  )
+      .filter(isChatSelectableModel)
+      .filter((m) => (props.provider ? m.provider.id === props.provider : true))
+  })
 
   return (
     <List
@@ -47,8 +52,12 @@ const ModelList: Component<{
       current={model.current()}
       filterKeys={["provider.name", "name", "id", "family"]}
       sortBy={(a, b) => a.name.localeCompare(b.name)}
-      groupBy={modelBucket}
+      groupBy={(m) =>
+        model.isFavorite({ modelID: m.id, providerID: m.provider.id }) ? FAVORITES_GROUP : modelBucket(m)
+      }
       sortGroupsBy={(a, b) => {
+        if (a.category === FAVORITES_GROUP) return -1
+        if (b.category === FAVORITES_GROUP) return 1
         const bucketOrder = bucketIndex(a.category) - bucketIndex(b.category)
         if (bucketOrder !== 0) return bucketOrder
         const aProvider = a.items[0]?.provider.id ?? ""
@@ -84,6 +93,27 @@ const ModelList: Component<{
           <Show when={i.latest}>
             <Tag>{language.t("model.tag.latest")}</Tag>
           </Show>
+          <button
+            type="button"
+            class="ml-auto shrink-0 px-0.5 leading-none transition-colors"
+            classList={{
+              "text-[#9ADB35]": model.isFavorite({ modelID: i.id, providerID: i.provider.id }),
+              "text-text-faint hover:text-text-muted": !model.isFavorite({ modelID: i.id, providerID: i.provider.id }),
+            }}
+            aria-label={
+              model.isFavorite({ modelID: i.id, providerID: i.provider.id })
+                ? language.t("model.favorite.remove")
+                : language.t("model.favorite.add")
+            }
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              event.preventDefault()
+              model.toggleFavorite({ modelID: i.id, providerID: i.provider.id })
+            }}
+          >
+            {model.isFavorite({ modelID: i.id, providerID: i.provider.id }) ? "★" : "☆"}
+          </button>
         </div>
       )}
     </List>

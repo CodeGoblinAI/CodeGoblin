@@ -73,14 +73,14 @@ describe("parsePluginSpecifier", () => {
   })
 
   test("parses bare npm protocol specifier using the target package", () => {
-    expect(parsePluginSpecifier("npm:@opencode/acme@1.0.0")).toEqual({
+    expect(parsePluginSpecifier("npm:@codegoblin/acme@1.0.0")).toEqual({
       pkg: "@codegoblin/acme",
       version: "1.0.0",
     })
   })
 
   test("parses unversioned npm protocol specifier", () => {
-    expect(parsePluginSpecifier("npm:@opencode/acme")).toEqual({
+    expect(parsePluginSpecifier("npm:@codegoblin/acme")).toEqual({
       pkg: "@codegoblin/acme",
       version: "latest",
     })

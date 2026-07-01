@@ -8,6 +8,141 @@
   font-style: normal;
 }
 
+@font-face {
+  font-family: "Silkscreen";
+  src: url("/assets/Silkscreen-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pirata One";
+  src: url("/assets/PirataOne-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Distinctive pixel display face for headlines — ties the web to the pixel favicon + TUI wordmark. */
+.cg-display {
+  font-family: "Silkscreen", var(--font-family-sans);
+  letter-spacing: 0.5px;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+/* CodeGoblin entry surfaces — neutral dark base + a single whisper of goblin green. */
+[data-cg-home],
+[data-cg-session] {
+  position: relative;
+  background:
+    radial-gradient(90% 55% at 50% -12%, rgba(154, 219, 53, 0.05), transparent 60%),
+    var(--v2-background-bg-base);
+}
+@keyframes cg-ember {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.8;
+  }
+  82% {
+    opacity: 0.45;
+  }
+  100% {
+    transform: translateY(-160px) scale(0.5);
+    opacity: 0;
+  }
+}
+.cg-ember {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #f5c84b;
+  box-shadow: 0 0 7px 1px rgba(245, 200, 75, 0.7);
+  animation: cg-ember linear infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+.cg-rail-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #6f8a72;
+  background: linear-gradient(180deg, #0e1a10, #0a130b);
+  border: 1px solid #1a3420;
+  box-shadow: inset 0 1px 0 rgba(154, 219, 53, 0.05);
+  transition: color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.cg-rail-btn:hover {
+  color: #cfe6d1;
+  border-color: #2b6d31;
+  box-shadow: 0 0 16px rgba(154, 219, 53, 0.14), inset 0 1px 0 rgba(154, 219, 53, 0.08);
+}
+.cg-rail-btn[data-active] {
+  color: #9adb35;
+  border-color: #2f6a35;
+  background: linear-gradient(180deg, #15311a, #0e1f12);
+  box-shadow: 0 0 18px rgba(154, 219, 53, 0.22), inset 0 1px 0 rgba(154, 219, 53, 0.12);
+}
+.cg-gem-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 17px;
+  border-radius: 11px;
+  font-weight: 500;
+  color: #06210a;
+  background: linear-gradient(180deg, #b6f24a, #7ec428);
+  border: 1px solid #6fb31f;
+  box-shadow: 0 5px 16px rgba(154, 219, 53, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: filter 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.cg-gem-btn:hover {
+  filter: brightness(1.07);
+  box-shadow: 0 8px 22px rgba(154, 219, 53, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transform: translateY(-1px);
+}
+.cg-stone-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  color: #cfe6d1;
+  font-weight: 500;
+  background: linear-gradient(180deg, rgba(20, 38, 22, 0.55), rgba(10, 19, 11, 0.85));
+  border: 1px solid #234a27;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.cg-stone-btn:hover {
+  border-color: #2f6a35;
+  background: linear-gradient(180deg, rgba(26, 49, 28, 0.7), rgba(14, 26, 16, 0.9));
+  box-shadow: 0 0 14px rgba(154, 219, 53, 0.1);
+}
+.cg-panel {
+  position: relative;
+  background: linear-gradient(180deg, rgba(14, 26, 16, 0.62), rgba(8, 16, 10, 0.62));
+  border: 1px solid #1a3420;
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(154, 219, 53, 0.04), 0 16px 40px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+}
+.cg-ledger-row {
+  border: 1px solid transparent;
+  border-radius: 11px;
+  transition: border-color 130ms ease, background 130ms ease;
+}
+.cg-ledger-row:hover {
+  border-color: #1d3a20;
+  background: linear-gradient(180deg, rgba(14, 26, 16, 0.7), rgba(10, 19, 11, 0.5));
+}
+
 @layer components {
   @keyframes session-progress-whip {
     0% {
