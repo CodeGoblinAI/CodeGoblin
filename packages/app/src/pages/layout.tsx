@@ -569,6 +569,10 @@ export default function Layout(props: ParentProps) {
     const dir = currentDir()
     if (!dir) return
     const key = pathKey(dir)
+    // "No project" scratch chats are rooted at the home dir — keep them out of
+    // the project list so No-project stays truly project-less.
+    const home = globalSync.data.path.home
+    if (home && key === pathKey(home)) return
     const known = layout.projects
       .list()
       .some((p) => pathKey(p.worktree) === key || p.sandboxes?.some((s) => pathKey(s) === key))
@@ -2427,6 +2431,29 @@ export default function Layout(props: ParentProps) {
               // Work without a project: a scratch chat rooted at the home dir.
               const dir = globalSync.data.path.home || globalSync.data.path.directory
               if (dir) navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
+            }}
+            onQuickStart={() => {
+              // Ask the local server to make a fresh random-named scratch folder,
+              // then open it as a project.
+              void (async () => {
+                try {
+                  const res = await fetch(`${globalSDK.url}/codegoblin/create-scratch`, {
+                    method: "POST",
+                    headers: {
+                      "content-type": "application/json",
+                      "x-opencode-directory": globalSync.data.path.directory ?? "",
+                    },
+                    body: "{}",
+                  })
+                  const data = (await res.json()) as { ok?: boolean; directory?: string }
+                  if (data?.ok && data.directory) {
+                    openProject(data.directory, false)
+                    navigateWithSidebarReset(`/${base64Encode(data.directory)}/session`)
+                  }
+                } catch {
+                  // best-effort; ignore
+                }
+              })()
             }}
             onOpenSettings={() => openSettings()}
             onOpenHelp={() => platform.openLink("https://github.com/shawnisikli/CodeGoblin/issues/new?template=bug-report.yml")}

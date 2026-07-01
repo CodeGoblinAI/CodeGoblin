@@ -31,6 +31,7 @@ export function ThreePaneSidebar(props: {
   onNewChat: () => void
   onOpenProject: () => void
   onNoProject: () => void
+  onQuickStart: () => void
   onOpenSettings: () => void
   onOpenHelp: () => void
 }) {
@@ -232,6 +233,10 @@ export function ThreePaneSidebar(props: {
                   <DropdownMenu.Item onSelect={() => props.onOpenProject()}>
                     <IconV2 name="folder-add-left" />
                     <DropdownMenu.ItemLabel>New project…</DropdownMenu.ItemLabel>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item onSelect={() => props.onQuickStart()}>
+                    <IconV2 name="grid-plus" />
+                    <DropdownMenu.ItemLabel>Quick start</DropdownMenu.ItemLabel>
                   </DropdownMenu.Item>
                   <DropdownMenu.Item onSelect={() => props.onNoProject()}>
                     <IconV2 name="xmark-small" />

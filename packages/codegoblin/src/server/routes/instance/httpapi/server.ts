@@ -1,6 +1,7 @@
 import { Config as EffectConfig, Context, Effect, Layer } from "effect"
 import { HttpApiBuilder, OpenApi } from "effect/unstable/httpapi"
 import fs from "fs/promises"
+import os from "os"
 import path from "path"
 import {
   FetchHttpClient,
@@ -466,6 +467,21 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           }),
         )
         return HttpServerResponse.jsonUnsafe(picked, { status: picked.ok ? 200 : 400 })
+      }),
+    )
+    yield* router.add("POST", "/codegoblin/create-scratch", (request) =>
+      Effect.gen(function* () {
+        if (!isHostOnlyHttpRequest(request.headers)) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: "Quick start is only available on the local server." },
+            { status: 403 },
+          )
+        }
+        // Create a fresh, random-named scratch project folder under the home dir.
+        const suffix = crypto.randomUUID().slice(0, 8)
+        const directory = path.join(os.homedir(), "codegoblin-scratch", `goblin-dig-${suffix}`)
+        yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
+        return HttpServerResponse.jsonUnsafe({ ok: true, directory }, { status: 200 })
       }),
     )
     yield* router.add("POST", "/codegoblin/audio", (request) =>
