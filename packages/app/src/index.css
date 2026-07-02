@@ -274,3 +274,8 @@
     }
   }
 }
+
+/* Settings search: hide a section (header + card) when every row in it is filtered out. */
+[data-settings-filterable] [data-settings-section]:not(:has([data-settings-row]:not(.hidden))) {
+  display: none;
+}

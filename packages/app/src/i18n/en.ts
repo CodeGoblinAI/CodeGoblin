@@ -743,6 +743,7 @@ export const dict = {
   "settings.desktop.wsl.title": "WSL integration",
   "settings.desktop.wsl.description": "Run the CodeGoblin server inside WSL on Windows.",
 
+  "settings.general.search.placeholder": "Search settings",
   "settings.general.section.appearance": "Look & feel",
   "settings.general.section.advanced": "Under the hood",
   "settings.general.section.notifications": "Desktop alerts",
