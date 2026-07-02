@@ -4,7 +4,7 @@ set -euo pipefail
 APP=codegoblin
 SHORT_APP=cg
 ASSET_PREFIX=${CODEGOBLIN_RELEASE_ASSET_PREFIX:-opencode}
-RELEASE_REPO=${CODEGOBLIN_RELEASE_REPO:-shawnisikli/CodeGoblin}
+RELEASE_REPO=${CODEGOBLIN_RELEASE_REPO:-CodeGoblinAI/CodeGoblin}
 INSTALL_DIR=${CODEGOBLIN_INSTALL_DIR:-$HOME/.codegoblin/bin}
 
 MUTED='\033[0;2m'
@@ -25,8 +25,8 @@ Options:
       --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
 
 Examples:
-  curl -fsSL https://raw.githubusercontent.com/shawnisikli/CodeGoblin/dev/install | bash
-  curl -fsSL https://raw.githubusercontent.com/shawnisikli/CodeGoblin/dev/install | bash -s -- --version 1.0.180
+  curl -fsSL https://raw.githubusercontent.com/CodeGoblinAI/CodeGoblin/dev/install | bash
+  curl -fsSL https://raw.githubusercontent.com/CodeGoblinAI/CodeGoblin/dev/install | bash -s -- --version 1.0.180
   ./install --binary /path/to/codegoblin
 EOF
 }

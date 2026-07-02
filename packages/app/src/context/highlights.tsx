@@ -8,7 +8,7 @@ import { persisted } from "@/utils/persist"
 import { DialogReleaseNotes, type Highlight } from "@/components/dialog-release-notes"
 
 // Dormant until a changelog.json ships on the repo (fetch failures are swallowed below).
-const CHANGELOG_URL = "https://raw.githubusercontent.com/shawnisikli/CodeGoblin/dev/changelog.json"
+const CHANGELOG_URL = "https://raw.githubusercontent.com/CodeGoblinAI/CodeGoblin/dev/changelog.json"
 
 type Store = {
   version?: string

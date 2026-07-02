@@ -31,7 +31,7 @@ cg --help
 
 The `codegoblin` npm package installs a small launcher plus the native binary package for your platform. `cg` is included as a short alias.
 
-Publish and dry-run via GitHub Actions → **publish-codegoblin-npm** on `shawnisikli/CodeGoblin`.
+Publish and dry-run via GitHub Actions → **publish-codegoblin-npm** on `CodeGoblinAI/CodeGoblin`.
 
 ## Run from a source checkout
 

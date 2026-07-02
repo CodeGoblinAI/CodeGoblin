@@ -20,7 +20,7 @@ const product = {
   command: "codegoblin",
   shortCommand: "cg",
   description: "Your local AI goblin for code, images, and agents.",
-  repository: "https://github.com/shawnisikli/CodeGoblin",
+  repository: "https://github.com/CodeGoblinAI/CodeGoblin",
 }
 
 function publishedPackageName() {

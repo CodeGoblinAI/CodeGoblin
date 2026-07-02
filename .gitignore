@@ -61,3 +61,4 @@ packages/storybook/*.log
 **/.npmrc
 # dead SST stubs (hosted infra removed)
 sst-env.d.ts
+.artifacts/

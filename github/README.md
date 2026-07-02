@@ -90,7 +90,7 @@ This will walk you through installing the GitHub app, creating the workflow, and
              persist-credentials: false
 
          - name: Run CodeGoblin
-           uses: shawnisikli/CodeGoblin/github@dev
+           uses: CodeGoblinAI/CodeGoblin/github@dev
            env:
              ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -103,7 +103,7 @@ This will walk you through installing the GitHub app, creating the workflow, and
 
 ## Support
 
-This is an early release. If you encounter issues or have feedback, please create an issue at https://github.com/shawnisikli/CodeGoblin/issues.
+This is an early release. If you encounter issues or have feedback, please create an issue at https://github.com/CodeGoblinAI/CodeGoblin/issues.
 
 ## Development
 
