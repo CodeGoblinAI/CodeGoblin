@@ -32,7 +32,7 @@ CodeGoblin preserves OpenCode's MIT license notice and upstream history. Keep Op
 Local remotes after setup:
 
 ```bash
-origin   https://github.com/shawnisikli/CodeGoblin.git
+origin   https://github.com/CodeGoblinAI/CodeGoblin.git
 upstream https://github.com/anomalyco/opencode.git
 ```
 

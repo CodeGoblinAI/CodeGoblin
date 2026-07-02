@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   build:
-    if: github.repository == 'CodeGoblinAI/CodeGoblin' || github.repository == 'shawnisikli/CodeGoblin' || github.repository == 'codegoblin/codegoblin'
+    if: github.repository == 'CodeGoblinAI/CodeGoblin'
     strategy:
       fail-fast: false
       matrix:
@@ -73,7 +73,7 @@ jobs:
           if-no-files-found: error
 
   publish-npm:
-    if: github.repository == 'CodeGoblinAI/CodeGoblin' || github.repository == 'shawnisikli/CodeGoblin' || github.repository == 'codegoblin/codegoblin'
+    if: github.repository == 'CodeGoblinAI/CodeGoblin'
     needs: build
     runs-on: ubuntu-latest
     steps:

@@ -2394,7 +2394,7 @@ export default function Layout(props: ParentProps) {
       settingsKeybind={() => command.keybind("settings.open")}
       onOpenSettings={openSettings}
       helpLabel={() => language.t("sidebar.help")}
-      onOpenHelp={() => platform.openLink("https://github.com/shawnisikli/CodeGoblin/issues/new?template=bug-report.yml")}
+      onOpenHelp={() => platform.openLink("https://github.com/CodeGoblinAI/CodeGoblin/issues/new?template=bug-report.yml")}
       renderPanel={() =>
         mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
       }
@@ -2456,7 +2456,7 @@ export default function Layout(props: ParentProps) {
               })()
             }}
             onOpenSettings={() => openSettings()}
-            onOpenHelp={() => platform.openLink("https://github.com/shawnisikli/CodeGoblin/issues/new?template=bug-report.yml")}
+            onOpenHelp={() => platform.openLink("https://github.com/CodeGoblinAI/CodeGoblin/issues/new?template=bug-report.yml")}
           />
           {/* Center (and right) panel: home or session */}
           <main

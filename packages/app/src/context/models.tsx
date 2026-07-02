@@ -1,8 +1,10 @@
-import { createMemo } from "solid-js"
+import { createEffect, createMemo } from "solid-js"
 import { createStore } from "solid-js/store"
 import { DateTime } from "luxon"
 import { filter, firstBy, flat, groupBy, mapValues, pipe, uniqueBy, values } from "remeda"
 import { createSimpleContext } from "@codegoblin/ui/context"
+import { useGlobalSDK } from "@/context/global-sdk"
+import { useGlobalSync } from "@/context/global-sync"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
 
@@ -27,6 +29,8 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
   name: "Models",
   init: () => {
     const providers = useProviders()
+    const globalSDK = useGlobalSDK()
+    const globalSync = useGlobalSync()
 
     const [store, setStore, _, ready] = persisted(
       Persist.global("model", ["model.v1"]),
@@ -37,6 +41,59 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
         variant: {},
       }),
     )
+
+    // --- shared favorites (TUI <-> web) -------------------------------------
+    // The TUI keeps favorites in <state>/model.json on the server machine; the
+    // /codegoblin/model-favorites routes expose that file so both surfaces see
+    // the same stars. Web localStorage stays the fast local cache; the server
+    // file is the shared source of truth.
+    const favoritesRequest = (init?: RequestInit) =>
+      fetch(`${globalSDK.url}/codegoblin/model-favorites`, {
+        ...init,
+        headers: {
+          "x-opencode-directory": globalSync.data.path.directory ?? "",
+          ...init?.headers,
+        },
+      })
+
+    const plainFavorites = (items: ModelKey[]) =>
+      items.map((x) => ({ providerID: x.providerID, modelID: x.modelID }))
+
+    const pushFavorites = (favorite: ModelKey[]) => {
+      void favoritesRequest({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ favorite: plainFavorites(favorite) }),
+      }).catch(() => {})
+    }
+
+    // Hydrate once after localStorage is loaded: union the server (TUI) list
+    // with the local one so neither side loses stars on first sync, then push
+    // the merged list back so the shared file becomes authoritative.
+    let hydrated = false
+    createEffect(() => {
+      if (!ready() || hydrated) return
+      hydrated = true
+      void (async () => {
+        try {
+          const response = await favoritesRequest()
+          if (!response.ok) return
+          const data = (await response.json()) as { favorite?: ModelKey[] }
+          if (!Array.isArray(data.favorite)) return
+          const remote = data.favorite.filter(
+            (x) => x && typeof x.providerID === "string" && typeof x.modelID === "string",
+          )
+          const merged = uniqueBy([...remote, ...(store.favorite ?? [])], modelKey)
+          const changed =
+            merged.length !== (store.favorite ?? []).length ||
+            merged.some((x, i) => modelKey(x) !== modelKey((store.favorite ?? [])[i]!))
+          if (changed) setStore("favorite", merged)
+          if (merged.length !== remote.length) pushFavorites(merged)
+        } catch {
+          // Server route unavailable (older server, remote access) — stay local.
+        }
+      })()
+    })
 
     const available = createMemo(() =>
       providers.connected().flatMap((p) =>
@@ -140,14 +197,12 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
     const toggleFavorite = (model: ModelKey) => {
       const key = modelKey(model)
       const current = store.favorite ?? []
-      if (current.some((x) => modelKey(x) === key)) {
-        setStore(
-          "favorite",
-          current.filter((x) => modelKey(x) !== key),
-        )
-        return
-      }
-      setStore("favorite", [{ providerID: model.providerID, modelID: model.modelID }, ...current])
+      const next = current.some((x) => modelKey(x) === key)
+        ? current.filter((x) => modelKey(x) !== key)
+        : [{ providerID: model.providerID, modelID: model.modelID }, ...current]
+      setStore("favorite", next)
+      // Write through to the shared server file so the TUI sees it too.
+      pushFavorites(next)
     }
 
     const variantKey = (model: ModelKey) => `${model.providerID}/${model.modelID}`

@@ -1,4 +1,4 @@
-import { Component, Show, createMemo, createResource, onMount, type JSX } from "solid-js"
+import { Component, Show, createMemo, createResource, createSignal, onMount, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@codegoblin/ui/button"
 import { Icon } from "@codegoblin/ui/icon"
@@ -28,8 +28,13 @@ import {
 } from "@/context/settings"
 import { decode64 } from "@/utils/base64"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
+import { IconButton } from "@codegoblin/ui/icon-button"
 import { Link } from "./link"
 import { SettingsList } from "./settings-list"
+
+// Shared between SettingsGeneral (which owns the search input) and the
+// module-local SettingsRow (which hides itself when it doesn't match).
+const [settingsFilter, setSettingsFilter] = createSignal("")
 
 let demoSoundState = {
   cleanup: undefined as (() => void) | undefined,
@@ -302,7 +307,7 @@ export const SettingsGeneral: Component = () => {
   })
 
   const GeneralSection = () => (
-    <div class="flex flex-col gap-1">
+    <div data-settings-section class="flex flex-col gap-1">
       <SettingsList>
         <SettingsRow
           title={language.t("settings.general.row.language.title")}
@@ -440,7 +445,7 @@ export const SettingsGeneral: Component = () => {
   )
 
   const AdvancedSection = () => (
-    <div class="flex flex-col gap-1">
+    <div data-settings-section class="flex flex-col gap-1">
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.advanced")}</h3>
 
       <SettingsList>
@@ -508,7 +513,7 @@ export const SettingsGeneral: Component = () => {
   )
 
   const AppearanceSection = () => (
-    <div class="flex flex-col gap-1">
+    <div data-settings-section class="flex flex-col gap-1">
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.appearance")}</h3>
 
       <SettingsList>
@@ -540,7 +545,7 @@ export const SettingsGeneral: Component = () => {
           description={
             <>
               {language.t("settings.general.row.theme.description")}{" "}
-              <Link href="https://github.com/shawnisikli/CodeGoblin#themes">{language.t("common.learnMore")}</Link>
+              <Link href="https://github.com/CodeGoblinAI/CodeGoblin#themes">{language.t("common.learnMore")}</Link>
             </>
           }
         >
@@ -638,7 +643,7 @@ export const SettingsGeneral: Component = () => {
   )
 
   const NotificationsSection = () => (
-    <div class="flex flex-col gap-1">
+    <div data-settings-section class="flex flex-col gap-1">
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.notifications")}</h3>
 
       <SettingsList>
@@ -682,7 +687,7 @@ export const SettingsGeneral: Component = () => {
   )
 
   const SoundsSection = () => (
-    <div class="flex flex-col gap-1">
+    <div data-settings-section class="flex flex-col gap-1">
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.sounds")}</h3>
 
       <SettingsList>
@@ -735,7 +740,7 @@ export const SettingsGeneral: Component = () => {
   )
 
   const UpdatesSection = () => (
-    <div class="flex flex-col gap-1">
+    <div data-settings-section class="flex flex-col gap-1">
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.updates")}</h3>
 
       <SettingsList>
@@ -780,7 +785,7 @@ export const SettingsGeneral: Component = () => {
 
   const DisplaySection = () => (
     <Show when={desktop()}>
-      <div class="flex flex-col gap-1">
+      <div data-settings-section class="flex flex-col gap-1">
         <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.display")}</h3>
 
         <SettingsList>
@@ -817,11 +822,34 @@ export const SettingsGeneral: Component = () => {
     </Show>
   )
 
+  onMount(() => setSettingsFilter(""))
+
   return (
-    <div class="flex flex-col h-full overflow-y-auto no-scrollbar px-4 pb-10 sm:px-10 sm:pb-10">
+    <div
+      data-settings-filterable
+      class="flex flex-col h-full overflow-y-auto no-scrollbar px-4 pb-10 sm:px-10 sm:pb-10"
+    >
       <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
-        <div class="flex flex-col gap-1 pt-6 pb-8">
+        <div class="flex flex-col gap-3 pt-6 pb-8">
           <h2 class="text-16-medium text-text-strong">{language.t("settings.tab.general")}</h2>
+          <div class="flex items-center gap-2 px-3 h-9 rounded-lg bg-surface-base">
+            <Icon name="magnifying-glass" class="text-icon-weak-base flex-shrink-0" />
+            <TextField
+              variant="ghost"
+              type="text"
+              value={settingsFilter()}
+              onChange={(v) => setSettingsFilter(v)}
+              placeholder={language.t("settings.general.search.placeholder")}
+              spellcheck={false}
+              autocorrect="off"
+              autocomplete="off"
+              autocapitalize="off"
+              class="flex-1"
+            />
+            <Show when={settingsFilter()}>
+              <IconButton icon="circle-x" variant="ghost" onClick={() => setSettingsFilter("")} />
+            </Show>
+          </div>
         </div>
       </div>
 
@@ -853,8 +881,22 @@ interface SettingsRowProps {
 }
 
 const SettingsRow: Component<SettingsRowProps> = (props) => {
+  let el: HTMLDivElement | undefined
+  // Match the search box against the row's rendered text (covers JSX titles,
+  // descriptions, and control labels). The ref is set before the filter can
+  // become non-empty, so the initial undefined read never hides a row.
+  const visible = createMemo(() => {
+    const query = settingsFilter().trim().toLowerCase()
+    if (!query) return true
+    return (el?.textContent ?? "").toLowerCase().includes(query)
+  })
   return (
-    <div class="flex flex-wrap items-center gap-4 py-3 border-b border-border-weak-base last:border-none sm:flex-nowrap">
+    <div
+      ref={el}
+      data-settings-row
+      classList={{ hidden: !visible() }}
+      class="flex flex-wrap items-center gap-4 py-3 border-b border-border-weak-base last:border-none sm:flex-nowrap"
+    >
       <div class="flex min-w-0 flex-1 flex-col gap-0.5">
         <span class="text-14-medium text-text-strong">{props.title}</span>
         <span class="text-12-regular text-text-weak">{props.description}</span>

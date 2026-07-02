@@ -22,7 +22,7 @@ function defaultModelsSource() {
   if (process.env.CODEGOBLIN === "1") {
     return (
       process.env.CODEGOBLIN_MODELS_CATALOG_URL ||
-      "https://raw.githubusercontent.com/shawnisikli/CodeGoblin/dev/packages/codegoblin/models"
+      "https://raw.githubusercontent.com/CodeGoblinAI/CodeGoblin/dev/packages/codegoblin/models"
     )
   }
   return "https://models.dev"

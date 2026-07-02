@@ -57,6 +57,35 @@ describe("web model buckets", () => {
     expect(isDefaultChatModel(model)).toBe(false)
   })
 
+  test("never defaults to generation-only models (video/image without text output)", () => {
+    // grok-imagine-video: modalities output = ["video"] only — must not be the chat default.
+    const video = {
+      id: "grok-imagine-video",
+      name: "Grok Imagine Video",
+      family: "grok-imagine",
+      capabilities: {
+        input: { text: true, image: true },
+        output: { text: false },
+      },
+    }
+    expect(isDefaultChatModel(video)).toBe(false)
+
+    // Image-only generation models are selectable but not chat defaults either.
+    const image = {
+      id: "grok-imagine-image",
+      family: "grok-imagine",
+      capabilities: {
+        input: { text: true },
+        output: { image: true },
+      },
+    }
+    expect(isDefaultChatModel(image)).toBe(false)
+    expect(isChatSelectableModel(image)).toBe(true)
+
+    // Models with no capability data at all stay eligible (legacy/config-defined entries).
+    expect(isDefaultChatModel({ id: "custom-chat" })).toBe(true)
+  })
+
   test("places local GGUF models in the Local models bucket", () => {
     const model = {
       id: "gemma-3n-E2B-it-Q4_K_M",

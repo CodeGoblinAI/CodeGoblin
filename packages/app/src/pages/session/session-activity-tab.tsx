@@ -4,6 +4,8 @@ import { getToolInfo } from "@codegoblin/ui/message-part"
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js"
 import { useGlobalSync } from "@/context/global-sync"
 import { useSync } from "@/context/sync"
+import { useTerminal } from "@/context/terminal"
+import { useSessionLayout } from "@/pages/session/session-layout"
 
 // The live "what's running" view for the right pane — current activity, the
 // implementation plan (todos), a feed of recent tool-calls, and a jump-off to
@@ -178,6 +180,16 @@ export function SessionActivityTab(props: {
 }) {
   const sync = useSync()
   const globalSync = useGlobalSync()
+  const terminal = useTerminal()
+  const { view } = useSessionLayout()
+
+  // Workspace-scoped PTYs (the bottom terminal panel's tabs). Selecting one
+  // makes it the active tab and opens the panel.
+  const terminals = createMemo(() => terminal.all())
+  const openTerminal = (id: string) => {
+    terminal.open(id)
+    view().terminal.open()
+  }
 
   const status = createMemo(() => {
     const id = props.sessionID()
@@ -261,7 +273,8 @@ export function SessionActivityTab(props: {
   })
 
   const isEmpty = createMemo(
-    () => !working() && running().length === 0 && recent().length === 0 && todos().length === 0,
+    () =>
+      !working() && running().length === 0 && recent().length === 0 && todos().length === 0 && terminals().length === 0,
   )
 
   return (
@@ -314,6 +327,31 @@ export function SessionActivityTab(props: {
         <Show when={running().length > 0}>
           <Section label="Running">
             <For each={running()}>{(part) => <ToolRow part={part} now={now} />}</For>
+          </Section>
+        </Show>
+
+        {/* Live terminals */}
+        <Show when={terminals().length > 0}>
+          <Section label="Terminals" trailing={String(terminals().length)}>
+            <For each={terminals()}>
+              {(pty) => (
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2.5 px-4 py-1.5 text-left transition-colors hover:bg-v2-overlay-simple-overlay-hover"
+                  onClick={() => openTerminal(pty.id)}
+                >
+                  <Icon name="terminal-active" size="small" class="shrink-0 text-v2-icon-icon-muted" />
+                  <span class="min-w-0 flex-1 truncate text-[13px] text-v2-text-text-muted">
+                    {pty.title || `Terminal ${pty.titleNumber || ""}`.trim()}
+                  </span>
+                  <Show when={terminal.active() === pty.id}>
+                    <span class="shrink-0 text-[10px] font-medium uppercase tracking-wide" style={{ color: GREEN }}>
+                      active
+                    </span>
+                  </Show>
+                </button>
+              )}
+            </For>
           </Section>
         </Show>
 
