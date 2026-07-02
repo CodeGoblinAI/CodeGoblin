@@ -37,7 +37,12 @@ export function isChatSelectableModel(info: BucketModelInfo) {
 }
 
 export function isDefaultChatModel(info: BucketModelInfo) {
-  return !isAudioOnlyModel(info) && !is3DOnlyModel(info)
+  const output = info.capabilities?.output
+  // No capability data — assume a plain chat model (the server defaults output.text to true).
+  if (!output) return true
+  // The chat composer must never default to a generation-only model: anything that
+  // declares outputs but not text (video/image/audio/3D-only) is not a chat default.
+  return output.text === true
 }
 
 export function modelBucket(modelID: string, info: BucketModelInfo) {
