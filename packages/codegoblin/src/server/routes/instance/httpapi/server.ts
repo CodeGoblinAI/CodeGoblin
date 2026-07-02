@@ -3,6 +3,7 @@ import { HttpApiBuilder, OpenApi } from "effect/unstable/httpapi"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import { Global } from "@codegoblin/core/global"
 import {
   FetchHttpClient,
   HttpClient,
@@ -482,6 +483,59 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         const directory = path.join(os.homedir(), "codegoblin-scratch", `goblin-dig-${suffix}`)
         yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
         return HttpServerResponse.jsonUnsafe({ ok: true, directory }, { status: 200 })
+      }),
+    )
+    // Shared model favorites: the TUI persists favorites in <state>/model.json;
+    // these routes let the web UI read and write the same file so starring a
+    // model on either surface shows up on the other. Favorites are user-global,
+    // not workspace-scoped.
+    const modelStateFile = path.join(Global.Path.state, "model.json")
+    const readModelState = () =>
+      fs
+        .readFile(modelStateFile, "utf8")
+        .then((raw) => JSON.parse(raw) as Record<string, unknown>)
+        .catch(() => ({}) as Record<string, unknown>)
+    yield* router.add("GET", "/codegoblin/model-favorites", (request) =>
+      Effect.gen(function* () {
+        if (!isHostOnlyHttpRequest(request.headers)) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: "Model favorites are only available on the local server." },
+            { status: 403 },
+          )
+        }
+        const data = yield* Effect.promise(readModelState)
+        const favorite = Array.isArray(data.favorite) ? data.favorite : []
+        return HttpServerResponse.jsonUnsafe({ ok: true, favorite }, { status: 200 })
+      }),
+    )
+    yield* router.add("POST", "/codegoblin/model-favorites", (request) =>
+      Effect.gen(function* () {
+        if (!isHostOnlyHttpRequest(request.headers)) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: "Model favorites are only available on the local server." },
+            { status: 403 },
+          )
+        }
+        const text = yield* Effect.orDie(request.text)
+        let body: any
+        try {
+          body = text ? JSON.parse(text) : {}
+        } catch {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Invalid JSON body." }, { status: 400 })
+        }
+        if (!Array.isArray(body?.favorite)) {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "favorite must be an array." }, { status: 400 })
+        }
+        const favorite = body.favorite
+          .filter((x: any) => x && typeof x.providerID === "string" && typeof x.modelID === "string")
+          .map((x: any) => ({ providerID: x.providerID, modelID: x.modelID }))
+        yield* Effect.promise(async () => {
+          // Preserve the TUI's other model state (recent, variant) on write.
+          const existing = await readModelState()
+          await fs.mkdir(path.dirname(modelStateFile), { recursive: true })
+          await fs.writeFile(modelStateFile, JSON.stringify({ ...existing, favorite }, null, 2))
+        })
+        return HttpServerResponse.jsonUnsafe({ ok: true, favorite }, { status: 200 })
       }),
     )
     yield* router.add("POST", "/codegoblin/audio", (request) =>
