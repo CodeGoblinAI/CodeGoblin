@@ -272,7 +272,12 @@ for (const item of targets) {
   }
 
   await $`rm -rf ./dist/${name}/bin/tui`
-  if (nativeSidecar && fs.existsSync(nativeSidecar)) {
+  // The Rust sidecar is cargo-built for the HOST only — bundling it into
+  // cross-compiled targets would ship a foreign binary (e.g. a Windows .exe
+  // inside the darwin/linux packages). Other platforms use the TS memory
+  // fallback until they get their own sidecar build.
+  const sidecarMatchesTarget = item.os === process.platform && item.arch === process.arch
+  if (nativeSidecar && fs.existsSync(nativeSidecar) && sidecarMatchesTarget) {
     const sidecarDest = path.join(dir, `dist/${name}/bin`, nativeExeName)
     await fs.promises.copyFile(nativeSidecar, sidecarDest)
     console.log(`Bundled native sidecar -> dist/${name}/bin/${nativeExeName}`)
