@@ -4,6 +4,12 @@ Your local AI goblin for code, images, and agents.
 
 CodeGoblin is a local-first AI coding agent with a terminal UI, web UI, and BYOK provider support. It keeps prompts, sessions, and generated assets on your machine by default, and adds goblin-branded workflows for image generation, local asset output, and simpler installation.
 
+## Status
+
+CodeGoblin is in **early alpha**. The core coding agent (TUI + web chat, BYOK providers, sessions) is usable day to day, but expect rough edges, breaking changes between releases, and incomplete docs. The most experimental areas are image/audio/3D generation, the local GGUF model runtime, and the desktop app. If something breaks, please [open an issue](https://github.com/CodeGoblinAI/CodeGoblin/issues).
+
+Local-first means your prompts, chat history, and generated files stay on your machine unless you connect a cloud provider — CodeGoblin itself sends nothing anywhere.
+
 ## Documentation
 
 Full guides live in [`docs/`](docs/README.md):
