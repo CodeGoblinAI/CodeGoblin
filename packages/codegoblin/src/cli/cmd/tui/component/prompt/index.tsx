@@ -9,7 +9,7 @@ import {
   type Renderable,
 } from "@opentui/core"
 import type { CommandContext } from "@opentui/keymap"
-import { createEffect, createMemo, createResource, onMount, createSignal, onCleanup, on, Show, Switch, Match } from "solid-js"
+import { createEffect, createMemo, createResource, onMount, createSignal, onCleanup, on, For, Show, Switch, Match } from "solid-js"
 import "opentui-spinner/solid"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -2047,6 +2047,28 @@ export function Prompt(props: PromptProps) {
     return `Ask the goblin... "${list()[store.placeholder % list().length]}"`
   })
 
+  // Pasted blocks live in the textarea as collapsed "[Pasted ~N lines]"
+  // placeholders (extmarks) with the real text stored in prompt.parts. This
+  // panel lists them under the bar; clicking a row expands/collapses a preview.
+  const [expandedPastes, setExpandedPastes] = createSignal<ReadonlySet<number>>(new Set<number>())
+  const pastedParts = createMemo(() => {
+    const out: { index: number; label: string; text: string }[] = []
+    store.prompt.parts.forEach((part, index) => {
+      if (part.type === "text" && part.source?.text) {
+        out.push({ index, label: part.source.text.value, text: part.text })
+      }
+    })
+    return out
+  })
+  const togglePaste = (index: number) => {
+    setExpandedPastes((prev) => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }
+
   const workspaceLabel = createMemo<
     | { type: "new"; workspaceType: string }
     | { type: "existing"; workspaceType: string; workspaceName: string; status?: WorkspaceStatus }
@@ -2269,6 +2291,33 @@ export function Prompt(props: PromptProps) {
             }
           />
         </box>
+        {/* Pasted blocks: click a row to expand/collapse the collapsed paste. */}
+        <For each={pastedParts()}>
+          {(item) => {
+            const expanded = () => expandedPastes().has(item.index)
+            const lines = () => item.text.split("\n")
+            const MAX_PREVIEW_LINES = 10
+            return (
+              <box flexDirection="column" flexShrink={0}>
+                <box flexDirection="row" gap={1} onMouseUp={() => togglePaste(item.index)}>
+                  <text fg={theme.primary}>{expanded() ? "▾" : "▸"}</text>
+                  <text fg={theme.textMuted}>{item.label}</text>
+                  <text fg={theme.textMuted}>{expanded() ? "(collapse)" : "(expand)"}</text>
+                </box>
+                <Show when={expanded()}>
+                  <box flexDirection="column" paddingLeft={2} flexShrink={0}>
+                    <For each={lines().slice(0, MAX_PREVIEW_LINES)}>
+                      {(line) => <text fg={theme.text}>{line.length ? line : " "}</text>}
+                    </For>
+                    <Show when={lines().length > MAX_PREVIEW_LINES}>
+                      <text fg={theme.textMuted}>{`… +${lines().length - MAX_PREVIEW_LINES} more lines`}</text>
+                    </Show>
+                  </box>
+                </Show>
+              </box>
+            )
+          }}
+        </For>
         <box width="100%" flexDirection="row" justifyContent="space-between" gap={2}>
           <Show when={status().type !== "retry"}>
             <box gap={2} flexDirection="row">

@@ -276,6 +276,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const [store, setStore] = createStore<{
     popover: "at" | "slash" | null
+    // Antigravity-style mid-prompt slash: true when the "/query" token is NOT the
+    // whole prompt — selection then inserts a "/name " reference inline instead of
+    // replacing the prompt / running the command.
+    slashInline: boolean
     historyIndex: number
     savedPrompt: PromptHistoryEntry | null
     placeholder: number
@@ -284,6 +288,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     applyingHistory: boolean
   }>({
     popover: null,
+    slashInline: false,
     historyIndex: -1,
     savedPrompt: null as PromptHistoryEntry | null,
     placeholder: Math.floor(Math.random() * EXAMPLES.length),
@@ -661,12 +666,58 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       source: cmd.source,
     }))
 
+    // Mid-prompt, only prompt-template commands (skills/config/MCP) make sense as
+    // inline references — UI commands like /models would just become dead text.
+    if (store.slashInline && store.popover === "slash") return custom
+
     return [...custom, ...builtin]
   })
 
+  // Replace the "/partial" token at the cursor with the completed "/name "
+  // reference, keeping the rest of the prompt intact (mirrors addPart's @ handling).
+  const insertSlashReference = (trigger: string) => {
+    const selection = window.getSelection()
+    if (!selection) return
+    if (selection.rangeCount === 0 || !editorRef.contains(selection.anchorNode)) {
+      editorRef.focus()
+      const cursor = prompt.cursor() ?? promptLength(prompt.current())
+      setCursorPosition(editorRef, cursor)
+    }
+    if (selection.rangeCount === 0) return
+    const range = selection.getRangeAt(0)
+    if (!editorRef.contains(range.startContainer)) return
+
+    const cursorPosition = getCursorPosition(editorRef)
+    const rawText = prompt
+      .current()
+      .map((p) => ("content" in p ? p.content : ""))
+      .join("")
+    const match = rawText.substring(0, cursorPosition).match(/(^|\s)\/(\S*)$/)
+    if (match) {
+      const start = (match.index ?? 0) + match[1].length
+      setRangeEdge(editorRef, range, "start", start)
+      setRangeEdge(editorRef, range, "end", cursorPosition)
+    }
+    const text = document.createTextNode(`/${trigger} `)
+    range.deleteContents()
+    range.insertNode(text)
+    range.setStart(text, (text.textContent ?? "").length)
+    range.collapse(true)
+    selection.removeAllRanges()
+    selection.addRange(range)
+    handleInput()
+  }
+
   const handleSlashSelect = (cmd: SlashCommand | undefined) => {
     if (!cmd) return
+    const inline = store.slashInline
     closePopover()
+
+    if (inline) {
+      insertSlashReference(cmd.trigger)
+      return
+    }
+
     const images = imageAttachments()
 
     if (cmd.type === "custom") {
@@ -907,14 +958,21 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const shellMode = store.mode === "shell"
 
     if (!shellMode) {
-      const atMatch = rawText.substring(0, cursorPosition).match(/@(\S*)$/)
-      const slashMatch = rawText.match(/^\/(\S*)$/)
+      const beforeCursor = rawText.substring(0, cursorPosition)
+      const atMatch = beforeCursor.match(/@(\S*)$/)
+      // Slash opens anywhere in the prompt (Antigravity-style), as long as the
+      // token starts the text or follows whitespace — so paths and URLs
+      // ("src/foo", "https://…") never trigger it.
+      const slashMatch = beforeCursor.match(/(^|\s)\/(\S*)$/)
 
       if (atMatch) {
         atOnInput(atMatch[1])
         setStore("popover", "at")
       } else if (slashMatch) {
-        slashOnInput(slashMatch[1])
+        // Inline mode = the token is NOT the entire prompt; selection inserts a
+        // "/name " reference instead of replacing the prompt / running a command.
+        setStore("slashInline", rawText !== `/${slashMatch[2]}`)
+        slashOnInput(slashMatch[2])
         setStore("popover", "slash")
       } else {
         closePopover()
