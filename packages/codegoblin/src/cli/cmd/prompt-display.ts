@@ -46,3 +46,21 @@ export function mentionTriggerIndex(value: string, offset = promptOffsetWidth(va
     return promptOffsetWidth(text.slice(0, index))
   }
 }
+
+/**
+ * Like mentionTriggerIndex but for "/" slash references: the nearest "/" before
+ * the cursor that starts a word (start of text or after whitespace) with no
+ * whitespace between it and the cursor. Paths and URLs never match because
+ * their slashes are not word-initial.
+ */
+export function slashTriggerIndex(value: string, offset = promptOffsetWidth(value)) {
+  const text = displaySlice(value, 0, offset)
+  const index = text.lastIndexOf("/")
+  if (index === -1) return
+
+  const before = index === 0 ? undefined : text[index - 1]
+  const query = text.slice(index)
+  if ((before === undefined || /\s/.test(before)) && !/\s/.test(query)) {
+    return promptOffsetWidth(text.slice(0, index))
+  }
+}

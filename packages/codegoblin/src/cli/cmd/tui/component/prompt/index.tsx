@@ -9,7 +9,7 @@ import {
   type Renderable,
 } from "@opentui/core"
 import type { CommandContext } from "@opentui/keymap"
-import { createEffect, createMemo, createResource, onMount, createSignal, onCleanup, on, For, Show, Switch, Match } from "solid-js"
+import { createEffect, createMemo, createResource, onMount, createSignal, onCleanup, on, For, Index, Show, Switch, Match, untrack } from "solid-js"
 import "opentui-spinner/solid"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -2294,15 +2294,15 @@ export function Prompt(props: PromptProps) {
         {/* Pasted blocks: click a row to expand the paste into an editable
             textarea (edits write back to the part that gets submitted), click
             again to collapse back to the placeholder. */}
-        <For each={pastedParts()}>
+        <Index each={pastedParts()}>
           {(item) => {
-            const expanded = () => expandedPastes().has(item.index)
+            const expanded = () => expandedPastes().has(item().index)
             let editor: TextareaRenderable | undefined
             return (
               <box flexDirection="column" flexShrink={0}>
-                <box flexDirection="row" gap={1} onMouseUp={() => togglePaste(item.index)}>
+                <box flexDirection="row" gap={1} onMouseUp={() => togglePaste(item().index)}>
                   <text fg={theme.primary}>{expanded() ? "▾" : "▸"}</text>
-                  <text fg={theme.textMuted}>{item.label}</text>
+                  <text fg={theme.textMuted}>{item().label}</text>
                   <text fg={theme.textMuted}>{expanded() ? "(click to collapse)" : "(click to edit)"}</text>
                 </box>
                 <Show when={expanded()}>
@@ -2316,7 +2316,7 @@ export function Prompt(props: PromptProps) {
                     <textarea
                       minHeight={1}
                       maxHeight={10}
-                      initialValue={item.text}
+                      initialValue={untrack(() => item().text)}
                       textColor={theme.text}
                       focusedTextColor={theme.text}
                       cursorColor={theme.text}
@@ -2324,9 +2324,10 @@ export function Prompt(props: PromptProps) {
                       onContentChange={() => {
                         if (!editor || editor.isDestroyed) return
                         const value = editor.plainText
+                        const index = untrack(() => item().index)
                         setStore(
                           produce((draft) => {
-                            const part = draft.prompt.parts[item.index]
+                            const part = draft.prompt.parts[index]
                             if (part?.type === "text") part.text = value
                           }),
                         )
@@ -2342,7 +2343,7 @@ export function Prompt(props: PromptProps) {
               </box>
             )
           }}
-        </For>
+        </Index>
         <box width="100%" flexDirection="row" justifyContent="space-between" gap={2}>
           <Show when={status().type !== "retry"}>
             <box gap={2} flexDirection="row">

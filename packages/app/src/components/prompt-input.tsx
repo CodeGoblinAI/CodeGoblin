@@ -794,6 +794,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       setEditorText(text)
       prompt.set([{ type: "text", content: text, start: 0, end: text.length }, ...images], text.length)
       focusEditorEnd()
+      // This path bypasses handleInput, so apply the reference highlight directly.
+      highlightCommandTokens()
       return
     }
 
