@@ -29,7 +29,7 @@ import { setSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { SessionActivityTab } from "@/pages/session/session-activity-tab"
 
-const NEW_DESIGN = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
+const NEW_DESIGN = true // redesign shipped in 0.2.x — no longer channel-gated
 
 type RenderDiff = (SnapshotFileDiff & { file: string }) | VcsFileDiff
 
@@ -241,7 +241,7 @@ export function SessionSidePanel(props: {
   })
 
   return (
-    <Show when={isDesktop() && !(import.meta.env.VITE_OPENCODE_CHANNEL !== "prod" && !params.id)}>
+    <Show when={isDesktop() && !!params.id}>
       <aside
         id="review-panel"
         aria-label={language.t("session.panel.reviewAndFiles")}
