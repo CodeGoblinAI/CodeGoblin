@@ -2291,27 +2291,52 @@ export function Prompt(props: PromptProps) {
             }
           />
         </box>
-        {/* Pasted blocks: click a row to expand/collapse the collapsed paste. */}
+        {/* Pasted blocks: click a row to expand the paste into an editable
+            textarea (edits write back to the part that gets submitted), click
+            again to collapse back to the placeholder. */}
         <For each={pastedParts()}>
           {(item) => {
             const expanded = () => expandedPastes().has(item.index)
-            const lines = () => item.text.split("\n")
-            const MAX_PREVIEW_LINES = 10
+            let editor: TextareaRenderable | undefined
             return (
               <box flexDirection="column" flexShrink={0}>
                 <box flexDirection="row" gap={1} onMouseUp={() => togglePaste(item.index)}>
                   <text fg={theme.primary}>{expanded() ? "▾" : "▸"}</text>
                   <text fg={theme.textMuted}>{item.label}</text>
-                  <text fg={theme.textMuted}>{expanded() ? "(collapse)" : "(expand)"}</text>
+                  <text fg={theme.textMuted}>{expanded() ? "(click to collapse)" : "(click to edit)"}</text>
                 </box>
                 <Show when={expanded()}>
-                  <box flexDirection="column" paddingLeft={2} flexShrink={0}>
-                    <For each={lines().slice(0, MAX_PREVIEW_LINES)}>
-                      {(line) => <text fg={theme.text}>{line.length ? line : " "}</text>}
-                    </For>
-                    <Show when={lines().length > MAX_PREVIEW_LINES}>
-                      <text fg={theme.textMuted}>{`… +${lines().length - MAX_PREVIEW_LINES} more lines`}</text>
-                    </Show>
+                  <box
+                    flexDirection="column"
+                    flexShrink={0}
+                    paddingLeft={2}
+                    border={["left"]}
+                    borderColor={theme.primary}
+                  >
+                    <textarea
+                      minHeight={1}
+                      maxHeight={10}
+                      initialValue={item.text}
+                      textColor={theme.text}
+                      focusedTextColor={theme.text}
+                      cursorColor={theme.text}
+                      focusedBackgroundColor={theme.backgroundElement}
+                      onContentChange={() => {
+                        if (!editor || editor.isDestroyed) return
+                        const value = editor.plainText
+                        setStore(
+                          produce((draft) => {
+                            const part = draft.prompt.parts[item.index]
+                            if (part?.type === "text") part.text = value
+                          }),
+                        )
+                      }}
+                      onMouseDown={(event: MouseEvent) => event.target?.focus()}
+                      ref={(r: TextareaRenderable) => {
+                        editor = r
+                      }}
+                    />
+                    <text fg={theme.textMuted}>edits apply to the pasted block · click ▾ to collapse</text>
                   </box>
                 </Show>
               </box>

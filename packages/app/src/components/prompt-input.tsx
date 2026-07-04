@@ -708,6 +708,75 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     handleInput()
   }
 
+  // Codex-style highlight for slash references: wrap completed "/name" tokens
+  // that match a known prompt-template command in a non-editable pill. Runs as
+  // a pure DOM decoration after input — the parts parser recurses unknown
+  // spans, so the model (and the submitted message) still sees plain text, and
+  // hand-typed references highlight exactly like popover-inserted ones. Only
+  // whitespace-terminated tokens are wrapped so a token still being typed at
+  // the cursor is left alone.
+  const highlightCommandTokens = () => {
+    const triggers = new Set(
+      slashCommands()
+        .filter((cmd) => cmd.type === "custom")
+        .map((cmd) => cmd.trigger),
+    )
+    if (triggers.size === 0) return
+
+    const textNodes: Text[] = []
+    const collect = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        textNodes.push(node as Text)
+        return
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return
+      const el = node as HTMLElement
+      if (el.dataset.type) return // never descend into existing pills
+      for (const child of Array.from(el.childNodes)) collect(child)
+    }
+    for (const child of Array.from(editorRef.childNodes)) collect(child)
+
+    const pattern = /(^|\s)\/([A-Za-z0-9._:-]+)(?=\s)/g
+    let changed = false
+    const hadFocus = editorRef.contains(document.activeElement) || document.activeElement === editorRef
+    const cursor = hadFocus ? getCursorPosition(editorRef) : null
+
+    for (const node of textNodes) {
+      const content = node.textContent ?? ""
+      pattern.lastIndex = 0
+      let match: RegExpExecArray | null
+      const pieces: (string | HTMLElement)[] = []
+      let last = 0
+      while ((match = pattern.exec(content))) {
+        if (!triggers.has(match[2])) continue
+        const tokenStart = match.index + match[1].length
+        pieces.push(content.slice(last, tokenStart))
+        const pill = document.createElement("span")
+        pill.textContent = `/${match[2]}`
+        pill.setAttribute("data-type", "command")
+        pill.setAttribute("contenteditable", "false")
+        pill.style.userSelect = "text"
+        pill.style.cursor = "default"
+        pieces.push(pill)
+        last = tokenStart + match[2].length + 1
+      }
+      if (pieces.length === 0) continue
+      pieces.push(content.slice(last))
+      const fragment = document.createDocumentFragment()
+      for (const piece of pieces) {
+        if (typeof piece === "string") {
+          if (piece) fragment.appendChild(document.createTextNode(piece))
+        } else {
+          fragment.appendChild(piece)
+        }
+      }
+      node.replaceWith(fragment)
+      changed = true
+    }
+
+    if (changed && cursor !== null) setCursorPosition(editorRef, cursor)
+  }
+
   const handleSlashSelect = (cmd: SlashCommand | undefined) => {
     if (!cmd) return
     const inline = store.slashInline
@@ -774,6 +843,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       const el = node as HTMLElement
       if (el.dataset.type === "file") return true
       if (el.dataset.type === "agent") return true
+      // Slash-reference highlight pills are pure decoration over text.
+      if (el.dataset.type === "command") return true
       return el.tagName === "BR"
     })
 
@@ -793,6 +864,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     if (last?.nodeType === Node.ELEMENT_NODE && (last as HTMLElement).tagName === "BR") {
       editorRef.appendChild(document.createTextNode("\u200B"))
     }
+
+    // Re-apply slash-reference highlighting: pills are decoration over text,
+    // so rebuilds (history restore, normalization) regenerate them from content.
+    highlightCommandTokens()
   }
 
   // Auto-scroll active command into view when navigating with keyboard
@@ -985,6 +1060,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
     mirror.input = true
     prompt.set([...rawParts, ...images], cursorPosition)
+    highlightCommandTokens()
     queueScroll()
   }
 
@@ -1965,6 +2041,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     "select-text": true,
                     "min-h-[52px] w-full px-4 pt-4 pb-2 focus:outline-none whitespace-pre-wrap leading-5 text-[13px] font-[440] text-v2-text-text-faint [font-family:Inter,var(--font-family-sans)]": true,
                     "[&_[data-type=file]]:text-syntax-property": true,
+                    "[&_[data-type=command]]:text-syntax-keyword": true,
+                    "[&_[data-type=command]]:font-medium": true,
                     "[&_[data-type=agent]]:text-syntax-type": true,
                     "font-mono!": store.mode === "shell",
                   }}
@@ -2143,6 +2221,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     "select-text": true,
                     "w-full pl-3 pr-2 pt-2 text-14-regular text-text-strong focus:outline-none whitespace-pre-wrap": true,
                     "[&_[data-type=file]]:text-syntax-property": true,
+                    "[&_[data-type=command]]:text-syntax-keyword": true,
+                    "[&_[data-type=command]]:font-medium": true,
                     "[&_[data-type=agent]]:text-syntax-type": true,
                     "font-mono!": store.mode === "shell",
                   }}
