@@ -75,7 +75,7 @@ const emptyFollowups: FollowupItem[] = []
 
 type ChangeMode = "git" | "branch" | "turn"
 type VcsMode = "git" | "branch"
-const USE_NEW_SESSION_DESIGN = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
+const USE_NEW_SESSION_DESIGN = true // redesign shipped in 0.2.x — no longer channel-gated
 
 type SessionHistoryWindowInput = {
   sessionID: () => string | undefined

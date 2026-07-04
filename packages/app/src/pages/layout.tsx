@@ -90,7 +90,7 @@ import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from 
 import { SidebarContent } from "./layout/sidebar-shell"
 import { ThreePaneSidebar } from "./layout/three-pane-sidebar"
 
-const USE_NEW_DESIGN = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
+const USE_NEW_DESIGN = true // redesign shipped in 0.2.x — no longer channel-gated
 
 export default function Layout(props: ParentProps) {
   const [store, setStore, , ready] = persisted(

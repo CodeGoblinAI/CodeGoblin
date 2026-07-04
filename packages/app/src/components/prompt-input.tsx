@@ -1813,7 +1813,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return getFilename(value)
   }
 
-  const USE_V2_INPUT = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
+  const USE_V2_INPUT = true // redesign shipped in 0.2.x — no longer channel-gated
 
   return (
     <div class="relative size-full flex flex-col gap-0">

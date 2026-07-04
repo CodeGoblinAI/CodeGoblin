@@ -282,7 +282,7 @@ export function MessageTimeline(props: {
   const language = useLanguage()
   const { params, sessionKey } = useSessionKey()
   const { view } = useSessionLayout()
-  const newDesign = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
+  const newDesign = true // redesign shipped in 0.2.x — no longer channel-gated
   const platform = usePlatform()
 
   let virtualizer: VirtualizerHandle | undefined
