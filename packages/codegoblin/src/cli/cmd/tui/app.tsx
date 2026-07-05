@@ -479,6 +479,58 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         },
       },
       {
+        name: "app.update",
+        title: "Check for updates",
+        category: "App",
+        slashName: "update",
+        slashAliases: ["upgrade", "version"],
+        run: async () => {
+          toast.show({ variant: "info", message: "Checking for updates...", duration: 4000 })
+          try {
+            const response = await fetch(`${sdk.url}/codegoblin/update-check`)
+            const data = (await response.json()) as {
+              ok: boolean
+              version?: string
+              method?: string
+              latest?: string | null
+              message?: string
+            }
+            if (!data.ok || !data.version) throw new Error(data.message ?? "check failed")
+            if (!data.latest) {
+              toast.show({
+                variant: "error",
+                message: `Could not reach the update registry (install method: ${data.method ?? "unknown"})`,
+                duration: 8000,
+              })
+              return
+            }
+            if (!semver.valid(data.version) || !semver.gt(data.latest, data.version)) {
+              toast.show({
+                variant: "info",
+                message: `You're up to date (v${data.version}, latest v${data.latest})`,
+                duration: 8000,
+              })
+              return
+            }
+            await performInstallationUpdate({
+              version: data.latest,
+              dialog,
+              kv,
+              sdk,
+              toast,
+              exit,
+              confirm: true,
+            })
+          } catch {
+            toast.show({
+              variant: "error",
+              message: "Update check failed — is the network up?",
+              duration: 8000,
+            })
+          }
+        },
+      },
+      {
         name: "session.list",
         title: "Switch session",
         category: "Session",

@@ -4,6 +4,7 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { Global } from "@codegoblin/core/global"
+import { InstallationVersion } from "@codegoblin/core/installation/version"
 import {
   FetchHttpClient,
   HttpClient,
@@ -536,6 +537,28 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           await fs.writeFile(modelStateFile, JSON.stringify({ ...existing, favorite }, null, 2))
         })
         return HttpServerResponse.jsonUnsafe({ ok: true, favorite }, { status: 200 })
+      }),
+    )
+    // On-demand update check for the TUI /update command and any client that
+    // wants it. Uses the promise-based Installation exports (own runtime), so
+    // no extra layer plumbing is needed in this plain router.
+    yield* router.add("GET", "/codegoblin/update-check", (request) =>
+      Effect.gen(function* () {
+        if (!isHostOnlyHttpRequest(request.headers)) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: "Update checks are only available on the local server." },
+            { status: 403 },
+          )
+        }
+        const result = yield* Effect.promise(async () => {
+          const method = await Installation.method().catch(() => "unknown" as const)
+          const latest = method === "unknown" ? undefined : await Installation.latest(method).catch(() => undefined)
+          return { method, latest }
+        })
+        return HttpServerResponse.jsonUnsafe(
+          { ok: true, version: InstallationVersion, method: result.method, latest: result.latest ?? null },
+          { status: 200 },
+        )
       }),
     )
     yield* router.add("POST", "/codegoblin/audio", (request) =>
