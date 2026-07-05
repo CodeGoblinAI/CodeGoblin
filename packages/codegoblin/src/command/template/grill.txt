@@ -1,0 +1,21 @@
+Before doing any work, interrogate the request until it is unambiguous. Ask the questions whose answers would actually change what you build — then wait.
+
+The task to pin down (or the pending request in this conversation if this is blank):
+$ARGUMENTS
+
+## Do this now, before touching anything
+
+1. Read enough of the codebase/config to answer for yourself whatever the repo already makes clear. Do not ask about things you can look up.
+
+2. Find the decisions that are genuinely underspecified and would send the implementation in different directions. Focus on:
+   - **Scope & done-criteria**: what is explicitly in and out; what "finished" looks like.
+   - **Forks in the road**: choices where two reasonable answers lead to very different work (approach, library, data shape, API surface, where code lives).
+   - **Constraints**: performance, compatibility, security, style, things that must not change.
+   - **Unknown inputs**: credentials, environments, endpoints, file locations, sample data only the user has.
+   - **Assumptions you'd otherwise just make** — surface them so a wrong guess doesn't cost a rewrite.
+
+3. Ask them as ONE batch via the `question` tool. A handful of high-leverage questions, each with concrete options where you can, plus your recommended default so the user can just accept. Do not dribble questions out one at a time, and do not ask things the code already answers.
+
+4. Wait for the answers. Do not start implementing, editing, or running commands until the user has responded. If they skip a question, proceed with the recommended default and say which default you took.
+
+Then restate the sharpened task in one or two sentences and get to work.

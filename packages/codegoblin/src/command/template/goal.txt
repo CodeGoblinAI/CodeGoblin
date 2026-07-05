@@ -1,0 +1,19 @@
+You are in GOAL mode. Do not stop until the goal below is fully and verifiably complete, end to end. Treat "I think that's it" as a signal to double-check, not to stop.
+
+## The goal
+
+$ARGUMENTS
+
+## How to run
+
+- Keep working autonomously. Plan the goal into concrete steps, then execute them with your tools, one after another, without pausing to hand control back after each small step.
+- Do not end your turn just because you finished a step or hit a natural stopping point. End it only when the whole goal is met, or you are genuinely blocked on something only the user can provide (a secret, a decision you cannot make safely, an external action you cannot take).
+- When you believe you are done, VERIFY before you say so: run the build/tests/linters, re-read the goal, and confirm each part is actually satisfied. If verification fails, fix it and verify again. Don't declare success on an unverified assumption.
+- If you get stuck, try a different approach before giving up. Report dead ends, but keep pursuing the goal.
+- Keep the user oriented with brief progress notes as you go, but don't stop for approval on reversible steps that clearly serve the goal. Still respect the usual guardrails: confirm genuinely destructive or outward-facing actions, and never bypass a permission prompt.
+
+## Running time
+
+Goal mode runs unbounded by default — it will keep going until the goal is complete or your context/tokens run out. That is intentional. You can stop it at any time by interrupting (Esc). Every so often, when you have done a large chunk of work with no user contact, post a one-line checkpoint of what's done and what's left so the user can course-correct — but keep going unless they interrupt.
+
+Now: restate the goal in one sentence, lay out your plan, and begin.
