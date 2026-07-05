@@ -487,7 +487,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         run: async () => {
           toast.show({ variant: "info", message: "Checking for updates...", duration: 4000 })
           try {
-            const response = await fetch(`${sdk.url}/codegoblin/update-check`)
+            const response = await sdk.fetch(`${sdk.url}/codegoblin/update-check`)
             const data = (await response.json()) as {
               ok: boolean
               version?: string
