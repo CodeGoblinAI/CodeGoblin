@@ -6,6 +6,7 @@ import {
   isExitCommand,
   isNewCommand,
   mentionTriggerIndex,
+  slashTriggerIndex,
   movePromptHistory,
   printableBinding,
   promptCycle,
@@ -110,6 +111,17 @@ describe("run prompt shared", () => {
     expect(draft.apply).toBe(true)
     expect(draft.text).toBe("草稿")
     expect(draft.cursor).toBe(Bun.stringWidth("草稿"))
+  })
+
+  test("slash trigger matches word-initial slashes anywhere, never paths or urls", () => {
+    expect(slashTriggerIndex("/")).toBe(0)
+    expect(slashTriggerIndex("/rmslop")).toBe(0)
+    expect(slashTriggerIndex("help me with /rm")).toBe(13)
+    expect(slashTriggerIndex("use /a and /b")).toBe(11)
+    expect(slashTriggerIndex("src/foo")).toBeUndefined()
+    expect(slashTriggerIndex("https://example.com")).toBeUndefined()
+    expect(slashTriggerIndex("done /cmd ", Bun.stringWidth("done /cmd "))).toBeUndefined()
+    expect(slashTriggerIndex("中文 /skill")).toBe(5)
   })
 
   test("uses display-width offsets for mention helpers", () => {

@@ -20,7 +20,7 @@ import { useFrecency } from "./frecency"
 import { useBindings, useCommandSlashes, useOpencodeModeStack } from "../../keymap"
 import { Reference } from "@/reference/reference"
 import { ConfigReference } from "@/config/reference"
-import { displayCharAt, mentionTriggerIndex } from "@/cli/cmd/prompt-display"
+import { displayCharAt, mentionTriggerIndex, slashTriggerIndex } from "@/cli/cmd/prompt-display"
 
 function removeLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -544,20 +544,31 @@ export function Autocomplete(props: {
   )
 
   const commands = createMemo((): AutocompleteOption[] => {
-    const results: AutocompleteOption[] = [...slashes()]
+    // Mid-prompt ("inline") slash = a reference to a prompt-template command,
+    // so UI commands are hidden and skills are INCLUDED; at the start of the
+    // prompt the classic execute-a-command list is unchanged.
+    const inline = store.visible === "/" && store.index > 0
+    const results: AutocompleteOption[] = inline ? [] : [...slashes()]
 
     for (const serverCommand of sync.data.command) {
-      if (serverCommand.source === "skill") continue
-      const label = serverCommand.source === "mcp" ? ":mcp" : ""
+      if (serverCommand.source === "skill" && !inline) continue
+      const label = serverCommand.source === "mcp" ? ":mcp" : serverCommand.source === "skill" ? ":skill" : ""
       results.push({
         display: "/" + serverCommand.name + label,
         description: serverCommand.description,
         onSelect: () => {
+          // Replace just the "/partial" token (from the trigger index to the
+          // cursor) with the completed reference — at index 0 this matches the
+          // old replace-everything behavior.
+          const input = props.input()
           const newText = "/" + serverCommand.name + " "
-          const cursor = props.input().logicalCursor
-          props.input().deleteRange(0, 0, cursor.row, cursor.col)
-          props.input().insertText(newText)
-          props.input().cursorOffset = Bun.stringWidth(newText)
+          const currentOffset = input.cursorOffset
+          input.cursorOffset = store.index
+          const startCursor = input.logicalCursor
+          input.cursorOffset = currentOffset
+          const endCursor = input.logicalCursor
+          input.deleteRange(startCursor.row, startCursor.col, endCursor.row, endCursor.col)
+          input.insertText(newText)
         },
       })
     }
@@ -743,7 +754,7 @@ export function Autocomplete(props: {
 
   function hide() {
     const text = props.input().plainText
-    if (store.visible === "/" && !text.endsWith(" ") && text.startsWith("/")) {
+    if (store.visible === "/" && store.index === 0 && !text.endsWith(" ") && text.startsWith("/")) {
       const cursor = props.input().logicalCursor
       props.input().deleteRange(0, 0, cursor.row, cursor.col)
       // Sync the prompt store immediately since onContentChange is async
@@ -775,7 +786,7 @@ export function Autocomplete(props: {
             // There is a space between the trigger and the cursor
             props.input().getTextRange(store.index, props.input().cursorOffset).match(/\s/) ||
             // "/<command>" is not the sole content
-            (store.visible === "/" && value.match(/^\S+\s+\S+\s*$/))
+            (store.visible === "/" && store.index === 0 && value.match(/^\S+\s+\S+\s*$/))
           ) {
             hide()
           }
@@ -786,10 +797,12 @@ export function Autocomplete(props: {
         const offset = props.input().cursorOffset
         if (offset === 0) return
 
-        // Check for "/" at position 0 - reopen slash commands
-        if (value.startsWith("/") && !value.slice(0, offset).match(/\s/)) {
+        // "/" trigger — anywhere a slash starts a word (start of text or after
+        // whitespace), so slash references work mid-prompt like @ mentions.
+        const slashIdx = slashTriggerIndex(value, offset)
+        if (slashIdx !== undefined) {
           show("/")
-          setStore("index", 0)
+          setStore("index", slashIdx)
           return
         }
 

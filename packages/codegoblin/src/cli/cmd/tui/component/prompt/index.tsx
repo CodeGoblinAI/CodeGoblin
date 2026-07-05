@@ -9,7 +9,7 @@ import {
   type Renderable,
 } from "@opentui/core"
 import type { CommandContext } from "@opentui/keymap"
-import { createEffect, createMemo, createResource, onMount, createSignal, onCleanup, on, Show, Switch, Match } from "solid-js"
+import { createEffect, createMemo, createResource, onMount, createSignal, onCleanup, on, For, Index, Show, Switch, Match, untrack } from "solid-js"
 import "opentui-spinner/solid"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -2047,6 +2047,28 @@ export function Prompt(props: PromptProps) {
     return `Ask the goblin... "${list()[store.placeholder % list().length]}"`
   })
 
+  // Pasted blocks live in the textarea as collapsed "[Pasted ~N lines]"
+  // placeholders (extmarks) with the real text stored in prompt.parts. This
+  // panel lists them under the bar; clicking a row expands/collapses a preview.
+  const [expandedPastes, setExpandedPastes] = createSignal<ReadonlySet<number>>(new Set<number>())
+  const pastedParts = createMemo(() => {
+    const out: { index: number; label: string; text: string }[] = []
+    store.prompt.parts.forEach((part, index) => {
+      if (part.type === "text" && part.source?.text) {
+        out.push({ index, label: part.source.text.value, text: part.text })
+      }
+    })
+    return out
+  })
+  const togglePaste = (index: number) => {
+    setExpandedPastes((prev) => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }
+
   const workspaceLabel = createMemo<
     | { type: "new"; workspaceType: string }
     | { type: "existing"; workspaceType: string; workspaceName: string; status?: WorkspaceStatus }
@@ -2269,6 +2291,59 @@ export function Prompt(props: PromptProps) {
             }
           />
         </box>
+        {/* Pasted blocks: click a row to expand the paste into an editable
+            textarea (edits write back to the part that gets submitted), click
+            again to collapse back to the placeholder. */}
+        <Index each={pastedParts()}>
+          {(item) => {
+            const expanded = () => expandedPastes().has(item().index)
+            let editor: TextareaRenderable | undefined
+            return (
+              <box flexDirection="column" flexShrink={0}>
+                <box flexDirection="row" gap={1} onMouseUp={() => togglePaste(item().index)}>
+                  <text fg={theme.primary}>{expanded() ? "▾" : "▸"}</text>
+                  <text fg={theme.textMuted}>{item().label}</text>
+                  <text fg={theme.textMuted}>{expanded() ? "(click to collapse)" : "(click to edit)"}</text>
+                </box>
+                <Show when={expanded()}>
+                  <box
+                    flexDirection="column"
+                    flexShrink={0}
+                    paddingLeft={2}
+                    border={["left"]}
+                    borderColor={theme.primary}
+                  >
+                    <textarea
+                      minHeight={1}
+                      maxHeight={10}
+                      initialValue={untrack(() => item().text)}
+                      textColor={theme.text}
+                      focusedTextColor={theme.text}
+                      cursorColor={theme.text}
+                      focusedBackgroundColor={theme.backgroundElement}
+                      onContentChange={() => {
+                        if (!editor || editor.isDestroyed) return
+                        const value = editor.plainText
+                        const index = untrack(() => item().index)
+                        setStore(
+                          produce((draft) => {
+                            const part = draft.prompt.parts[index]
+                            if (part?.type === "text") part.text = value
+                          }),
+                        )
+                      }}
+                      onMouseDown={(event: MouseEvent) => event.target?.focus()}
+                      ref={(r: TextareaRenderable) => {
+                        editor = r
+                      }}
+                    />
+                    <text fg={theme.textMuted}>edits apply to the pasted block · click ▾ to collapse</text>
+                  </box>
+                </Show>
+              </box>
+            )
+          }}
+        </Index>
         <box width="100%" flexDirection="row" justifyContent="space-between" gap={2}>
           <Show when={status().type !== "retry"}>
             <box gap={2} flexDirection="row">
