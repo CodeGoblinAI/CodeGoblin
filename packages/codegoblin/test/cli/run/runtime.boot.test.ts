@@ -139,7 +139,7 @@ describe("run runtime boot", () => {
     expect(formatBindings(result.historyNext, result.leader)).toBe("down")
     expect(formatBindings(result.inputClear, result.leader)).toBe("ctrl+c")
     expect(formatBindings(result.inputSubmit, result.leader)).toBe("return")
-    expect(formatBindings(result.inputNewline, result.leader)).toBe("shift+return, ctrl+return, alt+return, ctrl+j")
+    expect(formatBindings(result.inputNewline, result.leader)).toBe("ctrl+j, shift+return, ctrl+return, alt+return")
   })
 
   test("reads diff style and falls back to auto", async () => {
