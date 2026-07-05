@@ -8,13 +8,18 @@ function envOr(suffix: string, fallback: string) {
 
 const githubRepo = envOr("GITHUB_REPO", "CodeGoblinAI/CodeGoblin")
 const npmPackage = envOr("NPM_PACKAGE", "codegoblin")
-const npmScope = env("NPM_SCOPE")
+// The published package lives under the @codegoblin-io org scope — the unscoped
+// name `codegoblin` is permanently blocked by npm's similarity filter and does
+// not exist on the registry. Without this default, update checks,
+// `codegoblin update`, and npm install-method detection all query a
+// nonexistent package and silently fail for every npm user.
+const npmScope = envOr("NPM_SCOPE", "@codegoblin-io")
 
 /** CodeGoblin distribution identity — used for updates, npm install, and release checks. */
 export const Product = {
   name: "CodeGoblin",
   cliName: envOr("CLI_NAME", "codegoblin"),
-  /** Unscoped package today (`codegoblin`). Future org scope via CODEGOBLIN_NPM_SCOPE, e.g. `@codegoblin/cli`. */
+  /** Scoped package (`@codegoblin-io/codegoblin`); override the scope via CODEGOBLIN_NPM_SCOPE. */
   npmPackage,
   npmScope,
   npmScopedPackage: npmScope ? `${npmScope}/${npmPackage}` : npmPackage,

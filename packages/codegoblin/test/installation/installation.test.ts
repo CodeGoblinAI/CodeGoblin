@@ -3,6 +3,7 @@ import { Effect, Layer, Stream } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Installation } from "../../src/installation"
+import { npmRegistryPackageUrl } from "../../src/installation/product"
 import { InstallationChannel } from "@codegoblin/core/installation/version"
 import { AppProcess } from "@codegoblin/core/process"
 import { testEffect } from "../lib/effect"
@@ -86,7 +87,7 @@ describe("installation", () => {
       Effect.gen(function* () {
         const result = yield* Installation.use.latest("npm")
         expect(result).toBe("1.5.0")
-        expect(npmCalls).toContain(`https://registry.npmjs.org/codegoblin/${InstallationChannel}`)
+        expect(npmCalls).toContain(npmRegistryPackageUrl("https://registry.npmjs.org", InstallationChannel))
       }),
     )
 
@@ -100,7 +101,7 @@ describe("installation", () => {
       Effect.gen(function* () {
         const result = yield* Installation.use.latest("bun")
         expect(result).toBe("1.6.0")
-        expect(bunCalls).toContain(`https://registry.npmjs.org/codegoblin/${InstallationChannel}`)
+        expect(bunCalls).toContain(npmRegistryPackageUrl("https://registry.npmjs.org", InstallationChannel))
       }),
     )
 
@@ -114,7 +115,7 @@ describe("installation", () => {
       Effect.gen(function* () {
         const result = yield* Installation.use.latest("pnpm")
         expect(result).toBe("1.7.0")
-        expect(pnpmCalls).toContain(`https://registry.npmjs.org/codegoblin/${InstallationChannel}`)
+        expect(pnpmCalls).toContain(npmRegistryPackageUrl("https://registry.npmjs.org", InstallationChannel))
       }),
     )
 
