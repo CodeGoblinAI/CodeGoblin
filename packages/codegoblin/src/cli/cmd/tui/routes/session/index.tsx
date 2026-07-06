@@ -164,6 +164,8 @@ const context = createContext<{
   showDetails: () => boolean
   showGenericToolOutput: () => boolean
   diffWrapMode: () => "word" | "none"
+  isFolded: (messageID: string, foldable: boolean, isLast: boolean) => boolean
+  toggleFold: (messageID: string) => void
   providers: () => ReadonlyMap<string, Provider>
   sync: ReturnType<typeof useSync>
   tui: ReturnType<typeof useTuiConfig>
@@ -242,6 +244,21 @@ export function Session() {
   const [diffWrapMode] = kv.signal<"word" | "none">("diff_wrap_mode", "word")
   const [_animationsEnabled, _setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
+  // Chat folding: collapse completed assistant turns to a one-line summary so long
+  // sessions stay scrollable. `foldAll` is the global default; `foldOverrides` holds
+  // per-message opt-in/out that wins over the global until a fold-all/unfold-all resets it.
+  const [foldAll, setFoldAll] = kv.signal("assistant_fold_all", false)
+  const [foldOverrides, setFoldOverrides] = createSignal<Record<string, boolean>>({})
+  const isFolded = (messageID: string, foldable: boolean, isLast: boolean) => {
+    if (!foldable) return false
+    const override = foldOverrides()[messageID]
+    if (override !== undefined) return override
+    // Fold-all collapses history but leaves the newest turn open to read.
+    return isLast ? false : foldAll()
+  }
+  const toggleFold = (messageID: string) => {
+    setFoldOverrides((prev) => ({ ...prev, [messageID]: !(prev[messageID] ?? foldAll()) }))
+  }
 
   const wide = createMemo(() => dimensions().width > 120)
   const sidebarVisible = createMemo(() => {
@@ -756,6 +773,21 @@ export function Session() {
       },
     },
     {
+      title: foldAll() ? "Unfold assistant responses" : "Fold assistant responses",
+      value: "session.toggle.fold",
+      category: "Session",
+      slash: {
+        name: "fold",
+        aliases: ["toggle-fold"],
+      },
+      run: () => {
+        // Reset per-message overrides so this is a clean fold-all / unfold-all.
+        setFoldOverrides({})
+        setFoldAll((prev) => !prev)
+        dialog.clear()
+      },
+    },
+    {
       title: "Open last generated asset",
       value: "codegoblin.asset.open",
       category: "CodeGoblin",
@@ -1145,6 +1177,8 @@ export function Session() {
           showDetails,
           showGenericToolOutput,
           diffWrapMode,
+          isFolded,
+          toggleFold,
           providers,
           sync,
           tui: tuiConfig,
@@ -1382,58 +1416,64 @@ function UserMessage(props: {
             maxWidth={80}
             flexShrink={1}
           >
-          <box
-            onMouseOver={() => {
-              setHover(true)
-            }}
-            onMouseOut={() => {
-              setHover(false)
-            }}
-            onMouseUp={props.onMouseUp}
-            paddingTop={1}
-            paddingBottom={1}
-            paddingLeft={2}
-            paddingRight={2}
-            backgroundColor={hover() ? RGBA.fromInts(24, 44, 26) : RGBA.fromInts(15, 28, 17)}
-            flexShrink={0}
-          >
-            <text fg={theme.text}>{text()}</text>
-            <Show when={files().length}>
-              <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
-                <For each={files()}>
-                  {(file) => {
-                    const bg = createMemo(() => {
-                      if (file.mime.startsWith("image/")) return theme.accent
-                      if (file.mime === "application/pdf") return theme.primary
-                      return theme.secondary
-                    })
-                    return (
-                      <text fg={theme.text}>
-                        <span style={{ bg: bg(), fg: theme.background }}> {MIME_BADGE[file.mime] ?? file.mime} </span>
-                        <span style={{ bg: theme.backgroundElement, fg: theme.textMuted }}> {file.filename} </span>
-                      </text>
-                    )
-                  }}
-                </For>
-              </box>
-            </Show>
-            <Show
-              when={queued()}
-              fallback={
-                <Show when={ctx.showTimestamps()}>
-                  <text fg={theme.textMuted}>
-                    <span style={{ fg: theme.textMuted }}>
-                      {Locale.todayTimeOrDateTime(props.message.time.created)}
-                    </span>
-                  </text>
-                </Show>
-              }
+            <box
+              onMouseOver={() => {
+                setHover(true)
+              }}
+              onMouseOut={() => {
+                setHover(false)
+              }}
+              onMouseUp={props.onMouseUp}
+              paddingTop={1}
+              paddingBottom={1}
+              paddingLeft={2}
+              paddingRight={2}
+              backgroundColor={hover() ? RGBA.fromInts(24, 44, 26) : RGBA.fromInts(15, 28, 17)}
+              flexShrink={0}
             >
-              <text fg={theme.textMuted}>
-                <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
-              </text>
-            </Show>
-          </box>
+              <text fg={theme.text}>{text()}</text>
+              <Show when={files().length}>
+                <box
+                  flexDirection="row"
+                  paddingBottom={metadataVisible() ? 1 : 0}
+                  paddingTop={1}
+                  gap={1}
+                  flexWrap="wrap"
+                >
+                  <For each={files()}>
+                    {(file) => {
+                      const bg = createMemo(() => {
+                        if (file.mime.startsWith("image/")) return theme.accent
+                        if (file.mime === "application/pdf") return theme.primary
+                        return theme.secondary
+                      })
+                      return (
+                        <text fg={theme.text}>
+                          <span style={{ bg: bg(), fg: theme.background }}> {MIME_BADGE[file.mime] ?? file.mime} </span>
+                          <span style={{ bg: theme.backgroundElement, fg: theme.textMuted }}> {file.filename} </span>
+                        </text>
+                      )
+                    }}
+                  </For>
+                </box>
+              </Show>
+              <Show
+                when={queued()}
+                fallback={
+                  <Show when={ctx.showTimestamps()}>
+                    <text fg={theme.textMuted}>
+                      <span style={{ fg: theme.textMuted }}>
+                        {Locale.todayTimeOrDateTime(props.message.time.created)}
+                      </span>
+                    </text>
+                  </Show>
+                }
+              >
+                <text fg={theme.textMuted}>
+                  <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
+                </text>
+              </Show>
+            </box>
           </box>
         </box>
       </Show>
@@ -1471,9 +1511,48 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
   })
 
   const childShortcut = useCommandShortcut("session.child.first")
+  const renderer = useRenderer()
+
+  // A turn is foldable once it has settled (completed or errored, but not merely
+  // interrupted). Streaming turns are never folded so you can watch them arrive.
+  const foldable = createMemo(
+    () => final() || Boolean(props.message.error && props.message.error.name !== "MessageAbortedError"),
+  )
+  const folded = createMemo(() => ctx.isFolded(props.message.id, foldable(), props.last))
+  const summary = createMemo(() => {
+    let lines = 0
+    let tools = 0
+    for (const part of props.parts) {
+      if (part.type === "text") {
+        const text = part.text.trim()
+        if (text) lines += text.split("\n").length
+      } else if (part.type === "tool") {
+        tools++
+      }
+    }
+    return { lines, tools }
+  })
+  const toggleFold = () => {
+    if (!foldable()) return
+    // Don't swallow a click that was really a text selection.
+    if (renderer.getSelection()?.getSelectedText()) return
+    ctx.toggleFold(props.message.id)
+  }
 
   return (
-    <>
+    <Show
+      when={!folded()}
+      fallback={
+        <FoldedAssistant
+          agent={props.message.agent}
+          mode={props.message.mode}
+          model={model()}
+          duration={duration()}
+          summary={summary()}
+          onExpand={toggleFold}
+        />
+      }
+    >
       <For each={props.parts}>
         {(part, index) => {
           const component = createMemo(() => PART_MAPPING[part.type as keyof typeof PART_MAPPING])
@@ -1513,7 +1592,7 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
       </Show>
       <Switch>
         <Match when={props.last || final() || props.message.error?.name === "MessageAbortedError"}>
-          <box paddingLeft={3}>
+          <box paddingLeft={3} onMouseUp={toggleFold}>
             <text marginTop={1}>
               <span
                 style={{
@@ -1535,11 +1614,52 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
               <Show when={props.message.error?.name === "MessageAbortedError"}>
                 <span style={{ fg: theme.textMuted }}> · interrupted</span>
               </Show>
+              <Show when={foldable()}>
+                <span style={{ fg: theme.textMuted }}> · click to fold</span>
+              </Show>
             </text>
           </box>
         </Match>
       </Switch>
-    </>
+    </Show>
+  )
+}
+
+function FoldedAssistant(props: {
+  agent: string
+  mode: string | undefined
+  model: string
+  duration: number
+  summary: { lines: number; tools: number }
+  onExpand: () => void
+}) {
+  const { theme } = useTheme()
+  const local = useLocal()
+  const color = createMemo(() =>
+    props.agent?.toLowerCase() === "build" ? theme.primary : local.agent.color(props.agent),
+  )
+  const meta = createMemo(() => {
+    const bits: string[] = []
+    if (props.summary.lines) bits.push(`${props.summary.lines} line${props.summary.lines === 1 ? "" : "s"}`)
+    if (props.summary.tools) bits.push(`${props.summary.tools} tool${props.summary.tools === 1 ? "" : "s"}`)
+    return bits.join(", ")
+  })
+
+  return (
+    <box paddingLeft={3} marginTop={1} flexShrink={0} onMouseUp={props.onExpand}>
+      <text fg={theme.textMuted} wrapMode="none">
+        <span style={{ fg: color() }}>▸ </span>
+        <span style={{ fg: theme.text }}>{displayAgentMode(props.mode)}</span>
+        <span style={{ fg: theme.textMuted }}> · {props.model}</span>
+        <Show when={props.duration}>
+          <span style={{ fg: theme.textMuted }}> · {Locale.duration(props.duration)}</span>
+        </Show>
+        <Show when={meta()}>
+          <span style={{ fg: theme.textMuted }}> · {meta()}</span>
+        </Show>
+        <span style={{ fg: theme.textMuted }}> · click to expand</span>
+      </text>
+    </box>
   )
 }
 
@@ -1803,9 +1923,7 @@ function CodeGoblinImageStatusPart(props: { part: TextPart }) {
             >
               <Spinner color={theme.primary}>{title()}</Spinner>
             </Show>
-            <Show when={model()}>
-              {(value) => <text fg={theme.textMuted}>{value()}</text>}
-            </Show>
+            <Show when={model()}>{(value) => <text fg={theme.textMuted}>{value()}</text>}</Show>
           </box>
           <Show when={image().output}>
             {(output) => (
@@ -1815,11 +1933,11 @@ function CodeGoblinImageStatusPart(props: { part: TextPart }) {
               </text>
             )}
           </Show>
-          <Show when={detail()}>
-            {(value) => <text fg={theme.textMuted}>{value()}</text>}
-          </Show>
+          <Show when={detail()}>{(value) => <text fg={theme.textMuted}>{value()}</text>}</Show>
           <Show when={image().output && status() !== "running"}>
-            <text fg={hover() ? theme.text : theme.textMuted}>click to open · command palette can reveal in Explorer</text>
+            <text fg={hover() ? theme.text : theme.textMuted}>
+              click to open · command palette can reveal in Explorer
+            </text>
           </Show>
         </box>
       )}
@@ -1903,13 +2021,14 @@ function CodeGoblinAudioStatusPart(props: { part: TextPart }) {
             >
               <Spinner color={theme.primary}>{title()}</Spinner>
             </Show>
-            <Show when={model()}>
-              {(value) => <text fg={theme.textMuted}>{value()}</text>}
-            </Show>
+            <Show when={model()}>{(value) => <text fg={theme.textMuted}>{value()}</text>}</Show>
           </box>
           <Show when={audio().voice || audio().outputFormat}>
             <text fg={theme.textMuted} wrapMode="word">
-              {[audio().voice ? `Voice: ${audio().voice}` : undefined, audio().outputFormat ? `Format: ${audio().outputFormat}` : undefined]
+              {[
+                audio().voice ? `Voice: ${audio().voice}` : undefined,
+                audio().outputFormat ? `Format: ${audio().outputFormat}` : undefined,
+              ]
                 .filter(Boolean)
                 .join("  ·  ")}
             </text>
@@ -1922,11 +2041,11 @@ function CodeGoblinAudioStatusPart(props: { part: TextPart }) {
               </text>
             )}
           </Show>
-          <Show when={detail()}>
-            {(value) => <text fg={theme.textMuted}>{value()}</text>}
-          </Show>
+          <Show when={detail()}>{(value) => <text fg={theme.textMuted}>{value()}</text>}</Show>
           <Show when={audio().output && status() !== "running"}>
-            <text fg={hover() ? theme.text : theme.textMuted}>click to play · command palette can reveal in Explorer</text>
+            <text fg={hover() ? theme.text : theme.textMuted}>
+              click to play · command palette can reveal in Explorer
+            </text>
           </Show>
         </box>
       )}
@@ -2010,9 +2129,7 @@ function CodeGoblin3DStatusPart(props: { part: TextPart }) {
             >
               <Spinner color={theme.primary}>{title()}</Spinner>
             </Show>
-            <Show when={model()}>
-              {(value) => <text fg={theme.textMuted}>{value()}</text>}
-            </Show>
+            <Show when={model()}>{(value) => <text fg={theme.textMuted}>{value()}</text>}</Show>
           </box>
           <Show when={model3d().inputMode || model3d().modelVersion}>
             <text fg={theme.textMuted} wrapMode="word">
@@ -2032,11 +2149,11 @@ function CodeGoblin3DStatusPart(props: { part: TextPart }) {
               </text>
             )}
           </Show>
-          <Show when={detail()}>
-            {(value) => <text fg={theme.textMuted}>{value()}</text>}
-          </Show>
+          <Show when={detail()}>{(value) => <text fg={theme.textMuted}>{value()}</text>}</Show>
           <Show when={model3d().output && status() !== "running"}>
-            <text fg={hover() ? theme.text : theme.textMuted}>click to open · command palette can reveal in Explorer</text>
+            <text fg={hover() ? theme.text : theme.textMuted}>
+              click to open · command palette can reveal in Explorer
+            </text>
           </Show>
         </box>
       )}
