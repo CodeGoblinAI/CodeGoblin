@@ -116,6 +116,21 @@ export function permissionInfo(request: PermissionRequest): PermissionInfo {
     }
   }
 
+  if (request.permission === "session_checkpoint") {
+    const meta = dict(request.metadata)
+    const toolCalls = typeof meta.toolCalls === "number" ? meta.toolCalls : undefined
+    return {
+      icon: "⟳",
+      title: "Still working — keep going?",
+      lines: [
+        toolCalls !== undefined
+          ? `This turn has run ${toolCalls} tool calls. Continue autonomously?`
+          : "This turn has been running for a while. Continue autonomously?",
+        `"Allow always" stops asking for this session.`,
+      ],
+    }
+  }
+
   return {
     icon: "⚙",
     title: `Call tool ${request.permission}`,

@@ -1256,6 +1256,12 @@ export const layer = Layer.effect(
         let step = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
+        // Autonomy guardrail (opt-in): after `checkpointEvery` tool calls in a turn,
+        // pause and confirm before doing more. Unset/0 = unbounded (the default), so
+        // the whole checkpoint path below is a no-op unless the user configures it.
+        const checkpointEvery = (yield* config.get()).autonomy?.checkpoint ?? 0
+        let nextCheckpoint = checkpointEvery
+
         while (true) {
           yield* status.set(sessionID, { type: "busy" })
           yield* slog.info("loop", { step })
@@ -1284,6 +1290,43 @@ export const layer = Layer.effect(
           ) {
             yield* slog.info("exiting loop")
             break
+          }
+
+          if (checkpointEvery > 0) {
+            // Subagent spawns are `task` tool calls, so counting tool parts covers
+            // "tool calls or subagents". Scope to the current turn (since lastUser).
+            const toolCalls = msgs.reduce(
+              (total, m) =>
+                m.info.role === "assistant" && m.info.id > lastUser.id
+                  ? total + m.parts.filter((part) => part.type === "tool").length
+                  : total,
+              0,
+            )
+            if (toolCalls >= nextCheckpoint) {
+              const keepGoing = yield* permission
+                .ask({
+                  sessionID,
+                  permission: "session_checkpoint",
+                  patterns: [sessionID],
+                  always: [sessionID],
+                  metadata: { toolCalls, checkpoint: checkpointEvery },
+                  ruleset: session.permission ?? [],
+                })
+                .pipe(
+                  Effect.as(true),
+                  Effect.catchTags({
+                    PermissionRejectedError: () => Effect.succeed(false),
+                    PermissionCorrectedError: () => Effect.succeed(false),
+                    PermissionDeniedError: () => Effect.succeed(false),
+                  }),
+                )
+              if (!keepGoing) {
+                yield* slog.info("stopped at autonomy checkpoint", { toolCalls })
+                break
+              }
+              // Ask again only after another full window of tool calls.
+              nextCheckpoint = toolCalls + checkpointEvery
+            }
           }
 
           step++

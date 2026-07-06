@@ -372,6 +372,24 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
               }
             }
 
+            if (permission === "session_checkpoint") {
+              const raw = props.request.metadata?.toolCalls
+              const toolCalls = typeof raw === "number" ? raw : undefined
+              return {
+                icon: "⟳",
+                title: "Still working — keep going?",
+                body: (
+                  <box paddingLeft={1}>
+                    <text fg={theme.textMuted}>
+                      {toolCalls !== undefined
+                        ? `This turn has run ${toolCalls} tool calls. Continue autonomously? ("Allow always" stops asking for this session.)`
+                        : `This turn has been running for a while. Continue autonomously? ("Allow always" stops asking for this session.)`}
+                    </text>
+                  </box>
+                ),
+              }
+            }
+
             return {
               icon: "⚙",
               title: `Call tool ${permission}`,
