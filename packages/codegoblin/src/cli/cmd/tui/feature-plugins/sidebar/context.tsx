@@ -16,6 +16,17 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const session = createMemo(() => props.api.state.session.get(props.session_id))
   const cost = createMemo(() => session()?.cost ?? 0)
 
+  // Cost of the current turn: everything the assistant spent since the last user message.
+  const lastPromptCost = createMemo(() => {
+    const messages = msg()
+    const lastUser = messages.findLast((item) => item.role === "user")
+    if (!lastUser) return 0
+    return messages.reduce(
+      (total, item) => (item.role === "assistant" && item.id > lastUser.id ? total + (item.cost ?? 0) : total),
+      0,
+    )
+  })
+
   const state = createMemo(() => {
     const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
     if (!last) {
@@ -41,7 +52,8 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       </text>
       <text fg={theme().textMuted}>{state().tokens.toLocaleString()} tokens</text>
       <text fg={theme().textMuted}>{state().percent ?? 0}% used</text>
-      <text fg={theme().textMuted}>{money.format(cost())} spent</text>
+      <text fg={theme().textMuted}>{money.format(lastPromptCost())} last prompt</text>
+      <text fg={theme().textMuted}>{money.format(cost())} spent total</text>
     </box>
   )
 }

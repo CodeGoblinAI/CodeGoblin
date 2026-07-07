@@ -26,7 +26,12 @@ const PROVIDERS = ["deepseek", "moonshot"] as const
 const MANUAL_BALANCE_ENV = {
   hoard: ["CODEGOBLIN_TOKEN_HOARD_USD"],
   deepseek: ["CODEGOBLIN_DEEPSEEK_BALANCE_USD", "CODEGOBLIN_DEEPSEEK_CREDITS_USD", "DEEPSEEK_BALANCE_USD"],
-  moonshot: ["CODEGOBLIN_MOONSHOT_BALANCE_USD", "CODEGOBLIN_MOONSHOT_CREDITS_USD", "MOONSHOT_BALANCE_USD", "KIMI_BALANCE_USD"],
+  moonshot: [
+    "CODEGOBLIN_MOONSHOT_BALANCE_USD",
+    "CODEGOBLIN_MOONSHOT_CREDITS_USD",
+    "MOONSHOT_BALANCE_USD",
+    "KIMI_BALANCE_USD",
+  ],
 } satisfies Record<CodeGoblinBalanceProvider, readonly string[]>
 
 const API_KEY_ENV = {
@@ -55,20 +60,21 @@ export const CodeGoblinBalance = {
 }
 
 function configuredBalances(env: Env): CodeGoblinBalanceEntry[] {
-  return (["hoard", ...PROVIDERS] as const)
-    .flatMap((provider) => {
-      const match = firstValue(env, MANUAL_BALANCE_ENV[provider])
-      const amount = parseAmount(match?.value)
-      if (amount === undefined || !match) return []
-      return [{
+  return (["hoard", ...PROVIDERS] as const).flatMap((provider) => {
+    const match = firstValue(env, MANUAL_BALANCE_ENV[provider])
+    const amount = parseAmount(match?.value)
+    if (amount === undefined || !match) return []
+    return [
+      {
         provider,
         label: provider === "moonshot" ? "moon" : provider,
         amount,
         unit: "USD",
         source: match.name,
         live: false,
-      } satisfies CodeGoblinBalanceEntry]
-    })
+      } satisfies CodeGoblinBalanceEntry,
+    ]
+  })
 }
 
 async function liveBalances(input: { env: Env; fetch: FetchLike; now: Date }) {
@@ -156,7 +162,12 @@ function selectedBalanceProvider(input: { providerID?: string; modelID?: string 
   const providerID = input.providerID?.toLowerCase()
   const modelID = input.modelID?.toLowerCase()
   if (providerID === "deepseek" || modelID?.includes("deepseek")) return "deepseek" as const
-  if (providerID === "moonshot" || providerID === "kimi" || modelID?.includes("moonshot") || modelID?.includes("kimi")) {
+  if (
+    providerID === "moonshot" ||
+    providerID === "kimi" ||
+    modelID?.includes("moonshot") ||
+    modelID?.includes("kimi")
+  ) {
     return "moonshot" as const
   }
 }
@@ -175,13 +186,12 @@ function formatFooter(input: {
       const tag = providerBalance.live ? "live" : "manual"
       return `${providerBalance.label} ${formatAmount(providerBalance.amount, providerBalance.unit)} left · ${tag}`
     }
-    // No balance endpoint for this provider: fall back to a running session-spend estimate.
-    if (input.spent !== undefined && input.spent > 0) return `~${formatAmount(input.spent, "USD")} spent · est`
+    // No balance endpoint for this provider: show nothing. The footer already
+    // displays exact session spend, so a "~$X spent · est" here was redundant.
     return
   }
   const hoard = balances.find((entry) => entry.provider === "hoard")
   if (hoard) return `hoard ${formatAmount(Math.max(0, hoard.amount - (input.spent ?? 0)), hoard.unit)} left · manual`
-  if (input.spent !== undefined && input.spent > 0) return `~${formatAmount(input.spent, "USD")} spent · est`
 }
 
 async function loadLocalEnv(root: string) {
@@ -224,7 +234,10 @@ function parseAmount(value: unknown) {
 }
 
 function formatAmount(amount: number, unit: string) {
-  const normalized = amount.toFixed(amount < 10 && Math.round(amount * 100) !== amount * 100 ? 5 : 2).replace(/0+$/, "").replace(/\.$/, "")
+  const normalized = amount
+    .toFixed(amount < 10 && Math.round(amount * 100) !== amount * 100 ? 5 : 2)
+    .replace(/0+$/, "")
+    .replace(/\.$/, "")
   if (unit.toUpperCase() === "USD") return `$${normalized}`
   return `${normalized} ${unit}`
 }
