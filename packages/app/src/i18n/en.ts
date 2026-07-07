@@ -507,7 +507,8 @@ export const dict = {
   "error.chain.didYouMean": "Did you mean: {{suggestions}}",
   "error.chain.modelNotFound": "Model not found: {{provider}}/{{model}}",
   "error.chain.checkConfig": "Check your CodeGoblin config (codegoblin.jsonc or opencode.json) provider/model names",
-  "error.chain.mcpFailed": 'MCP server "{{name}}" failed. CodeGoblin could not complete this MCP authentication flow yet.',
+  "error.chain.mcpFailed":
+    'MCP server "{{name}}" failed. CodeGoblin could not complete this MCP authentication flow yet.',
   "error.chain.providerAuthFailed": "Provider authentication failed ({{provider}}): {{message}}",
   "error.chain.providerInitFailed":
     'Failed to initialize provider "{{provider}}". Check credentials and configuration.',
@@ -759,6 +760,11 @@ export const dict = {
     "Pick the shell for your terminal. Compatible shells also run the goblin's tool calls.",
   "settings.general.row.shell.autoDefault": "Auto (Default)",
   "settings.general.row.shell.terminalOnly": "terminal only",
+  "settings.general.row.autonomyCheckpoint.title": "Autonomy checkpoint",
+  "settings.general.row.autonomyCheckpoint.description":
+    "Long autonomous runs (like /goal) pause and ask to continue after this many tool calls. By default they run unbounded until finished.",
+  "settings.general.row.autonomyCheckpoint.never": "Never (Default)",
+  "settings.general.row.autonomyCheckpoint.calls": "{{count}} tool calls",
   "settings.general.row.imageAutoApprove.title": "Skip image confirmations",
   "settings.general.row.imageAutoApprove.description":
     "Send image prompts straight through whenever an image model is selected — no confirm step.",
