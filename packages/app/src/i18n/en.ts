@@ -507,7 +507,8 @@ export const dict = {
   "error.chain.didYouMean": "Did you mean: {{suggestions}}",
   "error.chain.modelNotFound": "Model not found: {{provider}}/{{model}}",
   "error.chain.checkConfig": "Check your CodeGoblin config (codegoblin.jsonc or opencode.json) provider/model names",
-  "error.chain.mcpFailed": 'MCP server "{{name}}" failed. CodeGoblin could not complete this MCP authentication flow yet.',
+  "error.chain.mcpFailed":
+    'MCP server "{{name}}" failed. CodeGoblin could not complete this MCP authentication flow yet.',
   "error.chain.providerAuthFailed": "Provider authentication failed ({{provider}}): {{message}}",
   "error.chain.providerInitFailed":
     'Failed to initialize provider "{{provider}}". Check credentials and configuration.',
@@ -805,6 +806,13 @@ export const dict = {
   "settings.general.row.showSessionProgressBar.title": "Show session progress bar",
   "settings.general.row.showSessionProgressBar.description":
     "Display the animated progress bar at the top of the session when the agent is working",
+  "settings.general.row.foldCompletedTurns.title": "Fold completed responses",
+  "settings.general.row.foldCompletedTurns.description":
+    "Collapse finished responses to a one-line summary so long chats stay easy to scroll. The newest response stays open.",
+  "session.fold.folded": "Response folded",
+  "session.fold.stats": "{{tools}} tools · {{lines}} lines",
+  "session.fold.show": "Show",
+  "session.fold.collapse": "Collapse response",
   "settings.general.row.pinchZoom.title": "Pinch to zoom",
   "settings.general.row.pinchZoom.description": "Allow trackpad pinch and Ctrl-scroll gestures to zoom",
 

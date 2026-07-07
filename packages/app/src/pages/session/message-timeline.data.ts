@@ -29,6 +29,7 @@ export type TimelineRowMap = {
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
   Error: { userMessageID: string; text: string }
+  FoldedTurn: { userMessageID: string; expanded: boolean; tools: number; lines: number }
   BottomSpacer: {}
 }
 
@@ -67,6 +68,15 @@ export namespace TimelineRow {
   export class Retry extends Data.TaggedClass("Retry")<{
     userMessageID: string
   }> {}
+  // Folding: when collapsed, this row replaces a settled turn's assistant parts
+  // with a one-line summary; when a fold-all turn is expanded via override, it
+  // renders as a trailing "collapse" affordance instead.
+  export class FoldedTurn extends Data.TaggedClass("FoldedTurn")<{
+    userMessageID: string
+    expanded: boolean
+    tools: number
+    lines: number
+  }> {}
   export class BottomSpacer extends Data.TaggedClass("BottomSpacer")<{}> {}
 
   export type TimelineRow =
@@ -78,6 +88,7 @@ export namespace TimelineRow {
     | DiffSummary
     | Error
     | Retry
+    | FoldedTurn
     | BottomSpacer
 
   export const key = (row: TimelineRow) => {
@@ -98,6 +109,8 @@ export namespace TimelineRow {
         return `error:${row.userMessageID}`
       case "Retry":
         return `retry:${row.userMessageID}`
+      case "FoldedTurn":
+        return `folded-turn:${row.userMessageID}:${row.expanded ? "expanded" : "collapsed"}`
       case "BottomSpacer":
         return "bottom-spacer"
     }
@@ -117,6 +130,9 @@ export namespace Timeline {
     showReasoning: boolean,
     status: SessionStatus["type"],
     isActive: boolean,
+    // "none" = folding off for this turn; "folded" = replace assistant parts with a
+    // summary row; "expanded" = show parts plus a trailing collapse affordance.
+    fold: "none" | "folded" | "expanded" = "none",
   ) {
     const rows: TimelineRow.TimelineRow[] = []
 
@@ -178,28 +194,61 @@ export namespace Timeline {
       )
     }
 
-    let assistantGroupIndex = 0
-    assistantItems.forEach((item) => {
-      if (item.type === "interrupted") {
-        rows.push(
-          new TimelineRow.TurnDivider({
-            userMessageID: userMessage.id,
-            label: "interrupted",
-          }),
-        )
-        return
+    const foldStats = () => {
+      let tools = 0
+      let lines = 0
+      for (const ref of assistantPartRefs) {
+        if (ref.part.type === "tool") tools += 1
+        if (ref.part.type === "text" && !ref.part.synthetic) {
+          const text = ref.part.text.trim()
+          if (text) lines += text.split("\n").length
+        }
       }
+      return { tools, lines }
+    }
 
+    if (fold === "folded" && assistantPartRefs.length > 0) {
       rows.push(
-        new TimelineRow.AssistantPart({
+        new TimelineRow.FoldedTurn({
           userMessageID: userMessage.id,
-          group: item.group,
-          previousAssistantPart: assistantGroupIndex > 0,
-          lastAssistantPart: assistantGroupIndex === assistantGroupCount - 1,
+          expanded: false,
+          ...foldStats(),
         }),
       )
-      assistantGroupIndex += 1
-    })
+    } else {
+      let assistantGroupIndex = 0
+      assistantItems.forEach((item) => {
+        if (item.type === "interrupted") {
+          rows.push(
+            new TimelineRow.TurnDivider({
+              userMessageID: userMessage.id,
+              label: "interrupted",
+            }),
+          )
+          return
+        }
+
+        rows.push(
+          new TimelineRow.AssistantPart({
+            userMessageID: userMessage.id,
+            group: item.group,
+            previousAssistantPart: assistantGroupIndex > 0,
+            lastAssistantPart: assistantGroupIndex === assistantGroupCount - 1,
+          }),
+        )
+        assistantGroupIndex += 1
+      })
+
+      if (fold === "expanded" && assistantPartRefs.length > 0) {
+        rows.push(
+          new TimelineRow.FoldedTurn({
+            userMessageID: userMessage.id,
+            expanded: true,
+            ...foldStats(),
+          }),
+        )
+      }
+    }
 
     if (isActive && status === "busy" && !error && (showReasoning ? assistantPartRefs.length === 0 : true)) {
       const heading = assistantMessages
