@@ -180,6 +180,10 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
       Effect.mapError(() => new UpgradeFailedError({ stderr: upgradeFailure("curl") })),
     )
 
+    // The install method can't change while the process runs, and detecting it
+    // shells out to package managers — cache the first successful detection.
+    let cachedMethod: Method | undefined
+
     const result: Interface = {
       info: Effect.fn("Installation.info")(function* () {
         return {
@@ -188,20 +192,39 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
         }
       }),
       method: Effect.fn("Installation.method")(function* () {
+        if (cachedMethod) return cachedMethod
         if (process.execPath.includes(path.join(".codegoblin", "bin"))) return "curl" as Method
         if (process.execPath.includes(path.join(".opencode", "bin"))) return "curl" as Method
         if (process.execPath.includes(path.join(".local", "bin"))) return "curl" as Method
         const exec = process.execPath.toLowerCase()
 
         const checks: Array<{ name: Method; command: () => Effect.Effect<string>; packages: string[] }> = [
-          { name: "npm", command: () => text(["npm", "list", "-g", "--depth=0"]), packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage] },
-          { name: "yarn", command: () => text(["yarn", "global", "list"]), packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage] },
-          { name: "pnpm", command: () => text(["pnpm", "list", "-g", "--depth=0"]), packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage] },
-          { name: "bun", command: () => text(["bun", "pm", "ls", "-g"]), packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage] },
+          {
+            name: "npm",
+            command: () => text(["npm", "list", "-g", "--depth=0"]),
+            packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage],
+          },
+          {
+            name: "yarn",
+            command: () => text(["yarn", "global", "list"]),
+            packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage],
+          },
+          {
+            name: "pnpm",
+            command: () => text(["pnpm", "list", "-g", "--depth=0"]),
+            packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage],
+          },
+          {
+            name: "bun",
+            command: () => text(["bun", "pm", "ls", "-g"]),
+            packages: [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage],
+          },
           {
             name: "brew",
             command: () => text(["brew", "list", "--formula", Product.brewFormulae[0]]),
-            packages: Product.brewFormulae.map((formula) => (formula.includes("/") ? formula.split("/").pop()! : formula)),
+            packages: Product.brewFormulae.map((formula) =>
+              formula.includes("/") ? formula.split("/").pop()! : formula,
+            ),
           },
           {
             name: "scoop",
@@ -223,9 +246,22 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
           return 0
         })
 
-        for (const check of checks) {
-          const output = yield* check.command()
+        // Probe every package manager concurrently with a hard per-probe timeout.
+        // Sequential probing summed to minutes on Windows, where a single
+        // `npm list -g` can take tens of seconds — the update check looked hung.
+        const outputs = yield* Effect.all(
+          checks.map((check) =>
+            check.command().pipe(
+              Effect.timeout("10 seconds"),
+              Effect.catch(() => Effect.succeed("")),
+              Effect.map((output) => ({ check, output })),
+            ),
+          ),
+          { concurrency: checks.length },
+        )
+        for (const { check, output } of outputs) {
           if (check.packages.some((pkg) => output.includes(pkg))) {
+            cachedMethod = check.name
             return check.name
           }
         }
@@ -255,7 +291,9 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
         if (detectedMethod === "npm" || detectedMethod === "bun" || detectedMethod === "pnpm") {
           const registry = yield* NpmConfig.registry(process.cwd())
           const response = yield* httpOk.execute(
-            HttpClientRequest.get(npmRegistryPackageUrl(registry, InstallationChannel)).pipe(HttpClientRequest.acceptJson),
+            HttpClientRequest.get(npmRegistryPackageUrl(registry, InstallationChannel)).pipe(
+              HttpClientRequest.acceptJson,
+            ),
           )
           const data = yield* HttpClientResponse.schemaBodyJson(NpmPackage)(response)
           return data.version
@@ -263,11 +301,13 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
 
         if (detectedMethod === "choco") {
           for (const pkg of [Product.chocoPackage, Product.legacyChocoPackage]) {
-            const response = yield* httpOk.execute(
-              HttpClientRequest.get(
-                `https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27${encodeURIComponent(pkg)}%27%20and%20IsLatestVersion&$select=Version`,
-              ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json;odata=verbose" })),
-            ).pipe(Effect.catch(() => Effect.succeed(undefined)))
+            const response = yield* httpOk
+              .execute(
+                HttpClientRequest.get(
+                  `https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27${encodeURIComponent(pkg)}%27%20and%20IsLatestVersion&$select=Version`,
+                ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json;odata=verbose" })),
+              )
+              .pipe(Effect.catch(() => Effect.succeed(undefined)))
             if (!response) continue
             const data = yield* HttpClientResponse.schemaBodyJson(ChocoPackage)(response).pipe(
               Effect.catch(() => Effect.succeed(undefined)),
@@ -279,11 +319,13 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
 
         if (detectedMethod === "scoop") {
           for (const pkg of [Product.scoopPackage, Product.legacyScoopPackage]) {
-            const response = yield* httpOk.execute(
-              HttpClientRequest.get(
-                `https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/${pkg}.json`,
-              ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json" })),
-            ).pipe(Effect.catch(() => Effect.succeed(undefined)))
+            const response = yield* httpOk
+              .execute(
+                HttpClientRequest.get(
+                  `https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/${pkg}.json`,
+                ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json" })),
+              )
+              .pipe(Effect.catch(() => Effect.succeed(undefined)))
             if (!response || response.status === 404) continue
             const data = yield* HttpClientResponse.schemaBodyJson(ScoopManifest)(response).pipe(
               Effect.catch(() => Effect.succeed(undefined)),
