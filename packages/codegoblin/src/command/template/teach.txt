@@ -1,0 +1,46 @@
+Turn a hard-won learning into a reusable CodeGoblin skill — proposal first, then write it only after the user approves.
+
+What to capture (from the user, or infer from this conversation if they didn't say):
+$ARGUMENTS
+
+## 1. Understand the learning
+
+Figure out the specific, non-obvious knowledge worth saving. Good skills capture things a fresh agent would get wrong without help: a gotcha you just hit, a multi-step workflow, a project convention, a tool's real behavior. If the trigger is vague, read the relevant code/config/history to pin down the concrete facts — do not save generic advice.
+
+Every candidate fact should pass: "Would a capable agent likely miss or misapply this without being told?" If not, drop it.
+
+## 2. Draft a learning proposal (do NOT write the skill yet)
+
+Present a short proposal and ask the user to approve, edit, or reject it. Use the `question` tool for the approval so it is one clean interaction. The proposal is:
+
+- **Skill name**: short kebab-case slug (this becomes the folder name)
+- **When to use / description**: one line the model will match against to decide relevance — the single most important field
+- **What it captures**: 2-5 bullets of the actual knowledge
+- **Why it's worth a skill**: what breaks or slows down without it
+
+Keep it tight. If several unrelated learnings came up, propose the most valuable one (or a small set), not a grab-bag.
+
+## 3. Write it on approval
+
+Only after the user approves, create `.codegoblin/skills/<name>/SKILL.md` with YAML frontmatter and a focused body:
+
+```markdown
+---
+name: <kebab-case-slug>
+description: <one line — when should the model reach for this skill>
+---
+
+# <Title>
+
+<The actual, verifiable knowledge. Exact commands, file:line references,
+concrete gotchas. Short sections and bullets. No filler, no generic advice,
+nothing you could not verify.>
+```
+
+Rules:
+- The `description` is what gets matched for relevance — make it specific and trigger-oriented ("Use when …"), not a summary.
+- Include only what you verified. Prefer exact commands and real paths over prose.
+- If a skill with that name already exists, improve it in place instead of duplicating.
+- Keep it small. A skill that tries to cover everything gets loaded for nothing.
+
+After writing, tell the user the path and that it will load automatically when relevant. Do not restate the whole skill back to them.

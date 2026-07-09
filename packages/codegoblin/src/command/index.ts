@@ -10,6 +10,9 @@ import { Skill } from "../skill"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 import PROMPT_GOBLIN from "./template/goblin.txt"
+import PROMPT_TEACH from "./template/teach.txt"
+import PROMPT_GRILL from "./template/grill.txt"
+import PROMPT_GOAL from "./template/goal.txt"
 
 type State = {
   commands: Record<string, Info>
@@ -56,6 +59,9 @@ export const Default = {
   REVIEW: "review",
   GOBLIN: "goblin",
   CODEGOBLIN: "codegoblin",
+  TEACH: "teach",
+  GRILL: "grill",
+  GOAL: "goal",
 } as const
 
 export interface Interface {
@@ -109,6 +115,27 @@ export const layer = Layer.effect(
         source: "command",
         template: PROMPT_GOBLIN,
         hints: hints(PROMPT_GOBLIN),
+      }
+      commands[Default.TEACH] = {
+        name: Default.TEACH,
+        description: "teach the goblin a new skill from a learning (proposal first)",
+        source: "command",
+        template: PROMPT_TEACH,
+        hints: hints(PROMPT_TEACH),
+      }
+      commands[Default.GRILL] = {
+        name: Default.GRILL,
+        description: "ask clarifying questions before starting the task",
+        source: "command",
+        template: PROMPT_GRILL,
+        hints: hints(PROMPT_GRILL),
+      }
+      commands[Default.GOAL] = {
+        name: Default.GOAL,
+        description: "run autonomously until the goal is complete (runs unbounded)",
+        source: "command",
+        template: PROMPT_GOAL,
+        hints: hints(PROMPT_GOAL),
       }
       for (const [name, command] of Object.entries(cfg.command ?? {})) {
         commands[name] = {
