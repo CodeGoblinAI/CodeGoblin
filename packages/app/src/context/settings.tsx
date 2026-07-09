@@ -32,6 +32,7 @@ export interface Settings {
     shellToolPartsExpanded: boolean
     editToolPartsExpanded: boolean
     showSessionProgressBar: boolean
+    foldCompletedTurns: boolean
   }
   updates: {
     startup: boolean
@@ -123,6 +124,7 @@ const defaultSettings: Settings = {
     shellToolPartsExpanded: false,
     editToolPartsExpanded: false,
     showSessionProgressBar: true,
+    foldCompletedTurns: false,
   },
   updates: {
     startup: true,
@@ -244,6 +246,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setShowSessionProgressBar(value: boolean) {
           setStore("general", "showSessionProgressBar", value)
+        },
+        foldCompletedTurns: withFallback(
+          () => store.general?.foldCompletedTurns,
+          defaultSettings.general.foldCompletedTurns,
+        ),
+        setFoldCompletedTurns(value: boolean) {
+          setStore("general", "foldCompletedTurns", value)
         },
       },
       updates: {

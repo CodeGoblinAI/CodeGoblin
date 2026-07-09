@@ -392,6 +392,26 @@ export function MessageTimeline(props: {
   })
   const showHeader = createMemo(() => !!(titleValue() || parentID()))
 
+  // Chat folding: collapse a settled turn's assistant output to a one-line summary.
+  // The setting folds all history by default (newest turn stays open); per-turn
+  // clicks override it either way until the setting is toggled again.
+  const [foldOverrides, setFoldOverrides] = createSignal<Record<string, boolean>>({})
+  const toggleFold = (userMessageID: string, currentlyFolded: boolean) => {
+    setFoldOverrides((prev) => ({ ...prev, [userMessageID]: !currentlyFolded }))
+  }
+  const foldMode = (userMessageID: string, index: number): "none" | "folded" | "expanded" => {
+    const busy = sessionStatus().type !== "idle" && activeMessageID() === userMessageID
+    if (busy) return "none"
+    const global = settings.general.foldCompletedTurns()
+    const override = foldOverrides()[userMessageID]
+    // With folding off and untouched, render exactly as before — no extra rows.
+    if (!global && override === undefined) return "none"
+    const isLast = index === props.userMessages.length - 1
+    const folded = override !== undefined ? override : isLast ? false : global
+    // "expanded" renders a trailing collapse affordance so the turn can be re-folded.
+    return folded ? "folded" : "expanded"
+  }
+
   const messageRowMemos = createMemo(
     mapArray(
       () => props.userMessages,
@@ -405,6 +425,7 @@ export function MessageTimeline(props: {
             settings.general.showReasoningSummaries(),
             sessionStatus().type,
             activeMessageID() === userMessage.id,
+            foldMode(userMessage.id, indexAccessor()),
           )
 
           return reuseTimelineRows(previous, rows)
@@ -1186,6 +1207,40 @@ export function MessageTimeline(props: {
               <Card variant="error" class="error-card">
                 {row.text}
               </Card>
+            </div>
+          </TimelineRowFrame>
+        )
+      }
+      case "FoldedTurn": {
+        return (
+          <TimelineRowFrame row={row}>
+            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+              <Show
+                when={!row.expanded}
+                fallback={
+                  <button
+                    type="button"
+                    class="flex items-center gap-1.5 mt-2 bg-transparent border-none p-0 cursor-pointer text-12-regular text-text-weak opacity-50 hover:opacity-100 transition-opacity"
+                    onClick={() => toggleFold(row.userMessageID, false)}
+                  >
+                    <Icon name="chevron-down" size="small" class="rotate-180" />
+                    <span>{language.t("session.fold.collapse")}</span>
+                  </button>
+                }
+              >
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2 mt-3 rounded-[6px] border border-border-weak-base bg-background-stronger px-3 py-2 cursor-pointer text-left hover:border-[var(--border-weak-base)] transition-colors"
+                  onClick={() => toggleFold(row.userMessageID, true)}
+                >
+                  <Icon name="chevron-right" size="small" />
+                  <span class="text-12-medium text-text-strong">{language.t("session.fold.folded")}</span>
+                  <span class="text-12-regular text-text-weak">
+                    {language.t("session.fold.stats", { tools: row.tools, lines: row.lines })}
+                  </span>
+                  <span class="ml-auto text-12-regular text-text-weak">{language.t("session.fold.show")}</span>
+                </button>
+              </Show>
             </div>
           </TimelineRowFrame>
         )

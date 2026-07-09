@@ -440,6 +440,18 @@ export const SettingsGeneral: Component = () => {
             />
           </div>
         </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.foldCompletedTurns.title")}
+          description={language.t("settings.general.row.foldCompletedTurns.description")}
+        >
+          <div data-action="settings-fold-completed-turns">
+            <Switch
+              checked={settings.general.foldCompletedTurns()}
+              onChange={(checked) => settings.general.setFoldCompletedTurns(checked)}
+            />
+          </div>
+        </SettingsRow>
       </SettingsList>
     </div>
   )
