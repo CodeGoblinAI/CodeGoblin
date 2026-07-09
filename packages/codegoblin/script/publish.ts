@@ -248,5 +248,7 @@ const nativePackages = Object.fromEntries(
 console.log("native packages", nativePackages)
 await createInstallerPackage(nativePackages, version)
 
-await Promise.all(Object.entries(nativePackages).map(([name, version]) => publish(`./dist/${name}`, name, version)))
+for (const [name, version] of Object.entries(nativePackages)) {
+  await publish(`./dist/${name}`, name, version)
+}
 await publish(`./dist/${product.npm}`, publishedPackageName(), version)
