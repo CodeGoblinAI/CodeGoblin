@@ -1214,6 +1214,12 @@ export type Config = {
    * Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications
    */
   autoupdate?: boolean | "notify"
+  autonomy?: {
+    /**
+     * For long autonomous runs (e.g. /goal): pause and ask to continue after this many tool calls in a single turn. Subagent spawns count as tool calls. 0 or unset means never pause — turns run unbounded, which is the default.
+     */
+    checkpoint?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
   disabled_providers?: Array<string>
   enabled_providers?: Array<string>
   model?: string
@@ -1336,6 +1342,7 @@ export type Model = {
       image: boolean
       video: boolean
       pdf: boolean
+      model3d?: boolean
     }
     output: {
       text: boolean
@@ -1343,6 +1350,7 @@ export type Model = {
       image: boolean
       video: boolean
       pdf: boolean
+      model3d?: boolean
     }
     interleaved:
       | boolean
@@ -3972,6 +3980,7 @@ export type GlobalHealthResponses = {
   200: {
     healthy: true
     version: string
+    memoryNative: boolean
   }
 }
 

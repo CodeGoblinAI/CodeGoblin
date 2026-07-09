@@ -760,6 +760,11 @@ export const dict = {
     "Pick the shell for your terminal. Compatible shells also run the goblin's tool calls.",
   "settings.general.row.shell.autoDefault": "Auto (Default)",
   "settings.general.row.shell.terminalOnly": "terminal only",
+  "settings.general.row.autonomyCheckpoint.title": "Autonomy checkpoint",
+  "settings.general.row.autonomyCheckpoint.description":
+    "Long autonomous runs (like /goal) pause and ask to continue after this many tool calls. By default they run unbounded until finished.",
+  "settings.general.row.autonomyCheckpoint.never": "Never (Default)",
+  "settings.general.row.autonomyCheckpoint.calls": "{{count}} tool calls",
   "settings.general.row.imageAutoApprove.title": "Skip image confirmations",
   "settings.general.row.imageAutoApprove.description":
     "Send image prompts straight through whenever an image model is selected — no confirm step.",

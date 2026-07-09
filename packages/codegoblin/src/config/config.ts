@@ -171,6 +171,17 @@ export const Info = Schema.Struct({
     description:
       "Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications",
   }),
+  autonomy: Schema.optional(
+    Schema.Struct({
+      checkpoint: Schema.optional(Schema.Number).annotate({
+        description:
+          "For long autonomous runs (e.g. /goal): pause and ask to continue after this many tool calls in a single turn. Subagent spawns count as tool calls. 0 or unset means never pause — turns run unbounded, which is the default.",
+      }),
+    }),
+  ).annotate({
+    description:
+      "Guardrails for long-running autonomous turns. By default a turn runs until it finishes on its own; set autonomy.checkpoint to be asked whether to keep going after a number of tool calls.",
+  }),
   disabled_providers: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
     description: "Disable providers that are loaded automatically",
   }),

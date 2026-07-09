@@ -242,6 +242,17 @@ export const SettingsGeneral: Component = () => {
     return options
   })
 
+  // Autonomy checkpoint: how many tool calls a long autonomous turn (e.g. /goal)
+  // may run before pausing to ask "keep going?". 0/unset = unbounded (default).
+  const autonomyCheckpointOptions = createMemo(() => [
+    { id: 0, label: language.t("settings.general.row.autonomyCheckpoint.never") },
+    ...[25, 50, 100, 250].map((count) => ({
+      id: count,
+      label: language.t("settings.general.row.autonomyCheckpoint.calls", { count }),
+    })),
+  ])
+  const currentAutonomyCheckpoint = createMemo(() => globalSync.data.config.autonomy?.checkpoint ?? 0)
+
   const onDisplayBackendChange = (checked: boolean) => {
     const update = platform.setDisplayBackend?.(checked ? "wayland" : "auto")
     if (!update) return
@@ -385,6 +396,31 @@ export const SettingsGeneral: Component = () => {
               if (!option) return
               if (option.value === currentShell()) return
               globalSync.updateConfig({ shell: option.value })
+            }}
+            variant="secondary"
+            size="small"
+            triggerVariant="settings"
+            triggerStyle={{ "min-width": "180px" }}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.autonomyCheckpoint.title")}
+          description={language.t("settings.general.row.autonomyCheckpoint.description")}
+        >
+          <Select
+            data-action="settings-autonomy-checkpoint"
+            options={autonomyCheckpointOptions()}
+            current={
+              autonomyCheckpointOptions().find((o) => o.id === currentAutonomyCheckpoint()) ??
+              autonomyCheckpointOptions()[0]
+            }
+            value={(o) => String(o.id)}
+            label={(o) => o.label}
+            onSelect={(option) => {
+              if (!option) return
+              if (option.id === currentAutonomyCheckpoint()) return
+              globalSync.updateConfig({ autonomy: { checkpoint: option.id } })
             }}
             variant="secondary"
             size="small"
