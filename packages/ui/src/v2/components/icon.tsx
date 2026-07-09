@@ -37,6 +37,10 @@ const icons = {
     viewBox: "0 0 16 16",
     body: `<path d="M4.25 11.75L11.75 4.25M11.75 11.75L4.25 4.25" stroke="currentColor"/>`,
   },
+  "dots-horizontal": {
+    viewBox: "0 0 16 16",
+    body: `<circle cx="3.25" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.75" cy="8" r="1.25" fill="currentColor"/>`,
+  },
 }
 
 const spriteID = "opencode-v2-icon-sprite"

@@ -1,9 +1,11 @@
-import { createEffect, createMemo, For, Show, type Accessor } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Show, type Accessor } from "solid-js"
+import { produce } from "solid-js/store"
 import { useNavigate, useParams } from "@solidjs/router"
 import { DateTime } from "luxon"
 import { base64Encode } from "@codegoblin/core/util/encode"
 import { getFilename } from "@codegoblin/core/util/path"
 import type { Session } from "@codegoblin/sdk/v2/client"
+import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { getAvatarColors, useLayout, type LocalProject } from "@/context/layout"
 import { useLanguage } from "@/context/language"
@@ -12,7 +14,12 @@ import { pathKey } from "@/utils/path-key"
 import { sessionTitle } from "@/utils/session-title"
 import { sortedRootSessions, displayName } from "@/pages/layout/helpers"
 import { CodeGoblinLogoMark } from "@/components/codegoblin-logo"
+import { Button } from "@codegoblin/ui/button"
+import { Dialog } from "@codegoblin/ui/dialog"
 import { DropdownMenu } from "@codegoblin/ui/dropdown-menu"
+import { TextField } from "@codegoblin/ui/text-field"
+import { showToast } from "@codegoblin/ui/toast"
+import { useDialog } from "@codegoblin/ui/context/dialog"
 import { Avatar as AvatarV2 } from "@codegoblin/ui/v2/components/avatar-v2.jsx"
 import { IconButtonV2 } from "@codegoblin/ui/v2/components/icon-button-v2.jsx"
 import { Icon as IconV2 } from "@codegoblin/ui/v2/components/icon.jsx"
@@ -23,7 +30,7 @@ const SECTION_LABEL = "px-3 py-1 text-[11px] font-semibold uppercase tracking-wi
 
 const SESSION_LIMIT = 20
 
-type SidebarSession = { session: Session; project: LocalProject | undefined }
+type SidebarSession = { session: Session; project: LocalProject | undefined; storeDir: string }
 
 export function ThreePaneSidebar(props: {
   projects: Accessor<LocalProject[]>
@@ -42,18 +49,27 @@ export function ThreePaneSidebar(props: {
   const navigate = useNavigate()
   const params = useParams()
 
-  const projectByWorktree = createMemo(
-    () => new Map(props.projects().map((p) => [pathKey(p.worktree), p])),
-  )
+  const projectByWorktree = createMemo(() => new Map(props.projects().map((p) => [pathKey(p.worktree), p])))
 
-  // Pull the session list for every sidebar project (and the active dir) so the
-  // chat list actually populates. globalSync.child uses bootstrap:false, so the
-  // lists never load on their own; loadSessions is deduped, safe to call here.
-  createEffect(() => {
-    const dirs = new Set(props.projects().map((p) => p.worktree))
+  // Directories whose sessions the sidebar lists: every project, the active dir,
+  // and the home dir. Home matters because "no project" chats are rooted there —
+  // and so are sessions started from the TUI in non-project folders. Without it
+  // those chats vanish from the list the moment you navigate away.
+  const sessionDirs = createMemo(() => {
+    const dirs = new Map<string, string>()
+    for (const p of props.projects()) dirs.set(pathKey(p.worktree), p.worktree)
     const current = props.currentDir()
-    if (current) dirs.add(current)
-    for (const dir of dirs) void globalSync.project.loadSessions(dir)
+    if (current) dirs.set(pathKey(current), current)
+    const home = globalSync.data.path.home
+    if (home) dirs.set(pathKey(home), home)
+    return [...dirs.values()]
+  })
+
+  // Pull the session list for every sidebar directory so the chat list actually
+  // populates. globalSync.child uses bootstrap:false, so the lists never load on
+  // their own; loadSessions is deduped, safe to call here.
+  createEffect(() => {
+    for (const dir of sessionDirs()) void globalSync.project.loadSessions(dir)
   })
 
   const sidebarSessions = createMemo(() => {
@@ -61,16 +77,16 @@ export function ThreePaneSidebar(props: {
     const seen = new Set<string>()
     const results: SidebarSession[] = []
 
-    for (const project of props.projects()) {
-      const [store] = globalSync.child(project.worktree, { bootstrap: false })
+    for (const dir of sessionDirs()) {
+      const [store] = globalSync.child(dir, { bootstrap: false })
       for (const session of sortedRootSessions(store, now)) {
         const key = `${pathKey(session.directory)}:${session.id}`
         if (seen.has(key)) continue
         seen.add(key)
         results.push({
           session,
-          project: projectByWorktree().get(pathKey(session.directory)) ??
-            projectByWorktree().get(pathKey(project.worktree)),
+          project: projectByWorktree().get(pathKey(session.directory)) ?? projectByWorktree().get(pathKey(dir)),
+          storeDir: dir,
         })
       }
     }
@@ -78,8 +94,7 @@ export function ThreePaneSidebar(props: {
     return results
       .sort(
         (a, b) =>
-          (b.session.time.updated ?? b.session.time.created) -
-          (a.session.time.updated ?? a.session.time.created),
+          (b.session.time.updated ?? b.session.time.created) - (a.session.time.updated ?? a.session.time.created),
       )
       .slice(0, SESSION_LIMIT)
   })
@@ -128,6 +143,118 @@ export function ThreePaneSidebar(props: {
     navigate(`/${base64Encode(project.worktree)}/session`)
   }
 
+  const globalSDK = useGlobalSDK()
+  const dialog = useDialog()
+
+  function renameSession(item: SidebarSession, title: string) {
+    void globalSDK.client.session
+      .update({ directory: item.session.directory, sessionID: item.session.id, title })
+      .then(() => {
+        const [, setStore] = globalSync.child(item.storeDir, { bootstrap: false })
+        setStore(
+          produce((draft) => {
+            const match = draft.session.find((s) => s.id === item.session.id)
+            if (match) match.title = title
+          }),
+        )
+      })
+      .catch(() => showToast({ variant: "error", icon: "circle-x", title: language.t("common.requestFailed") }))
+  }
+
+  function removeFromStore(item: SidebarSession) {
+    const [, setStore] = globalSync.child(item.storeDir, { bootstrap: false })
+    setStore(
+      produce((draft) => {
+        const removed = new Set<string>([item.session.id])
+        for (;;) {
+          const before = removed.size
+          for (const s of draft.session) {
+            if (s.parentID && removed.has(s.parentID)) removed.add(s.id)
+          }
+          if (removed.size === before) break
+        }
+        draft.session = draft.session.filter((s) => !removed.has(s.id))
+      }),
+    )
+    if (params.id === item.session.id) navigate(`/${base64Encode(item.storeDir)}/session`)
+  }
+
+  function archiveSession(item: SidebarSession) {
+    void globalSDK.client.session
+      .update({ directory: item.session.directory, sessionID: item.session.id, time: { archived: Date.now() } })
+      .then(() => removeFromStore(item))
+      .catch(() => showToast({ variant: "error", icon: "circle-x", title: language.t("common.requestFailed") }))
+  }
+
+  function deleteSession(item: SidebarSession) {
+    void globalSDK.client.session
+      .delete({ directory: item.session.directory, sessionID: item.session.id })
+      .then(() => removeFromStore(item))
+      .catch(() => showToast({ variant: "error", icon: "circle-x", title: language.t("session.delete.failed.title") }))
+  }
+
+  function showRenameDialog(item: SidebarSession) {
+    dialog.show(() => {
+      const [draft, setDraft] = createSignal(sessionTitle(item.session.title) ?? "")
+      const submit = () => {
+        const value = draft().trim()
+        dialog.close()
+        if (!value || value === item.session.title) return
+        renameSession(item, value)
+      }
+      return (
+        <Dialog title={language.t("common.rename")} fit>
+          <div class="flex flex-col gap-4 pl-6 pr-2.5 pb-3">
+            <TextField
+              value={draft()}
+              onInput={(event) => setDraft(event.currentTarget.value)}
+              onKeyDown={(event: KeyboardEvent) => {
+                if (event.key === "Enter") submit()
+              }}
+              autofocus
+            />
+            <div class="flex justify-end gap-2">
+              <Button variant="ghost" size="large" onClick={() => dialog.close()}>
+                {language.t("common.cancel")}
+              </Button>
+              <Button variant="primary" size="large" onClick={submit}>
+                {language.t("common.save")}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )
+    })
+  }
+
+  function showDeleteDialog(item: SidebarSession) {
+    dialog.show(() => {
+      const name = sessionTitle(item.session.title) ?? language.t("command.session.new")
+      return (
+        <Dialog title={language.t("session.delete.title")} fit>
+          <div class="flex flex-col gap-4 pl-6 pr-2.5 pb-3">
+            <span class="text-14-regular text-text-strong">{language.t("session.delete.confirm", { name })}</span>
+            <div class="flex justify-end gap-2">
+              <Button variant="ghost" size="large" onClick={() => dialog.close()}>
+                {language.t("common.cancel")}
+              </Button>
+              <Button
+                variant="primary"
+                size="large"
+                onClick={() => {
+                  dialog.close()
+                  deleteSession(item)
+                }}
+              >
+                {language.t("session.delete.button")}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )
+    })
+  }
+
   return (
     <nav
       aria-label="Projects and chats"
@@ -157,26 +284,50 @@ export function ThreePaneSidebar(props: {
                 <div class={SECTION_LABEL}>{group.label}</div>
                 <div class="mt-1 flex flex-col gap-px">
                   <For each={group.items}>
-                    {({ session }) => {
-                      const title = createMemo(
-                        () => sessionTitle(session.title) || session.id.slice(0, 8),
-                      )
+                    {(item) => {
+                      const title = createMemo(() => sessionTitle(item.session.title) || item.session.id.slice(0, 8))
                       const isActive = () =>
-                        session.id === activeSessionId() &&
-                        pathKey(session.directory) === pathKey(activeDir())
+                        item.session.id === activeSessionId() &&
+                        pathKey(item.session.directory) === pathKey(activeDir())
+                      const [menuOpen, setMenuOpen] = createSignal(false)
                       return (
-                        <button
-                          type="button"
-                          class={`${ROW_BASE} h-8 gap-2 px-3`}
+                        <div
+                          class={`group/chat ${ROW_BASE} h-8 gap-1 pl-3 pr-1`}
                           classList={{
-                            "bg-v2-overlay-simple-overlay-hover text-v2-text-text-base": isActive(),
+                            "bg-v2-overlay-simple-overlay-hover text-v2-text-text-base": isActive() || menuOpen(),
                           }}
-                          onClick={() => openSession(session)}
                         >
-                          <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
-                            {title()}
-                          </span>
-                        </button>
+                          <button
+                            type="button"
+                            class="min-w-0 flex-1 h-full border-0 bg-transparent p-0 text-left text-inherit cursor-default focus-visible:outline-none"
+                            onClick={() => openSession(item.session)}
+                          >
+                            <span class="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{title()}</span>
+                          </button>
+                          <DropdownMenu open={menuOpen()} onOpenChange={setMenuOpen} gutter={4} placement="bottom-end">
+                            <DropdownMenu.Trigger
+                              class="flex size-6 shrink-0 items-center justify-center rounded-[4px] border-0 bg-transparent text-v2-icon-icon-muted opacity-0 transition-opacity cursor-default hover:bg-v2-overlay-simple-overlay-hover group-hover/chat:opacity-100 focus-visible:opacity-100"
+                              classList={{ "opacity-100": menuOpen() }}
+                              aria-label={language.t("common.moreOptions")}
+                              onClick={(event: MouseEvent) => event.stopPropagation()}
+                            >
+                              <IconV2 name="dots-horizontal" size="small" />
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Portal>
+                              <DropdownMenu.Content class="min-w-[160px]">
+                                <DropdownMenu.Item onSelect={() => showRenameDialog(item)}>
+                                  <DropdownMenu.ItemLabel>{language.t("common.rename")}</DropdownMenu.ItemLabel>
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Item onSelect={() => archiveSession(item)}>
+                                  <DropdownMenu.ItemLabel>{language.t("common.archive")}</DropdownMenu.ItemLabel>
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Item onSelect={() => showDeleteDialog(item)}>
+                                  <DropdownMenu.ItemLabel>{language.t("common.delete")}</DropdownMenu.ItemLabel>
+                                </DropdownMenu.Item>
+                              </DropdownMenu.Content>
+                            </DropdownMenu.Portal>
+                          </DropdownMenu>
+                        </div>
                       )
                     }}
                   </For>
@@ -212,9 +363,7 @@ export function ThreePaneSidebar(props: {
                         {...getAvatarColors(project.icon?.color)}
                         class="size-4 shrink-0 rounded"
                       />
-                      <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
-                        {name()}
-                      </span>
+                      <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{name()}</span>
                     </button>
                   )
                 }}

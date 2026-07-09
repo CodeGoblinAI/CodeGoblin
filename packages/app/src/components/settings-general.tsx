@@ -14,6 +14,8 @@ import { usePermission } from "@/context/permission"
 import { usePlatform, type DisplayBackend } from "@/context/platform"
 import { useGlobalSync } from "@/context/global-sync"
 import { useGlobalSDK } from "@/context/global-sdk"
+import { useServer } from "@/context/server"
+import { authTokenFromCredentials } from "@/utils/server"
 import {
   monoDefault,
   monoFontFamily,
@@ -93,6 +95,7 @@ export const SettingsGeneral: Component = () => {
   const platform = usePlatform()
   const params = useParams()
   const settings = useSettings()
+  const server = useServer()
 
   const [store, setStore] = createStore({
     checking: false,
@@ -126,19 +129,43 @@ export const SettingsGeneral: Component = () => {
   }
   const desktop = createMemo(() => platform.platform === "desktop")
 
+  // Web has no desktop updater, but the local server exposes an update check —
+  // the same one the TUI /update command uses. Without this the button was dead.
+  const serverUpdateCheck = async (): Promise<{ updateAvailable: boolean; version?: string; current?: string }> => {
+    const activeServer = server.current
+    const requestHeaders: Record<string, string> = {}
+    if (activeServer?.http.password) {
+      requestHeaders.authorization = `Basic ${authTokenFromCredentials({
+        username: activeServer.http.username,
+        password: activeServer.http.password,
+      })}`
+    }
+    const response = await fetch(`${globalSdk.url}/codegoblin/update-check`, { headers: requestHeaders })
+    const body = (await response.json().catch(() => undefined)) as
+      | { ok?: boolean; message?: string; version?: string; latest?: string | null }
+      | undefined
+    if (!response.ok || !body?.ok) throw new Error(body?.message ?? `HTTP ${response.status}`)
+    const latest = typeof body.latest === "string" ? body.latest : undefined
+    return {
+      updateAvailable: Boolean(latest && body.version && latest !== body.version),
+      version: latest,
+      current: body.version,
+    }
+  }
+
   const check = () => {
-    if (!platform.checkUpdate) return
     setStore("checking", true)
 
-    void platform
-      .checkUpdate()
-      .then((result) => {
+    void (platform.checkUpdate ? platform.checkUpdate() : serverUpdateCheck())
+      .then((result: { updateAvailable: boolean; version?: string; current?: string }) => {
         if (!result.updateAvailable) {
           showToast({
             variant: "success",
             icon: "circle-check",
             title: language.t("settings.updates.toast.latest.title"),
-            description: language.t("settings.updates.toast.latest.description", { version: platform.version ?? "" }),
+            description: language.t("settings.updates.toast.latest.description", {
+              version: platform.version ?? result.current ?? "",
+            }),
           })
           return
         }
@@ -821,7 +848,7 @@ export const SettingsGeneral: Component = () => {
           title={language.t("settings.updates.row.check.title")}
           description={language.t("settings.updates.row.check.description")}
         >
-          <Button size="small" variant="secondary" disabled={store.checking || !platform.checkUpdate} onClick={check}>
+          <Button size="small" variant="secondary" disabled={store.checking} onClick={check}>
             {store.checking
               ? language.t("settings.updates.action.checking")
               : language.t("settings.updates.action.checkNow")}
