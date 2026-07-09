@@ -87,7 +87,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Download all dist artifacts
-        uses: actions/download-artifact@d3f86a159357d2845a17789a388ed2e7bae1e5de # v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
           pattern: codegoblin-dist-*
