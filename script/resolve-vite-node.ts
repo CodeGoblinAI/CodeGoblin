@@ -121,7 +121,13 @@ export function logViteNodeChoice(nodeExecutable: string) {
 }
 
 export function viteCliPath(appDir: string) {
-  const direct = path.join(appDir, "node_modules", "vite", "bin", "vite.js")
-  if (fs.existsSync(direct)) return direct
-  throw new Error(`Vite CLI not found under ${appDir}. Run bun install in the repo root.`)
+  let dir = path.resolve(appDir)
+  const root = path.parse(dir).root
+  while (true) {
+    const candidate = path.join(dir, "node_modules", "vite", "bin", "vite.js")
+    if (fs.existsSync(candidate)) return candidate
+    if (dir === root) break
+    dir = path.dirname(dir)
+  }
+  throw new Error(`Vite CLI not found near ${appDir}. Run bun install in the repo root.`)
 }
