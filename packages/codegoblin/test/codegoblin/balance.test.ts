@@ -13,7 +13,9 @@ describe("CodeGoblin balance display", () => {
     expect(CodeGoblinBalance.formatFooter({ balances, providerID: "deepseek", modelID: "deepseek-chat" })).toBe(
       "deepseek $2.12 left · manual",
     )
-    expect(CodeGoblinBalance.formatFooter({ balances, providerID: "google", modelID: "gemini-2.5-pro" })).toBeUndefined()
+    expect(
+      CodeGoblinBalance.formatFooter({ balances, providerID: "google", modelID: "gemini-2.5-pro" }),
+    ).toBeUndefined()
     expect(CodeGoblinBalance.formatFooter({ balances, providerID: "moonshot", modelID: "kimi-k2" })).toBe(
       "moon $2.22376 left · manual",
     )
@@ -34,10 +36,16 @@ describe("CodeGoblin balance display", () => {
     expect(CodeGoblinBalance.formatFooter({ balances: live, providerID: "deepseek", modelID: "deepseek-chat" })).toBe(
       "deepseek $2.12 left · live",
     )
-    // Provider with no balance endpoint shows a running session-spend estimate.
+    // Provider with no balance endpoint shows nothing — the footer already
+    // displays exact session spend, so a spend estimate here would be redundant.
     expect(
-      CodeGoblinBalance.formatFooter({ balances: live, providerID: "google", modelID: "gemini-2.5-flash-image", spent: 0.039 }),
-    ).toBe("~$0.039 spent · est")
+      CodeGoblinBalance.formatFooter({
+        balances: live,
+        providerID: "google",
+        modelID: "gemini-2.5-flash-image",
+        spent: 0.039,
+      }),
+    ).toBeUndefined()
   })
 
   test("never fabricates a balance when nothing is configured", () => {
@@ -47,8 +55,8 @@ describe("CodeGoblin balance display", () => {
     expect(
       CodeGoblinBalance.formatFooter({ balances: [], providerID: "deepseek", modelID: "deepseek-chat" }),
     ).toBeUndefined()
-    // The only number ever shown without a configured balance is a clearly-tagged spend estimate.
-    expect(CodeGoblinBalance.formatFooter({ balances: [], spent: 0.5 })).toBe("~$0.5 spent · est")
+    // Session spend alone never produces a footer — it is already shown elsewhere.
+    expect(CodeGoblinBalance.formatFooter({ balances: [], spent: 0.5 })).toBeUndefined()
   })
 
   test("resolve returns no balances and no fabricated numbers without keys or manual env", async () => {

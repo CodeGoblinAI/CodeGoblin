@@ -320,12 +320,7 @@ function TuiSidebarCompanionGoblin(props: {
       "....G....G........",
       "..................",
     ]),
-    createChatGoblinVariant("21", "menu tiny body", [
-      ...menuHeadSmall,
-      "....GPPG....",
-      "...G.PP.G...",
-      "..G......G..",
-    ]),
+    createChatGoblinVariant("21", "menu tiny body", [...menuHeadSmall, "....GPPG....", "...G.PP.G...", "..G......G.."]),
     createChatGoblinVariant("22", "menu thin scout", [
       ...menuHeadSlim,
       "...GPPG...",
@@ -529,7 +524,9 @@ function TuiSidebarCompanionGoblin(props: {
   function normalizeFrames(frames: string[][]) {
     const height = Math.max(...frames.map((frame) => frame.length))
     const width = Math.max(...frames.flatMap((frame) => frame.map((row) => row.length)))
-    return frames.map((frame) => Array.from({ length: height }, (_, rowIndex) => (frame[rowIndex] ?? "").padEnd(width, ".")))
+    return frames.map((frame) =>
+      Array.from({ length: height }, (_, rowIndex) => (frame[rowIndex] ?? "").padEnd(width, ".")),
+    )
   }
 
   function normalizeChatGoblinFrame(value: string | undefined) {
@@ -546,104 +543,26 @@ function TuiSidebarCompanionGoblin(props: {
   // Calm at rest: the idle frames are identical so the resting goblin holds still (the constant sway
   // read as fidgety). It still animates during real activity — thinking, spending, image/audio work.
   const companionIdleFrames = normalizeFrames([
-    createCompanionFrame(
-      ...companionHeadWide,
-      "...GGPPGG...",
-      "..G.PPPP.G..",
-      "....G..G....",
-      "...G....G...",
-    ),
-    createCompanionFrame(
-      ...companionHeadWide,
-      "...GGPPGG...",
-      "..G.PPPP.G..",
-      "....G..G....",
-      "...G....G...",
-    ),
-    createCompanionFrame(
-      ...companionHeadWide,
-      "...GGPPGG...",
-      "..G.PPPP.G..",
-      "....G..G....",
-      "...G....G...",
-    ),
-    createCompanionFrame(
-      ...companionHeadWide,
-      "...GGPPGG...",
-      "..G.PPPP.G..",
-      "....G..G....",
-      "...G....G...",
-    ),
+    createCompanionFrame(...companionHeadWide, "...GGPPGG...", "..G.PPPP.G..", "....G..G....", "...G....G..."),
+    createCompanionFrame(...companionHeadWide, "...GGPPGG...", "..G.PPPP.G..", "....G..G....", "...G....G..."),
+    createCompanionFrame(...companionHeadWide, "...GGPPGG...", "..G.PPPP.G..", "....G..G....", "...G....G..."),
+    createCompanionFrame(...companionHeadWide, "...GGPPGG...", "..G.PPPP.G..", "....G..G....", "...G....G..."),
   ])
   const companionActionFrames = {
     "01": normalizeFrames([
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGPPGG..T.",
-        "..G.PPPP.G..",
-        "....G..G....",
-        "...G....G...",
-      ),
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGPPGGT...",
-        "..G.PPPP.G..",
-        "....G..G....",
-        "...G....G...",
-      ),
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGPPTGG...",
-        "..G.PPPP.G..",
-        "....G..G....",
-        "...G....G...",
-      ),
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGTPPGG...",
-        "..G.PPPP.G..",
-        "....G..G....",
-        "...G....G...",
-      ),
+      createCompanionFrame(...companionHeadWide, "...GGPPGG..T.", "..G.PPPP.G..", "....G..G....", "...G....G..."),
+      createCompanionFrame(...companionHeadWide, "...GGPPGGT...", "..G.PPPP.G..", "....G..G....", "...G....G..."),
+      createCompanionFrame(...companionHeadWide, "...GGPPTGG...", "..G.PPPP.G..", "....G..G....", "...G....G..."),
+      createCompanionFrame(...companionHeadWide, "...GGTPPGG...", "..G.PPPP.G..", "....G..G....", "...G....G..."),
     ]),
     "02": normalizeFrames([
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGWWGG...",
-        "..G.WWWW.G..",
-        "....GT.G....",
-        "...G....G...",
-      ),
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGWWGG...",
-        "..G.WWTW.G..",
-        "....GT.G....",
-        "...G....G...",
-      ),
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGWWGG...",
-        "..G.WTTW.G..",
-        "....G..G....",
-        "...G....G...",
-      ),
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGWWGG...",
-        "..G.TTTT.G..",
-        "....G..G....",
-        "...G....G...",
-      ),
+      createCompanionFrame(...companionHeadWide, "...GGWWGG...", "..G.WWWW.G..", "....GT.G....", "...G....G..."),
+      createCompanionFrame(...companionHeadWide, "...GGWWGG...", "..G.WWTW.G..", "....GT.G....", "...G....G..."),
+      createCompanionFrame(...companionHeadWide, "...GGWWGG...", "..G.WTTW.G..", "....G..G....", "...G....G..."),
+      createCompanionFrame(...companionHeadWide, "...GGWWGG...", "..G.TTTT.G..", "....G..G....", "...G....G..."),
     ]),
     "03": normalizeFrames([
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGPPGG..T.",
-        "..G.PPPP.G..",
-        "....G..G....",
-        "...G....G...",
-      ),
+      createCompanionFrame(...companionHeadWide, "...GGPPGG..T.", "..G.PPPP.G..", "....G..G....", "...G....G..."),
       createCompanionFrame(
         ".....GGGG.....",
         "...GGGGGGGG..T",
@@ -685,34 +604,10 @@ function TuiSidebarCompanionGoblin(props: {
       ),
     ]),
     "04": normalizeFrames([
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGWWGG...",
-        "..G.WWWW.G..",
-        "....G..G....",
-        "...G....G...",
-      ),
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGWWGG...",
-        "..G.WTTW.G..",
-        "....G..G....",
-        "...G....G...",
-      ),
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGTTGG...",
-        "..G.TTTT.G..",
-        "....G..G....",
-        "...G....G...",
-      ),
-      createCompanionFrame(
-        ...companionHeadWide,
-        "...GGWWGG...",
-        "..G.TTTT.G..",
-        "....G..G....",
-        "...G....G...",
-      ),
+      createCompanionFrame(...companionHeadWide, "...GGWWGG...", "..G.WWWW.G..", "....G..G....", "...G....G..."),
+      createCompanionFrame(...companionHeadWide, "...GGWWGG...", "..G.WTTW.G..", "....G..G....", "...G....G..."),
+      createCompanionFrame(...companionHeadWide, "...GGTTGG...", "..G.TTTT.G..", "....G..G....", "...G....G..."),
+      createCompanionFrame(...companionHeadWide, "...GGWWGG...", "..G.TTTT.G..", "....G..G....", "...G....G..."),
     ]),
   } as const
   const companionActivityVariantCatalog = {
@@ -1242,7 +1137,7 @@ function TuiSidebarCompanionGoblin(props: {
       } else if (char === "D") {
         cells.push(<text fg={facetColor}>██</text>)
       } else {
-        cells.push(<text>  </text>)
+        cells.push(<text> </text>)
       }
     }
 
@@ -1260,12 +1155,15 @@ function TuiSidebarCompanionGoblin(props: {
           <text fg={spendColor}>{sessionSpendText()}</text>
         </box>
         <box flexDirection="row" gap={1}>
-          <text fg={props.theme.textMuted}>last  :</text>
+          <text fg={props.theme.textMuted}>last :</text>
           <text fg={effectiveBurn() !== undefined ? spendColor : props.theme.textMuted}>
             {effectiveBurnText() ? `+${effectiveBurnText()}` : "waiting"}
           </text>
         </box>
-        <text fg={actionActive() ? spendColor : props.active ? props.theme.text : props.theme.textMuted} wrapMode="none">
+        <text
+          fg={actionActive() ? spendColor : props.active ? props.theme.text : props.theme.textMuted}
+          wrapMode="none"
+        >
           {actionText()}
         </text>
         <text fg={props.theme.textMuted} wrapMode="none">
@@ -1289,7 +1187,10 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const session = createMemo(() => sync.session.get(props.sessionID))
   const messages = createMemo(() => sync.data.message[props.sessionID] ?? [])
   const pending = createMemo(() => messages().findLast((item) => item.role === "assistant" && !item.time.completed)?.id)
-  const showChatGoblin = createMemo(() => codeGoblinCompanionVisible(process.env.CODEGOBLIN_CHAT_GOBLIN))
+  // Companion goblin is opt-in via CODEGOBLIN_CHAT_GOBLIN=1 (dev variant scripts set it).
+  // It used to default on, which resurfaced the goblin whenever the sidebar opened —
+  // e.g. reopening an old session from /sessions — after it was removed from the chat UI.
+  const showChatGoblin = createMemo(() => codeGoblinFlagEnabled(process.env.CODEGOBLIN_CHAT_GOBLIN))
   const latestCodeGoblinAssetState = createMemo(() => {
     let latest: string | undefined
     for (const message of messages()) {
@@ -1315,7 +1216,12 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     const assistantMessages = messages().filter((item): item is AssistantMessage => item.role === "assistant")
     const sessionTokens = assistantMessages.reduce(
       (total, item) =>
-        total + item.tokens.input + item.tokens.output + item.tokens.reasoning + item.tokens.cache.read + item.tokens.cache.write,
+        total +
+        item.tokens.input +
+        item.tokens.output +
+        item.tokens.reasoning +
+        item.tokens.cache.read +
+        item.tokens.cache.write,
       0,
     )
     // Spend must include image/audio generation, whose cost lives on synthetic assistant

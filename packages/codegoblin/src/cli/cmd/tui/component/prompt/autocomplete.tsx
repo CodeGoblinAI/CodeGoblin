@@ -545,13 +545,12 @@ export function Autocomplete(props: {
 
   const commands = createMemo((): AutocompleteOption[] => {
     // Mid-prompt ("inline") slash = a reference to a prompt-template command,
-    // so UI commands are hidden and skills are INCLUDED; at the start of the
-    // prompt the classic execute-a-command list is unchanged.
+    // so UI commands are hidden; at the start of the prompt the classic
+    // execute-a-command list applies. Skills are listed in both cases.
     const inline = store.visible === "/" && store.index > 0
     const results: AutocompleteOption[] = inline ? [] : [...slashes()]
 
     for (const serverCommand of sync.data.command) {
-      if (serverCommand.source === "skill" && !inline) continue
       const label = serverCommand.source === "mcp" ? ":mcp" : serverCommand.source === "skill" ? ":skill" : ""
       results.push({
         display: "/" + serverCommand.name + label,

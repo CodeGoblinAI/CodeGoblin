@@ -38,13 +38,15 @@ const tui: TuiPlugin = async (api) => {
     slots: {
       home_bottom() {
         const hidden = createMemo(() => api.kv.get("tips_hidden", false))
-        const first = createMemo(() => api.state.session.count() === 0)
         const connected = createMemo(() =>
           api.state.provider.some(
             (item) => item.id !== "opencode" || Object.values(item.models).some((model) => model.cost?.input !== 0),
           ),
         )
-        const show = createMemo(() => (!first() || !connected()) && !hidden())
+        // Tips show whenever not explicitly hidden. The old "hide until the first
+        // session exists" gate meant a fresh install (or fresh database) showed no
+        // tip at all, which read as a rendering bug.
+        const show = createMemo(() => !hidden())
         return <View api={api} hidden={hidden()} show={show()} connected={connected()} />
       },
     },

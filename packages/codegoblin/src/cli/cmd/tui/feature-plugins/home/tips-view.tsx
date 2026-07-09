@@ -156,7 +156,9 @@ export function Tips(props: { api: TuiPluginApi; connected?: boolean }) {
   }, NO_MODELS_PARTS)
 
   return (
-    <box flexDirection="row" maxWidth="100%">
+    // Fixed two-row height: tips wrap to one or two lines depending on text, and
+    // without a reserved height the prompt below shifts every time the tip rotates.
+    <box flexDirection="row" maxWidth="100%" height={2} flexShrink={0} alignItems="flex-start">
       <text flexShrink={0} style={{ fg: theme.warning }}>
         ◆{" "}
       </text>
