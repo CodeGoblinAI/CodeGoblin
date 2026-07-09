@@ -274,27 +274,46 @@ export const layer = Layer.effect(
         ? yield* provider.getModel(ag.model.providerID, ag.model.modelID)
         : ((yield* provider.getSmallModel(input.providerID)) ??
           (yield* provider.getModel(input.providerID, input.modelID)))
-      const msgs = onlySubtasks
-        ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
-        : yield* MessageV2.toModelMessagesEffect(context, mdl)
-      const text = yield* llm
-        .stream({
-          agent: ag,
-          user: firstInfo,
-          system: [],
-          small: true,
-          tools: {},
-          model: mdl,
-          sessionID: input.session.id,
-          retries: 2,
-          messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
-        })
-        .pipe(
-          Stream.filter(LLMEvent.is.textDelta),
-          Stream.map((e) => e.text),
-          Stream.mkString,
-          Effect.orDie,
-        )
+
+      const generate = Effect.fnUntraced(function* (model: Provider.Model) {
+        const msgs = onlySubtasks
+          ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
+          : yield* MessageV2.toModelMessagesEffect(context, model)
+        return yield* llm
+          .stream({
+            agent: ag,
+            user: firstInfo,
+            system: [],
+            small: true,
+            tools: {},
+            model,
+            sessionID: input.session.id,
+            retries: 2,
+            messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
+          })
+          .pipe(
+            Stream.filter(LLMEvent.is.textDelta),
+            Stream.map((e) => e.text),
+            Stream.mkString,
+          )
+      })
+
+      // The small model can be unavailable even when chat works (e.g. the hosted
+      // gateway's paid nano model on a free account). Fall back to the model the
+      // conversation itself is using so sessions still get named.
+      const sameModel = mdl.providerID === input.providerID && mdl.id === input.modelID
+      const text = yield* generate(mdl).pipe(
+        Effect.catchCause((cause) => {
+          if (sameModel) return Effect.failCause(cause)
+          return elog
+            .info("title model failed, falling back to conversation model", {
+              title: `${mdl.providerID}/${mdl.id}`,
+              fallback: `${input.providerID}/${input.modelID}`,
+            })
+            .pipe(Effect.andThen(provider.getModel(input.providerID, input.modelID)), Effect.flatMap(generate))
+        }),
+        Effect.orDie,
+      )
       const cleaned = text
         .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
         .split("\n")
