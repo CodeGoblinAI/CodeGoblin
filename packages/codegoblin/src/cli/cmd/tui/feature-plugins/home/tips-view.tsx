@@ -220,7 +220,7 @@ const TIPS: Tip[] = [
     if (!items.length) return undefined
     return `Use ${items.map(shortcutText).join(" / ")} to move between parent and child sessions`
   },
-  "Create {highlight}codegoblin.jsonc{/highlight} for server settings and {highlight}tui.json{/highlight} for TUI settings (legacy {highlight}opencode.json{/highlight} still loads)",
+  "Create {highlight}codegoblin.jsonc{/highlight} for server settings and {highlight}tui.json{/highlight} for TUI settings",
   "Place TUI settings in the CodeGoblin config directory's {highlight}tui.json{/highlight}",
   "Add {highlight}$schema{/highlight} to your config for autocomplete in your editor",
   "Configure {highlight}model{/highlight} in config to set your default model",
