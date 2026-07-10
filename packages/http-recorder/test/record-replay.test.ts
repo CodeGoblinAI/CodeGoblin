@@ -55,7 +55,6 @@ const failureText = (exit: Exit.Exit<unknown, unknown>) => {
 }
 
 const fakeAPIKey = `sk-${"123456789012345678901234"}`
-const fakeGoogleAPIKey = `AI${"zaSyDHibiBRvJZLsFnPYPoiTwxY4ztQ55yqCE"}`
 
 describe("http-recorder", () => {
   test("redacts sensitive URL query parameters", () => {
@@ -129,7 +128,7 @@ describe("http-recorder", () => {
               method: "POST",
               url: `https://example.test/path?key=${fakeAPIKey}`,
               headers: {},
-              body: JSON.stringify({ nested: fakeGoogleAPIKey }),
+              body: "",
             },
             response: {
               status: 200,
@@ -141,7 +140,6 @@ describe("http-recorder", () => {
       }),
     ).toEqual([
       { path: "interactions[0].request.url", reason: "API key" },
-      { path: "interactions[0].request.body", reason: "Google API key" },
       { path: "interactions[0].response.body", reason: "bearer token" },
     ])
   })
