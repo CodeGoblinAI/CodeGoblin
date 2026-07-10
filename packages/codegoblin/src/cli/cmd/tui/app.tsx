@@ -21,11 +21,7 @@ import {
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { Flag } from "@codegoblin/core/flag/flag"
 import semver from "semver"
-import {
-  markUpdateAvailable,
-  performInstallationUpdate,
-  SKIPPED_VERSION_KV_KEY,
-} from "@tui/util/installation-update"
+import { markUpdateAvailable, performInstallationUpdate, SKIPPED_VERSION_KV_KEY } from "@tui/util/installation-update"
 import { DialogProvider, useDialog } from "@tui/ui/dialog"
 import { DialogProvider as DialogProviderList } from "@tui/component/dialog-provider"
 import { ErrorComponent } from "@tui/component/error-component"
@@ -485,7 +481,9 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         slashName: "update",
         slashAliases: ["upgrade", "version"],
         run: async () => {
-          toast.show({ variant: "info", message: "Checking for updates...", duration: 4000 })
+          // Stays visible for the whole worst-case check (method detection is
+          // capped at 10s server-side) so the command never looks stalled.
+          toast.show({ variant: "info", message: "Checking for updates...", duration: 15000 })
           try {
             const response = await sdk.fetch(`${sdk.url}/codegoblin/update-check`)
             const data = (await response.json()) as {
@@ -1060,7 +1058,9 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         evt.preventDefault()
         evt.stopPropagation()
       }}
-      onMouseUp={Flag.CODEGOBLIN_EXPERIMENTAL_DISABLE_COPY_ON_SELECT ? undefined : () => Selection.copy(renderer, toast)}
+      onMouseUp={
+        Flag.CODEGOBLIN_EXPERIMENTAL_DISABLE_COPY_ON_SELECT ? undefined : () => Selection.copy(renderer, toast)
+      }
     >
       <Show when={Flag.CODEGOBLIN_SHOW_TTFD}>
         <TimeToFirstDraw />
