@@ -1,20 +1,38 @@
-# CodeGoblin
+<h1 align="center">CodeGoblin</h1>
 
-Your local AI goblin for code, images, and agents.
-
-CodeGoblin is a local-first AI coding agent with a terminal UI, web UI, and BYOK provider support. It keeps prompts, sessions, and generated assets on your machine by default, and adds goblin-branded workflows for image generation, local asset output, and simpler installation.
+<p align="center"><b>Your local AI goblin for code, images, and agents.</b></p>
 
 <p align="center">
-  <img src=".github/assets/home.png" alt="CodeGoblin web UI — home screen with project hoard and recent chats" width="900" />
+  <a href="https://www.npmjs.com/package/@codegoblin-io/codegoblin"><img src="https://img.shields.io/npm/v/%40codegoblin-io%2Fcodegoblin?label=npm&color=9adb35" alt="npm version" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-9adb35" alt="MIT license" /></a>
+  <img src="https://img.shields.io/badge/platforms-win%20%7C%20mac%20%7C%20linux-2d2d2d" alt="Windows, macOS, and Linux" />
 </p>
 
-## A quick look
+<p align="center">
+  <img src=".github/assets/tui.png" alt="The CodeGoblin terminal UI — wordmark, rotating tip, and prompt" width="880" />
+</p>
+
+<p align="center">
+  <code>npm install -g @codegoblin-io/codegoblin</code> &nbsp;→&nbsp; <code>cg</code>
+</p>
+
+CodeGoblin is a **local-first AI coding agent** that lives in your terminal and your browser. Bring your own keys — or sign in with your ChatGPT, Claude, or SuperGrok account — and your prompts, sessions, and generated assets stay on your machine.
+
+- 🧑‍💻 **One agent, two faces** — the terminal UI (`cg`) and web UI (`codegoblin web`) share the same sessions: start a chat in one, continue it in the other.
+- 🔑 **Your accounts, not just API keys** — subscription sign-in for ChatGPT Pro/Plus, Claude Pro/Max, and SuperGrok, alongside classic BYOK for 150+ providers.
+- 🏠 **Local models too** — run GGUF models on your own GPU/CPU with the built-in local runtime.
+- 🎨 **More than code** — image, audio, and 3D generation with outputs saved inside your project.
+- 🤖 **Autonomy with a leash** — `/goal` runs until the job is done, with a configurable checkpoint that asks before running away.
+
+## The web UI
+
+<p align="center">
+  <img src=".github/assets/home.png" alt="CodeGoblin web UI — home screen with project hoard and recent chats" width="880" />
+</p>
 
 | Chat | Settings |
 | --- | --- |
 | ![A chat session rendering a streamed markdown response](.github/assets/chat.png) | ![Settings with provider, model, and autonomy options](.github/assets/settings.png) |
-
-The same sessions are available from the terminal UI (`codegoblin`) and the web UI (`codegoblin web`) — start a chat in one and continue it in the other.
 
 ## Status
 
