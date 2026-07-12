@@ -1404,7 +1404,7 @@ export function MessageTimeline(props: {
               <Show when={sessionID()} keyed>
                 {(id) => (
                   <div class="shrink-0 flex items-center gap-3">
-                    <SessionContextUsage placement="bottom" />
+                    <SessionContextUsage placement="bottom" showCost />
                     <Show when={newDesign}>
                       <Tooltip
                         placement="bottom"
