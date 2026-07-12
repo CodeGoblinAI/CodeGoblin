@@ -13,6 +13,8 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
 
 interface SessionContextUsageProps {
+  /** Show the running session cost as a visible label next to the indicator. */
+  showCost?: boolean
   variant?: "button" | "indicator"
   placement?: TooltipProps["placement"]
 }
@@ -103,22 +105,34 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
 
   return (
     <Show when={params.id}>
-      <Tooltip value={tooltipValue()} placement={props.placement ?? "top"}>
-        <Switch>
-          <Match when={variant() === "indicator"}>{circle()}</Match>
-          <Match when={true}>
-            <Button
-              type="button"
-              variant="ghost"
-              class="size-6"
-              onClick={openContext}
-              aria-label={language.t("context.usage.view")}
-            >
-              {circle()}
-            </Button>
-          </Match>
-        </Switch>
-      </Tooltip>
+      <div class="flex items-center gap-1.5">
+        <Show when={props.showCost && metrics().totalCost > 0}>
+          <button
+            type="button"
+            onClick={openContext}
+            class="text-12-regular tabular-nums text-text-weak hover:text-text-base transition-colors"
+            aria-label={language.t("context.usage.cost")}
+          >
+            {cost()}
+          </button>
+        </Show>
+        <Tooltip value={tooltipValue()} placement={props.placement ?? "top"}>
+          <Switch>
+            <Match when={variant() === "indicator"}>{circle()}</Match>
+            <Match when={true}>
+              <Button
+                type="button"
+                variant="ghost"
+                class="size-6"
+                onClick={openContext}
+                aria-label={language.t("context.usage.view")}
+              >
+                {circle()}
+              </Button>
+            </Match>
+          </Switch>
+        </Tooltip>
+      </div>
     </Show>
   )
 }
