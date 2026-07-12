@@ -101,21 +101,23 @@ jobs:
           find artifacts -mindepth 1 -maxdepth 2 -type d -name 'codegoblin-*' -exec cp -R {} packages/codegoblin/dist/ \;
           ls -la packages/codegoblin/dist/
 
+      # Trusted Publishing exchanges the workflow's OIDC token for a short-lived
+      # npm credential — no NPM_TOKEN secret. It requires npm >= 11.5.1, newer
+      # than what ships with Node 24, so upgrade the bundled npm first.
+      - name: Upgrade npm for Trusted Publishing (OIDC)
+        if: inputs.dry_run != true
+        shell: bash
+        run: npm install -g npm@latest
+
       - name: Pack or publish CodeGoblin npm packages
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
           OPENCODE_VERSION: ${{ inputs.version }}
           OPENCODE_CHANNEL: latest
           CODEGOBLIN_NPM_SCOPE: ${{ vars.CODEGOBLIN_NPM_SCOPE }}
           CODEGOBLIN_PUBLISH_DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
         run: |
-          if [ "${{ inputs.dry_run }}" != "true" ] && [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN is required for a real publish."
-            exit 1
-          fi
-
           if [ "${{ inputs.dry_run }}" != "true" ] && [ -z "${{ inputs.version }}" ]; then
             echo "A version input is required for a real publish."
             exit 1
