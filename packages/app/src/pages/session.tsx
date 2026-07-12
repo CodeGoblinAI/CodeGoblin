@@ -271,7 +271,11 @@ export default function Page() {
   const desktopSidePanelOpen = createMemo(() => desktopReviewOpen() || desktopFileTreeOpen())
   const sessionPanelWidth = createMemo(() => {
     if (!desktopSidePanelOpen()) return "100%"
-    if (desktopReviewOpen()) return `${layout.session.width()}px`
+    // The chat column is the resizable one; the review/activity panel takes the
+    // remainder. Keep the chat at >= 55% of the width so that panel never eats
+    // more than ~45% of the screen (it used to balloon past half on wide
+    // monitors). Dragging the handle can still widen the chat further.
+    if (desktopReviewOpen()) return `max(${layout.session.width()}px, 55%)`
     return `calc(100% - ${layout.fileTree.width()}px)`
   })
   const centered = createMemo(() => isDesktop() && !desktopReviewOpen())
@@ -1817,7 +1821,7 @@ export default function Page() {
                 direction="horizontal"
                 size={layout.session.width()}
                 min={450}
-                max={typeof window === "undefined" ? 1000 : window.innerWidth * 0.45}
+                max={typeof window === "undefined" ? 1000 : window.innerWidth * 0.8}
                 onResize={(width) => {
                   size.touch()
                   layout.session.resize(width)
