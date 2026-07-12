@@ -15,6 +15,26 @@ type KVLike = {
 type SDK = ReturnType<typeof useSDK>
 type Toast = ReturnType<typeof useToast>
 
+// The SDK surfaces upgrade failures as a structured error object, so a bare
+// String(error) rendered "[object Object]" and hid the real cause (e.g. on
+// Windows, npm can't overwrite the running codegoblin.exe). Pull out a readable
+// message from the shapes the client actually returns.
+export function updateErrorMessage(error: unknown): string | undefined {
+  if (!error) return undefined
+  if (typeof error === "string") return error
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "object") {
+    const e = error as Record<string, any>
+    const nested = e.data?.message ?? e.data?.stderr ?? e.message ?? e.stderr
+    if (typeof nested === "string" && nested.trim()) return nested.trim()
+    try {
+      const json = JSON.stringify(error)
+      if (json && json !== "{}") return json
+    } catch {}
+  }
+  return undefined
+}
+
 export function markUpdateAvailable(kv: KVLike, version: string) {
   kv.set(UPDATE_AVAILABLE_KV_KEY, version)
 }
@@ -63,8 +83,8 @@ export async function performInstallationUpdate(input: {
     toast.show({
       variant: "error",
       title: "Update Failed",
-      message: result.error ? String(result.error) : "Update failed",
-      duration: 10000,
+      message: updateErrorMessage(result.error) ?? "Update failed. Try `cg update` from a terminal.",
+      duration: 12000,
     })
     return
   }
