@@ -18,8 +18,27 @@ import { SessionProcessor } from "./processor"
 import { PartID } from "./schema"
 import * as Log from "@codegoblin/core/util/log"
 import { EffectBridge } from "@/effect/bridge"
+import { loadedToolNames, rankTools } from "./context-policy"
+import type { JSONSchema7 } from "@ai-sdk/provider"
 
 const log = Log.create({ service: "session.tools" })
+const SEARCH_TOOL = "mcp_tool_search"
+const SEARCH_SCHEMA: JSONSchema7 = {
+  type: "object",
+  properties: {
+    query: {
+      type: "string",
+      description: "Describe the external MCP capability needed for the current task in a short phrase",
+    },
+    tools: {
+      type: "array",
+      items: { type: "string" },
+      description: "Optional exact tool names from the compact capability catalog",
+    },
+  },
+  required: ["query"],
+  additionalProperties: false,
+}
 
 export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   agent: Agent.Info
@@ -38,6 +57,12 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const registry = yield* ToolRegistry.Service
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
+  const catalog: Array<{
+    name: string
+    description: string
+    source: "builtin" | "mcp"
+    definitionChars: number
+  }> = []
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
@@ -78,6 +103,12 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     agent: input.agent,
   })) {
     const schema = ProviderTransform.schema(input.model, ToolJsonSchema.fromTool(item))
+    catalog.push({
+      name: item.id,
+      description: item.description,
+      source: "builtin",
+      definitionChars: JSON.stringify({ name: item.id, description: item.description, schema }).length,
+    })
     tools[item.id] = tool({
       description: item.description,
       inputSchema: jsonSchema(schema),
@@ -121,6 +152,12 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
 
     const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
     const transformed = ProviderTransform.schema(input.model, schema)
+    catalog.push({
+      name: key,
+      description: item.description ?? "External MCP capability",
+      source: "mcp",
+      definitionChars: JSON.stringify({ name: key, description: item.description, schema: transformed }).length,
+    })
     item.inputSchema = jsonSchema(transformed)
     item.execute = (args, opts) =>
       run.promise(
@@ -202,7 +239,50 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     tools[key] = item
   }
 
-  return tools
+  const loaded = loadedToolNames(input.messages, SEARCH_TOOL)
+  const disabled = Permission.disabled(
+    Object.keys(tools),
+    Permission.merge(input.agent.permission, input.session.permission ?? []),
+  )
+  const available = catalog.filter((entry) => tools[entry.name] && !disabled.has(entry.name))
+  const builtin = available.filter((entry) => entry.source === "builtin")
+  const external = available.filter((entry) => entry.source === "mcp")
+  const search = tool({
+    description:
+      "Search connected MCP servers and load only the external tools relevant to the current task. Built-in filesystem, shell, web, memory, skill, and agent tools are already available and do not require this search.",
+    inputSchema: jsonSchema(SEARCH_SCHEMA),
+    async execute(args: unknown) {
+      const input = args as { query: string; tools?: string[] }
+      const selected = rankTools(input.query, external, input.tools)
+      return {
+        title: `Loaded ${selected.length} capabilities`,
+        output: selected.length
+          ? [
+              "Loaded tools for the next model step:",
+              ...selected.map((entry) => `- ${entry.name}: ${entry.description.slice(0, 240)}`),
+            ].join("\n")
+          : "No matching tools were found. Refine the capability query or answer without tools.",
+        metadata: { tools: selected.map((entry) => entry.name) },
+      }
+    },
+  })
+
+  const filtered: Record<string, AITool> = {
+    ...Object.fromEntries(builtin.map((entry) => [entry.name, tools[entry.name]])),
+    ...(external.length ? { [SEARCH_TOOL]: search } : {}),
+    ...Object.fromEntries(
+      [...loaded].flatMap((name) => (external.some((entry) => entry.name === name) ? [[name, tools[name]]] : [])),
+    ),
+  }
+  return {
+    tools: filtered,
+    available: available.length,
+    loaded: external.filter((entry) => loaded.has(entry.name)).length,
+    schemaChars:
+      builtin.reduce((total, entry) => total + entry.definitionChars, 0) +
+      (external.length ? JSON.stringify({ name: SEARCH_TOOL, schema: SEARCH_SCHEMA }).length : 0) +
+      external.filter((entry) => loaded.has(entry.name)).reduce((total, entry) => total + entry.definitionChars, 0),
+  }
 })
 
 export * as SessionTools from "./tools"

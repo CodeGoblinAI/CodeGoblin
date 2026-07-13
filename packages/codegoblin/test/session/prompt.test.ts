@@ -550,6 +550,89 @@ it.instance("static loop returns assistant text through local provider", () =>
   }),
 )
 
+it.instance("cloud greeting preserves the normal agent and core tools", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const session = yield* sessions.create({
+      title: "Lean greeting",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* prompt.prompt({
+      sessionID: session.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "hi" }],
+    })
+    yield* llm.text("hello")
+    yield* prompt.loop({ sessionID: session.id })
+
+    const [request] = yield* llm.inputs
+    const names = ((request.tools ?? []) as Array<{ function?: { name?: string } }>).flatMap((item) =>
+      item.function?.name ? [item.function.name] : [],
+    )
+    expect(names).toEqual(expect.arrayContaining(["read", "bash", "skill", "memory"]))
+    expect(names).not.toContain("capability_search")
+    expect(JSON.stringify(request.messages)).not.toContain("Reply to the greeting")
+  }),
+)
+
+it.instance("ordinary cloud chat preserves the normal agent and core tools", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const session = yield* sessions.create({
+      title: "Direct chat",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* prompt.prompt({
+      sessionID: session.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "just testing everything works" }],
+    })
+    yield* llm.text("Everything works.")
+    yield* prompt.loop({ sessionID: session.id })
+
+    const [request] = yield* llm.inputs
+    const names = ((request.tools ?? []) as Array<{ function?: { name?: string } }>).flatMap((item) =>
+      item.function?.name ? [item.function.name] : [],
+    )
+    expect(names).toEqual(expect.arrayContaining(["read", "bash", "skill", "memory"]))
+    expect(names).not.toContain("capability_search")
+  }),
+)
+
+it.instance("actionable requests can use core tools without a routing round trip", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const session = yield* sessions.create({
+      title: "Deferred tools",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* prompt.prompt({
+      sessionID: session.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "inspect the contents of package.json" }],
+    })
+    yield* llm.text("done")
+    yield* prompt.loop({ sessionID: session.id })
+
+    const [request] = yield* llm.inputs
+    const names = (request: Record<string, unknown>) =>
+      ((request.tools ?? []) as Array<{ function?: { name?: string } }>).flatMap((item) =>
+        item.function?.name ? [item.function.name] : [],
+      )
+    expect(names(request)).toEqual(expect.arrayContaining(["read", "bash"]))
+    expect(request.tool_choice).toBe("auto")
+  }),
+)
+
 it.instance("static loop consumes queued replies across turns", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)
@@ -782,7 +865,7 @@ it.instance(
         subagent_type: "general",
       })
       yield* llm.hang
-      yield* user(chat.id, "hello")
+      yield* user(chat.id, "delegate work to inspect the cache key path")
 
       const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
 
