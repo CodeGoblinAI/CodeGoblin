@@ -395,6 +395,21 @@ export function Prompt(props: PromptProps) {
     return Math.max(session?.cost ?? 0, messageCost)
   })
 
+  // Cost of the current turn: everything the assistant spent since the last user message.
+  // Surfaced on demand by hovering the "spent" readout in the footer (no layout reflow —
+  // it only appends text on the same line).
+  const lastPromptCost = createMemo(() => {
+    if (!props.sessionID) return 0
+    const list = sync.data.message[props.sessionID] ?? []
+    const lastUser = list.findLast((item) => item.role === "user")
+    if (!lastUser) return 0
+    return list.reduce(
+      (total, item) => (item.role === "assistant" && item.id > lastUser.id ? total + (item.cost ?? 0) : total),
+      0,
+    )
+  })
+  const [spentHover, setSpentHover] = createSignal(false)
+
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const session = sync.session.get(props.sessionID)
@@ -2333,9 +2348,34 @@ export function Prompt(props: PromptProps) {
                 <Match when={store.mode === "normal"}>
                   <Switch>
                     <Match when={usage() || tokenHoard()}>
-                      <text fg={theme.textMuted} wrapMode="none">
-                        {[usage()?.context, usage()?.cost, tokenHoard()].filter(Boolean).join(" · ")}
-                      </text>
+                      <box flexDirection="row" gap={1}>
+                        <Show when={usage()?.context}>
+                          <text fg={theme.textMuted} wrapMode="none">
+                            {usage()!.context}
+                          </text>
+                        </Show>
+                        <Show when={usage()?.cost}>
+                          <Show when={usage()?.context}>
+                            <text fg={theme.textMuted}>·</text>
+                          </Show>
+                          {/* Hover the spend readout to reveal this turn's cost — appends on the
+                              same line so nothing shifts. */}
+                          <box onMouseOver={() => setSpentHover(true)} onMouseOut={() => setSpentHover(false)}>
+                            <text fg={theme.textMuted} wrapMode="none">
+                              {usage()!.cost}
+                              <Show when={spentHover() && lastPromptCost() > 0}>
+                                <span style={{ fg: theme.textMuted }}> (last {money.format(lastPromptCost())})</span>
+                              </Show>
+                            </text>
+                          </box>
+                        </Show>
+                        <Show when={tokenHoard()}>
+                          <text fg={theme.textMuted}>·</text>
+                          <text fg={theme.textMuted} wrapMode="none">
+                            {tokenHoard()}
+                          </text>
+                        </Show>
+                      </box>
                     </Match>
                     <Match when={true}>
                       <text fg={theme.text}>
@@ -2368,7 +2408,8 @@ export function Prompt(props: PromptProps) {
                   <Show when={store.mode === "normal"}>
                     <box flexDirection="row" gap={1}>
                       <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
-                      {/* Click-through to the existing model selector (keyboard path: /models). */}
+                      {/* Click-through to the existing model selector (keyboard path: /models).
+                          The ▾ caret signals the readout is clickable. */}
                       <box
                         flexDirection="row"
                         gap={1}
@@ -2378,7 +2419,10 @@ export function Prompt(props: PromptProps) {
                         <text flexShrink={0} fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}>
                           {local.model.parsed().model}
                         </text>
-                        <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
+                        <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>
+                          {currentProviderLabel()}
+                          <span style={{ fg: fadeColor(theme.primary, modelMetaAlpha()) }}> ▾</span>
+                        </text>
                       </box>
                       <Show when={showVariant()}>
                         <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>

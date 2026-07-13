@@ -1282,7 +1282,6 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
       0,
     )
   })
-  const [spendDetail, setSpendDetail] = createSignal(false)
 
   return (
     <Show when={session()}>
@@ -1368,24 +1367,18 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
           </box>
         </Show>
 
-        {/* Context + spend pinned to the bottom-left; hover for last-prompt detail. */}
-        <box
-          flexShrink={0}
-          paddingTop={1}
-          onMouseOver={() => setSpendDetail(true)}
-          onMouseOut={() => setSpendDetail(false)}
-        >
+        {/* Context + spend pinned to the bottom-left. Stable three-line block (no
+            hover reflow) — the hover-to-reveal detail lives on the chat composer. */}
+        <box flexShrink={0} paddingTop={1}>
           <text fg={theme.textMuted} wrapMode="none">
             {companionUsage().contextText}
           </text>
           <text fg={theme.textMuted} wrapMode="none">
+            {money.format(lastPromptCost())} last prompt
+          </text>
+          <text fg={theme.textMuted} wrapMode="none">
             {money.format(companionUsage().sessionCost)} spent total
           </text>
-          <Show when={spendDetail()}>
-            <text fg={theme.textMuted} wrapMode="none">
-              {money.format(lastPromptCost())} last prompt
-            </text>
-          </Show>
         </box>
         <box flexShrink={0} gap={1} paddingTop={1}>
           <TuiPluginRuntime.Slot name="sidebar_footer" mode="single_winner" session_id={props.sessionID}>
