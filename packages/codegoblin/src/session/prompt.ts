@@ -1442,7 +1442,7 @@ export const layer = Layer.effect(
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
             const promptOps = yield* ops()
 
-            const tools = yield* SessionTools.resolve({
+            const resolved = yield* SessionTools.resolve({
               agent,
               session,
               model,
@@ -1457,6 +1457,7 @@ export const layer = Layer.effect(
               Effect.provideService(MCP.Service, mcp),
               Effect.provideService(Truncate.Service, truncate),
             )
+            const tools = resolved.tools
 
             // Small local GGUF models (served by `codegoblin runtime`) have a trained context too
             // small to fit the full tool/MCP schema set (~38k tokens). Strip tools so they run as a
@@ -1533,6 +1534,19 @@ export const layer = Layer.effect(
               : [...env, ...instructions, ...(skills ? [skills] : []), ...(memory ? [memory] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+            log.info("context policy", {
+              sessionID,
+              mode: isLocalRuntimeModel(model) ? "local-chat" : "agent",
+              systemChars:
+                system.reduce((total, item) => total + item.length, 0) +
+                (agent.prompt ?? SystemPrompt.provider(model).join("\n")).length,
+              conversationChars: JSON.stringify(modelMsgs).length,
+              toolSchemaChars: resolved.schemaChars,
+              toolsAvailable: resolved.available,
+              toolsLoaded: Object.keys(tools).length,
+              memory: Boolean(memory),
+              instructions: instructions.length,
+            })
             const result = yield* handle.process({
               user: lastUser,
               agent,
