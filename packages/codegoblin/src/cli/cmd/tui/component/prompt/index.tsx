@@ -30,7 +30,7 @@ import { fileURLToPath } from "url"
 import { Filesystem } from "@/util/filesystem"
 import { useLocal } from "@tui/context/local"
 import { tint, useTheme } from "@tui/context/theme"
-import { EmptyBorder, SplitBorder } from "@tui/component/border"
+import { EmptyBorder } from "@tui/component/border"
 import { Spinner } from "@tui/component/spinner"
 import { useSDK } from "@tui/context/sdk"
 import { useRoute } from "@tui/context/route"
@@ -2053,8 +2053,8 @@ export function Prompt(props: PromptProps) {
       const example = shell()[store.placeholder % shell().length]
       return `Run a command... "${example}"`
     }
-    if (!list().length) return undefined
-    return `Ask the goblin... "${list()[store.placeholder % list().length]}"`
+    // Calm, static placeholder (no rotating examples) — it clears as soon as you type.
+    return "Ask the goblin anything…"
   })
 
   // Pasted blocks live in the textarea as collapsed "[Pasted ~N lines]"
@@ -2176,24 +2176,17 @@ export function Prompt(props: PromptProps) {
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false}>
+        {/* Thin rules above and below the editor instead of a filled block; the rule
+            color carries the agent tint (and dims while the leader key is pending). */}
         <box
-          border={["left"]}
+          border={["top", "bottom"]}
           borderColor={borderHighlight()}
           customBorderChars={{
-            ...SplitBorder.customBorderChars,
-            bottomLeft: "╹",
+            ...EmptyBorder,
+            horizontal: "─",
           }}
         >
-          <box
-            paddingLeft={1}
-            paddingRight={2}
-            paddingTop={1}
-            paddingBottom={1}
-            justifyContent="center"
-            flexShrink={0}
-            backgroundColor={theme.backgroundElement}
-            flexGrow={1}
-          >
+          <box paddingLeft={1} paddingRight={2} flexShrink={0} flexGrow={1}>
             <box flexDirection="row" alignItems="flex-start">
               <box onMouseUp={() => openAttachMenu()} flexShrink={0} paddingRight={1}>
                 <text fg={props.disabled ? theme.textMuted : theme.primary}>+</text>
@@ -2267,39 +2260,13 @@ export function Prompt(props: PromptProps) {
                     }, 0)
                   }}
                   onMouseDown={(r: MouseEvent) => r.target?.focus()}
-                  focusedBackgroundColor={theme.backgroundElement}
+                  focusedBackgroundColor={theme.backgroundPanel}
                   cursorColor={props.disabled ? theme.backgroundElement : theme.text}
                   syntaxStyle={syntax()}
                 />
               </box>
             </box>
           </box>
-        </box>
-        <box
-          height={1}
-          border={["left"]}
-          borderColor={borderHighlight()}
-          customBorderChars={{
-            ...EmptyBorder,
-            vertical: theme.backgroundElement.a !== 0 ? "╹" : " ",
-          }}
-        >
-          <box
-            height={1}
-            border={["bottom"]}
-            borderColor={theme.backgroundElement}
-            customBorderChars={
-              theme.backgroundElement.a !== 0
-                ? {
-                    ...EmptyBorder,
-                    horizontal: "▀",
-                  }
-                : {
-                    ...EmptyBorder,
-                    horizontal: " ",
-                  }
-            }
-          />
         </box>
         {/* Pasted blocks: click a row to expand the paste into an editable
             textarea (edits write back to the part that gets submitted), click
@@ -2393,23 +2360,35 @@ export function Prompt(props: PromptProps) {
             <Show when={status().type === "idle" && local.agent.current()}>
               {(agent) => (
                 <box flexDirection="row" gap={1}>
-                  <text fg={fadeColor(highlight(), agentMetaAlpha())}>
-                    {store.mode === "shell" ? "Shell" : displayAgentName(agent().name)}
-                  </text>
+                  <box onMouseUp={() => keymap.dispatchCommand("agent.list")}>
+                    <text fg={fadeColor(highlight(), agentMetaAlpha())}>
+                      {store.mode === "shell" ? "Shell" : displayAgentName(agent().name)}
+                    </text>
+                  </box>
                   <Show when={store.mode === "normal"}>
                     <box flexDirection="row" gap={1}>
                       <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
-                      <text flexShrink={0} fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}>
-                        {local.model.parsed().model}
-                      </text>
-                      <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
+                      {/* Click-through to the existing model selector (keyboard path: /models). */}
+                      <box
+                        flexDirection="row"
+                        gap={1}
+                        flexShrink={0}
+                        onMouseUp={() => keymap.dispatchCommand("model.list")}
+                      >
+                        <text flexShrink={0} fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}>
+                          {local.model.parsed().model}
+                        </text>
+                        <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
+                      </box>
                       <Show when={showVariant()}>
                         <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
-                        <text>
-                          <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
-                            {local.model.variant.current()}
-                          </span>
-                        </text>
+                        <box onMouseUp={() => keymap.dispatchCommand("variant.cycle")}>
+                          <text>
+                            <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
+                              {local.model.variant.current()}
+                            </span>
+                          </text>
+                        </box>
                       </Show>
                     </box>
                   </Show>

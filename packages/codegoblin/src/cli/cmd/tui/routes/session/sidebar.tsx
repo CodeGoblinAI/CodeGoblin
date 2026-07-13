@@ -1271,11 +1271,23 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     return project.workspace.get(workspaceID)
   }
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
+  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
+  // Cost of the current turn: everything the assistant spent since the last user message.
+  const lastPromptCost = createMemo(() => {
+    const list = messages()
+    const lastUser = list.findLast((item) => item.role === "user")
+    if (!lastUser) return 0
+    return list.reduce(
+      (total, item) => (item.role === "assistant" && item.id > lastUser.id ? total + (item.cost ?? 0) : total),
+      0,
+    )
+  })
+  const [spendDetail, setSpendDetail] = createSignal(false)
 
   return (
     <Show when={session()}>
       <box
-        backgroundColor={theme.backgroundPanel}
+        backgroundColor={props.overlay ? theme.backgroundPanel : theme.background}
         width={SESSION_SIDEBAR_WIDTH}
         height="100%"
         paddingTop={1}
@@ -1284,13 +1296,20 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
         paddingRight={2}
         position={props.overlay ? "absolute" : "relative"}
       >
+        <box flexShrink={0} flexDirection="row" justifyContent="flex-end" paddingBottom={1}>
+          <text wrapMode="none">
+            <span style={{ fg: theme.primary }}>◤◢ </span>
+            <span style={{ fg: theme.text, bold: true }}>Code</span>
+            <span style={{ fg: theme.primary, bold: true }}>Goblin</span>
+          </text>
+        </box>
         <scrollbox
           flexGrow={1}
           scrollAcceleration={scrollAcceleration()}
           verticalScrollbarOptions={{
             trackOptions: {
               backgroundColor: theme.background,
-              foregroundColor: theme.borderActive,
+              foregroundColor: theme.borderSubtle,
             },
           }}
         >
@@ -1349,6 +1368,25 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
           </box>
         </Show>
 
+        {/* Context + spend pinned to the bottom-left; hover for last-prompt detail. */}
+        <box
+          flexShrink={0}
+          paddingTop={1}
+          onMouseOver={() => setSpendDetail(true)}
+          onMouseOut={() => setSpendDetail(false)}
+        >
+          <text fg={theme.textMuted} wrapMode="none">
+            {companionUsage().contextText}
+          </text>
+          <text fg={theme.textMuted} wrapMode="none">
+            {money.format(companionUsage().sessionCost)} spent total
+          </text>
+          <Show when={spendDetail()}>
+            <text fg={theme.textMuted} wrapMode="none">
+              {money.format(lastPromptCost())} last prompt
+            </text>
+          </Show>
+        </box>
         <box flexShrink={0} gap={1} paddingTop={1}>
           <TuiPluginRuntime.Slot name="sidebar_footer" mode="single_winner" session_id={props.sessionID}>
             <text fg={theme.textMuted}>

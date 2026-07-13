@@ -14,8 +14,9 @@ import { RGBA } from "@opentui/core"
 import { HEADER_FONTS, SMALL_WORDMARK } from "./home-wordmarks"
 
 function TuiGoblinHeader(props: { theme: any }) {
-  const skinColor = RGBA.fromInts(154, 219, 53)
-  const goldColor = RGBA.fromInts(245, 200, 75)
+  // Wordmark follows the active theme instead of hardcoded brand colors.
+  const skinColor = props.theme.primary
+  const ruleColor = props.theme.borderSubtle
   const dimensions = useTerminalDimensions()
 
   // Pad a block of figlet lines to equal width so they centre cleanly as one unit.
@@ -37,7 +38,7 @@ function TuiGoblinHeader(props: { theme: any }) {
     const rule = "─".repeat(wordmark[0].length)
     return [
       ...wordmark.map((line) => <text fg={skinColor}>{line}</text>),
-      <text fg={goldColor}>{rule}</text>,
+      <text fg={ruleColor}>{rule}</text>,
     ]
   })
 

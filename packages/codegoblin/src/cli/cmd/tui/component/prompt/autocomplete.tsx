@@ -11,7 +11,7 @@ import { useSDK } from "@tui/context/sdk"
 import { useSync } from "@tui/context/sync"
 import { getScrollAcceleration } from "../../util/scroll"
 import { useTuiConfig } from "../../context/tui-config"
-import { useTheme, selectedForeground } from "@tui/context/theme"
+import { useTheme } from "@tui/context/theme"
 import { SplitBorder } from "@tui/component/border"
 import { useTerminalDimensions } from "@opentui/solid"
 import { Locale } from "@/util/locale"
@@ -834,13 +834,21 @@ export function Autocomplete(props: {
       width={position().width}
       zIndex={100}
       {...SplitBorder}
-      borderColor={theme.border}
+      borderColor={theme.borderSubtle}
     >
       <scrollbox
         ref={(r: ScrollBoxRenderable) => (scroll = r)}
         backgroundColor={theme.backgroundMenu}
         height={height()}
         scrollbarOptions={{ visible: false }}
+        verticalScrollbarOptions={{
+          // Visible scrollbar doubles as the "more items" indicator on long lists.
+          visible: options().length > height(),
+          trackOptions: {
+            backgroundColor: theme.backgroundMenu,
+            foregroundColor: theme.borderSubtle,
+          },
+        }}
         scrollAcceleration={scrollAcceleration()}
       >
         <Index
@@ -855,7 +863,7 @@ export function Autocomplete(props: {
             <box
               paddingLeft={1}
               paddingRight={1}
-              backgroundColor={index === store.selected ? theme.primary : undefined}
+              backgroundColor={index === store.selected ? theme.backgroundElement : undefined}
               flexDirection="row"
               onMouseMove={() => {
                 setStore("input", "mouse")
@@ -870,11 +878,11 @@ export function Autocomplete(props: {
               }}
               onMouseUp={() => select()}
             >
-              <text fg={index === store.selected ? selectedForeground(theme) : theme.text} flexShrink={0}>
+              <text fg={index === store.selected ? theme.primary : theme.text} flexShrink={0}>
                 {option().display}
               </text>
               <Show when={option().description}>
-                <text fg={index === store.selected ? selectedForeground(theme) : theme.textMuted} wrapMode="none">
+                <text fg={index === store.selected ? theme.text : theme.textMuted} wrapMode="none">
                   {option().description}
                 </text>
               </Show>
