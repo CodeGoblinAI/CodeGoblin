@@ -30,7 +30,7 @@ import { fileURLToPath } from "url"
 import { Filesystem } from "@/util/filesystem"
 import { useLocal } from "@tui/context/local"
 import { tint, useTheme } from "@tui/context/theme"
-import { EmptyBorder, SplitBorder } from "@tui/component/border"
+import { EmptyBorder } from "@tui/component/border"
 import { Spinner } from "@tui/component/spinner"
 import { useSDK } from "@tui/context/sdk"
 import { useRoute } from "@tui/context/route"
@@ -394,6 +394,21 @@ export function Prompt(props: PromptProps) {
     )
     return Math.max(session?.cost ?? 0, messageCost)
   })
+
+  // Cost of the current turn: everything the assistant spent since the last user message.
+  // Surfaced on demand by hovering the "spent" readout in the footer (no layout reflow —
+  // it only appends text on the same line).
+  const lastPromptCost = createMemo(() => {
+    if (!props.sessionID) return 0
+    const list = sync.data.message[props.sessionID] ?? []
+    const lastUser = list.findLast((item) => item.role === "user")
+    if (!lastUser) return 0
+    return list.reduce(
+      (total, item) => (item.role === "assistant" && item.id > lastUser.id ? total + (item.cost ?? 0) : total),
+      0,
+    )
+  })
+  const [spentHover, setSpentHover] = createSignal(false)
 
   const usage = createMemo(() => {
     if (!props.sessionID) return
@@ -2053,8 +2068,8 @@ export function Prompt(props: PromptProps) {
       const example = shell()[store.placeholder % shell().length]
       return `Run a command... "${example}"`
     }
-    if (!list().length) return undefined
-    return `Ask the goblin... "${list()[store.placeholder % list().length]}"`
+    // Calm, static placeholder (no rotating examples) — it clears as soon as you type.
+    return "Ask the goblin anything…"
   })
 
   // Pasted blocks live in the textarea as collapsed "[Pasted ~N lines]"
@@ -2176,24 +2191,17 @@ export function Prompt(props: PromptProps) {
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false}>
+        {/* Thin rules above and below the editor instead of a filled block; the rule
+            color carries the agent tint (and dims while the leader key is pending). */}
         <box
-          border={["left"]}
+          border={["top", "bottom"]}
           borderColor={borderHighlight()}
           customBorderChars={{
-            ...SplitBorder.customBorderChars,
-            bottomLeft: "╹",
+            ...EmptyBorder,
+            horizontal: "─",
           }}
         >
-          <box
-            paddingLeft={1}
-            paddingRight={2}
-            paddingTop={1}
-            paddingBottom={1}
-            justifyContent="center"
-            flexShrink={0}
-            backgroundColor={theme.backgroundElement}
-            flexGrow={1}
-          >
+          <box paddingLeft={1} paddingRight={2} flexShrink={0} flexGrow={1}>
             <box flexDirection="row" alignItems="flex-start">
               <box onMouseUp={() => openAttachMenu()} flexShrink={0} paddingRight={1}>
                 <text fg={props.disabled ? theme.textMuted : theme.primary}>+</text>
@@ -2267,39 +2275,13 @@ export function Prompt(props: PromptProps) {
                     }, 0)
                   }}
                   onMouseDown={(r: MouseEvent) => r.target?.focus()}
-                  focusedBackgroundColor={theme.backgroundElement}
+                  focusedBackgroundColor={theme.backgroundPanel}
                   cursorColor={props.disabled ? theme.backgroundElement : theme.text}
                   syntaxStyle={syntax()}
                 />
               </box>
             </box>
           </box>
-        </box>
-        <box
-          height={1}
-          border={["left"]}
-          borderColor={borderHighlight()}
-          customBorderChars={{
-            ...EmptyBorder,
-            vertical: theme.backgroundElement.a !== 0 ? "╹" : " ",
-          }}
-        >
-          <box
-            height={1}
-            border={["bottom"]}
-            borderColor={theme.backgroundElement}
-            customBorderChars={
-              theme.backgroundElement.a !== 0
-                ? {
-                    ...EmptyBorder,
-                    horizontal: "▀",
-                  }
-                : {
-                    ...EmptyBorder,
-                    horizontal: " ",
-                  }
-            }
-          />
         </box>
         {/* Pasted blocks: click a row to expand the paste into an editable
             textarea (edits write back to the part that gets submitted), click
@@ -2366,9 +2348,34 @@ export function Prompt(props: PromptProps) {
                 <Match when={store.mode === "normal"}>
                   <Switch>
                     <Match when={usage() || tokenHoard()}>
-                      <text fg={theme.textMuted} wrapMode="none">
-                        {[usage()?.context, usage()?.cost, tokenHoard()].filter(Boolean).join(" · ")}
-                      </text>
+                      <box flexDirection="row" gap={1}>
+                        <Show when={usage()?.context}>
+                          <text fg={theme.textMuted} wrapMode="none">
+                            {usage()!.context}
+                          </text>
+                        </Show>
+                        <Show when={usage()?.cost}>
+                          <Show when={usage()?.context}>
+                            <text fg={theme.textMuted}>·</text>
+                          </Show>
+                          {/* Hover the spend readout to reveal this turn's cost — appends on the
+                              same line so nothing shifts. */}
+                          <box onMouseOver={() => setSpentHover(true)} onMouseOut={() => setSpentHover(false)}>
+                            <text fg={theme.textMuted} wrapMode="none">
+                              {usage()!.cost}
+                              <Show when={spentHover() && lastPromptCost() > 0}>
+                                <span style={{ fg: theme.textMuted }}> (last {money.format(lastPromptCost())})</span>
+                              </Show>
+                            </text>
+                          </box>
+                        </Show>
+                        <Show when={tokenHoard()}>
+                          <text fg={theme.textMuted}>·</text>
+                          <text fg={theme.textMuted} wrapMode="none">
+                            {tokenHoard()}
+                          </text>
+                        </Show>
+                      </box>
                     </Match>
                     <Match when={true}>
                       <text fg={theme.text}>
@@ -2393,23 +2400,39 @@ export function Prompt(props: PromptProps) {
             <Show when={status().type === "idle" && local.agent.current()}>
               {(agent) => (
                 <box flexDirection="row" gap={1}>
-                  <text fg={fadeColor(highlight(), agentMetaAlpha())}>
-                    {store.mode === "shell" ? "Shell" : displayAgentName(agent().name)}
-                  </text>
+                  <box onMouseUp={() => keymap.dispatchCommand("agent.list")}>
+                    <text fg={fadeColor(highlight(), agentMetaAlpha())}>
+                      {store.mode === "shell" ? "Shell" : displayAgentName(agent().name)}
+                    </text>
+                  </box>
                   <Show when={store.mode === "normal"}>
                     <box flexDirection="row" gap={1}>
                       <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
-                      <text flexShrink={0} fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}>
-                        {local.model.parsed().model}
-                      </text>
-                      <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
+                      {/* Click-through to the existing model selector (keyboard path: /models).
+                          The ▾ caret signals the readout is clickable. */}
+                      <box
+                        flexDirection="row"
+                        gap={1}
+                        flexShrink={0}
+                        onMouseUp={() => keymap.dispatchCommand("model.list")}
+                      >
+                        <text flexShrink={0} fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}>
+                          {local.model.parsed().model}
+                        </text>
+                        <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>
+                          {currentProviderLabel()}
+                          <span style={{ fg: fadeColor(theme.primary, modelMetaAlpha()) }}> ▾</span>
+                        </text>
+                      </box>
                       <Show when={showVariant()}>
                         <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
-                        <text>
-                          <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
-                            {local.model.variant.current()}
-                          </span>
-                        </text>
+                        <box onMouseUp={() => keymap.dispatchCommand("variant.cycle")}>
+                          <text>
+                            <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
+                              {local.model.variant.current()}
+                            </span>
+                          </text>
+                        </box>
                       </Show>
                     </box>
                   </Show>

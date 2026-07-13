@@ -5,6 +5,8 @@ import { InstallationVersion } from "@codegoblin/core/installation/version"
 import { createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from "solid-js"
 import { Global } from "@codegoblin/core/global"
 import { markUpdateAvailable, UPDATE_AVAILABLE_KV_KEY } from "../../util/installation-update"
+import { useBindings } from "../../keymap"
+import { Tips } from "./tips-view"
 
 const id = "internal:home-footer"
 
@@ -80,21 +82,52 @@ function Version(props: { api: TuiPluginApi }) {
 }
 
 function View(props: { api: TuiPluginApi }) {
+  const hidden = createMemo(() => props.api.kv.get("tips_hidden", false))
+  const connected = createMemo(() =>
+    props.api.state.provider.some(
+      (item) => item.id !== "opencode" || Object.values(item.models).some((model) => model.cost?.input !== 0),
+    ),
+  )
+
+  useBindings(() => ({
+    commands: [
+      {
+        name: "tips.toggle",
+        title: hidden() ? "Show tips" : "Hide tips",
+        category: "System",
+        namespace: "palette",
+        run() {
+          props.api.kv.set("tips_hidden", !props.api.kv.get("tips_hidden", false))
+          props.api.ui.dialog.clear()
+        },
+      },
+    ],
+    bindings: props.api.tuiConfig.keybinds.get("tips.toggle"),
+  }))
+
   return (
-    <box
-      width="100%"
-      paddingTop={1}
-      paddingBottom={1}
-      paddingLeft={2}
-      paddingRight={2}
-      flexDirection="row"
-      flexShrink={0}
-      gap={2}
-    >
-      <Directory api={props.api} />
-      <Mcp api={props.api} />
-      <box flexGrow={1} />
-      <Version api={props.api} />
+    <box width="100%" flexShrink={0}>
+      {/* Rotating tip lives in the footer now (was a standalone section mid-screen). */}
+      <Show when={!hidden()}>
+        <box paddingLeft={2} paddingRight={2} paddingTop={1} flexShrink={0}>
+          <Tips api={props.api} connected={connected()} />
+        </box>
+      </Show>
+      <box
+        width="100%"
+        paddingTop={1}
+        paddingBottom={1}
+        paddingLeft={2}
+        paddingRight={2}
+        flexDirection="row"
+        flexShrink={0}
+        gap={2}
+      >
+        <Directory api={props.api} />
+        <Mcp api={props.api} />
+        <box flexGrow={1} />
+        <Version api={props.api} />
+      </box>
     </box>
   )
 }

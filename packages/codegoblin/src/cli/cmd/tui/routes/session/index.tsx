@@ -1411,7 +1411,7 @@ function UserMessage(props: {
           <box
             id={props.message.id}
             border={["right"]}
-            borderColor={theme.accent}
+            borderColor={theme.secondary}
             customBorderChars={SplitBorder.customBorderChars}
             maxWidth={80}
             flexShrink={1}
@@ -1424,11 +1424,9 @@ function UserMessage(props: {
                 setHover(false)
               }}
               onMouseUp={props.onMouseUp}
-              paddingTop={1}
-              paddingBottom={1}
               paddingLeft={2}
               paddingRight={2}
-              backgroundColor={hover() ? RGBA.fromInts(24, 44, 26) : RGBA.fromInts(15, 28, 17)}
+              backgroundColor={hover() ? theme.backgroundPanel : undefined}
               flexShrink={0}
             >
               <text fg={theme.text}>{text()}</text>
@@ -1539,6 +1537,12 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
     ctx.toggleFold(props.message.id)
   }
 
+  // Assistant turns get their own thin accent line (agent-colored), mirroring the
+  // user message's right-side accent — messages read as aligned columns, not cards.
+  const accent = createMemo(() =>
+    props.message.agent?.toLowerCase() === "build" ? theme.primary : local.agent.color(props.message.agent),
+  )
+
   return (
     <Show
       when={!folded()}
@@ -1553,21 +1557,23 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
         />
       }
     >
-      <For each={props.parts}>
-        {(part, index) => {
-          const component = createMemo(() => PART_MAPPING[part.type as keyof typeof PART_MAPPING])
-          return (
-            <Show when={component()}>
-              <Dynamic
-                last={index() === props.parts.length - 1}
-                component={component()}
-                part={part as any}
-                message={props.message}
-              />
-            </Show>
-          )
-        }}
-      </For>
+      <box border={["left"]} customBorderChars={SplitBorder.customBorderChars} borderColor={accent()}>
+        <For each={props.parts}>
+          {(part, index) => {
+            const component = createMemo(() => PART_MAPPING[part.type as keyof typeof PART_MAPPING])
+            return (
+              <Show when={component()}>
+                <Dynamic
+                  last={index() === props.parts.length - 1}
+                  component={component()}
+                  part={part as any}
+                  message={props.message}
+                />
+              </Show>
+            )
+          }}
+        </For>
+      </box>
       <Show when={props.parts.some((x) => x.type === "tool" && x.tool === "task")}>
         <box paddingTop={1} paddingLeft={3}>
           <text fg={theme.text}>
@@ -1609,7 +1615,7 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
               <span style={{ fg: theme.text }}>{displayAgentMode(props.message.mode)}</span>
               <span style={{ fg: theme.textMuted }}> · {model()}</span>
               <Show when={duration()}>
-                <span style={{ fg: theme.textMuted }}> · {Locale.duration(duration())}</span>
+                <span style={{ fg: theme.textMuted }}> · worked {Locale.duration(duration())}</span>
               </Show>
               <Show when={props.message.error?.name === "MessageAbortedError"}>
                 <span style={{ fg: theme.textMuted }}> · interrupted</span>
@@ -1621,6 +1627,10 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
           </box>
         </Match>
       </Switch>
+      {/* Subtle rule separating a settled turn from whatever comes next. */}
+      <Show when={final() || props.message.error?.name === "MessageAbortedError"}>
+        <box marginTop={1} border={["top"]} borderColor={theme.borderSubtle} />
+      </Show>
     </Show>
   )
 }
@@ -1739,9 +1749,9 @@ function CollapsedReasoningText(props: { title: string | null; duration: number 
   const duration = () => Locale.duration(props.duration)
 
   return (
-    <text fg={theme.warning} wrapMode="none">
-      <span style={{ fg: theme.warning }}>
-        {props.title ? "+ Thought: " + props.title + " · " + duration() : "+ Thought: " + duration()}
+    <text fg={theme.textMuted} wrapMode="none">
+      <span style={{ fg: theme.textMuted }}>
+        {props.title ? "◆ Thought for " + duration() + " · " + props.title : "◆ Thought for " + duration()}
       </span>
     </text>
   )

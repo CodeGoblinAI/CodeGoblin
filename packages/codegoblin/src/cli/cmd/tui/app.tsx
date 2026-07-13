@@ -803,8 +803,9 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "help.show",
-        title: "Help",
+        title: "Keyboard shortcuts",
         slashName: "help",
+        slashAliases: ["shortcuts", "keys"],
         run: () => {
           dialog.replace(() => <DialogHelp />)
         },
