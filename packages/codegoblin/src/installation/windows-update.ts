@@ -27,10 +27,11 @@ export function needsWindowsUpdateHandoff(input: {
   execPath?: string
   helper?: string
 }) {
-  if ((input.platform ?? process.platform) !== "win32") return false
+  const platform = input.platform ?? process.platform
+  if (platform !== "win32") return false
   if ((input.helper ?? process.env[HELPER_ENV]) === "1") return false
   if (input.method === "unknown") return false
-  return path.basename(input.execPath ?? process.execPath).toLowerCase() === "codegoblin.exe"
+  return path.win32.basename(input.execPath ?? process.execPath).toLowerCase() === "codegoblin.exe"
 }
 
 export function willUseWindowsUpdateHandoff() {
