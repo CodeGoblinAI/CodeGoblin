@@ -4,6 +4,7 @@ import { Flag } from "@codegoblin/core/flag/flag"
 import { Installation } from "@/installation"
 import { InstallationVersion } from "@codegoblin/core/installation/version"
 import { GlobalBus } from "@/bus/global"
+import { needsWindowsUpdateHandoff } from "@/installation/windows-update"
 
 export async function upgrade() {
   const config = await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.getGlobal()))
@@ -39,6 +40,16 @@ export async function upgrade() {
   }
 
   if (method === "unknown") return
+  if (needsWindowsUpdateHandoff({ method })) {
+    GlobalBus.emit("event", {
+      directory: "global",
+      payload: {
+        type: Installation.Event.UpdateAvailable.type,
+        properties: { version: latest },
+      },
+    })
+    return
+  }
   await Installation.upgrade(method, latest)
     .then(() =>
       GlobalBus.emit("event", {

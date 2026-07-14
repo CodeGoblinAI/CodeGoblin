@@ -80,6 +80,7 @@ import {
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
 import { CodeGoblinBrand } from "@/codegoblin/brand"
+import { takeWindowsUpdateError } from "@/installation/windows-update"
 import { DialogImageSettings, DialogAudioSettings, DialogModel3DSettings } from "./codegoblin/dialog-media-settings"
 import { DialogMarket } from "./codegoblin/dialog-market"
 import { DialogGoblinHub } from "./codegoblin/dialog-goblin-hub"
@@ -384,6 +385,15 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
 
   const args = useArgs()
   onMount(() => {
+    const updateError = takeWindowsUpdateError()
+    if (updateError) {
+      toast.show({
+        variant: "error",
+        title: "Update Failed",
+        message: updateError,
+        duration: 12000,
+      })
+    }
     batch(() => {
       if (args.agent) local.agent.set(args.agent)
       if (args.model) {
