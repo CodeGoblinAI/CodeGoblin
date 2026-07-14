@@ -3,6 +3,7 @@ import { UI } from "../ui"
 import * as prompts from "@clack/prompts"
 import { Installation } from "../../installation"
 import { InstallationVersion } from "@codegoblin/core/installation/version"
+import { needsWindowsUpdateHandoff } from "@/installation/windows-update"
 
 export const UpgradeCommand = {
   command: "update [target]",
@@ -18,7 +19,7 @@ export const UpgradeCommand = {
         alias: "m",
         describe: "installation method to use",
         type: "string",
-        choices: ["curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"],
+        choices: ["curl", "npm", "yarn", "pnpm", "bun", "brew", "choco", "scoop"],
       })
   },
   handler: async (args: { target?: string; method?: string }) => {
@@ -53,6 +54,7 @@ export const UpgradeCommand = {
     }
 
     prompts.log.info(`From ${InstallationVersion} → ${target}`)
+    const handoff = needsWindowsUpdateHandoff({ method })
     const spinner = prompts.spinner()
     spinner.start("Updating...")
     const err = await Installation.upgrade(method, target).catch((err) => err)
@@ -69,7 +71,7 @@ export const UpgradeCommand = {
       prompts.outro("Done")
       return
     }
-    spinner.stop("Update complete")
-    prompts.outro("Done")
+    spinner.stop(handoff ? "Update prepared" : "Update complete")
+    prompts.outro(handoff ? "CodeGoblin will restart when the update is complete" : "Done")
   },
 }

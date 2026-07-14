@@ -13,6 +13,7 @@ import semver from "semver"
 import { InstallationChannel, InstallationVersion } from "@codegoblin/core/installation/version"
 import { NpmConfig } from "@codegoblin/core/npm-config"
 import { Product, npmInstallSpec, npmRegistryPackageUrl } from "./product"
+import { needsWindowsUpdateHandoff, scheduleWindowsUpdate } from "./windows-update"
 
 const log = Log.create({ service: "installation" })
 
@@ -341,6 +342,13 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
         return data.tag_name.replace(/^v/, "")
       }, Effect.orDie),
       upgrade: Effect.fn("Installation.upgrade")(function* (m: Method, target: string) {
+        if (needsWindowsUpdateHandoff({ method: m })) {
+          return yield* Effect.tryPromise({
+            try: () => scheduleWindowsUpdate({ method: m, target }),
+            catch: () =>
+              new UpgradeFailedError({ stderr: "Could not prepare the Windows update helper. Please try again." }),
+          })
+        }
         let upgradeResult: { code: number; stdout: string; stderr: string } | undefined
         switch (m) {
           case "curl":
@@ -351,6 +359,9 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
             break
           case "pnpm":
             upgradeResult = yield* run(["pnpm", "install", "-g", npmInstallSpec(target)])
+            break
+          case "yarn":
+            upgradeResult = yield* run(["yarn", "global", "add", npmInstallSpec(target)])
             break
           case "bun":
             upgradeResult = yield* run(["bun", "install", "-g", npmInstallSpec(target)])

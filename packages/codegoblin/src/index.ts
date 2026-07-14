@@ -49,6 +49,14 @@ import { drizzle } from "drizzle-orm/bun-sqlite"
 import { ensureProcessMetadata } from "@codegoblin/core/util/opencode-process"
 import { isRecord } from "@/util/record"
 import { CodeGoblinBrand, codeGoblinCliName } from "@/codegoblin/brand"
+import { cleanupWindowsUpdate, runWindowsUpdateHelper, windowsUpdateStatePath } from "@/installation/windows-update"
+
+const windowsUpdateState = windowsUpdateStatePath()
+if (windowsUpdateState) {
+  await runWindowsUpdateHelper(windowsUpdateState, Installation.upgrade)
+  process.exit()
+}
+await cleanupWindowsUpdate()
 
 const processMetadata = ensureProcessMetadata("main")
 const cliName = codeGoblinCliName()

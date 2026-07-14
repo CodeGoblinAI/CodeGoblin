@@ -3,6 +3,7 @@ import type { useSDK } from "../context/sdk"
 import type { useToast } from "../ui/toast"
 import { DialogAlert } from "@tui/ui/dialog-alert"
 import { DialogConfirm } from "@tui/ui/dialog-confirm"
+import { willUseWindowsUpdateHandoff } from "@/installation/windows-update"
 
 export const UPDATE_AVAILABLE_KV_KEY = "update_available_version"
 export const SKIPPED_VERSION_KV_KEY = "skipped_version"
@@ -90,6 +91,16 @@ export async function performInstallationUpdate(input: {
   }
 
   clearUpdateAvailable(kv)
+
+  if (willUseWindowsUpdateHandoff()) {
+    toast.show({
+      variant: "success",
+      message: `Update prepared. Restarting CodeGoblin...`,
+      duration: 3000,
+    })
+    exit()
+    return
+  }
 
   await DialogAlert.show(
     dialog,

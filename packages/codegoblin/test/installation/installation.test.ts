@@ -173,6 +173,22 @@ describe("installation", () => {
   })
 
   describe("upgrade", () => {
+    const yarnCalls: string[][] = []
+    testEffect(
+      testLayer(
+        () => jsonResponse({}),
+        (cmd, args) => {
+          if (cmd === "yarn") yarnCalls.push([...args])
+          return ""
+        },
+      ),
+    ).effect("updates yarn installations", () =>
+      Effect.gen(function* () {
+        yield* Installation.use.upgrade("yarn", "9.9.9")
+        expect(yarnCalls).toContainEqual(["global", "add", "@codegoblin-io/codegoblin@9.9.9"])
+      }),
+    )
+
     testEffect(
       testLayer(
         () => jsonResponse({}),
