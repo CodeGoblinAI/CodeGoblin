@@ -28,12 +28,24 @@ export const LogInput = Schema.Struct({
 })
 
 export const ControlPaths = {
+  authList: "/auth",
   auth: "/auth/:providerID",
   log: "/log",
 } as const
 
 export const ControlApi = HttpApi.make("control").add(
   HttpApiGroup.make("control")
+    .add(
+      HttpApiEndpoint.get("authList", ControlPaths.authList, {
+        success: described(Schema.Array(ProviderID), "Stored authentication provider ids"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "auth.list",
+          summary: "List stored auth credentials",
+          description: "List provider ids with removable credentials stored by CodeGoblin.",
+        }),
+      ),
+    )
     .add(
       HttpApiEndpoint.put("authSet", ControlPaths.auth, {
         params: AuthParams,

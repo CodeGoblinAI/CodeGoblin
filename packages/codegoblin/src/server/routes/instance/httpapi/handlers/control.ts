@@ -10,6 +10,11 @@ export const controlHandlers = HttpApiBuilder.group(RootHttpApi, "control", (han
   Effect.gen(function* () {
     const auth = yield* Auth.Service
 
+    const authList = Effect.fn("ControlHttpApi.authList")(function* () {
+      if (process.env.CODEGOBLIN_AUTH_CONTENT ?? process.env.OPENCODE_AUTH_CONTENT) return []
+      return Object.keys(yield* auth.all().pipe(Effect.orDie)).map((providerID) => ProviderID.make(providerID))
+    })
+
     const authSet = Effect.fn("ControlHttpApi.authSet")(function* (ctx: {
       params: { providerID: ProviderID }
       payload: Auth.Info
@@ -29,6 +34,10 @@ export const controlHandlers = HttpApiBuilder.group(RootHttpApi, "control", (han
       return true
     })
 
-    return handlers.handle("authSet", authSet).handle("authRemove", authRemove).handle("log", log)
+    return handlers
+      .handle("authList", authList)
+      .handle("authSet", authSet)
+      .handle("authRemove", authRemove)
+      .handle("log", log)
   }),
 )

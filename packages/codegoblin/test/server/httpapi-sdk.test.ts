@@ -341,6 +341,7 @@ describe("HttpApi SDK", () => {
       const sdk = client("raw")
       const health = yield* call(() => sdk.global.health())
       const log = yield* call(() => sdk.app.log({ service: "httpapi-sdk-test", level: "info", message: "hello" }))
+      const auth = yield* call(() => sdk.auth.list())
 
       expect(health.response.status).toBe(200)
       expect(health.data).toMatchObject({ healthy: true })
@@ -349,6 +350,8 @@ describe("HttpApi SDK", () => {
       })
       expect(log.response.status).toBe(200)
       expect(log.data).toBe(true)
+      expect(auth.response.status).toBe(200)
+      expect(auth.data).toEqual([])
       yield* expectStatus(() => sdk.auth.set({ providerID: "test" }), 400)
     }),
   )

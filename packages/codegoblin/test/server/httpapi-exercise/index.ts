@@ -543,6 +543,21 @@ const scenarios: Scenario[] = [
       check(body === true, "log route should return true")
     }),
   http.protected
+    .get("/auth", "auth.list")
+    .global()
+    .seeded(() =>
+      Effect.promise(() =>
+        Bun.write(
+          path.join(exerciseDataDirectory, "auth.json"),
+          JSON.stringify({ anthropic: { type: "api", key: "listed-secret" } }),
+        ),
+      ),
+    )
+    .json(200, (body) => {
+      array(body)
+      check(body.length === 1 && body[0] === "anthropic", "auth list should only return stored provider ids")
+    }),
+  http.protected
     .put("/auth/{providerID}", "auth.set")
     .global()
     .at(() => ({ path: route("/auth/{providerID}", { providerID: "test" }), body: { type: "api", key: "test-key" } }))
