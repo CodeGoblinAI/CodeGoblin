@@ -16,11 +16,11 @@ import {
   codeGoblinFlagEnabled,
   type CodeGoblinCompanionBurn,
 } from "@/codegoblin/companion"
-import { RGBA } from "@opentui/core"
 import type { JSX } from "@opentui/solid"
 
 import { getScrollAcceleration } from "../../util/scroll"
 import { WorkspaceLabel } from "../../component/workspace-label"
+import { codeGoblinBrandPalette } from "../../component/codegoblin-brand"
 
 export const SESSION_SIDEBAR_WIDTH = 46
 
@@ -33,11 +33,7 @@ function TuiSidebarCompanionGoblin(props: {
   activityText: string
   activityKind: "idle" | "thinking" | "image" | "audio"
 }) {
-  const skinColor = RGBA.fromInts(154, 219, 53)
-  const shadowColor = RGBA.fromInts(120, 125, 135)
-  const vestColor = RGBA.fromInts(130, 80, 223)
-  const facetColor = RGBA.fromInts(92, 138, 30)
-  const eyeColor = props.theme.backgroundElement
+  const colors = createMemo(() => codeGoblinBrandPalette(props.theme))
   const spendColor = props.theme.warning
   const [tick, setTick] = createSignal(0)
   const [lastBurn, setLastBurn] = createSignal<CodeGoblinCompanionBurn | undefined>()
@@ -1121,13 +1117,13 @@ function TuiSidebarCompanionGoblin(props: {
 
     for (const char of spriteRow) {
       if (char === "G") {
-        cells.push(<text fg={skinColor}>██</text>)
+        cells.push(<text fg={colors().skin}>██</text>)
       } else if (char === "S") {
-        cells.push(<text fg={shadowColor}>██</text>)
+        cells.push(<text fg={colors().shadow}>██</text>)
       } else if (char === "P") {
-        cells.push(<text fg={vestColor}>██</text>)
+        cells.push(<text fg={colors().vest}>██</text>)
       } else if (char === "B") {
-        cells.push(<text fg={eyeColor}>██</text>)
+        cells.push(<text fg={colors().eye}>██</text>)
       } else if (char === "M") {
         cells.push(<text fg={props.theme.textMuted}>██</text>)
       } else if (char === "W") {
@@ -1135,7 +1131,7 @@ function TuiSidebarCompanionGoblin(props: {
       } else if (char === "T") {
         cells.push(<text fg={spendColor}>██</text>)
       } else if (char === "D") {
-        cells.push(<text fg={facetColor}>██</text>)
+        cells.push(<text fg={colors().facet}>██</text>)
       } else {
         cells.push(<text> </text>)
       }
