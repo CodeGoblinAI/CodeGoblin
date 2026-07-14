@@ -443,8 +443,11 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     })
 
     createEffect(() => {
-      renderer.setBackgroundColor(values().background)
+      const background = values().background
+      renderer.setBackgroundColor(background)
+      if (process.stdout.isTTY) process.stdout.write(terminalBackgroundSequence(background))
     })
+    onCleanup(() => renderer.resetTerminalBgColor())
 
     const syntax = createMemo(() => generateSyntax(values()))
     const subtleSyntax = createMemo(() => generateSubtleSyntax(values()))
@@ -527,6 +530,11 @@ export function tint(base: RGBA, overlay: RGBA, alpha: number): RGBA {
   const g = base.g + (overlay.g - base.g) * alpha
   const b = base.b + (overlay.b - base.b) * alpha
   return RGBA.fromInts(Math.round(r * 255), Math.round(g * 255), Math.round(b * 255))
+}
+
+export function terminalBackgroundSequence(color: RGBA) {
+  const channel = (value: number) => Math.round(value * 255).toString(16).padStart(2, "0")
+  return `\x1b]11;rgb:${channel(color.r)}/${channel(color.g)}/${channel(color.b)}\x07`
 }
 
 export function generateSystem(colors: TerminalColors, mode: "dark" | "light"): ThemeJson {

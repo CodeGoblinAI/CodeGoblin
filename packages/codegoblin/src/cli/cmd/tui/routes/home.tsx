@@ -10,13 +10,10 @@ import { useLocal } from "../context/local"
 import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
 import { useEditorContext } from "@tui/context/editor"
 import { useTheme } from "../context/theme"
-import { RGBA } from "@opentui/core"
 import { HEADER_FONTS, SMALL_WORDMARK } from "./home-wordmarks"
+import { codeGoblinBrandPalette } from "../component/codegoblin-brand"
 
 function TuiGoblinHeader(props: { theme: any }) {
-  // Wordmark follows the active theme instead of hardcoded brand colors.
-  const skinColor = props.theme.primary
-  const ruleColor = props.theme.borderSubtle
   const dimensions = useTerminalDimensions()
 
   // Pad a block of figlet lines to equal width so they centre cleanly as one unit.
@@ -37,8 +34,8 @@ function TuiGoblinHeader(props: { theme: any }) {
     const wordmark = width >= wideWordmark[0].length + 4 ? wideWordmark : smallWordmark
     const rule = "─".repeat(wordmark[0].length)
     return [
-      ...wordmark.map((line) => <text fg={skinColor}>{line}</text>),
-      <text fg={ruleColor}>{rule}</text>,
+      ...wordmark.map((line) => <text fg={props.theme.primary}>{line}</text>),
+      <text fg={props.theme.borderSubtle}>{rule}</text>,
     ]
   })
 
@@ -47,10 +44,7 @@ function TuiGoblinHeader(props: { theme: any }) {
 
 function TuiGoblinRunner(props: { theme: any }) {
   const dimensions = useTerminalDimensions()
-  const skinColor = RGBA.fromInts(154, 219, 53)
-  const shadowColor = RGBA.fromInts(120, 125, 135)
-  const vestColor = RGBA.fromInts(130, 80, 223)
-  const eyeColor = props.theme.backgroundElement
+  const colors = createMemo(() => codeGoblinBrandPalette(props.theme))
   const [tick, setTick] = createSignal(0)
 
   interface RunnerVariant {
@@ -331,17 +325,17 @@ function TuiGoblinRunner(props: { theme: any }) {
       const char = spriteColumn >= 0 && spriteColumn < spriteRow.length ? spriteRow[spriteColumn] : "."
 
       if (char === "G") {
-        cells.push(<text fg={skinColor}>██</text>)
+        cells.push(<text fg={colors().skin}>██</text>)
       } else if (char === "S") {
-        cells.push(<text fg={shadowColor}>██</text>)
+        cells.push(<text fg={colors().shadow}>██</text>)
       } else if (char === "P") {
-        cells.push(<text fg={vestColor}>██</text>)
+        cells.push(<text fg={colors().vest}>██</text>)
       } else if (char === "B") {
-        cells.push(<text fg={eyeColor}>██</text>)
+        cells.push(<text fg={colors().eye}>██</text>)
       } else if (char === "M") {
         cells.push(<text fg={props.theme.textMuted}>██</text>)
       } else if (rowIndex === spriteHeight - 1 && cell >= trailStart && cell < trailEnd) {
-        cells.push(<text fg={shadowColor}>░░</text>)
+        cells.push(<text fg={colors().shadow}>░░</text>)
       } else {
         cells.push(<text>  </text>)
       }
@@ -358,7 +352,7 @@ function TuiGoblinRunner(props: { theme: any }) {
         </box>
       ))}
       <box flexDirection="row" width={laneWidth()}>
-        <text fg={shadowColor}>{"▁".repeat(laneWidth())}</text>
+        <text fg={colors().shadow}>{"▁".repeat(laneWidth())}</text>
       </box>
     </box>
   )
