@@ -11,6 +11,8 @@ import type {
   AppSkillsErrors,
   AppSkillsResponses,
   Auth as Auth3,
+  AuthListErrors,
+  AuthListResponses,
   AuthRemoveErrors,
   AuthRemoveResponses,
   AuthSetErrors,
@@ -343,6 +345,18 @@ class HeyApiRegistry<T> {
 }
 
 export class Auth extends HeyApiClient {
+  /**
+   * List stored auth credentials
+   *
+   * List provider ids with removable credentials stored by CodeGoblin.
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<AuthListResponses, AuthListErrors, ThrowOnError>({
+      url: "/auth",
+      ...options,
+    })
+  }
+
   /**
    * Remove auth credentials
    *

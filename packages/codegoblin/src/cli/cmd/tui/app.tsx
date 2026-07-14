@@ -24,6 +24,7 @@ import semver from "semver"
 import { markUpdateAvailable, performInstallationUpdate, SKIPPED_VERSION_KV_KEY } from "@tui/util/installation-update"
 import { DialogProvider, useDialog } from "@tui/ui/dialog"
 import { DialogProvider as DialogProviderList } from "@tui/component/dialog-provider"
+import { DialogProviderLogout } from "@tui/component/dialog-provider-logout"
 import { ErrorComponent } from "@tui/component/error-component"
 import { PluginRouteMissing } from "@tui/component/plugin-route-missing"
 import { ProjectProvider, useProject } from "@tui/context/project"
@@ -693,6 +694,48 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         slashName: "connect",
         run: () => {
           dialog.replace(() => <DialogProviderList />)
+        },
+        category: "Provider",
+      },
+      {
+        name: "provider.logout",
+        title: "Remove saved provider credentials",
+        slashName: "logout",
+        slashAliases: ["disconnect", "remove-key"],
+        run: () => {
+          sdk.client.auth
+            .list({ throwOnError: true })
+            .then((result) => {
+              const credentials = result.data ?? []
+              if (credentials.length === 0) {
+                toast.show({ variant: "info", message: "No removable provider credentials are saved" })
+                return
+              }
+              dialog.replace(() => (
+                <DialogProviderLogout
+                  credentials={credentials}
+                  providers={sync.data.provider_next.all}
+                  onRemove={(providerID) => {
+                    sdk.client.auth
+                      .remove({ providerID }, { throwOnError: true })
+                      .then(() => {
+                        dialog.clear()
+                        toast.show({ variant: "success", message: `Removed saved credentials for ${providerID}` })
+                        void sync.bootstrap({ fatal: false })
+                      })
+                      .catch((error) => {
+                        toast.show({
+                          variant: "error",
+                          message: `Failed to remove credentials: ${errorMessage(error)}`,
+                        })
+                      })
+                  }}
+                />
+              ))
+            })
+            .catch((error) => {
+              toast.show({ variant: "error", message: `Failed to load saved credentials: ${errorMessage(error)}` })
+            })
         },
         category: "Provider",
       },
