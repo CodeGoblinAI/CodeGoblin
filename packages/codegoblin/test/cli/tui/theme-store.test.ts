@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test"
 
-const { DEFAULT_THEMES, allThemes, addTheme, hasTheme, resolveTheme } = await import(
+const { DEFAULT_THEMES, allThemes, addTheme, hasTheme, resolveTheme, terminalBackgroundSequence } = await import(
   "../../../src/cli/cmd/tui/context/theme"
 )
+const { RGBA } = await import("@opentui/core")
 
 test("addTheme writes into module theme store", () => {
   const name = `plugin-theme-${Date.now()}`
@@ -48,4 +49,8 @@ test("resolveTheme rejects circular color refs", () => {
   item.theme.primary = "one"
 
   expect(() => resolveTheme(item, "dark")).toThrow("Circular color reference")
+})
+
+test("terminal background sequence uses the active theme RGB color", () => {
+  expect(terminalBackgroundSequence(RGBA.fromInts(1, 2, 3))).toBe("\x1b]11;rgb:01/02/03\x07")
 })
