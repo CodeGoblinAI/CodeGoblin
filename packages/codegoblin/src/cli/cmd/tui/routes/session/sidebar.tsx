@@ -1185,7 +1185,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const pending = createMemo(() => messages().findLast((item) => item.role === "assistant" && !item.time.completed)?.id)
   // Companion goblin is opt-in via CODEGOBLIN_CHAT_GOBLIN=1 (dev variant scripts set it).
   // It used to default on, which resurfaced the goblin whenever the sidebar opened —
-  // e.g. reopening an old session from /sessions — after it was removed from the chat UI.
+  // e.g. reopening an old session from /resume — after it was removed from the chat UI.
   const showChatGoblin = createMemo(() => codeGoblinFlagEnabled(process.env.CODEGOBLIN_CHAT_GOBLIN))
   const latestCodeGoblinAssetState = createMemo(() => {
     let latest: string | undefined

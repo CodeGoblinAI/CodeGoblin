@@ -55,7 +55,7 @@ const GROUPS: Group[] = [
     title: "Session",
     rows: [
       { title: "New session", command: "session.new" },
-      { title: "Session list", command: "session.list", fallback: "/sessions" },
+      { title: "Resume session", command: "session.list", fallback: "/resume" },
       { title: "Timeline", command: "session.timeline", fallback: "/timeline" },
       { title: "Rename session", command: "session.rename", fallback: "/rename" },
       { title: "Compact session", command: "session.compact", fallback: "/compact" },
