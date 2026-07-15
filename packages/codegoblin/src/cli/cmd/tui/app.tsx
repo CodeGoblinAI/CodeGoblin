@@ -636,31 +636,12 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "agent.list",
-        title: "Switch custom agent",
+        title: "Switch mode",
         category: "Agent",
-        slashName: "agents",
+        slashName: "mode",
+        slashAliases: ["agents"],
         run: () => {
           dialog.replace(() => <DialogAgent />)
-        },
-      },
-      {
-        name: "agent.plan",
-        title: "Enter plan mode",
-        category: "Agent",
-        slashName: "plan",
-        run: () => {
-          local.agent.set("plan")
-          dialog.clear()
-        },
-      },
-      {
-        name: "agent.build",
-        title: "Return to agent mode",
-        category: "Agent",
-        slashName: "agent",
-        run: () => {
-          local.agent.set("build")
-          dialog.clear()
         },
       },
       {

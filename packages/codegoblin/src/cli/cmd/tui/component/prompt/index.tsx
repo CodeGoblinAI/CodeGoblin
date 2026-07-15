@@ -2379,7 +2379,7 @@ export function Prompt(props: PromptProps) {
                     </Match>
                     <Match when={true}>
                       <text fg={theme.text}>
-                        {agentShortcut()} <span style={{ fg: theme.textMuted }}>agents</span>
+                        {agentShortcut()} <span style={{ fg: theme.textMuted }}>modes</span>
                       </text>
                     </Match>
                   </Switch>

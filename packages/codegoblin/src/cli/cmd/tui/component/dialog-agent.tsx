@@ -16,14 +16,19 @@ export function DialogAgent() {
       return {
         value: item.name,
         title: displayAgentName(item.name),
-        description: item.native ? "native" : item.description,
+        description:
+          item.name.toLowerCase() === "build"
+            ? "Full coding mode"
+            : item.name.toLowerCase() === "plan"
+              ? "Read-only planning mode"
+              : (item.description ?? (item.native ? "Built-in mode" : "Custom mode")),
       }
     }),
   )
 
   return (
     <DialogSelect
-      title="Select agent"
+      title="Select mode"
       current={local.agent.current()?.name}
       options={options()}
       onSelect={(option) => {
