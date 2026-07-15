@@ -8,6 +8,7 @@ import { useProject } from "@tui/context/project"
 import { useTheme } from "../context/theme"
 import { useSDK } from "../context/sdk"
 import { useLocal } from "../context/local"
+import { useKV } from "../context/kv"
 import { Flag } from "@codegoblin/core/flag/flag"
 import { DialogSessionRename } from "./dialog-session-rename"
 import { createDebouncedSignal } from "../util/signal"
@@ -19,6 +20,11 @@ import { DialogSessionDeleteFailed } from "./dialog-session-delete-failed"
 import { WorkspaceLabel } from "./workspace-label"
 import { useCommandShortcut } from "../keymap"
 import { discoverExternalSessions, loadExternalSession, type ExternalSessionSummary } from "@/session/external"
+import { DialogConfirm } from "@tui/ui/dialog-confirm"
+
+const EXTERNAL_SESSION_SOURCES_KEY = "external_session_sources"
+const externalSources = ["claude-code", "codex"] as const
+type ExternalSource = (typeof externalSources)[number]
 
 export function DialogSessionList() {
   const dialog = useDialog()
@@ -28,6 +34,7 @@ export function DialogSessionList() {
   const { theme } = useTheme()
   const sdk = useSDK()
   const local = useLocal()
+  const kv = useKV()
   const toast = useToast()
   const [toDelete, setToDelete] = createSignal<string>()
   const [importing, setImporting] = createSignal<string>()
@@ -44,7 +51,13 @@ export function DialogSessionList() {
       return result.data ?? []
     },
   )
-  const [externalSessions] = createResource(() => discoverExternalSessions().catch(() => []))
+  const enabledExternalSources = createMemo(() => {
+    const saved = kv.get(EXTERNAL_SESSION_SOURCES_KEY, []) as string[]
+    return externalSources.filter((source) => saved.includes(source))
+  })
+  const [externalSessions] = createResource(enabledExternalSources, (sources) =>
+    sources.length ? discoverExternalSessions({ sources }).catch(() => []) : [],
+  )
   const externalByID = createMemo(
     () => new Map((externalSessions() ?? []).map((session) => [session.id, session] as const)),
   )
@@ -228,7 +241,19 @@ export function DialogSessionList() {
         footer: Locale.time(session.updated),
       }))
 
-    return [...pinned.map((id) => buildOption(id, "Pinned")).filter((x) => x !== undefined), ...remaining, ...external]
+    return [
+      ...pinned.map((id) => buildOption(id, "Pinned")).filter((x) => x !== undefined),
+      ...remaining,
+      ...external,
+      {
+        title: "Manage external session access",
+        description: enabledExternalSources().length
+          ? `Enabled: ${enabledExternalSources().map(externalSourceName).join(", ")}`
+          : "Disabled by default. Choose which local transcript folders CodeGoblin may scan.",
+        value: "external:manage",
+        category: "Import",
+      },
+    ]
   })
 
   onMount(() => {
@@ -246,6 +271,10 @@ export function DialogSessionList() {
         setToDelete(undefined)
       }}
       onSelect={async (option) => {
+        if (option.value === "external:manage") {
+          dialog.replace(() => <DialogExternalSessionAccess onDone={() => dialog.replace(() => <DialogSessionList />)} />)
+          return
+        }
         const external = externalByID().get(option.value)
         if (external) {
           await importExternal(external)
@@ -364,6 +393,62 @@ export function DialogSessionList() {
     route.navigate({ type: "session", sessionID: result.data.id })
     dialog.clear()
   }
+}
+
+function DialogExternalSessionAccess(props: { onDone: () => void }) {
+  const dialog = useDialog()
+  const kv = useKV()
+  const enabled = createMemo(() => {
+    const saved = kv.get(EXTERNAL_SESSION_SOURCES_KEY, []) as string[]
+    return new Set(externalSources.filter((source) => saved.includes(source)))
+  })
+
+  return (
+    <DialogSelect
+      title="External session access"
+      options={[
+        ...externalSources.map((source) => ({
+          title: `${externalSourceName(source)}: ${enabled().has(source) ? "enabled" : "disabled"}`,
+          description: externalSourceDescription(source),
+          value: source,
+        })),
+        { title: "Done", value: "done" },
+      ]}
+      onSelect={async (option) => {
+        if (option.value === "done") {
+          props.onDone()
+          return
+        }
+        const source = option.value as ExternalSource
+        if (enabled().has(source)) {
+          kv.set(
+            EXTERNAL_SESSION_SOURCES_KEY,
+            [...enabled()].filter((item) => item !== source),
+          )
+          dialog.replace(() => <DialogExternalSessionAccess onDone={props.onDone} />)
+          return
+        }
+        const confirmed = await DialogConfirm.show(
+          dialog,
+          `Allow ${externalSourceName(source)} access?`,
+          `CodeGoblin will read local ${externalSourceName(source)} transcript files to list and import conversations. It never uploads, changes, or background-watches those files.`,
+          "Allow local access",
+        )
+        if (confirmed) kv.set(EXTERNAL_SESSION_SOURCES_KEY, [...enabled(), source])
+        dialog.replace(() => <DialogExternalSessionAccess onDone={props.onDone} />)
+      }}
+    />
+  )
+}
+
+function externalSourceName(source: ExternalSource) {
+  return source === "claude-code" ? "Claude Code" : "Codex"
+}
+
+function externalSourceDescription(source: ExternalSource) {
+  return source === "claude-code"
+    ? "Allow CodeGoblin to scan ~/.claude/projects only when you open /resume."
+    : "Allow CodeGoblin to scan ~/.codex/sessions only when you open /resume."
 }
 
 function quickSwitchRange(first: string, last: string) {

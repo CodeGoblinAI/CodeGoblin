@@ -29,12 +29,14 @@ export type ExternalSessionMessage = {
 
 const PREVIEW_BYTES = 128 * 1024
 
-export async function discoverExternalSessions(input?: { home?: string; limit?: number }) {
+export async function discoverExternalSessions(input?: { home?: string; limit?: number; sources?: ExternalSessionSource[] }) {
   const home = input?.home ?? os.homedir()
-  const candidates = await Promise.all([
-    collect(path.join(home, ".claude", "projects"), "claude-code"),
-    collect(path.join(home, ".codex", "sessions"), "codex"),
-  ])
+  const sources = input?.sources ?? ["claude-code", "codex"]
+  const candidates = await Promise.all(
+    sources.map((source) =>
+      collect(path.join(home, source === "claude-code" ? ".claude/projects" : ".codex/sessions"), source),
+    ),
+  )
   const recent = candidates
     .flat()
     .toSorted((a, b) => b.updated - a.updated)

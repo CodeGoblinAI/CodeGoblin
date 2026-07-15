@@ -176,6 +176,26 @@ describe("external sessions", () => {
       },
     ])
   })
+
+  test("only scans explicitly selected sources", async () => {
+    using home = await tempdir()
+    await write(
+      path.join(home.path, ".claude", "projects", "repo", "claude-123.jsonl"),
+      JSON.stringify({ type: "user", sessionId: "claude-123", message: { role: "user", content: "Claude only" } }),
+    )
+    await write(
+      path.join(home.path, ".codex", "sessions", "rollout.jsonl"),
+      record("session_meta", { id: "codex-123" }),
+    )
+
+    expect(await discoverExternalSessions({ home: home.path, sources: [] })).toEqual([])
+    expect(await discoverExternalSessions({ home: home.path, sources: ["claude-code"] })).toMatchObject([
+      { source: "claude-code", title: "Claude only" },
+    ])
+    expect(await discoverExternalSessions({ home: home.path, sources: ["codex"] })).toMatchObject([
+      { source: "codex", title: "Codex session codex-12" },
+    ])
+  })
 })
 
 function record(type: string, payload: unknown) {
