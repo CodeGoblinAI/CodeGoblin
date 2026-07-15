@@ -121,39 +121,62 @@ function parseTranscript(source: ExternalSessionSource, text: string) {
     .split(/\r?\n/)
     .map((line) => parseRecord(line))
     .filter((record): record is Record<string, unknown> => record !== undefined)
-  if (source === "claude-code") return groupTurns(records.flatMap((record) => parseClaudeMessage(record)))
+  if (source === "claude-code") return parseClaudeTranscript(records)
 
-  const state = { providerID: undefined as string | undefined, modelID: undefined as string | undefined }
-  return groupTurns(
-    records.flatMap((record) => {
-      if (record.type === "session_meta") {
-        state.providerID = string(object(record.payload)?.model_provider) ?? state.providerID
-        return []
-      }
-      if (record.type === "turn_context") {
-        state.modelID = string(object(record.payload)?.model) ?? state.modelID
-        return []
-      }
-      return parseCodexMessage(record).map((message) => {
-        if (message.role !== "assistant" || !state.providerID || !state.modelID) return message
-        return { ...message, model: { providerID: state.providerID, id: state.modelID } }
-      })
-    }),
-  )
+  return parseCodexTranscript(records)
 }
 
-function groupTurns(messages: ExternalSessionMessage[]) {
-  return messages.reduce<ExternalSessionMessage[]>((result, message) => {
-    const text = message.text.trim()
-    if (!text) return result
-    const previous = result.at(-1)
-    if (message.role !== "assistant" || previous?.role !== "assistant") {
-      result.push({ ...message, text })
+function parseClaudeTranscript(records: Record<string, unknown>[]) {
+  return records.reduce<ExternalSessionMessage[]>((result, record) => {
+    return parseClaudeMessage(record).reduce((turns, message) => {
+      const text = message.text.trim()
+      if (!text) return turns
+      const previous = turns.at(-1)
+      if (message.role === "user" || previous?.role !== "assistant") {
+        turns.push({ ...message, text })
+        return turns
+      }
+
+      // Claude records tool use and tool results between assistant text fragments.
+      // Keep those fragments in the same native assistant turn until a real user message begins the next one.
+      previous.text = `${previous.text}\n\n${text}`
+      previous.model ??= message.model
+      return turns
+    }, result)
+  }, [])
+}
+
+function parseCodexTranscript(records: Record<string, unknown>[]) {
+  const state = { providerID: undefined as string | undefined, modelID: undefined as string | undefined }
+  return records.reduce<ExternalSessionMessage[]>((result, record) => {
+    if (record.type === "session_meta") {
+      state.providerID = string(object(record.payload)?.model_provider) ?? state.providerID
       return result
     }
-    previous.text = `${previous.text}\n\n${text}`
-    previous.model = message.model ?? previous.model
-    return result
+    if (record.type === "turn_context") {
+      state.modelID = string(object(record.payload)?.model) ?? state.modelID
+      return result
+    }
+    return parseCodexMessage(record).reduce((turns, message) => {
+      const text = message.text.trim()
+      if (!text) return turns
+      const normalized =
+        message.role === "assistant" && state.providerID && state.modelID
+          ? { ...message, text, model: { providerID: state.providerID, id: state.modelID } }
+          : { ...message, text }
+      const previous = turns.at(-1)
+      if (normalized.role === "user" && previous?.role === "user" && previous.text === text) return turns
+      if (normalized.role === "user" || previous?.role !== "assistant") {
+        turns.push(normalized)
+        return turns
+      }
+
+      // Codex emits commentary and final response items separately inside one turn.
+      // Join only adjacent assistant items; the next response_item user message starts a new turn.
+      previous.text = `${previous.text}\n\n${text}`
+      previous.model = normalized.model ?? previous.model
+      return turns
+    }, result)
   }, [])
 }
 
@@ -226,6 +249,8 @@ function synthetic(text: string) {
     "<skills_instructions>",
     "<system-reminder>",
     "<task-notification>",
+    "<turn_aborted>",
+    "<turn_cancelled>",
     "<command-name>",
     "<command-message>",
   ].some((prefix) => value.startsWith(prefix))

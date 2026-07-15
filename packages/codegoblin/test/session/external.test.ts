@@ -22,6 +22,16 @@ describe("external sessions", () => {
           role: "user",
           content: [{ type: "input_text", text: "Fix login" }],
         }),
+        record("response_item", {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "<turn_aborted>internal interruption state</turn_aborted>" }],
+        }),
+        record("response_item", {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Fix login" }],
+        }),
         record("turn_context", { model: "gpt-5.6-luna" }),
         record("response_item", {
           type: "message",
@@ -34,6 +44,17 @@ describe("external sessions", () => {
           type: "message",
           role: "assistant",
           content: [{ type: "output_text", text: "Done" }],
+        }),
+        record("response_item", {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Double-check it" }],
+        }),
+        record("turn_context", { model: "gpt-5.7-sol" }),
+        record("response_item", {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "It is correct." }],
         }),
       ].join("\n"),
     )
@@ -48,6 +69,13 @@ describe("external sessions", () => {
         text: "I’ll inspect it.\n\nDone",
         time: undefined,
         model: { providerID: "openai", id: "gpt-5.6-luna" },
+      },
+      { role: "user", text: "Double-check it", time: undefined },
+      {
+        role: "assistant",
+        text: "It is correct.",
+        time: undefined,
+        model: { providerID: "openai", id: "gpt-5.7-sol" },
       },
     ])
   })

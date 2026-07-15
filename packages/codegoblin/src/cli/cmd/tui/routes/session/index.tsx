@@ -24,6 +24,7 @@ import { SplitBorder } from "@tui/component/border"
 import { Spinner } from "@tui/component/spinner"
 import { generateSubtleSyntax, selectedForeground, useTheme } from "@tui/context/theme"
 import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, RGBA } from "@opentui/core"
+import stringWidth from "string-width"
 import { Prompt, type PromptRef } from "@tui/component/prompt"
 import type {
   AssistantMessage,
@@ -88,6 +89,7 @@ import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
 import { DialogRetryAction } from "../../component/dialog-retry-action"
 import { SessionRetry } from "@/session/retry"
+import { wrappedTextHeight } from "../../util/text-layout"
 import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 import { PathFormatterProvider, usePathFormatter } from "../../context/path-format"
@@ -1400,6 +1402,17 @@ function UserMessage(props: {
   const color = createMemo(() => local.agent.color(props.message.agent))
   const queuedFg = createMemo(() => selectedForeground(theme, color()))
   const metadataVisible = createMemo(() => queued() || ctx.showTimestamps())
+  const bubbleWidth = createMemo(() => {
+    const natural =
+      Math.max(
+        ...text()
+          .split("\n")
+          .map((line) => stringWidth(line)),
+        1,
+      ) + 5
+    return Math.min(80, Math.max(1, ctx.width), natural)
+  })
+  const textWidth = createMemo(() => Math.max(1, bubbleWidth() - 5))
 
   const compaction = createMemo(() => props.parts.find((x) => x.type === "compaction"))
 
@@ -1412,7 +1425,7 @@ function UserMessage(props: {
             border={["right"]}
             borderColor={theme.secondary}
             customBorderChars={SplitBorder.customBorderChars}
-            maxWidth={80}
+            width={bubbleWidth()}
             flexShrink={1}
           >
             <box
@@ -1428,7 +1441,9 @@ function UserMessage(props: {
               backgroundColor={hover() ? theme.backgroundPanel : undefined}
               flexShrink={0}
             >
-              <text fg={theme.text}>{text()}</text>
+              <text fg={theme.text} width={textWidth()} height={wrappedTextHeight(text(), textWidth())} wrapMode="word">
+                {text()}
+              </text>
               <Show when={files().length}>
                 <box
                   flexDirection="row"
