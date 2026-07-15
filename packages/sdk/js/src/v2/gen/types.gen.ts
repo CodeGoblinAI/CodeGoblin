@@ -6377,6 +6377,52 @@ export type SessionStatusResponses = {
 
 export type SessionStatusResponse = SessionStatusResponses[keyof SessionStatusResponses]
 
+export type SessionImportExternalData = {
+  body?: {
+    source: "claude-code" | "codex"
+    title: string
+    model?: {
+      id: string
+      providerID: string
+      variant?: string
+    }
+    messages: Array<{
+      role: "user" | "assistant"
+      text: string
+      time?: number
+      model?: {
+        id: string
+        providerID: string
+        variant?: string
+      }
+    }>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/external-session/import"
+}
+
+export type SessionImportExternalErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type SessionImportExternalError = SessionImportExternalErrors[keyof SessionImportExternalErrors]
+
+export type SessionImportExternalResponses = {
+  /**
+   * Successfully imported session
+   */
+  200: Session
+}
+
+export type SessionImportExternalResponse = SessionImportExternalResponses[keyof SessionImportExternalResponses]
+
 export type SessionDeleteData = {
   body?: never
   path: {

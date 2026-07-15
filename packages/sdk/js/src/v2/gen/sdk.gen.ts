@@ -190,6 +190,8 @@ import type {
   SessionForkResponses,
   SessionGetErrors,
   SessionGetResponses,
+  SessionImportExternalErrors,
+  SessionImportExternalResponses,
   SessionInitErrors,
   SessionInitResponses,
   SessionListErrors,
@@ -3405,6 +3407,66 @@ export class Session2 extends HeyApiClient {
       url: "/session/status",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Import external session
+   *
+   * Import a normalized plain-text transcript into a new CodeGoblin session.
+   */
+  public importExternal<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      source?: "claude-code" | "codex"
+      title?: string
+      model?: {
+        id: string
+        providerID: string
+        variant?: string
+      }
+      messages?: Array<{
+        role: "user" | "assistant"
+        text: string
+        time?: number
+        model?: {
+          id: string
+          providerID: string
+          variant?: string
+        }
+      }>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "source" },
+            { in: "body", key: "title" },
+            { in: "body", key: "model" },
+            { in: "body", key: "messages" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionImportExternalResponses,
+      SessionImportExternalErrors,
+      ThrowOnError
+    >({
+      url: "/external-session/import",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

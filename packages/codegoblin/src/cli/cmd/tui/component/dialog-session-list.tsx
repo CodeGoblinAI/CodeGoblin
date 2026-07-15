@@ -18,6 +18,7 @@ import { errorMessage } from "@/util/error"
 import { DialogSessionDeleteFailed } from "./dialog-session-delete-failed"
 import { WorkspaceLabel } from "./workspace-label"
 import { useCommandShortcut } from "../keymap"
+import { discoverExternalSessions, loadExternalSession, type ExternalSessionSummary } from "@/session/external"
 
 export function DialogSessionList() {
   const dialog = useDialog()
@@ -29,6 +30,7 @@ export function DialogSessionList() {
   const local = useLocal()
   const toast = useToast()
   const [toDelete, setToDelete] = createSignal<string>()
+  const [importing, setImporting] = createSignal<string>()
   const [search, setSearch] = createDebouncedSignal("", 150)
   const deleteHint = useCommandShortcut("session.delete")
   const quickSwitch1 = useCommandShortcut("session.quick_switch.1")
@@ -41,6 +43,10 @@ export function DialogSessionList() {
       const result = await sdk.client.session.list({ search: input.query, limit: 30, ...input.filter })
       return result.data ?? []
     },
+  )
+  const [externalSessions] = createResource(() => discoverExternalSessions().catch(() => []))
+  const externalByID = createMemo(
+    () => new Map((externalSessions() ?? []).map((session) => [session.id, session] as const)),
   )
 
   const currentSessionID = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
@@ -209,7 +215,20 @@ export function DialogSessionList() {
       })
       .filter((x) => x !== undefined)
 
-    return [...pinned.map((id) => buildOption(id, "Pinned")).filter((x) => x !== undefined), ...remaining]
+    const query = search().trim().toLowerCase()
+    const external = (externalSessions() ?? [])
+      .filter((session) => {
+        if (!query) return true
+        return [session.title, session.directory, session.source].some((value) => value?.toLowerCase().includes(query))
+      })
+      .map((session) => ({
+        title: importing() === session.id ? `Importing ${session.title}...` : session.title,
+        value: session.id,
+        category: session.source === "claude-code" ? "Claude Code" : "Codex",
+        footer: Locale.time(session.updated),
+      }))
+
+    return [...pinned.map((id) => buildOption(id, "Pinned")).filter((x) => x !== undefined), ...remaining, ...external]
   })
 
   onMount(() => {
@@ -226,7 +245,12 @@ export function DialogSessionList() {
       onMove={() => {
         setToDelete(undefined)
       }}
-      onSelect={(option) => {
+      onSelect={async (option) => {
+        const external = externalByID().get(option.value)
+        if (external) {
+          await importExternal(external)
+          return
+        }
         route.navigate({
           type: "session",
           sessionID: option.value,
@@ -238,6 +262,7 @@ export function DialogSessionList() {
           command: "session.pin.toggle",
           title: "pin/unpin",
           onTrigger: (option: { value: string }) => {
+            if (externalByID().has(option.value)) return
             local.session.togglePin(option.value)
           },
         },
@@ -245,6 +270,7 @@ export function DialogSessionList() {
           command: "session.delete",
           title: "delete",
           onTrigger: async (option) => {
+            if (externalByID().has(option.value)) return
             if (toDelete() === option.value) {
               const session = sessions().find((item) => item.id === option.value)
               const status = session?.workspaceID ? project.workspace.status(session.workspaceID) : undefined
@@ -293,6 +319,7 @@ export function DialogSessionList() {
           command: "session.rename",
           title: "rename",
           onTrigger: async (option) => {
+            if (externalByID().has(option.value)) return
             dialog.replace(() => <DialogSessionRename session={option.value} />)
           },
         },
@@ -300,6 +327,43 @@ export function DialogSessionList() {
       footerHints={quickSwitchFooterHints()}
     />
   )
+
+  async function importExternal(external: ExternalSessionSummary) {
+    if (importing()) return
+    setImporting(external.id)
+    const transcript = await loadExternalSession(external).catch((error) => {
+      toast.show({ variant: "error", title: "Import failed", message: errorMessage(error) })
+      return undefined
+    })
+    if (!transcript) {
+      setImporting(undefined)
+      return
+    }
+
+    const selected = local.model.current()
+    const result = await sdk.client.session
+      .importExternal({
+        source: transcript.source,
+        title: `${transcript.source === "claude-code" ? "Claude Code" : "Codex"} · ${transcript.title}`,
+        model: selected
+          ? {
+              providerID: selected.providerID,
+              id: selected.modelID,
+              variant: local.model.variant.current(),
+            }
+          : undefined,
+        messages: transcript.messages,
+      })
+      .catch((error) => ({ error, data: undefined }))
+    setImporting(undefined)
+    if (result.error || !result.data) {
+      toast.show({ variant: "error", title: "Import failed", message: errorMessage(result.error ?? "no response") })
+      return
+    }
+    await sync.session.refresh()
+    route.navigate({ type: "session", sessionID: result.data.id })
+    dialog.clear()
+  }
 }
 
 function quickSwitchRange(first: string, last: string) {
