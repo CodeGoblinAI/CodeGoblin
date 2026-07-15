@@ -1679,7 +1679,7 @@ export function Prompt(props: PromptProps) {
       toast.show({
         variant: "warning",
         message:
-          "That looks like an image request, but the selected model is not image-capable. Use /models to pick an image model first; I did not send it to the text model.",
+          "That looks like an image request, but the selected model is not image-capable. Use /model to pick an image model first; I did not send it to the text model.",
         duration: 9000,
       })
       return false
@@ -2379,7 +2379,7 @@ export function Prompt(props: PromptProps) {
                     </Match>
                     <Match when={true}>
                       <text fg={theme.text}>
-                        {agentShortcut()} <span style={{ fg: theme.textMuted }}>agents</span>
+                        {agentShortcut()} <span style={{ fg: theme.textMuted }}>modes</span>
                       </text>
                     </Match>
                   </Switch>
@@ -2408,7 +2408,7 @@ export function Prompt(props: PromptProps) {
                   <Show when={store.mode === "normal"}>
                     <box flexDirection="row" gap={1}>
                       <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
-                      {/* Click-through to the existing model selector (keyboard path: /models).
+                      {/* Click-through to the existing model selector (keyboard path: /model).
                           The ▾ caret signals the readout is clickable. */}
                       <box
                         flexDirection="row"

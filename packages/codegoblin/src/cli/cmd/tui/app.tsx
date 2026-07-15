@@ -541,22 +541,22 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "session.list",
-        title: "Switch session",
+        title: "Resume session",
         category: "Session",
         suggested: sync.data.session.length > 0,
-        slashName: "sessions",
-        slashAliases: ["resume", "continue"],
+        slashName: "resume",
+        slashAliases: ["sessions", "continue"],
         run: () => {
           dialog.replace(() => <DialogSessionList />)
         },
       },
       {
         name: "session.new",
-        title: "New session",
+        title: "Clear and start a new session",
         suggested: route.data.type === "session",
         category: "Session",
-        slashName: "new",
-        slashAliases: ["clear"],
+        slashName: "clear",
+        slashAliases: ["new", "reset"],
         run: () => {
           route.navigate({
             type: "home",
@@ -592,7 +592,8 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         title: "Switch model",
         suggested: true,
         category: "Agent",
-        slashName: "models",
+        slashName: "model",
+        slashAliases: ["models"],
         run: () => {
           dialog.replace(() => <DialogModel />)
         },
@@ -635,9 +636,10 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "agent.list",
-        title: "Switch agent",
+        title: "Switch mode",
         category: "Agent",
-        slashName: "agents",
+        slashName: "mode",
+        slashAliases: ["agents"],
         run: () => {
           dialog.replace(() => <DialogAgent />)
         },
@@ -646,7 +648,8 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         name: "mcp.list",
         title: "Toggle MCPs",
         category: "Agent",
-        slashName: "mcps",
+        slashName: "mcp",
+        slashAliases: ["mcps"],
         run: () => {
           dialog.replace(() => <DialogMcp />)
         },
@@ -818,8 +821,8 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       {
         name: "codegoblin.market",
         title: "CodeGoblin market",
-        slashName: "market",
-        slashAliases: ["mcp-market", "skills-market", "plugins"],
+        slashName: "plugins",
+        slashAliases: ["market", "mcp-market", "skills-market"],
         run: () => {
           dialog.replace(() => <DialogMarket />)
         },
@@ -828,8 +831,8 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       {
         name: "theme.switch",
         title: "Switch TUI theme",
-        slashName: "themes",
-        slashAliases: ["theme"],
+        slashName: "theme",
+        slashAliases: ["themes"],
         run: () => {
           dialog.replace(() => <DialogThemeList />)
         },

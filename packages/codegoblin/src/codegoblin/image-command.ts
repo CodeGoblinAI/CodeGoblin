@@ -71,7 +71,7 @@ const DEFAULT_MODEL = "gemini-2.5-flash-image"
 const DEFAULT_DIR = "codegoblin-output/images"
 const USAGE_FILE = "codegoblin-output/usage.json"
 const IMAGE_MODEL_HINT =
-  "Select an image model with /models first, such as google/gemini-2.5-flash-image, xai/grok-imagine-image-quality, openai/gpt-image-1, or qwen/wan2.7-image-pro. I did not send this prompt to a text model."
+  "Select an image model with /model first, such as google/gemini-2.5-flash-image, xai/grok-imagine-image-quality, openai/gpt-image-1, or qwen/wan2.7-image-pro. I did not send this prompt to a text model."
 
 export const CodeGoblinImageCommand = {
   isSlash(input: string) {

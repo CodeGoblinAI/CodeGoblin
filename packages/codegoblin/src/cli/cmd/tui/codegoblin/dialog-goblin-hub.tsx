@@ -124,7 +124,7 @@ export function DialogGoblinHub() {
         dialog.replace(() => (
           <DialogAlert
             title="CodeGoblin Identity"
-            message="CodeGoblin theme identity shows the product look: custom wordmark, green/black default TUI palette, CG terminal title, and local usage hoard. /themes opens the actual theme picker."
+            message="CodeGoblin theme identity shows the product look: custom wordmark, green/black default TUI palette, CG terminal title, and local usage hoard. /theme opens the actual theme picker."
           />
         ))
       }}

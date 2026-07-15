@@ -27,7 +27,7 @@ You'll get the goblin splash and a prompt box. A few things to know:
 
 - **Switch models** with the leader key `Ctrl+X` then `m`.
 - **Actions menu**: `Ctrl+G`.
-- Slash commands start with `/` (e.g. `/help`, `/models`, `/init`).
+- Slash commands start with `/` (e.g. `/help`, `/model`, `/init`).
 
 ## Talking to a cloud model
 

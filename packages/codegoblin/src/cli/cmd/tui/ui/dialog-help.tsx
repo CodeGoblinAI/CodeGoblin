@@ -55,7 +55,7 @@ const GROUPS: Group[] = [
     title: "Session",
     rows: [
       { title: "New session", command: "session.new" },
-      { title: "Session list", command: "session.list", fallback: "/sessions" },
+      { title: "Resume session", command: "session.list", fallback: "/resume" },
       { title: "Timeline", command: "session.timeline", fallback: "/timeline" },
       { title: "Rename session", command: "session.rename", fallback: "/rename" },
       { title: "Compact session", command: "session.compact", fallback: "/compact" },
@@ -64,13 +64,13 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    title: "Models & theme",
+    title: "Models, modes & theme",
     rows: [
-      { title: "Model selector", command: "model.list", fallback: "/models" },
+      { title: "Model selector", command: "model.list", fallback: "/model" },
       { title: "Recent model", command: "model.cycle_recent" },
       { title: "Cycle variant", command: "variant.cycle" },
-      { title: "Agent list", command: "agent.list", fallback: "/agents" },
-      { title: "Theme selector", command: "theme.switch", fallback: "/themes" },
+      { title: "Mode selector", command: "agent.list", fallback: "/mode" },
+      { title: "Theme selector", command: "theme.switch", fallback: "/theme" },
     ],
   },
 ]
