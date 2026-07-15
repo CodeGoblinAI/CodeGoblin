@@ -591,6 +591,31 @@ describe("HttpApi SDK", () => {
     ),
   )
 
+  serverPathParity("routes external session imports before dynamic session paths", (serverPath) =>
+    withStandardProject(serverPath, ({ sdk }) =>
+      Effect.gen(function* () {
+        const imported = yield* capture(() =>
+          sdk.session.importExternal({
+            source: "codex",
+            title: "Imported Codex session",
+            messages: [
+              { role: "user", text: "hello from codex" },
+              { role: "assistant", text: "hello from codegoblin" },
+            ],
+          }),
+        )
+        const sessionID = String(record(imported.data).id)
+        const messages = yield* capture(() => sdk.session.messages({ sessionID }))
+
+        return {
+          statuses: statuses({ imported, messages }),
+          title: record(imported.data).title,
+          texts: array(messages.data).map(firstPartText),
+        }
+      }),
+    ),
+  )
+
   serverPathParity("matches generated SDK session message and part routes", (serverPath) =>
     withStandardProject(serverPath, ({ sdk, directory }) =>
       Effect.gen(function* () {

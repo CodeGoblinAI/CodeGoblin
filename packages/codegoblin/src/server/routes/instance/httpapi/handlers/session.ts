@@ -416,6 +416,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     return handlers
       .handle("list", list)
       .handle("status", status)
+      .handle("importExternal", importExternal)
       .handle("get", get)
       .handle("children", children)
       .handle("todo", todo)
@@ -423,7 +424,6 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("messages", messages)
       .handle("message", message)
       .handleRaw("create", createRaw)
-      .handle("importExternal", importExternal)
       .handle("remove", remove)
       .handle("update", update)
       .handleRaw("fork", forkRaw)
