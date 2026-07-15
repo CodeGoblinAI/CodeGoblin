@@ -81,6 +81,7 @@ export const SessionPaths = {
   messages: `${root}/:sessionID/message`,
   message: `${root}/:sessionID/message/:messageID`,
   create: root,
+  importExternal: `${root}/import`,
   remove: `${root}/:sessionID`,
   update: `${root}/:sessionID`,
   fork: `${root}/:sessionID/fork`,
@@ -206,6 +207,18 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.create",
             summary: "Create session",
             description: "Create a new OpenCode session for interacting with AI assistants and managing conversations.",
+          }),
+        ),
+        HttpApiEndpoint.post("importExternal", SessionPaths.importExternal, {
+          query: WorkspaceRoutingQuery,
+          payload: Session.ImportExternalInput,
+          success: described(Session.Info, "Successfully imported session"),
+          error: HttpApiError.BadRequest,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.import_external",
+            summary: "Import external session",
+            description: "Import a normalized plain-text transcript into a new CodeGoblin session.",
           }),
         ),
         HttpApiEndpoint.delete("remove", SessionPaths.remove, {

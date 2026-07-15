@@ -172,6 +172,16 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return yield* create({ payload })
     })
 
+    const importExternal = Effect.fn("SessionHttpApi.importExternal")(function* (ctx: {
+      payload: typeof Session.ImportExternalInput.Type
+    }) {
+      return yield* session.importExternal({
+        ...ctx.payload,
+        model: ctx.payload.model ? { ...ctx.payload.model } : undefined,
+        messages: ctx.payload.messages.map((message) => ({ ...message })),
+      })
+    })
+
     const remove = Effect.fn("SessionHttpApi.remove")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* SessionError.mapStorageNotFound(session.remove(ctx.params.sessionID))
       return true
@@ -413,6 +423,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("messages", messages)
       .handle("message", message)
       .handleRaw("create", createRaw)
+      .handle("importExternal", importExternal)
       .handle("remove", remove)
       .handle("update", update)
       .handleRaw("fork", forkRaw)

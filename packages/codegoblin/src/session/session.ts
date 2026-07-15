@@ -252,6 +252,20 @@ export const CreateInput = Schema.optional(
 )
 export type CreateInput = Types.DeepMutable<Schema.Schema.Type<typeof CreateInput>>
 
+export const ImportExternalInput = Schema.Struct({
+  source: Schema.Literals(["claude-code", "codex"]),
+  title: Schema.String,
+  model: Schema.optional(Model),
+  messages: Schema.Array(
+    Schema.Struct({
+      role: Schema.Literals(["user", "assistant"]),
+      text: Schema.String,
+      time: Schema.optional(NonNegativeInt),
+    }),
+  ),
+})
+export type ImportExternalInput = Types.DeepMutable<Schema.Schema.Type<typeof ImportExternalInput>>
+
 export const ForkInput = Schema.Struct({
   sessionID: SessionID,
   messageID: Schema.optional(MessageID),
@@ -458,6 +472,7 @@ export interface Interface {
     permission?: Permission.Ruleset
     workspaceID?: WorkspaceID
   }) => Effect.Effect<Info>
+  readonly importExternal: (input: ImportExternalInput) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
@@ -676,6 +691,69 @@ export const layer: Layer.Layer<
       })
     })
 
+    const importExternal = Effect.fn("Session.importExternal")(function* (input: ImportExternalInput) {
+      const ctx = yield* InstanceState.context
+      const imported = yield* create({ title: input.title, model: input.model })
+      const model = input.model
+        ? { providerID: input.model.providerID, modelID: input.model.id, variant: input.model.variant }
+        : { providerID: ProviderID.make("codegoblin"), modelID: ModelID.make("imported") }
+      const state = { parentID: undefined as MessageID | undefined }
+
+      for (const message of input.messages) {
+        const text = message.text.trim()
+        if (!text) continue
+        const id = MessageID.ascending()
+        const created = message.time ?? Date.now()
+
+        if (message.role === "user") {
+          state.parentID = id
+          yield* updateMessage({
+            id,
+            sessionID: imported.id,
+            role: "user",
+            time: { created },
+            agent: "agent",
+            model,
+          })
+          yield* updatePart({
+            id: PartID.ascending(),
+            sessionID: imported.id,
+            messageID: id,
+            type: "text",
+            text,
+          })
+          continue
+        }
+
+        if (!state.parentID) continue
+        yield* updateMessage({
+          id,
+          sessionID: imported.id,
+          role: "assistant",
+          time: { created, completed: created },
+          parentID: state.parentID,
+          modelID: model.modelID,
+          providerID: model.providerID,
+          mode: "agent",
+          agent: "agent",
+          path: { cwd: ctx.directory, root: ctx.worktree },
+          cost: 0,
+          tokens: structuredClone(EmptyTokens),
+          finish: "stop",
+        })
+        yield* updatePart({
+          id: PartID.ascending(),
+          sessionID: imported.id,
+          messageID: id,
+          type: "text",
+          text,
+        })
+      }
+
+      yield* touch(imported.id)
+      return imported
+    })
+
     const fork = Effect.fn("Session.fork")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
       const ctx = yield* InstanceState.context
       const original = yield* get(input.sessionID)
@@ -839,6 +917,7 @@ export const layer: Layer.Layer<
     return Service.of({
       list,
       create,
+      importExternal,
       fork,
       touch,
       get,

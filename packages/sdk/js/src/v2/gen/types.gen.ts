@@ -6752,6 +6752,47 @@ export type SessionMessageResponses = {
 
 export type SessionMessageResponse = SessionMessageResponses[keyof SessionMessageResponses]
 
+export type SessionImportExternalData = {
+  body?: {
+    source: "claude-code" | "codex"
+    title: string
+    model?: {
+      id: string
+      providerID: string
+      variant?: string
+    }
+    messages: Array<{
+      role: "user" | "assistant"
+      text: string
+      time?: number
+    }>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/import"
+}
+
+export type SessionImportExternalErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type SessionImportExternalError = SessionImportExternalErrors[keyof SessionImportExternalErrors]
+
+export type SessionImportExternalResponses = {
+  /**
+   * Successfully imported session
+   */
+  200: Session
+}
+
+export type SessionImportExternalResponse = SessionImportExternalResponses[keyof SessionImportExternalResponses]
+
 export type SessionForkData = {
   body?: {
     messageID?: string
