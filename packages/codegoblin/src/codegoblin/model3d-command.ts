@@ -47,7 +47,7 @@ type SlashInput = {
 
 const DEFAULT_DIR = "codegoblin-output/models"
 const MODEL3D_HINT =
-  "Select a 3D model with /models first, such as tripo/text-to-model or tripo/image-to-model. Tripo generation uses credits and requires confirmation."
+  "Select a 3D model with /model first, such as tripo/text-to-model or tripo/image-to-model. Tripo generation uses credits and requires confirmation."
 
 function looksLike3DIntent(prompt: string) {
   return /\b(3d|mesh|model|glb|obj|tripo|generate a model|make a model|turn this into 3d)\b/i.test(prompt)

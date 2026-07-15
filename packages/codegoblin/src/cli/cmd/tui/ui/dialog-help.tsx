@@ -66,11 +66,11 @@ const GROUPS: Group[] = [
   {
     title: "Models & theme",
     rows: [
-      { title: "Model selector", command: "model.list", fallback: "/models" },
+      { title: "Model selector", command: "model.list", fallback: "/model" },
       { title: "Recent model", command: "model.cycle_recent" },
       { title: "Cycle variant", command: "variant.cycle" },
       { title: "Agent list", command: "agent.list", fallback: "/agents" },
-      { title: "Theme selector", command: "theme.switch", fallback: "/themes" },
+      { title: "Theme selector", command: "theme.switch", fallback: "/theme" },
     ],
   },
 ]
