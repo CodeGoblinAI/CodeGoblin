@@ -3430,6 +3430,11 @@ export class Session2 extends HeyApiClient {
         role: "user" | "assistant"
         text: string
         time?: number
+        model?: {
+          id: string
+          providerID: string
+          variant?: string
+        }
       }>
     },
     options?: Options<never, ThrowOnError>,

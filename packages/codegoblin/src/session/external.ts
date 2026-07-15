@@ -14,11 +14,17 @@ export type ExternalSessionSummary = {
 }
 
 export type ExternalSessionTranscript = ExternalSessionSummary & {
-  messages: Array<{
-    role: "user" | "assistant"
-    text: string
-    time?: number
-  }>
+  messages: ExternalSessionMessage[]
+}
+
+export type ExternalSessionMessage = {
+  role: "user" | "assistant"
+  text: string
+  time?: number
+  model?: {
+    providerID: string
+    id: string
+  }
 }
 
 const PREVIEW_BYTES = 128 * 1024
@@ -51,10 +57,7 @@ export async function loadExternalSession(session: ExternalSessionSummary): Prom
   const text = await Bun.file(session.path).text()
   return {
     ...session,
-    messages: text
-      .split(/\r?\n/)
-      .flatMap((line) => parseMessage(session.source, line))
-      .filter((message) => message.text.trim().length > 0),
+    messages: parseTranscript(session.source, text),
   }
 }
 
@@ -113,13 +116,48 @@ function parseSummary(source: ExternalSessionSource, file: string, updated: numb
   } satisfies ExternalSessionSummary
 }
 
-function parseMessage(source: ExternalSessionSource, line: string) {
-  const record = parseRecord(line)
-  if (!record) return []
-  return source === "codex" ? parseCodexMessage(record) : parseClaudeMessage(record)
+function parseTranscript(source: ExternalSessionSource, text: string) {
+  const records = text
+    .split(/\r?\n/)
+    .map((line) => parseRecord(line))
+    .filter((record): record is Record<string, unknown> => record !== undefined)
+  if (source === "claude-code") return groupTurns(records.flatMap((record) => parseClaudeMessage(record)))
+
+  const state = { providerID: undefined as string | undefined, modelID: undefined as string | undefined }
+  return groupTurns(
+    records.flatMap((record) => {
+      if (record.type === "session_meta") {
+        state.providerID = string(object(record.payload)?.model_provider) ?? state.providerID
+        return []
+      }
+      if (record.type === "turn_context") {
+        state.modelID = string(object(record.payload)?.model) ?? state.modelID
+        return []
+      }
+      return parseCodexMessage(record).map((message) => {
+        if (message.role !== "assistant" || !state.providerID || !state.modelID) return message
+        return { ...message, model: { providerID: state.providerID, id: state.modelID } }
+      })
+    }),
+  )
 }
 
-function parseCodexMessage(record: Record<string, unknown>): ExternalSessionTranscript["messages"] {
+function groupTurns(messages: ExternalSessionMessage[]) {
+  return messages.reduce<ExternalSessionMessage[]>((result, message) => {
+    const text = message.text.trim()
+    if (!text) return result
+    const previous = result.at(-1)
+    if (message.role !== "assistant" || previous?.role !== "assistant") {
+      result.push({ ...message, text })
+      return result
+    }
+    previous.text = `${previous.text}\n\n${text}`
+    previous.model = message.model ?? previous.model
+    return result
+  }, [])
+}
+
+function parseCodexMessage(record: Record<string, unknown>): ExternalSessionMessage[] {
   const payload = record.type === "response_item" ? object(record.payload) : record
   if (payload?.type !== "message") return []
   const role = payload.role === "user" ? "user" : payload.role === "assistant" ? "assistant" : undefined
@@ -129,15 +167,21 @@ function parseCodexMessage(record: Record<string, unknown>): ExternalSessionTran
   return [{ role, text, time: timestamp(record.timestamp) }]
 }
 
-function parseClaudeMessage(record: Record<string, unknown>): ExternalSessionTranscript["messages"] {
+function parseClaudeMessage(record: Record<string, unknown>): ExternalSessionMessage[] {
   if (record.type !== "user" && record.type !== "assistant") return []
   const message = object(record.message)
   const value = message?.role ?? record.type
   const role = value === "user" ? "user" : value === "assistant" ? "assistant" : undefined
   if (role !== "user" && role !== "assistant") return []
+  if (role === "user" && record.isMeta === true) return []
   const text = contentText(message?.content)
   if (!text || synthetic(text)) return []
-  return [{ role, text, time: timestamp(record.timestamp) }]
+  const modelID = string(message?.model)
+  const result: ExternalSessionMessage = { role, text, time: timestamp(record.timestamp) }
+  if (role === "assistant" && modelID && modelID !== "<synthetic>") {
+    result.model = { providerID: "anthropic", id: modelID }
+  }
+  return [result]
 }
 
 function contentText(value: unknown): string {
@@ -169,17 +213,21 @@ function synthetic(text: string) {
   return [
     "# AGENTS.md instructions for",
     "## Memory\n",
+    "Base directory for this skill:",
     "<app-context>",
     "<apps_instructions>",
     "<collaboration_mode>",
     "<environment_context>",
     "<local-command-caveat>",
+    "<local-command-stdout>",
     "<permissions instructions>",
     "<plugins_instructions>",
     "<recommended_plugins>",
     "<skills_instructions>",
     "<system-reminder>",
+    "<task-notification>",
     "<command-name>",
+    "<command-message>",
   ].some((prefix) => value.startsWith(prefix))
 }
 

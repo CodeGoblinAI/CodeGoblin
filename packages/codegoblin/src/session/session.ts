@@ -261,6 +261,7 @@ export const ImportExternalInput = Schema.Struct({
       role: Schema.Literals(["user", "assistant"]),
       text: Schema.String,
       time: Schema.optional(NonNegativeInt),
+      model: Schema.optional(Model),
     }),
   ),
 })
@@ -694,7 +695,7 @@ export const layer: Layer.Layer<
     const importExternal = Effect.fn("Session.importExternal")(function* (input: ImportExternalInput) {
       const ctx = yield* InstanceState.context
       const imported = yield* create({ title: input.title, model: input.model })
-      const model = input.model
+      const continuationModel = input.model
         ? { providerID: input.model.providerID, modelID: input.model.id, variant: input.model.variant }
         : { providerID: ProviderID.make("codegoblin"), modelID: ModelID.make("imported") }
       const state = { parentID: undefined as MessageID | undefined }
@@ -712,8 +713,8 @@ export const layer: Layer.Layer<
             sessionID: imported.id,
             role: "user",
             time: { created },
-            agent: "agent",
-            model,
+            agent: "build",
+            model: continuationModel,
           })
           yield* updatePart({
             id: PartID.ascending(),
@@ -726,16 +727,19 @@ export const layer: Layer.Layer<
         }
 
         if (!state.parentID) continue
+        const historicalModel = message.model
+          ? { providerID: message.model.providerID, modelID: message.model.id }
+          : continuationModel
         yield* updateMessage({
           id,
           sessionID: imported.id,
           role: "assistant",
           time: { created, completed: created },
           parentID: state.parentID,
-          modelID: model.modelID,
-          providerID: model.providerID,
-          mode: "agent",
-          agent: "agent",
+          modelID: historicalModel.modelID,
+          providerID: historicalModel.providerID,
+          mode: input.source === "claude-code" ? "claude code" : "codex",
+          agent: "build",
           path: { cwd: ctx.directory, root: ctx.worktree },
           cost: 0,
           tokens: structuredClone(EmptyTokens),

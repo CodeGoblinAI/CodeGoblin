@@ -6390,6 +6390,11 @@ export type SessionImportExternalData = {
       role: "user" | "assistant"
       text: string
       time?: number
+      model?: {
+        id: string
+        providerID: string
+        variant?: string
+      }
     }>
   }
   path?: never

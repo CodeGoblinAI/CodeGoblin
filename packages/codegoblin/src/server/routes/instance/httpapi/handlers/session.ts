@@ -178,7 +178,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return yield* session.importExternal({
         ...ctx.payload,
         model: ctx.payload.model ? { ...ctx.payload.model } : undefined,
-        messages: ctx.payload.messages.map((message) => ({ ...message })),
+        messages: ctx.payload.messages.map((message) => ({
+          ...message,
+          model: message.model ? { ...message.model } : undefined,
+        })),
       })
     })
 

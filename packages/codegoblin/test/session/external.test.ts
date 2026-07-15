@@ -11,7 +11,7 @@ describe("external sessions", () => {
     await write(
       file,
       [
-        record("session_meta", { id: "codex-12345678", cwd: "C:/repo" }),
+        record("session_meta", { id: "codex-12345678", cwd: "C:/repo", model_provider: "openai" }),
         record("response_item", {
           type: "message",
           role: "user",
@@ -22,7 +22,14 @@ describe("external sessions", () => {
           role: "user",
           content: [{ type: "input_text", text: "Fix login" }],
         }),
+        record("turn_context", { model: "gpt-5.6-luna" }),
+        record("response_item", {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "I’ll inspect it." }],
+        }),
         record("response_item", { type: "function_call", name: "shell" }),
+        record("response_item", { type: "function_call_output", output: "private tool output" }),
         record("response_item", {
           type: "message",
           role: "assistant",
@@ -36,7 +43,12 @@ describe("external sessions", () => {
     expect(sessions[0]).toMatchObject({ source: "codex", title: "Fix login", directory: "C:/repo" })
     expect((await loadExternalSession(sessions[0])).messages).toEqual([
       { role: "user", text: "Fix login", time: undefined },
-      { role: "assistant", text: "Done", time: undefined },
+      {
+        role: "assistant",
+        text: "I’ll inspect it.\n\nDone",
+        time: undefined,
+        model: { providerID: "openai", id: "gpt-5.6-luna" },
+      },
     ])
   })
 
@@ -57,10 +69,56 @@ describe("external sessions", () => {
           sessionId: "claude-123",
           message: {
             role: "assistant",
+            model: "claude-fable-5",
             content: [
-              { type: "text", text: "Added them" },
+              { type: "thinking", thinking: "Inspect the tests" },
+              { type: "text", text: "I’ll inspect the tests." },
               { type: "tool_use", name: "Edit", input: { secret: "not imported" } },
             ],
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          sessionId: "claude-123",
+          message: { role: "user", content: [{ type: "tool_result", content: "private tool output" }] },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          sessionId: "claude-123",
+          message: {
+            role: "assistant",
+            model: "claude-fable-5",
+            content: [{ type: "text", text: "Added them." }],
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          sessionId: "claude-123",
+          isMeta: true,
+          message: { role: "user", content: [{ type: "text", text: "Injected skill instructions" }] },
+        }),
+        JSON.stringify({
+          type: "user",
+          sessionId: "claude-123",
+          message: { role: "user", content: "<task-notification>internal task output</task-notification>" },
+        }),
+        JSON.stringify({
+          type: "user",
+          sessionId: "claude-123",
+          message: { role: "user", content: "<local-command-stdout>Set model</local-command-stdout>" },
+        }),
+        JSON.stringify({
+          type: "user",
+          sessionId: "claude-123",
+          message: { role: "user", content: "Anything else?" },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          sessionId: "claude-123",
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-5",
+            content: [{ type: "text", text: "No, that’s all." }],
           },
         }),
       ].join("\n"),
@@ -73,9 +131,21 @@ describe("external sessions", () => {
     const sessions = await discoverExternalSessions({ home: home.path })
     expect(sessions).toHaveLength(1)
     expect(sessions[0]).toMatchObject({ source: "claude-code", title: "Add tests", directory: "C:/repo" })
-    expect((await loadExternalSession(sessions[0])).messages.map((message) => message.text)).toEqual([
-      "Add tests",
-      "Added them",
+    expect((await loadExternalSession(sessions[0])).messages).toEqual([
+      { role: "user", text: "Add tests", time: undefined },
+      {
+        role: "assistant",
+        text: "I’ll inspect the tests.\n\nAdded them.",
+        time: undefined,
+        model: { providerID: "anthropic", id: "claude-fable-5" },
+      },
+      { role: "user", text: "Anything else?", time: undefined },
+      {
+        role: "assistant",
+        text: "No, that’s all.",
+        time: undefined,
+        model: { providerID: "anthropic", id: "claude-sonnet-5" },
+      },
     ])
   })
 })

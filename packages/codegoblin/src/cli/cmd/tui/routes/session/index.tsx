@@ -1406,8 +1406,7 @@ function UserMessage(props: {
   return (
     <>
       <Show when={text()}>
-        <box flexDirection="row" marginTop={props.index === 0 ? 0 : 1}>
-          <box flexGrow={1} flexShrink={1} minWidth={2} />
+        <box width="100%" alignItems="flex-end" marginTop={props.index === 0 ? 0 : 1}>
           <box
             id={props.message.id}
             border={["right"]}

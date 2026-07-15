@@ -34,7 +34,12 @@ describe("external session import", () => {
         messages: [
           { role: "assistant", text: "orphaned output is skipped" },
           { role: "user", text: "Fix login", time: 100 },
-          { role: "assistant", text: "Done", time: 200 },
+          {
+            role: "assistant",
+            text: "Done",
+            time: 200,
+            model: { providerID: ProviderID.make("openai"), id: ModelID.make("gpt-5.6-luna") },
+          },
         ],
       })
       const messages = yield* service.messages({ sessionID: imported.id })
@@ -49,7 +54,11 @@ describe("external session import", () => {
         providerID: ProviderID.make("opencode"),
         modelID: ModelID.make("deepseek-v4"),
       })
-      expect(messages[1].info.role === "assistant" && messages[1].info.providerID).toBe(ProviderID.make("opencode"))
+      expect(messages[0].info.agent).toBe("build")
+      expect(messages[1].info.role === "assistant" && messages[1].info.providerID).toBe(ProviderID.make("openai"))
+      expect(messages[1].info.role === "assistant" && messages[1].info.modelID).toBe(ModelID.make("gpt-5.6-luna"))
+      expect(messages[1].info.role === "assistant" && messages[1].info.mode).toBe("codex")
+      expect(messages[1].info.agent).toBe("build")
 
       yield* service.remove(imported.id)
     }),
