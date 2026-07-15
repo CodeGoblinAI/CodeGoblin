@@ -1,8 +1,8 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Effect, Layer, Stream } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { Installation } from "../../src/installation"
+import { Installation, isNpmPackageExecutable, isUpdateAvailable } from "../../src/installation"
 import { npmRegistryPackageUrl } from "../../src/installation/product"
 import { InstallationChannel } from "@codegoblin/core/installation/version"
 import { AppProcess } from "@codegoblin/core/process"
@@ -58,6 +58,28 @@ function testLayer(
 }
 
 describe("installation", () => {
+  describe("npm executable detection", () => {
+    test("recognizes npm packages installed under WinGet's Node directory", () => {
+      expect(
+        isNpmPackageExecutable(
+          "C:\\Users\\SIsikli\\AppData\\Local\\Microsoft\\WinGet\\Packages\\OpenJS.NodeJS.LTS_Microsoft.Winget.Source_8wekyb3d8bbwe\\node-v24.16.0-win-x64\\node_modules\\@codegoblin-io\\codegoblin\\bin\\codegoblin.exe",
+        ),
+      ).toBe(true)
+    })
+
+    test("does not misidentify unrelated node executables as CodeGoblin npm installs", () => {
+      expect(isNpmPackageExecutable("C:\\Program Files\\nodejs\\node.exe")).toBe(false)
+    })
+  })
+
+  describe("update availability", () => {
+    test("only accepts a strictly newer registry version", () => {
+      expect(isUpdateAvailable("0.2.8", "0.3.0")).toBe(true)
+      expect(isUpdateAvailable("0.2.8", "0.2.8")).toBe(false)
+      expect(isUpdateAvailable("0.2.8", "0.1.0")).toBe(false)
+    })
+  })
+
   describe("latest", () => {
     testEffect(testLayer(() => jsonResponse({ tag_name: "v1.2.3" }))).effect(
       "reads release version from GitHub releases",

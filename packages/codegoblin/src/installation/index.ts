@@ -21,6 +21,13 @@ export type Method = "curl" | "npm" | "yarn" | "pnpm" | "bun" | "brew" | "scoop"
 
 export type ReleaseType = "patch" | "minor" | "major"
 
+export function isNpmPackageExecutable(executable: string) {
+  const normalized = executable.replaceAll("\\", "/").toLowerCase()
+  return [Product.npmScopedPackage, Product.npmPackage, Product.legacyNpmPackage].some((pkg) =>
+    normalized.includes(`/node_modules/${pkg.toLowerCase()}/`),
+  )
+}
+
 export const Event = {
   Updated: BusEvent.define(
     "installation.updated",
@@ -45,6 +52,10 @@ export function getReleaseType(current: string, latest: string): ReleaseType {
   if (newMajor > currMajor) return "major"
   if (newMinor > currMinor) return "minor"
   return "patch"
+}
+
+export function isUpdateAvailable(current: string, latest: string) {
+  return semver.valid(current) !== null && semver.valid(latest) !== null && semver.gt(latest, current)
 }
 
 export const Info = Schema.Struct({
@@ -194,6 +205,10 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
       }),
       method: Effect.fn("Installation.method")(function* () {
         if (cachedMethod) return cachedMethod
+        if (isNpmPackageExecutable(process.execPath)) {
+          cachedMethod = "npm"
+          return "npm"
+        }
         if (process.execPath.includes(path.join(".codegoblin", "bin"))) return "curl" as Method
         if (process.execPath.includes(path.join(".opencode", "bin"))) return "curl" as Method
         if (process.execPath.includes(path.join(".local", "bin"))) return "curl" as Method
