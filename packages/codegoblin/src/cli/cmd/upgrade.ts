@@ -31,24 +31,17 @@ export const UpgradeCommand = {
     const method = (args.method as Installation.Method) ?? detectedMethod
     if (method === "unknown") {
       prompts.log.error(`CodeGoblin is installed to ${process.execPath} and may be managed by a package manager`)
-      const install = await prompts.select({
-        message: "Install anyways?",
-        options: [
-          { label: "Yes", value: true },
-          { label: "No", value: false },
-        ],
-        initialValue: false,
-      })
-      if (!install) {
-        prompts.outro("Done")
-        return
-      }
+      prompts.log.info(
+        "Use `cg update --method npm` (or your package manager's update command) to choose an update method.",
+      )
+      prompts.outro("Done")
+      return
     }
     prompts.log.info("Using method: " + method)
-    const target = args.target ? args.target.replace(/^v/, "") : await Installation.latest()
+    const target = args.target ? args.target.replace(/^v/, "") : await Installation.latest(method)
 
-    if (InstallationVersion === target) {
-      prompts.log.warn(`CodeGoblin update skipped: ${target} is already installed`)
+    if (!args.target && !Installation.isUpdateAvailable(InstallationVersion, target)) {
+      prompts.log.warn(`No newer update available: installed ${InstallationVersion}, registry ${target}`)
       prompts.outro("Done")
       return
     }
