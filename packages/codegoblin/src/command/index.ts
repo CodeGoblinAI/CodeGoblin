@@ -9,7 +9,6 @@ import { MCP } from "../mcp"
 import { Skill } from "../skill"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
-import PROMPT_GOBLIN from "./template/goblin.txt"
 import PROMPT_TEACH from "./template/teach.txt"
 import PROMPT_GRILL from "./template/grill.txt"
 import PROMPT_GOAL from "./template/goal.txt"
@@ -57,8 +56,6 @@ export function hints(template: string) {
 export const Default = {
   INIT: "init",
   REVIEW: "review",
-  GOBLIN: "goblin",
-  CODEGOBLIN: "codegoblin",
   TEACH: "teach",
   GRILL: "grill",
   GOAL: "goal",
@@ -101,20 +98,6 @@ export const layer = Layer.effect(
         },
         subtask: true,
         hints: hints(PROMPT_REVIEW),
-      }
-      commands[Default.GOBLIN] = {
-        name: Default.GOBLIN,
-        description: "CodeGoblin status/help, balance, models, usage, and theme scaffold",
-        source: "command",
-        template: PROMPT_GOBLIN,
-        hints: hints(PROMPT_GOBLIN),
-      }
-      commands[Default.CODEGOBLIN] = {
-        name: Default.CODEGOBLIN,
-        description: "CodeGoblin status/help alias",
-        source: "command",
-        template: PROMPT_GOBLIN,
-        hints: hints(PROMPT_GOBLIN),
       }
       commands[Default.TEACH] = {
         name: Default.TEACH,

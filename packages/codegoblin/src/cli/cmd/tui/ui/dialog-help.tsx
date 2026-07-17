@@ -45,6 +45,9 @@ const GROUPS: Group[] = [
       { title: "Scroll page down", command: "session.page.down" },
       { title: "First message", command: "session.first" },
       { title: "Last message", command: "session.last" },
+      { title: "Next message", command: "session.message.next" },
+      { title: "Previous message", command: "session.message.previous" },
+      { title: "Jump to last user message", command: "session.messages_last_user" },
       { title: "Copy message", command: "messages.copy" },
       { title: "Toggle timestamps", command: "session.toggle.timestamps", fallback: "/timestamps" },
       { title: "Undo last message", command: "session.undo", fallback: "/undo" },
@@ -68,7 +71,7 @@ const GROUPS: Group[] = [
     rows: [
       { title: "Model selector", command: "model.list", fallback: "/model" },
       { title: "Recent model", command: "model.cycle_recent" },
-      { title: "Cycle variant", command: "variant.cycle" },
+      { title: "Switch model variant", command: "variant.cycle", fallback: "/variants" },
       { title: "Mode selector", command: "agent.list", fallback: "/mode" },
       { title: "Theme selector", command: "theme.switch", fallback: "/theme" },
     ],

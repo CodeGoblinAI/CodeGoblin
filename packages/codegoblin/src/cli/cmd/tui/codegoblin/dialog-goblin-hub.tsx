@@ -11,19 +11,9 @@ import { DialogMemory } from "./dialog-memory"
 import { DialogMarket } from "./dialog-market"
 import { DialogImageSettings, DialogAudioSettings, DialogModel3DSettings } from "./dialog-media-settings"
 
-type HubEntry = "memory" | "market" | "media-image" | "media-audio" | "media-3d" | "status" | "usage" | "models" | "balance" | "identity"
+type HubEntry = "memory" | "market" | "media-image" | "media-audio" | "media-3d" | "usage" | "models" | "balance" | "about"
 
 const ENTRIES: DialogSelectOption<HubEntry>[] = [
-  {
-    title: "Memory",
-    description: "Browse, pin, archive, and add CodeGoblin memories",
-    value: "memory",
-  },
-  {
-    title: "Market",
-    description: "Add, connect, authenticate, or disconnect MCP servers",
-    value: "market",
-  },
   {
     title: "Image settings",
     description: "Default image model, size, and output format",
@@ -40,9 +30,19 @@ const ENTRIES: DialogSelectOption<HubEntry>[] = [
     value: "media-3d",
   },
   {
-    title: "Status & about",
-    description: "What CodeGoblin is and how it routes image/audio prompts",
-    value: "status",
+    title: "Memory",
+    description: "Browse, pin, archive, and add CodeGoblin memories",
+    value: "memory",
+  },
+  {
+    title: "Market",
+    description: "Add, connect, authenticate, or disconnect MCP servers",
+    value: "market",
+  },
+  {
+    title: "Balance",
+    description: "Live provider balances (deepseek/moonshot) or manual fallback",
+    value: "balance",
   },
   {
     title: "Token hoard",
@@ -55,14 +55,11 @@ const ENTRIES: DialogSelectOption<HubEntry>[] = [
     value: "models",
   },
   {
-    title: "Balance",
-    description: "Live provider balances (deepseek/moonshot) or manual fallback",
-    value: "balance",
-  },
-  {
-    title: "Identity & theme",
-    description: "Product look, palette, and where to open the theme picker",
-    value: "identity",
+    // "Status" is deliberately not used here — /status is a different, real command
+    // (MCP/LSP/plugin connection status). This is product info, not connection state.
+    title: "About CodeGoblin",
+    description: "What CodeGoblin is, how it routes image/audio/3D prompts, theme/palette",
+    value: "about",
   },
 ]
 
@@ -72,7 +69,7 @@ export function DialogGoblinHub() {
 
   return (
     <DialogSelect
-      title={CodeGoblinBrand.product}
+      title="Settings"
       options={ENTRIES}
       onSelect={async (option) => {
         if (option.value === "memory") {
@@ -95,16 +92,6 @@ export function DialogGoblinHub() {
           dialog.replace(() => <DialogModel3DSettings />)
           return
         }
-        if (option.value === "status") {
-          const runtime = await collectRuntimeStatus()
-          dialog.replace(() => (
-            <DialogAlert
-              title={CodeGoblinBrand.product}
-              message={`${CodeGoblinBrand.mascot}\n${CodeGoblinBrand.tagline}\n\n${formatRuntimeStatus(runtime)}\n\nImage prompts route to local files when an image model is selected. 3D models use Tripo when a 3D model is selected.\n\n${CodeGoblinBrand.disclaimer}`}
-            />
-          ))
-          return
-        }
         if (option.value === "usage") {
           const summary = await CodeGoblinImageCommand.usageSummary(project.instance.directory() || process.cwd())
           dialog.replace(() => <DialogAlert title="Goblin Hoard" message={summary} />)
@@ -121,10 +108,11 @@ export function DialogGoblinHub() {
           dialog.replace(() => <DialogAlert title="CodeGoblin Balance" message={formatBalanceMessage(result)} />)
           return
         }
+        const runtime = await collectRuntimeStatus()
         dialog.replace(() => (
           <DialogAlert
-            title="CodeGoblin Identity"
-            message="CodeGoblin theme identity shows the product look: custom wordmark, green/black default TUI palette, CG terminal title, and local usage hoard. /theme opens the actual theme picker."
+            title="About CodeGoblin"
+            message={`${CodeGoblinBrand.mascot}\n${CodeGoblinBrand.tagline}\n\n${formatRuntimeStatus(runtime)}\n\nImage prompts route to local files when an image model is selected. 3D models use Tripo when a 3D model is selected.\n\nTheme: custom wordmark, green/black default TUI palette, CG terminal title. /theme opens the theme picker.\n\n${CodeGoblinBrand.disclaimer}`}
           />
         ))
       }}
