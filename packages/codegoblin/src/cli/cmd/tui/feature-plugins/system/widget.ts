@@ -1,11 +1,16 @@
 import { spawn, type ChildProcess } from "node:child_process"
+import { existsSync } from "node:fs"
+import { createInterface } from "node:readline"
+import path from "node:path"
 import { nativeBinPath, resolveNativeBinPath } from "@/codegoblin/memory-native"
+import { Global } from "@codegoblin/core/global"
 import type { TuiPlugin, TuiPluginApi } from "@codegoblin/plugin/tui"
 import type { InternalTuiPlugin } from "../../plugin/internal"
 
 const id = "internal:widget"
 
 const KV_ENABLED = "widget.enabled"
+const KV_SOUND = "widget.sound"
 
 /**
  * Desktop status widget: a tiny always-on-top native bubble (Rust,
@@ -22,6 +27,29 @@ type WidgetUpdate = {
   working?: boolean
   spend?: string
   startedAtMs?: number | null
+  done?: boolean
+  sound?: boolean
+  soundPath?: string
+}
+
+/** A custom completion bell: drop a `widget.wav` next to your config. */
+function customSoundPath(api: TuiPluginApi) {
+  const candidates = [
+    path.join(api.state.path.config, "widget.wav"),
+    path.join(Global.Path.config, "widget.wav"),
+  ]
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(candidate)) return candidate
+    } catch {}
+  }
+  return undefined
+}
+
+function formatDuration(ms: number) {
+  const secs = Math.max(0, Math.round(ms / 1000))
+  if (secs >= 60) return `${Math.floor(secs / 60)}m${String(secs % 60).padStart(2, "0")}s`
+  return `${secs}s`
 }
 
 const tui: TuiPlugin = async (api) => {
@@ -32,6 +60,7 @@ const tui: TuiPlugin = async (api) => {
   let startedAt: number | undefined
   let lastToolAt = 0
   let stopping = false
+  let errored = false
 
   function send(update: WidgetUpdate) {
     const stdin = child?.stdin
@@ -63,12 +92,24 @@ const tui: TuiPlugin = async (api) => {
       return false
     }
     const spawned = spawn(native, ["widget"], {
-      stdio: ["pipe", "ignore", "ignore"],
+      stdio: ["pipe", "pipe", "ignore"],
       windowsHide: true,
     })
     spawned.on("error", () => {
       if (child === spawned) child = undefined
     })
+    // The widget reports preference changes (menu clicks) on stdout.
+    if (spawned.stdout) {
+      const lines = createInterface({ input: spawned.stdout })
+      lines.on("line", (line) => {
+        try {
+          const event = JSON.parse(line)
+          if (event?.event === "sound" && typeof event.enabled === "boolean") {
+            api.kv.set(KV_SOUND, event.enabled)
+          }
+        } catch {}
+      })
+    }
     spawned.on("exit", () => {
       if (child !== spawned) return
       child = undefined
@@ -78,6 +119,7 @@ const tui: TuiPlugin = async (api) => {
     })
     child = spawned
     stopping = false
+    send({ sound: api.kv.get<boolean>(KV_SOUND, true), soundPath: customSoundPath(api) })
     pushSnapshot(watched)
     return true
   }
@@ -97,6 +139,7 @@ const tui: TuiPlugin = async (api) => {
     const sessionID = event.properties.sessionID
     const type = event.properties.status.type
     if (type === "busy" || type === "retry") {
+      errored = false
       if (watched !== sessionID) {
         watched = sessionID
         startedAt = Date.now()
@@ -107,8 +150,34 @@ const tui: TuiPlugin = async (api) => {
       return
     }
     if (sessionID !== watched) return
+    if (type === "idle" && errored) {
+      // The error banner already went out; don't overwrite it with "done".
+      errored = false
+      startedAt = undefined
+      return
+    }
+    if (type === "idle" && startedAt !== undefined) {
+      // A run just finished: flash + bell on the widget side.
+      const elapsed = Date.now() - startedAt
+      startedAt = undefined
+      send({
+        title: sessionTitle(sessionID),
+        working: false,
+        done: true,
+        status: `done · ${formatDuration(elapsed)}`,
+        startedAtMs: null,
+      })
+      return
+    }
     startedAt = undefined
     pushSnapshot(sessionID)
+  })
+
+  api.event.on("session.error", (event) => {
+    if (!event.properties.sessionID || event.properties.sessionID !== watched) return
+    if (startedAt === undefined) return
+    errored = true
+    send({ working: false, done: true, status: "hit an error — see terminal" })
   })
 
   api.event.on("message.part.updated", (event) => {
