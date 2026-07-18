@@ -59,7 +59,6 @@ import { TuiEvent } from "./event"
 import { KVProvider, useKV } from "./context/kv"
 import { Provider } from "@/provider/provider"
 import { ArgsProvider, useArgs, type Args } from "./context/args"
-import open from "open"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { TuiConfigProvider, useTuiConfig } from "./context/tui-config"
 import { TuiConfig } from "@/cli/cmd/tui/config/tui"
@@ -82,7 +81,6 @@ import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
 import { CodeGoblinBrand } from "@/codegoblin/brand"
 import { takeWindowsUpdateError } from "@/installation/windows-update"
-import { DialogImageSettings, DialogAudioSettings, DialogModel3DSettings } from "./codegoblin/dialog-media-settings"
 import { DialogMarket } from "./codegoblin/dialog-market"
 import { DialogGoblinHub } from "./codegoblin/dialog-goblin-hub"
 import { DialogMemory } from "./codegoblin/dialog-memory"
@@ -103,14 +101,11 @@ const appBindingCommands = [
   "model.list",
   "model.cycle_recent",
   "model.cycle_recent_reverse",
-  "model.cycle_favorite",
-  "model.cycle_favorite_reverse",
   "agent.list",
   "mcp.list",
   "agent.cycle",
   "agent.cycle.reverse",
   "variant.cycle",
-  "variant.list",
   "provider.connect",
   "console.org.switch",
   "opencode.status",
@@ -120,7 +115,6 @@ const appBindingCommands = [
   "theme.switch_mode",
   "theme.mode.lock",
   "help.show",
-  "docs.open",
   "app.debug",
   "app.console",
   "app.heap_snapshot",
@@ -617,24 +611,6 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         },
       },
       {
-        name: "model.cycle_favorite",
-        title: "Favorite cycle",
-        category: "Agent",
-        hidden: true,
-        run: () => {
-          local.model.cycleFavorite(1)
-        },
-      },
-      {
-        name: "model.cycle_favorite_reverse",
-        title: "Favorite cycle reverse",
-        category: "Agent",
-        hidden: true,
-        run: () => {
-          local.model.cycleFavorite(-1)
-        },
-      },
-      {
         name: "agent.list",
         title: "Switch mode",
         category: "Agent",
@@ -664,15 +640,12 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         },
       },
       {
+        // Command id stays "variant.cycle" — `codegoblin run`'s footer
+        // (run/runtime.boot.ts, run/footer.command.tsx) looks up this exact id
+        // independently of the interactive TUI, so renaming it would silently
+        // break that lookup. Behavior is now "open the picker" (was blind-cycle);
+        // the old separate "variant.list" picker command is folded in here.
         name: "variant.cycle",
-        title: "Variant cycle",
-        category: "Agent",
-        run: () => {
-          local.model.variant.cycle()
-        },
-      },
-      {
-        name: "variant.list",
         title: "Switch model variant",
         category: "Agent",
         hidden: local.model.variant.list().length === 0,
@@ -767,12 +740,12 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         category: "System",
       },
       {
-        // Single hub entry replaces the previously fragmented goblin status/balance/models/usage/identity
-        // palette commands. Old slash names are kept as aliases so muscle memory still resolves here.
+        // Single unified settings entry: image/audio/3D generation, memory, market,
+        // balance/usage, and about — all live inside this one dialog now instead of
+        // each having its own top-level slash command.
         name: "codegoblin.hub",
-        title: "CodeGoblin",
-        slashName: "goblin",
-        slashAliases: ["codegoblin", "goblin-balance", "goblin-models", "goblin-usage", "goblin-identity"],
+        title: "Settings",
+        slashName: "settings",
         run: () => {
           dialog.replace(() => <DialogGoblinHub />)
         },
@@ -782,39 +755,9 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         name: "codegoblin.memory",
         title: "CodeGoblin memory",
         slashName: "memory",
-        slashAliases: ["memories", "goblin-memory"],
+        slashAliases: ["memories"],
         run: () => {
           dialog.replace(() => <DialogMemory />)
-        },
-        category: "CodeGoblin",
-      },
-      {
-        name: "codegoblin.image.settings",
-        title: "Image generation settings",
-        slashName: "image-settings",
-        slashAliases: ["imagesettings", "image-config"],
-        run: () => {
-          dialog.replace(() => <DialogImageSettings />)
-        },
-        category: "CodeGoblin",
-      },
-      {
-        name: "codegoblin.audio.settings",
-        title: "Audio generation settings",
-        slashName: "audio-settings",
-        slashAliases: ["audiosettings", "audio-config"],
-        run: () => {
-          dialog.replace(() => <DialogAudioSettings />)
-        },
-        category: "CodeGoblin",
-      },
-      {
-        name: "codegoblin.model3d.settings",
-        title: "3D model generation settings",
-        slashName: "model3d-settings",
-        slashAliases: ["model3dsettings", "3d-settings", "3d-config"],
-        run: () => {
-          dialog.replace(() => <DialogModel3DSettings />)
         },
         category: "CodeGoblin",
       },
@@ -864,15 +807,6 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         slashAliases: ["shortcuts", "keys"],
         run: () => {
           dialog.replace(() => <DialogHelp />)
-        },
-        category: "System",
-      },
-      {
-        name: "docs.open",
-        title: "Open upstream docs",
-        run: () => {
-          open("https://opencode.ai/docs").catch(() => {})
-          dialog.clear()
         },
         category: "System",
       },
