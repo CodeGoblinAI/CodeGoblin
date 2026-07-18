@@ -28,6 +28,7 @@ type WidgetUpdate = {
   spend?: string
   startedAtMs?: number | null
   done?: boolean
+  error?: boolean
   sound?: boolean
   soundPath?: string
 }
@@ -177,7 +178,7 @@ const tui: TuiPlugin = async (api) => {
     if (!event.properties.sessionID || event.properties.sessionID !== watched) return
     if (startedAt === undefined) return
     errored = true
-    send({ working: false, done: true, status: "hit an error — see terminal" })
+    send({ working: false, done: true, error: true, status: "hit an error — see terminal" })
   })
 
   api.event.on("message.part.updated", (event) => {
