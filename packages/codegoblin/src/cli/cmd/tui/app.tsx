@@ -105,7 +105,7 @@ const appBindingCommands = [
   "mcp.list",
   "agent.cycle",
   "agent.cycle.reverse",
-  "variant.list",
+  "variant.cycle",
   "provider.connect",
   "console.org.switch",
   "opencode.status",

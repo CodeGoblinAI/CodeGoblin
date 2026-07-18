@@ -112,7 +112,7 @@ export function DialogGoblinHub() {
         dialog.replace(() => (
           <DialogAlert
             title="About CodeGoblin"
-            message={`${CodeGoblinBrand.mascot}\n${CodeGoblinBrand.tagline}\n\n${formatRuntimeStatus(runtime)}\n\nImage prompts route to local files when an image model is selected. 3D models use Tripo when a 3D model is selected.\n\nTheme: custom wordmark, green/black default TUI palette, CG terminal title. /theme opens the theme picker.\n\n${CodeGoblinBrand.disclaimer}`}
+            message={`${CodeGoblinBrand.mascot}\n${CodeGoblinBrand.tagline}\n\n${formatRuntimeStatus(runtime)}\n\nImage prompts route to local files when an image model is selected. 3D models use Tripo when a 3D model is selected.\n\nTheme: custom wordmark, theme-aware branding, and CG terminal title. /theme opens the theme picker.\n\n${CodeGoblinBrand.disclaimer}`}
           />
         ))
       }}
