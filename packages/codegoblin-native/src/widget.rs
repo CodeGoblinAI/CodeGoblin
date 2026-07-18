@@ -36,12 +36,14 @@ mod win {
     use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
     use windows_sys::Win32::Graphics::Gdi::*;
-    use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT};
+    use std::sync::OnceLock;
+    use windows_sys::Win32::Media::Audio::{
+        PlaySoundW, SND_ASYNC, SND_FILENAME, SND_MEMORY, SND_NODEFAULT,
+    };
     use windows_sys::Win32::System::Console::GetConsoleWindow;
     use windows_sys::Win32::UI::HiDpi::{
         SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     };
-    use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         TrackMouseEvent, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT,
     };
@@ -59,6 +61,7 @@ mod win {
         spend: Option<String>,
         started_at_ms: Option<u64>,
         done: Option<bool>,
+        error: Option<bool>,
         sound: Option<bool>,
         sound_path: Option<String>,
     }
@@ -103,6 +106,15 @@ mod win {
         DockedExpanded,
     }
 
+    struct Anim {
+        from: RECT,
+        to: RECT,
+        start: u64,
+        dur: u32,
+        /// When true, switch to the tab presentation once the slide lands.
+        collapse: bool,
+    }
+
     struct Ui {
         mode: Mode,
         edge: Edge,
@@ -116,6 +128,7 @@ mod win {
         flash: u8,
         /// Menu button rects (client coords), recomputed at paint.
         buttons: [RECT; 3],
+        anim: Option<Anim>,
     }
 
     const ZERO_RECT: RECT = RECT { left: 0, top: 0, right: 0, bottom: 0 };
@@ -131,12 +144,15 @@ mod win {
         frame: 0,
         flash: 0,
         buttons: [ZERO_RECT; 3],
+        anim: None,
     });
     static CTX: Mutex<Option<(isize, f32)>> = Mutex::new(None);
 
     const WM_APP_UPDATE: u32 = WM_APP + 1;
     const WM_APP_DONE: u32 = WM_APP + 2;
     const TIMER_TICK: usize = 1;
+    const TIMER_ANIM: usize = 2;
+    const ANIM_MS: u32 = 140;
 
     // 96-dpi layout constants (multiplied by the dpi scale at runtime).
     const BUBBLE_W: i32 = 320;
@@ -162,51 +178,60 @@ mod win {
     }
 
     // ── goblin mascot ────────────────────────────────────────────────────────
-    // 14x12 pixel grids: G skin, D dark shade, B eyes, T gold, W sparkle.
+    // The brand mask from codegoblin-logo.png as 18x14 pixel grids: a flat
+    // angular goblin mask — center crest, winged ears, asymmetric rectangular
+    // eye cutouts (left bigger than right), tapered chin. G skin, B eye cutout,
+    // D closed-lid shade, T gold, W sparkle.
 
-    const GOBLIN_OPEN: [&str; 12] = [
-        ".G..........G.",
-        ".GG........GG.",
-        ".GGGGGGGGGGGG.",
-        "..GGGGGGGGGG..",
-        ".GGGGGGGGGGGG.",
-        ".GGBBGGGGBBGG.",
-        ".GGBBGGGGBBGG.",
-        ".GGGGGGGGGGGG.",
-        "..GGGGGGGGGG..",
-        "..GGDDDDDDGG..",
-        "...GGGGGGGG...",
-        "....GGGGGG....",
+    const GOBLIN_OPEN: [&str; 14] = [
+        "......GGGGGG......",
+        ".....GGGGGGGG.....",
+        "...GGGGGGGGGGGG...",
+        "..GGGGGGGGGGGGGG..",
+        "G.GGGGGGGGGGGGGG.G",
+        "GGGGGGGGGGGGGGGGGG",
+        "GGGGBBBGGGGGBBGGGG",
+        ".GGGBBBGGGGGBBGGG.",
+        "..GGBBBGGGGGBBGG..",
+        "...GGGGGGGGGGGG...",
+        "....GGGGGGGGGG....",
+        ".....GGGGGGGG.....",
+        "......GGGGGG......",
+        ".......GGGG.......",
     ];
 
-    const GOBLIN_BLINK: [&str; 12] = [
-        ".G..........G.",
-        ".GG........GG.",
-        ".GGGGGGGGGGGG.",
-        "..GGGGGGGGGG..",
-        ".GGGGGGGGGGGG.",
-        ".GGGGGGGGGGGG.",
-        ".GGDDGGGGDDGG.",
-        ".GGGGGGGGGGGG.",
-        "..GGGGGGGGGG..",
-        "..GGDDDDDDGG..",
-        "...GGGGGGGG...",
-        "....GGGGGG....",
+    const GOBLIN_BLINK: [&str; 14] = [
+        "......GGGGGG......",
+        ".....GGGGGGGG.....",
+        "...GGGGGGGGGGGG...",
+        "..GGGGGGGGGGGGGG..",
+        "G.GGGGGGGGGGGGGG.G",
+        "GGGGGGGGGGGGGGGGGG",
+        "GGGGGGGGGGGGGGGGGG",
+        ".GGGDDDGGGGGDDGGG.",
+        "..GGGGGGGGGGGGGG..",
+        "...GGGGGGGGGGGG...",
+        "....GGGGGGGGGG....",
+        ".....GGGGGGGG.....",
+        "......GGGGGG......",
+        ".......GGGG.......",
     ];
 
-    const GOBLIN_HAPPY: [&str; 12] = [
-        ".G....W.....G.",
-        ".GG..WTW...GG.",
-        ".GGGGGWGGGGGG.",
-        "..GGGGGGGGGG..",
-        ".GGGGGGGGGGGG.",
-        ".GGBBGGGGBBGG.",
-        ".GGGGGGGGGGGG.",
-        ".GGGGGGGGGGGG.",
-        "..GDGGGGGGDG..",
-        "..GGDDDDDDGG..",
-        "...GGGGGGGG...",
-        "....GGGGGG....",
+    const GOBLIN_HAPPY: [&str; 14] = [
+        "......GGGGGG..W...",
+        ".....GGGGGGGG.....",
+        "...GGGGGGGGGGGG...",
+        "..GGGGGGGGGGGGGG..",
+        "G.GGGGGGGGGGGGGG.G",
+        "GGGGGGGGGGGGGGGGGG",
+        "GGGGTTTGGGGGTTGGGG",
+        ".GGGTTTGGGGGTTGGG.",
+        "..GGTTTGGGGGTTGG..",
+        "...GGGGGGGGGGGG...",
+        "....GGGGGGGGGG....",
+        ".....GGGGGGGG.....",
+        "......GGGGGG......",
+        ".......GGGG.......",
     ];
 
     fn wide(s: &str) -> Vec<u16> {
@@ -243,7 +268,60 @@ mod win {
         let _ = out.flush();
     }
 
-    fn play_done_sound() {
+    // ── chimes ───────────────────────────────────────────────────────────────
+    // Little synthesized goblin chimes (soft chiptune: sine + a whisper of
+    // square), rendered once into in-memory WAVs and played with SND_MEMORY.
+
+    const SAMPLE_RATE: u32 = 22050;
+
+    fn synth_chime(notes: &[(f32, f32)]) -> Vec<u8> {
+        let mut samples: Vec<i16> = Vec::new();
+        for &(freq, dur) in notes {
+            let count = (dur * SAMPLE_RATE as f32) as usize;
+            for i in 0..count {
+                let t = i as f32 / SAMPLE_RATE as f32;
+                let phase = 2.0 * std::f32::consts::PI * freq * t;
+                let sine = phase.sin();
+                let square = if sine >= 0.0 { 1.0 } else { -1.0 };
+                let envelope = (-t * 9.0).exp() * (1.0 - (i as f32 / count as f32)).max(0.0);
+                let value = (0.72 * sine + 0.28 * square) * envelope * 0.30;
+                samples.push((value * i16::MAX as f32) as i16);
+            }
+        }
+        // Standard 16-bit mono PCM WAV container.
+        let data_len = (samples.len() * 2) as u32;
+        let mut wav = Vec::with_capacity(44 + data_len as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+        wav.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
+        wav.extend_from_slice(&(SAMPLE_RATE * 2).to_le_bytes()); // byte rate
+        wav.extend_from_slice(&2u16.to_le_bytes()); // block align
+        wav.extend_from_slice(&16u16.to_le_bytes()); // bits
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        for sample in samples {
+            wav.extend_from_slice(&sample.to_le_bytes());
+        }
+        wav
+    }
+
+    fn done_chime() -> &'static [u8] {
+        static CHIME: OnceLock<Vec<u8>> = OnceLock::new();
+        // A bright little rising "dig complete": G5 → D6 → G6.
+        CHIME.get_or_init(|| synth_chime(&[(784.0, 0.11), (1175.0, 0.11), (1568.0, 0.22)]))
+    }
+
+    fn error_chime() -> &'static [u8] {
+        static CHIME: OnceLock<Vec<u8>> = OnceLock::new();
+        // A low descending "uh-oh": D4 → G3.
+        CHIME.get_or_init(|| synth_chime(&[(294.0, 0.16), (196.0, 0.26)]))
+    }
+
+    fn play_finish_sound(error: bool) {
         let (enabled, path) = {
             let guard = STATE.lock().unwrap();
             let state = match guard.as_ref() {
@@ -256,14 +334,16 @@ mod win {
             return;
         }
         unsafe {
-            if let Some(path) = path {
-                let w = wide(&path);
-                if PlaySoundW(w.as_ptr(), std::ptr::null_mut(), SND_ASYNC | SND_FILENAME | SND_NODEFAULT) != 0 {
-                    return;
+            if !error {
+                if let Some(path) = path {
+                    let w = wide(&path);
+                    if PlaySoundW(w.as_ptr(), std::ptr::null_mut(), SND_ASYNC | SND_FILENAME | SND_NODEFAULT) != 0 {
+                        return;
+                    }
                 }
             }
-            // Default bell: the system "asterisk" chime.
-            MessageBeep(MB_ICONASTERISK);
+            let chime = if error { error_chime() } else { done_chime() };
+            PlaySoundW(chime.as_ptr() as *const u16, std::ptr::null_mut(), SND_ASYNC | SND_MEMORY | SND_NODEFAULT);
         }
     }
 
@@ -364,6 +444,7 @@ mod win {
                     continue;
                 };
                 let mut finished = false;
+                let failed = update.error == Some(true);
                 {
                     let mut guard = STATE.lock().unwrap();
                     let state = guard.get_or_insert_with(State::default);
@@ -401,7 +482,7 @@ mod win {
                     PostMessageW(hwnd as HWND, if finished { WM_APP_DONE } else { WM_APP_UPDATE }, 0, 0);
                 }
                 if finished {
-                    play_done_sound();
+                    play_finish_sound(failed);
                 }
             }
             // stdin closed: the TUI is gone, so leave with it.
@@ -474,6 +555,59 @@ mod win {
         }
     }
 
+    /// Slide the window toward `to` over ANIM_MS with an ease-out curve.
+    fn start_anim(hwnd: HWND, to: (i32, i32, i32, i32), collapse: bool) {
+        let from = window_rect(hwnd);
+        {
+            let mut ui = UI.lock().unwrap();
+            ui.anim = Some(Anim {
+                from,
+                to: RECT { left: to.0, top: to.1, right: to.0 + to.2, bottom: to.1 + to.3 },
+                start: now_ms(),
+                dur: ANIM_MS,
+                collapse,
+            });
+        }
+        unsafe {
+            SetTimer(hwnd, TIMER_ANIM, 10, None);
+        }
+    }
+
+    fn step_anim(hwnd: HWND) {
+        let step = {
+            let mut ui = UI.lock().unwrap();
+            let Some(anim) = ui.anim.as_ref() else {
+                return;
+            };
+            let p = ((now_ms().saturating_sub(anim.start)) as f32 / anim.dur as f32).min(1.0);
+            let ease = 1.0 - (1.0 - p).powi(3);
+            let lerp = |a: i32, b: i32| a + (((b - a) as f32) * ease).round() as i32;
+            let rect = (
+                lerp(anim.from.left, anim.to.left),
+                lerp(anim.from.top, anim.to.top),
+                lerp(anim.from.right - anim.from.left, anim.to.right - anim.to.left),
+                lerp(anim.from.bottom - anim.from.top, anim.to.bottom - anim.to.top),
+            );
+            let finished = p >= 1.0;
+            if finished {
+                let collapse = anim.collapse;
+                ui.anim = None;
+                if collapse {
+                    ui.mode = Mode::DockedTab;
+                }
+            }
+            (rect, finished)
+        };
+        let ((x, y, w, h), finished) = step;
+        set_rect(hwnd, x, y, w, h);
+        unsafe {
+            if finished {
+                KillTimer(hwnd, TIMER_ANIM);
+            }
+            InvalidateRect(hwnd, std::ptr::null(), 0);
+        }
+    }
+
     /// After a drag: dock if dropped near an edge, otherwise float.
     fn settle_after_drag(hwnd: HWND) {
         let c = ctx();
@@ -500,12 +634,13 @@ mod win {
                     Edge::Top => rc.left,
                     Edge::Left | Edge::Right => rc.top,
                 };
-                let (x, y, w, h) = expanded_rect(&c, &mon, edge, ui.along);
+                let target = expanded_rect(&c, &mon, edge, ui.along);
                 drop(ui);
-                set_rect(hwnd, x, y, w, h);
+                start_anim(hwnd, target, false);
             }
             None => {
                 ui.mode = Mode::Floating;
+                ui.anim = None;
                 let (w, h) = (px(&c, BUBBLE_W), px(&c, BUBBLE_H));
                 drop(ui);
                 set_rect(hwnd, rc.left, rc.top, w, h);
@@ -518,28 +653,31 @@ mod win {
         let c = ctx();
         let mon = monitor_rect(hwnd);
         let mut ui = UI.lock().unwrap();
-        if ui.mode != Mode::DockedTab {
+        // Expand from the tab, or reverse an in-flight collapse.
+        let collapsing = ui.anim.as_ref().map(|a| a.collapse).unwrap_or(false);
+        if ui.mode != Mode::DockedTab && !collapsing {
             return;
         }
         ui.mode = Mode::DockedExpanded;
-        let (x, y, w, h) = expanded_rect(&c, &mon, ui.edge, ui.along);
+        ui.anim = None;
+        let target = expanded_rect(&c, &mon, ui.edge, ui.along);
         drop(ui);
-        set_rect(hwnd, x, y, w, h);
-        unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
+        start_anim(hwnd, target, false);
     }
 
     fn collapse_to_tab(hwnd: HWND) {
         let c = ctx();
         let mon = monitor_rect(hwnd);
-        let mut ui = UI.lock().unwrap();
+        let ui = UI.lock().unwrap();
         if ui.mode != Mode::DockedExpanded || ui.in_drag {
             return;
         }
-        ui.mode = Mode::DockedTab;
-        let (x, y, w, h) = tab_rect(&c, &mon, ui.edge, ui.along);
+        if ui.anim.as_ref().map(|a| a.collapse).unwrap_or(false) {
+            return; // already on its way in
+        }
+        let target = tab_rect(&c, &mon, ui.edge, ui.along);
         drop(ui);
-        set_rect(hwnd, x, y, w, h);
-        unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
+        start_anim(hwnd, target, true);
     }
 
     fn track_leave(hwnd: HWND, nonclient: bool) {
@@ -610,6 +748,10 @@ mod win {
                     ui.flash = 6;
                 }
                 InvalidateRect(hwnd, std::ptr::null(), 0);
+                0
+            }
+            WM_TIMER if wparam == TIMER_ANIM => {
+                step_anim(hwnd);
                 0
             }
             WM_TIMER => {
@@ -781,7 +923,7 @@ mod win {
     }
 
     unsafe fn draw_goblin(dc: HDC, c: &Ctx, x: i32, y: i32, state: &State, frame: u8) {
-        let grid: &[&str; 12] = if state.done {
+        let grid: &[&str; 14] = if state.done {
             &GOBLIN_HAPPY
         } else if state.working && frame % 4 == 3 {
             &GOBLIN_BLINK
@@ -869,8 +1011,8 @@ mod win {
             let pad = px(&c, 10);
 
             // Mascot column.
-            let sprite_w = px(&c, 2).max(2) * 14;
-            draw_goblin(mem, &c, pad, px(&c, 16), state, frame);
+            let sprite_w = px(&c, 2).max(2) * 18;
+            draw_goblin(mem, &c, pad, px(&c, 14), state, frame);
 
             let text_x = pad + sprite_w + px(&c, 8);
             let title_font = make_font(&c, 14, 600);
