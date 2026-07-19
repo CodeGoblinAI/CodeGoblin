@@ -181,6 +181,7 @@ export type AuthOAuthResult = { url: string; instructions: string } & (
           ))
         | {
             type: "failed"
+            message?: string
           }
       >
     }
@@ -202,6 +203,7 @@ export type AuthOAuthResult = { url: string; instructions: string } & (
           ))
         | {
             type: "failed"
+            message?: string
           }
       >
     }

@@ -175,7 +175,10 @@ export const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> =
         }
       }
 
-      const result = yield* Effect.promise(() => method.authorize(input.inputs))
+      const result = yield* Effect.tryPromise({
+        try: () => method.authorize(input.inputs),
+        catch: (error) => new ValidationFailed({ field: "provider", message: errorMessage(error) }),
+      })
       pending.set(input.providerID, result)
       return {
         url: result.url,
@@ -192,10 +195,14 @@ export const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> =
         return yield* new OauthCodeMissing({ providerID: input.providerID })
       }
 
-      const result = yield* Effect.promise(() =>
-        match.method === "code" ? match.callback(input.code!) : match.callback(),
-      )
-      if (!result || result.type !== "success") return yield* new OauthCallbackFailed({})
+      const result = yield* Effect.tryPromise({
+        try: () => (match.method === "code" ? match.callback(input.code!) : match.callback()),
+        catch: (error) => new ValidationFailed({ field: "provider", message: errorMessage(error) }),
+      })
+      if (!result || result.type !== "success") {
+        if (result?.message) return yield* new ValidationFailed({ field: "provider", message: result.message })
+        return yield* new OauthCallbackFailed({})
+      }
 
       if ("key" in result) {
         yield* auth.set(input.providerID, {
@@ -224,5 +231,11 @@ export const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> =
 export const defaultLayer = Layer.suspend(() =>
   layer.pipe(Layer.provide(Auth.defaultLayer), Layer.provide(Plugin.defaultLayer)),
 )
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error) return error
+  return "Provider authentication failed"
+}
 
 export * as ProviderAuth from "./auth"

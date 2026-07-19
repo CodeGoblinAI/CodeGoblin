@@ -6,10 +6,24 @@ import {
   parseCliAgentEvent,
 } from "../../src/provider/cli-agent"
 import { withoutRetiredAnthropicOauth } from "../../src/auth"
+import { ClaudeCodeCliAuthPlugin, CursorAgentCliAuthPlugin } from "../../src/plugin/cli-agent"
 
 describe("local CLI agent providers", () => {
   test("advertises Claude Code and Cursor Agent as local providers", () => {
-    expect(cliAgentProviderInfos().map((provider) => String(provider.id))).toEqual(["claude-code", "cursor-agent"])
+    const providers = cliAgentProviderInfos()
+    expect(providers.map((provider) => String(provider.id))).toEqual(["claude-code", "cursor-agent"])
+    expect(Object.keys(providers[0].models.sonnet.variants ?? {})).toEqual(["low", "medium", "high", "xhigh", "max"])
+  })
+
+  test("connects local CLIs through provider auth methods instead of API-key prompts", async () => {
+    const claude = await ClaudeCodeCliAuthPlugin({} as never)
+    const cursor = await CursorAgentCliAuthPlugin({} as never)
+    expect(claude.auth?.methods).toEqual([
+      expect.objectContaining({ type: "oauth", label: "Connect installed Claude Code" }),
+    ])
+    expect(cursor.auth?.methods).toEqual([
+      expect.objectContaining({ type: "oauth", label: "Connect installed Cursor Agent" }),
+    ])
   })
 
   test("uses a stable valid UUID for Claude sessions", () => {
@@ -25,9 +39,12 @@ describe("local CLI agent providers", () => {
       modelID: "sonnet",
       sessionID: "ses_example",
       permissionMode: "plan",
+      effort: "high",
     })
     expect(command).toContain("plan")
     expect(command).toContain("--session-id")
+    expect(command).toContain("--effort")
+    expect(command).toContain("high")
     expect(command).not.toContain("--dangerously-skip-permissions")
     expect(command).not.toContain("--allow-dangerously-skip-permissions")
   })

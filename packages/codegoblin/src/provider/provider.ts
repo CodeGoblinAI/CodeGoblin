@@ -169,7 +169,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         providerID,
         () =>
           Effect.succeed({
-            autoload: true,
+            autoload: false,
             getModel: async (_sdk: unknown, modelID: string, options?: Record<string, unknown>) =>
               createCliAgentLanguageModel(providerID, modelID, options ?? {}),
           }),

@@ -20,10 +20,12 @@ const PROVIDER_PRIORITY: Record<string, number> = {
   opencode: 0,
   "opencode-go": 1,
   openai: 2,
-  "github-copilot": 3,
-  anthropic: 4,
-  google: 5,
-  elevenlabs: 6,
+  "claude-code": 3,
+  "cursor-agent": 4,
+  "github-copilot": 5,
+  anthropic: 6,
+  google: 7,
+  elevenlabs: 8,
 }
 
 const CUSTOM_PROVIDER_OPTION_VALUE = "__codegoblin_custom_provider__"
@@ -59,6 +61,8 @@ export function providerOptions(list: { id: string; name: string }[]): ProviderO
           opencode: "(Hosted coding models)",
           anthropic: "(API key)",
           openai: "(ChatGPT Plus/Pro or API key)",
+          "claude-code": "(Use your installed Claude Code account)",
+          "cursor-agent": "(Use your installed Cursor account)",
           elevenlabs: "(Voice, TTS, and music API key)",
           "opencode-go": "Low-cost hosted subscription",
         }[provider.id],

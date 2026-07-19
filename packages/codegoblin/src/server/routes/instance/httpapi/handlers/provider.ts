@@ -4,6 +4,7 @@ import { ModelsDev } from "@codegoblin/core/models-dev"
 import { Provider } from "@/provider/provider"
 import { ProviderID } from "@/provider/schema"
 import { augmentAudioModelCatalog, augmentImageModelCatalog, augment3DModelCatalog } from "@/codegoblin/provider"
+import { cliAgentProviderInfos } from "@/provider/cli-agent"
 import { mapValues } from "remeda"
 import { Effect, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -53,6 +54,9 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
         augmentAudioModelCatalog(available)
       }
       augment3DModelCatalog(available)
+      for (const item of cliAgentProviderInfos()) {
+        if ((enabled ? enabled.has(item.id) : true) && !disabled.has(item.id)) available[item.id] = item
+      }
       const providers = Object.assign(available, connected)
       return {
         all: Object.values(providers).map(Provider.toPublicInfo),

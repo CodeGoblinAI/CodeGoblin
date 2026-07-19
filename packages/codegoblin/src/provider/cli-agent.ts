@@ -18,6 +18,7 @@ type BridgeOptions = {
   sessionID?: string
   directory?: string
   permissionMode?: "agent" | "plan"
+  effort?: "low" | "medium" | "high" | "xhigh" | "max"
   executable?: string
 }
 
@@ -37,16 +38,19 @@ const EMPTY_USAGE: LanguageModelV3Usage = {
   outputTokens: { total: undefined, text: undefined, reasoning: undefined },
 }
 
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
+const CLAUDE_VARIANTS = Object.fromEntries(CLAUDE_EFFORTS.map((effort) => [effort, { effort }]))
+
 let sessionWrite = Promise.resolve()
 
 export function cliAgentProviderInfos(): Info[] {
   return [
     providerInfo("claude-code", "Claude Code (local CLI)", [
-      model("claude-code", "default", "Claude Code default", "claude"),
-      model("claude-code", "fable", "Claude Fable", "claude"),
-      model("claude-code", "opus", "Claude Opus", "claude"),
-      model("claude-code", "sonnet", "Claude Sonnet", "claude"),
-      model("claude-code", "haiku", "Claude Haiku", "claude"),
+      model("claude-code", "default", "Claude Code default", "claude", CLAUDE_VARIANTS),
+      model("claude-code", "fable", "Claude Fable (latest)", "claude", CLAUDE_VARIANTS),
+      model("claude-code", "opus", "Claude Opus (latest)", "claude", CLAUDE_VARIANTS),
+      model("claude-code", "sonnet", "Claude Sonnet (latest)", "claude", CLAUDE_VARIANTS),
+      model("claude-code", "haiku", "Claude Haiku (latest)", "claude", CLAUDE_VARIANTS),
     ]),
     providerInfo("cursor-agent", "Cursor Agent (local CLI)", [
       model("cursor-agent", "default", "Cursor Agent default", "cursor"),
@@ -96,7 +100,7 @@ export function createCliAgentLanguageModel(
       }
       const sessionID = bridge.sessionID
       if (!sessionID) throw new Error(`${providerName(providerID)} bridge did not receive a CodeGoblin session ID`)
-      const executable = bridge.executable || executablePath(providerID)
+      const executable = bridge.executable || cliAgentExecutable(providerID)
       if (!executable) throw new Error(missingExecutableMessage(providerID))
 
       const sessions = await readSessions()
@@ -109,6 +113,7 @@ export function createCliAgentLanguageModel(
         externalSessionID,
         sessionID,
         permissionMode: bridge.permissionMode ?? "agent",
+        effort: bridge.effort,
       })
       const proc = Bun.spawn(command, {
         cwd: bridge.directory || process.cwd(),
@@ -227,7 +232,13 @@ function providerInfo(id: CliAgentProviderID, name: string, models: Model[]): In
   }
 }
 
-function model(provider: CliAgentProviderID, id: string, name: string, family: string): Model {
+function model(
+  provider: CliAgentProviderID,
+  id: string,
+  name: string,
+  family: string,
+  variants: Record<string, Record<string, unknown>> = {},
+): Model {
   return {
     id: ModelID.make(id),
     providerID: ProviderID.make(provider),
@@ -249,11 +260,11 @@ function model(provider: CliAgentProviderID, id: string, name: string, family: s
     cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
     limit: { context: 200_000, output: 32_000 },
     release_date: "",
-    variants: {},
+    variants,
   }
 }
 
-function executablePath(providerID: CliAgentProviderID) {
+export function cliAgentExecutable(providerID: CliAgentProviderID) {
   const override = process.env[providerID === "claude-code" ? "CODEGOBLIN_CLAUDE_CLI" : "CODEGOBLIN_CURSOR_CLI"]
   return override || Bun.which(providerID === "claude-code" ? "claude" : "cursor-agent")
 }
@@ -265,6 +276,7 @@ export function buildCliAgentCommand(input: {
   externalSessionID?: string
   sessionID: string
   permissionMode: "agent" | "plan"
+  effort?: "low" | "medium" | "high" | "xhigh" | "max"
 }) {
   if (input.providerID === "claude-code") {
     const external = input.externalSessionID ?? deterministicCliSessionID(input.sessionID)
@@ -279,6 +291,7 @@ export function buildCliAgentCommand(input: {
       "--verbose",
       "--permission-mode",
       input.permissionMode === "plan" ? "plan" : "auto",
+      ...(input.effort ? ["--effort", input.effort] : []),
       ...(input.modelID === "default" ? [] : ["--model", input.modelID]),
       ...(input.externalSessionID ? ["--resume", external] : ["--session-id", external]),
     ]
