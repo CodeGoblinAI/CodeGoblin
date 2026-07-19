@@ -1,19 +1,28 @@
 //! `codegoblin-native widget` — a tiny always-on-top status bubble for Windows.
 //!
-//! The TUI spawns this binary and streams JSON lines on stdin:
-//!   {"title":"fix auth bug","working":true,"status":"bash","startedAtMs":1721312345000}
-//!   {"working":false,"done":true,"status":"done · 1m27s"}
-//!   {"sound":true,"soundPath":"C:\\...\\widget.wav"}
-//! Fields are optional; each line merges into the current state. When stdin
-//! closes (TUI exit), the widget exits. No network, no discovery.
+//! Protocol v2: the TUI streams full JSON snapshots on stdin, one per line:
+//!   {"sessions":[{"id":"ses_1","title":"fix auth","working":true,"status":"bash",
+//!     "startedAtMs":123,"spend":"$0.42","ctx":"18.8K · 9%","todoDone":3,"todoTotal":7}],
+//!    "question":{"requestID":"q1","sessionID":"ses_1","text":"Deploy target?",
+//!     "options":["Production","Staging"]},
+//!    "sound":true,"soundPath":null,"layout":{...},"chime":"done"}
+//! `sessions`/`question` fully replace previous state each line; `sound`,
+//! `soundPath`, and `layout` apply only when present (sent once at startup);
+//! `chime` is a one-shot play request ("done" | "error"). When stdin closes
+//! (TUI exit), the widget exits. No network, no discovery.
 //!
-//! The widget reports user preference changes as JSON lines on stdout
-//! (currently `{"event":"sound","enabled":bool}`) so the TUI can persist them.
+//! The widget reports user actions as JSON lines on stdout:
+//!   {"event":"sound","enabled":false}
+//!   {"event":"layout","mode":"floating","x":12,"y":40}
+//!   {"event":"layout","mode":"docked","edge":"right","along":420}
+//!   {"event":"interrupt","sessionID":"ses_1"}
+//!   {"event":"answer","requestID":"q1","option":"Staging"}
 //!
 //! Interactions:
 //!   - drag anywhere to move; drop near the top/left/right monitor edge to
 //!     dock it as a small tab (PC-Manager style); hover the tab to fly out
-//!   - hover shows a menu row: focus terminal / sound on-off / hide
+//!   - hover shows a menu row: focus / esc (interrupt) / sound / hide
+//!   - question options render as clickable buttons
 //!   - double-click refocuses the terminal, right-click dismisses
 
 #[cfg(windows)]
@@ -30,13 +39,12 @@ pub fn run() -> Result<(), String> {
 mod win {
     use serde::Deserialize;
     use std::io::BufRead;
-    use std::sync::Mutex;
+    use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
     use windows_sys::Win32::Graphics::Gdi::*;
-    use std::sync::OnceLock;
     use windows_sys::Win32::Media::Audio::{
         PlaySoundW, SND_ASYNC, SND_FILENAME, SND_MEMORY, SND_NODEFAULT,
     };
@@ -47,56 +55,106 @@ mod win {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         TrackMouseEvent, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT,
     };
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
     // Lives in the Win32_UI_Controls feature; not worth pulling that in for one constant.
     const WM_MOUSELEAVE: u32 = 0x02a3;
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-    #[derive(Default, Deserialize)]
+    // ── wire types ───────────────────────────────────────────────────────────
+
+    #[derive(Clone, Default, Deserialize)]
     #[serde(rename_all = "camelCase")]
-    struct Update {
-        title: Option<String>,
-        status: Option<String>,
-        working: Option<bool>,
-        spend: Option<String>,
+    struct Row {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        title: String,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        working: bool,
+        #[serde(default)]
+        done: bool,
+        #[serde(default)]
+        error: bool,
         started_at_ms: Option<u64>,
-        done: Option<bool>,
-        error: Option<bool>,
+        done_at_ms: Option<u64>,
+        spend: Option<String>,
+        ctx: Option<String>,
+        todo_done: Option<u32>,
+        todo_total: Option<u32>,
+    }
+
+    #[derive(Clone, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Question {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        #[serde(rename = "sessionID", default)]
+        _session_id: String,
+        text: String,
+        #[serde(default)]
+        options: Vec<String>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LayoutIn {
+        mode: String,
+        edge: Option<String>,
+        along: Option<i32>,
+        x: Option<i32>,
+        y: Option<i32>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Snapshot {
+        sessions: Option<Vec<Row>>,
+        question: Option<Question>,
         sound: Option<bool>,
         sound_path: Option<String>,
+        layout: Option<LayoutIn>,
+        chime: Option<String>,
     }
 
     struct State {
-        title: String,
-        status: String,
-        working: bool,
-        spend: String,
-        started_at_ms: Option<u64>,
-        done: bool,
+        rows: Vec<Row>,
+        question: Option<Question>,
         sound_enabled: bool,
         sound_path: Option<String>,
     }
 
     impl Default for State {
         fn default() -> Self {
-            Self {
-                title: String::new(),
-                status: String::new(),
-                working: false,
-                spend: String::new(),
-                started_at_ms: None,
-                done: false,
-                sound_enabled: true,
-                sound_path: None,
-            }
+            Self { rows: Vec::new(), question: None, sound_enabled: true, sound_path: None }
         }
     }
+
+    // ── ui state ─────────────────────────────────────────────────────────────
 
     #[derive(Clone, Copy, PartialEq)]
     enum Edge {
         Top,
         Left,
         Right,
+    }
+
+    impl Edge {
+        fn name(self) -> &'static str {
+            match self {
+                Edge::Top => "top",
+                Edge::Left => "left",
+                Edge::Right => "right",
+            }
+        }
+        fn parse(s: &str) -> Edge {
+            match s {
+                "left" => Edge::Left,
+                "right" => Edge::Right,
+                _ => Edge::Top,
+            }
+        }
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -115,6 +173,20 @@ mod win {
         collapse: bool,
     }
 
+    struct Hit {
+        rect: RECT,
+        action: Action,
+    }
+
+    #[derive(Clone, PartialEq)]
+    enum Action {
+        Focus,
+        Interrupt(String),
+        Sound,
+        Hide,
+        Answer(String, String), // requestID, option label
+    }
+
     struct Ui {
         mode: Mode,
         edge: Edge,
@@ -126,12 +198,11 @@ mod win {
         frame: u8,
         /// Remaining pulse ticks of the "done" border flash.
         flash: u8,
-        /// Menu button rects (client coords), recomputed at paint.
-        buttons: [RECT; 3],
+        /// Clickable regions (client coords), rebuilt at paint.
+        hits: Vec<Hit>,
         anim: Option<Anim>,
+        desired_h: i32,
     }
-
-    const ZERO_RECT: RECT = RECT { left: 0, top: 0, right: 0, bottom: 0 };
 
     static STATE: Mutex<Option<State>> = Mutex::new(None);
     static UI: Mutex<Ui> = Mutex::new(Ui {
@@ -143,8 +214,9 @@ mod win {
         pulse: false,
         frame: 0,
         flash: 0,
-        buttons: [ZERO_RECT; 3],
+        hits: Vec::new(),
         anim: None,
+        desired_h: 0,
     });
     static CTX: Mutex<Option<(isize, f32)>> = Mutex::new(None);
 
@@ -155,21 +227,32 @@ mod win {
     const ANIM_MS: u32 = 140;
 
     // 96-dpi layout constants (multiplied by the dpi scale at runtime).
-    const BUBBLE_W: i32 = 320;
-    const BUBBLE_H: i32 = 84;
+    const BUBBLE_W: i32 = 330;
     const MENU_H: i32 = 24;
     const TAB_LEN: i32 = 56;
     const TAB_THICK: i32 = 12;
     const SNAP: i32 = 16;
+    const PAD: i32 = 10;
+    const STRIPE_W: i32 = 3;
+    const SPRITE_COLS: i32 = 26;
+    const SPRITE_ROWS: i32 = 19;
+    const EXTRA_ROW_H: i32 = 20;
+    const META_ROW_H: i32 = 16;
+    const QUESTION_TEXT_H: i32 = 32;
+    const QUESTION_BTN_H: i32 = 22;
+    const PRIMARY_H: i32 = 44;
 
     const BG: COLORREF = rgb(0x16, 0x18, 0x1c);
+    const BG_RAISED: COLORREF = rgb(0x1c, 0x1f, 0x24);
     const EDGE_C: COLORREF = rgb(0x2a, 0x2d, 0x33);
     const TAB_BG: COLORREF = rgb(0x3a, 0x3d, 0x44);
     const TITLE_FG: COLORREF = rgb(0xe8, 0xe8, 0xe8);
     const STATUS_FG: COLORREF = rgb(0x9a, 0x9f, 0xa6);
+    const FAINT_FG: COLORREF = rgb(0x6b, 0x70, 0x78);
     const GREEN: COLORREF = rgb(0x9a, 0xdb, 0x35);
     const GREEN_DIM: COLORREF = rgb(0x4f, 0x70, 0x1e);
     const GOLD: COLORREF = rgb(0xd4, 0xb0, 0x6a);
+    const RED: COLORREF = rgb(0xd4, 0x6a, 0x6a);
     const EYE: COLORREF = rgb(0x10, 0x12, 0x14);
     const WHITE: COLORREF = rgb(0xff, 0xff, 0xff);
 
@@ -178,10 +261,8 @@ mod win {
     }
 
     // ── goblin mascot ────────────────────────────────────────────────────────
-    // The brand mask from codegoblin-logo.png as 18x14 pixel grids: a flat
-    // angular goblin mask — center crest, winged ears, asymmetric rectangular
-    // eye cutouts (left bigger than right), tapered chin. G skin, B eye cutout,
-    // D closed-lid shade, T gold, W sparkle.
+    // The brand mask, downsampled from codegoblin-logo.png into a 26x19 grid.
+    // G skin, B eye cutout, D closed-lid shade, T gold, W sparkle.
 
     const GOBLIN_OPEN: [&str; 19] = [
         ".........GGGGGGGG.........",
@@ -249,6 +330,8 @@ mod win {
         "..........GGGGGGG.........",
     ];
 
+    // ── helpers ──────────────────────────────────────────────────────────────
+
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
@@ -271,8 +354,8 @@ mod win {
         Ctx { terminal: terminal as HWND, scale }
     }
 
-    fn px(ctx: &Ctx, v: i32) -> i32 {
-        ((v as f32) * ctx.scale).round() as i32
+    fn px(c: &Ctx, v: i32) -> i32 {
+        ((v as f32) * c.scale).round() as i32
     }
 
     fn emit_stdout(line: &str) {
@@ -281,6 +364,29 @@ mod win {
         let _ = out.write_all(line.as_bytes());
         let _ = out.write_all(b"\n");
         let _ = out.flush();
+    }
+
+    fn json_escape(s: &str) -> String {
+        s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+    }
+
+    fn fmt_dur(secs: u64) -> String {
+        if secs >= 60 {
+            format!("{}m{:02}s", secs / 60, secs % 60)
+        } else {
+            format!("{}s", secs)
+        }
+    }
+
+    fn fmt_ago(ms: u64) -> String {
+        let secs = now_ms().saturating_sub(ms) / 1000;
+        if secs < 60 {
+            "just now".into()
+        } else if secs < 3600 {
+            format!("{}m ago", secs / 60)
+        } else {
+            format!("{}h ago", secs / 3600)
+        }
     }
 
     // ── chimes ───────────────────────────────────────────────────────────────
@@ -303,19 +409,18 @@ mod win {
                 samples.push((value * i16::MAX as f32) as i16);
             }
         }
-        // Standard 16-bit mono PCM WAV container.
         let data_len = (samples.len() * 2) as u32;
         let mut wav = Vec::with_capacity(44 + data_len as usize);
         wav.extend_from_slice(b"RIFF");
         wav.extend_from_slice(&(36 + data_len).to_le_bytes());
         wav.extend_from_slice(b"WAVEfmt ");
         wav.extend_from_slice(&16u32.to_le_bytes());
-        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
-        wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
         wav.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
-        wav.extend_from_slice(&(SAMPLE_RATE * 2).to_le_bytes()); // byte rate
-        wav.extend_from_slice(&2u16.to_le_bytes()); // block align
-        wav.extend_from_slice(&16u16.to_le_bytes()); // bits
+        wav.extend_from_slice(&(SAMPLE_RATE * 2).to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
         wav.extend_from_slice(b"data");
         wav.extend_from_slice(&data_len.to_le_bytes());
         for sample in samples {
@@ -336,7 +441,7 @@ mod win {
         CHIME.get_or_init(|| synth_chime(&[(294.0, 0.16), (196.0, 0.26)]))
     }
 
-    fn play_finish_sound(error: bool) {
+    fn play_chime(error: bool) {
         let (enabled, path) = {
             let guard = STATE.lock().unwrap();
             let state = match guard.as_ref() {
@@ -352,7 +457,8 @@ mod win {
             if !error {
                 if let Some(path) = path {
                     let w = wide(&path);
-                    if PlaySoundW(w.as_ptr(), std::ptr::null_mut(), SND_ASYNC | SND_FILENAME | SND_NODEFAULT) != 0 {
+                    if PlaySoundW(w.as_ptr(), std::ptr::null_mut(), SND_ASYNC | SND_FILENAME | SND_NODEFAULT) != 0
+                    {
                         return;
                     }
                 }
@@ -362,168 +468,37 @@ mod win {
         }
     }
 
-    pub fn run() -> Result<(), String> {
-        unsafe {
-            let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    // ── layout math ──────────────────────────────────────────────────────────
 
-            // Whoever is foreground at launch is almost always the terminal the
-            // user toggled the widget from; remember it for click-to-focus.
-            let terminal = GetForegroundWindow();
-
-            let instance = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
-            let class_name = wide("CodeGoblinWidget");
-            let wc = WNDCLASSW {
-                style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
-                lpfnWndProc: Some(wnd_proc),
-                cbClsExtra: 0,
-                cbWndExtra: 0,
-                hInstance: instance,
-                hIcon: std::ptr::null_mut(),
-                hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
-                hbrBackground: std::ptr::null_mut(),
-                lpszMenuName: std::ptr::null(),
-                lpszClassName: class_name.as_ptr(),
-            };
-            if RegisterClassW(&wc) == 0 {
-                return Err("RegisterClassW failed".into());
+    fn desired_height(c: &Ctx) -> i32 {
+        let guard = STATE.lock().unwrap();
+        let (extras, has_meta, question_btns, has_question) = match guard.as_ref() {
+            Some(s) => {
+                let extras = s.rows.len().saturating_sub(1).min(3) as i32;
+                let has_meta = s
+                    .rows
+                    .first()
+                    .map(|r| r.ctx.is_some() || r.todo_total.unwrap_or(0) > 0)
+                    .unwrap_or(false);
+                let btns = s.question.as_ref().map(|q| !q.options.is_empty()).unwrap_or(false);
+                (extras, has_meta, btns, s.question.is_some())
             }
-
-            let dpi = windows_sys::Win32::UI::HiDpi::GetDpiForSystem();
-            let scale = (dpi as f32) / 96.0;
-            *CTX.lock().unwrap() = Some((terminal as isize, scale));
-            let c = ctx();
-
-            let width = px(&c, BUBBLE_W);
-            let height = px(&c, BUBBLE_H);
-
-            // Bottom-right of the work area (above the taskbar).
-            let mut work = RECT { left: 0, top: 0, right: 1280, bottom: 720 };
-            SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut work as *mut _ as *mut _, 0);
-            let x = work.right - width - px(&c, 16);
-            let y = work.bottom - height - px(&c, 16);
-
-            let title = wide("CodeGoblin");
-            let hwnd = CreateWindowExW(
-                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                class_name.as_ptr(),
-                title.as_ptr(),
-                WS_POPUP,
-                x,
-                y,
-                width,
-                height,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                instance,
-                std::ptr::null_mut(),
-            );
-            if hwnd.is_null() {
-                return Err("CreateWindowExW failed".into());
-            }
-
-            // Win11 rounded corners; silently ignored on Win10.
-            const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
-            const DWMWCP_ROUND: u32 = 2;
-            let pref: u32 = DWMWCP_ROUND;
-            let _ = DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_WINDOW_CORNER_PREFERENCE,
-                &pref as *const _ as *const _,
-                std::mem::size_of::<u32>() as u32,
-            );
-
-            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-            SetTimer(hwnd, TIMER_TICK, 600, None);
-
-            spawn_stdin_reader(hwnd as isize);
-
-            let mut msg: MSG = std::mem::zeroed();
-            while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
+            None => (0, false, false, false),
+        };
+        let mut h = PAD + PRIMARY_H;
+        if has_meta {
+            h += META_ROW_H;
+        }
+        h += extras * EXTRA_ROW_H;
+        if has_question {
+            h += QUESTION_TEXT_H;
+            if question_btns {
+                h += QUESTION_BTN_H + 4;
             }
         }
-        Ok(())
+        h += MENU_H;
+        px(c, h)
     }
-
-    fn spawn_stdin_reader(hwnd: isize) {
-        std::thread::spawn(move || {
-            let stdin = std::io::stdin();
-            for line in stdin.lock().lines() {
-                let Ok(line) = line else { break };
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                let Ok(update) = serde_json::from_str::<Update>(trimmed) else {
-                    continue;
-                };
-                let mut finished = false;
-                let failed = update.error == Some(true);
-                {
-                    let mut guard = STATE.lock().unwrap();
-                    let state = guard.get_or_insert_with(State::default);
-                    if let Some(v) = update.title {
-                        state.title = v;
-                    }
-                    if let Some(v) = update.status {
-                        state.status = v;
-                    }
-                    if let Some(v) = update.working {
-                        if v && state.done {
-                            state.done = false;
-                        }
-                        state.working = v;
-                    }
-                    if let Some(v) = update.spend {
-                        state.spend = v;
-                    }
-                    if update.started_at_ms.is_some() {
-                        state.started_at_ms = update.started_at_ms;
-                    }
-                    if let Some(v) = update.sound {
-                        state.sound_enabled = v;
-                    }
-                    if update.sound_path.is_some() {
-                        state.sound_path = update.sound_path;
-                    }
-                    if update.done == Some(true) && !state.done {
-                        state.done = true;
-                        state.working = false;
-                        finished = true;
-                    }
-                }
-                unsafe {
-                    PostMessageW(hwnd as HWND, if finished { WM_APP_DONE } else { WM_APP_UPDATE }, 0, 0);
-                }
-                if finished {
-                    play_finish_sound(failed);
-                }
-            }
-            // stdin closed: the TUI is gone, so leave with it.
-            unsafe {
-                PostMessageW(hwnd as HWND, WM_CLOSE, 0, 0);
-            }
-        });
-    }
-
-    fn focus_terminal() {
-        let c = ctx();
-        unsafe {
-            let mut target = c.terminal;
-            if target.is_null() || IsWindow(target) == 0 {
-                target = GetConsoleWindow();
-            }
-            if !target.is_null() && IsWindow(target) != 0 {
-                if IsIconic(target) != 0 {
-                    ShowWindow(target, SW_RESTORE);
-                }
-                SetForegroundWindow(target);
-            }
-        }
-    }
-
-    // ── docking geometry ─────────────────────────────────────────────────────
 
     fn monitor_rect(hwnd: HWND) -> RECT {
         unsafe {
@@ -560,9 +535,8 @@ mod win {
         }
     }
 
-    fn expanded_rect(c: &Ctx, mon: &RECT, edge: Edge, along: i32) -> (i32, i32, i32, i32) {
+    fn expanded_rect(c: &Ctx, mon: &RECT, edge: Edge, along: i32, h: i32) -> (i32, i32, i32, i32) {
         let w = px(c, BUBBLE_W);
-        let h = px(c, BUBBLE_H);
         match edge {
             Edge::Top => (along.clamp(mon.left, mon.right - w), mon.top, w, h),
             Edge::Left => (mon.left, along.clamp(mon.top, mon.bottom - h), w, h),
@@ -570,7 +544,39 @@ mod win {
         }
     }
 
-    /// Slide the window toward `to` over ANIM_MS with an ease-out curve.
+    /// Apply a new desired height after a snapshot; keeps the bottom edge
+    /// anchored when the bubble sits in the lower half of the screen.
+    fn apply_height(hwnd: HWND) {
+        let c = ctx();
+        let h = desired_height(&c);
+        let (mode, edge, along) = {
+            let mut ui = UI.lock().unwrap();
+            ui.desired_h = h;
+            (ui.mode, ui.edge, ui.along)
+        };
+        match mode {
+            Mode::Floating => {
+                let rc = window_rect(hwnd);
+                let cur_h = rc.bottom - rc.top;
+                if cur_h == h {
+                    return;
+                }
+                let mon = monitor_rect(hwnd);
+                let mid = (mon.top + mon.bottom) / 2;
+                let y = if rc.top > mid { rc.bottom - h } else { rc.top };
+                set_rect(hwnd, rc.left, y, px(&c, BUBBLE_W), h);
+            }
+            Mode::DockedExpanded => {
+                let mon = monitor_rect(hwnd);
+                let (x, y, w, hh) = expanded_rect(&c, &mon, edge, along, h);
+                set_rect(hwnd, x, y, w, hh);
+            }
+            Mode::DockedTab => {}
+        }
+    }
+
+    // ── animation ────────────────────────────────────────────────────────────
+
     fn start_anim(hwnd: HWND, to: (i32, i32, i32, i32), collapse: bool) {
         let from = window_rect(hwnd);
         {
@@ -623,7 +629,29 @@ mod win {
         }
     }
 
-    /// After a drag: dock if dropped near an edge, otherwise float.
+    // ── dock / drag ──────────────────────────────────────────────────────────
+
+    fn emit_layout(hwnd: HWND) {
+        let ui = UI.lock().unwrap();
+        match ui.mode {
+            Mode::Floating => {
+                drop(ui);
+                let rc = window_rect(hwnd);
+                emit_stdout(&format!(
+                    "{{\"event\":\"layout\",\"mode\":\"floating\",\"x\":{},\"y\":{}}}",
+                    rc.left, rc.top
+                ));
+            }
+            Mode::DockedTab | Mode::DockedExpanded => {
+                emit_stdout(&format!(
+                    "{{\"event\":\"layout\",\"mode\":\"docked\",\"edge\":\"{}\",\"along\":{}}}",
+                    ui.edge.name(),
+                    ui.along
+                ));
+            }
+        }
+    }
+
     fn settle_after_drag(hwnd: HWND) {
         let c = ctx();
         let mon = monitor_rect(hwnd);
@@ -649,33 +677,33 @@ mod win {
                     Edge::Top => rc.left,
                     Edge::Left | Edge::Right => rc.top,
                 };
-                let target = expanded_rect(&c, &mon, edge, ui.along);
+                let target = expanded_rect(&c, &mon, edge, ui.along, ui.desired_h.max(px(&c, 60)));
                 drop(ui);
                 start_anim(hwnd, target, false);
             }
             None => {
                 ui.mode = Mode::Floating;
                 ui.anim = None;
-                let (w, h) = (px(&c, BUBBLE_W), px(&c, BUBBLE_H));
+                let h = ui.desired_h.max(px(&c, 60));
                 drop(ui);
-                set_rect(hwnd, rc.left, rc.top, w, h);
+                set_rect(hwnd, rc.left, rc.top, px(&c, BUBBLE_W), h);
             }
         }
         unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
+        emit_layout(hwnd);
     }
 
     fn expand_from_tab(hwnd: HWND) {
         let c = ctx();
         let mon = monitor_rect(hwnd);
         let mut ui = UI.lock().unwrap();
-        // Expand from the tab, or reverse an in-flight collapse.
         let collapsing = ui.anim.as_ref().map(|a| a.collapse).unwrap_or(false);
         if ui.mode != Mode::DockedTab && !collapsing {
             return;
         }
         ui.mode = Mode::DockedExpanded;
         ui.anim = None;
-        let target = expanded_rect(&c, &mon, ui.edge, ui.along);
+        let target = expanded_rect(&c, &mon, ui.edge, ui.along, ui.desired_h.max(px(&c, 60)));
         drop(ui);
         start_anim(hwnd, target, false);
     }
@@ -688,7 +716,7 @@ mod win {
             return;
         }
         if ui.anim.as_ref().map(|a| a.collapse).unwrap_or(false) {
-            return; // already on its way in
+            return;
         }
         let target = tab_rect(&c, &mon, ui.edge, ui.along);
         drop(ui);
@@ -721,8 +749,6 @@ mod win {
     }
 
     fn on_leave(hwnd: HWND) {
-        // The cursor may have moved between our client and non-client areas —
-        // only treat it as a real leave when it is outside the window rect.
         let mut pt = POINT { x: 0, y: 0 };
         unsafe { GetCursorPos(&mut pt) };
         let rc = window_rect(hwnd);
@@ -741,19 +767,114 @@ mod win {
         }
     }
 
-    fn toggle_sound() -> bool {
+    fn focus_terminal() {
+        let c = ctx();
+        unsafe {
+            let mut target = c.terminal;
+            if target.is_null() || IsWindow(target) == 0 {
+                target = GetConsoleWindow();
+            }
+            if !target.is_null() && IsWindow(target) != 0 {
+                if IsIconic(target) != 0 {
+                    ShowWindow(target, SW_RESTORE);
+                }
+                SetForegroundWindow(target);
+            }
+        }
+    }
+
+    fn toggle_sound() {
         let mut guard = STATE.lock().unwrap();
         let state = guard.get_or_insert_with(State::default);
         state.sound_enabled = !state.sound_enabled;
         let enabled = state.sound_enabled;
         drop(guard);
         emit_stdout(&format!("{{\"event\":\"sound\",\"enabled\":{enabled}}}"));
-        enabled
     }
+
+    // ── stdin reader ─────────────────────────────────────────────────────────
+
+    fn apply_initial_layout(hwnd: HWND, layout: &LayoutIn) {
+        let c = ctx();
+        if layout.mode == "docked" {
+            let edge = Edge::parse(layout.edge.as_deref().unwrap_or("top"));
+            let along = layout.along.unwrap_or(0);
+            {
+                let mut ui = UI.lock().unwrap();
+                ui.mode = Mode::DockedTab;
+                ui.edge = edge;
+                ui.along = along;
+            }
+            let mon = monitor_rect(hwnd);
+            let (x, y, w, h) = tab_rect(&c, &mon, edge, along);
+            set_rect(hwnd, x, y, w, h);
+        } else if let (Some(x), Some(y)) = (layout.x, layout.y) {
+            let mon = monitor_rect(hwnd);
+            let w = px(&c, BUBBLE_W);
+            let h = { UI.lock().unwrap().desired_h.max(px(&c, 60)) };
+            let x = x.clamp(mon.left, (mon.right - w).max(mon.left));
+            let y = y.clamp(mon.top, (mon.bottom - h).max(mon.top));
+            set_rect(hwnd, x, y, w, h);
+        }
+        unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
+    }
+
+    fn spawn_stdin_reader(hwnd: isize) {
+        std::thread::spawn(move || {
+            let stdin = std::io::stdin();
+            let mut layout_applied = false;
+            for line in stdin.lock().lines() {
+                let Ok(line) = line else { break };
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let Ok(snapshot) = serde_json::from_str::<Snapshot>(trimmed) else {
+                    continue;
+                };
+                let chime = snapshot.chime.clone();
+                {
+                    let mut guard = STATE.lock().unwrap();
+                    let state = guard.get_or_insert_with(State::default);
+                    if let Some(rows) = snapshot.sessions {
+                        state.rows = rows;
+                        state.question = snapshot.question;
+                    } else if snapshot.question.is_some() {
+                        state.question = snapshot.question;
+                    }
+                    if let Some(v) = snapshot.sound {
+                        state.sound_enabled = v;
+                    }
+                    if snapshot.sound_path.is_some() {
+                        state.sound_path = snapshot.sound_path;
+                    }
+                }
+                if let Some(layout) = snapshot.layout {
+                    if !layout_applied {
+                        layout_applied = true;
+                        apply_initial_layout(hwnd as HWND, &layout);
+                    }
+                }
+                let msg = if chime.is_some() { WM_APP_DONE } else { WM_APP_UPDATE };
+                unsafe {
+                    PostMessageW(hwnd as HWND, msg, 0, 0);
+                }
+                if let Some(chime) = chime {
+                    play_chime(chime == "error");
+                }
+            }
+            unsafe {
+                PostMessageW(hwnd as HWND, WM_CLOSE, 0, 0);
+            }
+        });
+    }
+
+    // ── window proc ──────────────────────────────────────────────────────────
 
     unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         match msg {
             WM_APP_UPDATE => {
+                apply_height(hwnd);
                 InvalidateRect(hwnd, std::ptr::null(), 0);
                 0
             }
@@ -762,6 +883,7 @@ mod win {
                     let mut ui = UI.lock().unwrap();
                     ui.flash = 6;
                 }
+                apply_height(hwnd);
                 InvalidateRect(hwnd, std::ptr::null(), 0);
                 0
             }
@@ -773,10 +895,21 @@ mod win {
                 let mut repaint = false;
                 {
                     let mut ui = UI.lock().unwrap();
-                    let working = STATE.lock().unwrap().as_ref().map(|s| s.working).unwrap_or(false);
-                    if working {
+                    let (any_working, any_done) = {
+                        let guard = STATE.lock().unwrap();
+                        match guard.as_ref() {
+                            Some(s) => (
+                                s.rows.iter().any(|r| r.working),
+                                s.rows.iter().any(|r| r.done_at_ms.is_some()),
+                            ),
+                            None => (false, false),
+                        }
+                    };
+                    if any_working {
                         ui.pulse = !ui.pulse;
                         ui.frame = ui.frame.wrapping_add(1);
+                        repaint = true;
+                    } else if any_done {
                         repaint = true;
                     }
                     if ui.flash > 0 {
@@ -790,18 +923,18 @@ mod win {
                 0
             }
             WM_NCHITTEST => {
-                let c = ctx();
                 let ui = UI.lock().unwrap();
-                if ui.mode != Mode::DockedTab && ui.hovering {
-                    // The menu row is clickable; everything else drags.
+                if ui.mode != Mode::DockedTab {
                     let mut pt = POINT {
                         x: (lparam & 0xffff) as i16 as i32,
                         y: ((lparam >> 16) & 0xffff) as i16 as i32,
                     };
                     ScreenToClient(hwnd, &mut pt);
-                    let rc = window_rect(hwnd);
-                    let h = rc.bottom - rc.top;
-                    if pt.y >= h - px(&c, MENU_H) {
+                    if ui
+                        .hits
+                        .iter()
+                        .any(|h| pt.x >= h.rect.left && pt.x < h.rect.right && pt.y >= h.rect.top && pt.y < h.rect.bottom)
+                    {
                         return HTCLIENT as LRESULT;
                     }
                 }
@@ -833,22 +966,36 @@ mod win {
                     x: (lparam & 0xffff) as i16 as i32,
                     y: ((lparam >> 16) & 0xffff) as i16 as i32,
                 };
-                let hit = {
+                let action = {
                     let ui = UI.lock().unwrap();
-                    ui.buttons.iter().position(|rc| {
-                        pt.x >= rc.left && pt.x < rc.right && pt.y >= rc.top && pt.y < rc.bottom
-                    })
+                    ui.hits
+                        .iter()
+                        .find(|h| pt.x >= h.rect.left && pt.x < h.rect.right && pt.y >= h.rect.top && pt.y < h.rect.bottom)
+                        .map(|h| h.action.clone())
                 };
-                match hit {
-                    Some(0) => focus_terminal(),
-                    Some(1) => {
+                match action {
+                    Some(Action::Focus) => focus_terminal(),
+                    Some(Action::Interrupt(session)) => {
+                        emit_stdout(&format!(
+                            "{{\"event\":\"interrupt\",\"sessionID\":\"{}\"}}",
+                            json_escape(&session)
+                        ));
+                    }
+                    Some(Action::Sound) => {
                         toggle_sound();
                         InvalidateRect(hwnd, std::ptr::null(), 0);
                     }
-                    Some(2) => {
+                    Some(Action::Hide) => {
                         PostMessageW(hwnd, WM_CLOSE, 0, 0);
                     }
-                    _ => {}
+                    Some(Action::Answer(request, option)) => {
+                        emit_stdout(&format!(
+                            "{{\"event\":\"answer\",\"requestID\":\"{}\",\"option\":\"{}\"}}",
+                            json_escape(&request),
+                            json_escape(&option)
+                        ));
+                    }
+                    None => {}
                 }
                 0
             }
@@ -886,13 +1033,7 @@ mod win {
         let old = SelectObject(dc, font);
         SetTextColor(dc, color);
         let mut buf: Vec<u16> = text.encode_utf16().collect();
-        DrawTextW(
-            dc,
-            buf.as_mut_ptr(),
-            buf.len() as i32,
-            rect,
-            flags | DT_SINGLELINE | DT_NOPREFIX,
-        );
+        DrawTextW(dc, buf.as_mut_ptr(), buf.len() as i32, rect, flags | DT_NOPREFIX);
         SelectObject(dc, old);
     }
 
@@ -922,25 +1063,10 @@ mod win {
         DeleteObject(brush as HGDIOBJ);
     }
 
-    fn elapsed_text(state: &State) -> String {
-        let Some(start) = state.started_at_ms else {
-            return String::new();
-        };
-        if !state.working {
-            return String::new();
-        }
-        let secs = now_ms().saturating_sub(start) / 1000;
-        if secs >= 60 {
-            format!("{}m{:02}s", secs / 60, secs % 60)
-        } else {
-            format!("{}s", secs)
-        }
-    }
-
-    unsafe fn draw_goblin(dc: HDC, c: &Ctx, x: i32, y: i32, state: &State, frame: u8) {
-        let grid: &[&str; 19] = if state.done {
+    unsafe fn draw_goblin(dc: HDC, c: &Ctx, x: i32, y: i32, working: bool, done: bool, frame: u8) {
+        let grid: &[&str; 19] = if done {
             &GOBLIN_HAPPY
-        } else if state.working && frame % 4 == 3 {
+        } else if working && frame % 4 == 3 {
             &GOBLIN_BLINK
         } else {
             &GOBLIN_OPEN
@@ -977,7 +1103,6 @@ mod win {
         let w = rc.right - rc.left;
         let h = rc.bottom - rc.top;
 
-        // Double-buffer to avoid flicker.
         let mem = CreateCompatibleDC(hdc);
         let bmp = CreateCompatibleBitmap(hdc, w, h);
         let old_bmp = SelectObject(mem, bmp as HGDIOBJ);
@@ -990,19 +1115,25 @@ mod win {
 
         let guard = STATE.lock().unwrap();
         let placeholder = State {
-            title: "CodeGoblin".into(),
-            status: "waiting for the goblin…".into(),
+            rows: vec![Row {
+                title: "CodeGoblin".into(),
+                status: "waiting for the goblin…".into(),
+                ..Default::default()
+            }],
             ..Default::default()
         };
-        let state = guard.as_ref().unwrap_or(&placeholder);
+        let state = match guard.as_ref() {
+            Some(s) if !s.rows.is_empty() => s,
+            _ => &placeholder,
+        };
+        let primary = &state.rows[0];
+        let mut hits: Vec<Hit> = Vec::new();
 
         if mode == Mode::DockedTab {
-            // Small grey tab hugging the edge, with a status strip on the
-            // inner side so working/done state stays glanceable.
             fill(mem, &rc, TAB_BG);
-            let strip_color = if state.working {
+            let strip_color = if primary.working {
                 if pulse { GREEN } else { GREEN_DIM }
-            } else if state.done {
+            } else if primary.done {
                 GOLD
             } else {
                 EDGE_C
@@ -1023,102 +1154,287 @@ mod win {
             FrameRect(mem, &rc, edge_brush);
             DeleteObject(edge_brush as HGDIOBJ);
 
-            let pad = px(&c, 10);
+            // Left accent stripe carries the primary state color.
+            let stripe_color = if primary.error {
+                RED
+            } else if primary.working {
+                if pulse { GREEN } else { GREEN_DIM }
+            } else if primary.done {
+                GOLD
+            } else {
+                EDGE_C
+            };
+            let stripe = RECT { left: 1, top: 1, right: 1 + px(&c, STRIPE_W), bottom: h - 1 };
+            fill(mem, &stripe, stripe_color);
 
-            // Mascot column.
-            let sprite_w = px(&c, 2).max(2) * 26;
-            draw_goblin(mem, &c, pad, px(&c, 12), state, frame);
-
-            let text_x = pad + sprite_w + px(&c, 8);
+            let pad = px(&c, PAD);
             let title_font = make_font(&c, 14, 600);
             let body_font = make_font(&c, 12, 400);
+            let small_font = make_font(&c, 10, 400);
 
-            // Row 1: title + spend (right, gold).
-            let mut spend_w = 0;
-            if !state.spend.is_empty() {
-                spend_w = px(&c, 64);
-                let mut spend_rc = RECT {
-                    left: w - pad - spend_w,
-                    top: px(&c, 12),
-                    right: w - pad,
-                    bottom: px(&c, 30),
-                };
-                draw_text(mem, body_font, GOLD, &mut spend_rc, &state.spend, DT_RIGHT);
+            // Mascot column, centered against the primary block.
+            let cell = px(&c, 2).max(2);
+            let sprite_w = cell * SPRITE_COLS;
+            let sprite_h = cell * SPRITE_ROWS;
+            let primary_block_h = px(&c, PRIMARY_H);
+            let sprite_y = pad + (primary_block_h - sprite_h) / 2;
+            draw_goblin(mem, &c, pad, sprite_y.max(pad / 2), primary.working, primary.done, frame);
+
+            let text_x = pad + sprite_w + px(&c, 8);
+            let mut y = pad;
+
+            // ── primary session ──
+            // Row 1: title + spend (gold, right).
+            let mut right_w = 0;
+            if let Some(spend) = primary.spend.as_ref().filter(|s| !s.is_empty()) {
+                right_w = px(&c, 64);
+                let mut spend_rc =
+                    RECT { left: w - pad - right_w, top: y, right: w - pad, bottom: y + px(&c, 18) };
+                draw_text(mem, body_font, GOLD, &mut spend_rc, spend, DT_RIGHT | DT_SINGLELINE);
             }
             let mut title_rc = RECT {
                 left: text_x,
-                top: px(&c, 10),
-                right: w - pad - spend_w - px(&c, 4),
-                bottom: px(&c, 28),
+                top: y,
+                right: w - pad - right_w - px(&c, 4),
+                bottom: y + px(&c, 19),
             };
-            let title = if state.title.is_empty() { "CodeGoblin" } else { &state.title };
-            draw_text(mem, title_font, TITLE_FG, &mut title_rc, title, DT_LEFT | DT_END_ELLIPSIS);
+            let title = if primary.title.is_empty() { "CodeGoblin" } else { &primary.title };
+            draw_text(mem, title_font, TITLE_FG, &mut title_rc, title, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+            y += px(&c, 20);
 
-            // Row 2: status + elapsed (right).
-            let elapsed = elapsed_text(state);
+            // Row 2: status + elapsed / finished-ago (right).
+            let right_text = if primary.working {
+                primary
+                    .started_at_ms
+                    .map(|s| fmt_dur(now_ms().saturating_sub(s) / 1000))
+                    .unwrap_or_default()
+            } else if let Some(done_at) = primary.done_at_ms {
+                fmt_ago(done_at)
+            } else {
+                String::new()
+            };
             let mut elapsed_w = 0;
-            if !elapsed.is_empty() {
-                elapsed_w = px(&c, 56);
-                let mut el_rc = RECT {
-                    left: w - pad - elapsed_w,
-                    top: px(&c, 32),
-                    right: w - pad,
-                    bottom: px(&c, 50),
-                };
-                draw_text(mem, body_font, STATUS_FG, &mut el_rc, &elapsed, DT_RIGHT);
+            if !right_text.is_empty() {
+                elapsed_w = px(&c, 60);
+                let mut el_rc =
+                    RECT { left: w - pad - elapsed_w, top: y, right: w - pad, bottom: y + px(&c, 16) };
+                draw_text(mem, body_font, STATUS_FG, &mut el_rc, &right_text, DT_RIGHT | DT_SINGLELINE);
             }
             let mut status_rc = RECT {
                 left: text_x,
-                top: px(&c, 32),
+                top: y,
                 right: w - pad - elapsed_w - px(&c, 4),
-                bottom: px(&c, 50),
+                bottom: y + px(&c, 16),
             };
-            let status = if !state.status.is_empty() {
-                state.status.as_str()
-            } else if state.working {
+            let status = if !primary.status.is_empty() {
+                primary.status.as_str()
+            } else if primary.working {
                 "goblin working…"
             } else {
                 "idle"
             };
-            let status_color = if state.done {
+            let status_color = if primary.error {
+                RED
+            } else if primary.done {
                 GOLD
-            } else if state.working {
+            } else if primary.working {
                 GREEN
             } else {
                 STATUS_FG
             };
-            draw_text(mem, body_font, status_color, &mut status_rc, status, DT_LEFT | DT_END_ELLIPSIS);
+            draw_text(mem, body_font, status_color, &mut status_rc, status, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+            y = pad + primary_block_h;
 
-            // Menu row (hover only).
-            let mut buttons = [ZERO_RECT; 3];
-            if hovering {
-                let menu_top = h - px(&c, MENU_H);
-                let sep = RECT { left: 0, top: menu_top, right: w, bottom: menu_top + 1 };
-                fill(mem, &sep, EDGE_C);
-                let labels = [
-                    "focus".to_string(),
-                    if state.sound_enabled { "sound: on".to_string() } else { "sound: off".to_string() },
-                    "hide".to_string(),
-                ];
-                let third = w / 3;
-                for (i, label) in labels.iter().enumerate() {
-                    let mut cell = RECT {
-                        left: (i as i32) * third,
-                        top: menu_top + 1,
-                        right: ((i as i32) + 1) * third,
-                        bottom: h,
-                    };
-                    buttons[i] = cell;
-                    draw_text(mem, body_font, STATUS_FG, &mut cell, label, DT_CENTER | DT_VCENTER);
+            // Meta row: todo progress bar + ctx readout.
+            let has_meta = primary.ctx.is_some() || primary.todo_total.unwrap_or(0) > 0;
+            if has_meta {
+                if let (Some(done), Some(total)) = (primary.todo_done, primary.todo_total) {
+                    if total > 0 {
+                        let bar_w = px(&c, 70);
+                        let bar_h = px(&c, 4);
+                        let bar_y = y + px(&c, 6);
+                        let track =
+                            RECT { left: text_x, top: bar_y, right: text_x + bar_w, bottom: bar_y + bar_h };
+                        fill(mem, &track, EDGE_C);
+                        let fill_w = ((bar_w as f32) * (done.min(total) as f32 / total as f32)) as i32;
+                        let done_rc = RECT {
+                            left: text_x,
+                            top: bar_y,
+                            right: text_x + fill_w,
+                            bottom: bar_y + bar_h,
+                        };
+                        fill(mem, &done_rc, GREEN);
+                        let mut label_rc = RECT {
+                            left: text_x + bar_w + px(&c, 6),
+                            top: y,
+                            right: text_x + bar_w + px(&c, 50),
+                            bottom: y + px(&c, 15),
+                        };
+                        draw_text(
+                            mem,
+                            small_font,
+                            FAINT_FG,
+                            &mut label_rc,
+                            &format!("{}/{}", done.min(total), total),
+                            DT_LEFT | DT_SINGLELINE,
+                        );
+                    }
+                }
+                if let Some(ctx_text) = primary.ctx.as_ref().filter(|s| !s.is_empty()) {
+                    let mut ctx_rc =
+                        RECT { left: w / 2, top: y, right: w - pad, bottom: y + px(&c, 15) };
+                    draw_text(mem, small_font, FAINT_FG, &mut ctx_rc, ctx_text, DT_RIGHT | DT_SINGLELINE);
+                }
+                y += px(&c, META_ROW_H);
+            }
+
+            // ── extra sessions (compact rows) ──
+            for row in state.rows.iter().skip(1).take(3) {
+                let dot_color = if row.error {
+                    RED
+                } else if row.working {
+                    if pulse { GREEN } else { GREEN_DIM }
+                } else if row.done {
+                    GOLD
+                } else {
+                    EDGE_C
+                };
+                let dot = px(&c, 6);
+                let dot_rc = RECT {
+                    left: pad + px(&c, 4),
+                    top: y + px(&c, 7),
+                    right: pad + px(&c, 4) + dot,
+                    bottom: y + px(&c, 7) + dot,
+                };
+                fill(mem, &dot_rc, dot_color);
+
+                let right_text = if row.working {
+                    row.started_at_ms
+                        .map(|s| fmt_dur(now_ms().saturating_sub(s) / 1000))
+                        .unwrap_or_default()
+                } else if let Some(done_at) = row.done_at_ms {
+                    fmt_ago(done_at)
+                } else {
+                    String::new()
+                };
+                let mut right_w = 0;
+                if !right_text.is_empty() {
+                    right_w = px(&c, 56);
+                    let mut r =
+                        RECT { left: w - pad - right_w, top: y + px(&c, 2), right: w - pad, bottom: y + px(&c, 17) };
+                    draw_text(mem, small_font, FAINT_FG, &mut r, &right_text, DT_RIGHT | DT_SINGLELINE);
+                }
+                let label = if row.status.is_empty() {
+                    row.title.clone()
+                } else {
+                    format!("{} — {}", row.title, row.status)
+                };
+                let mut r = RECT {
+                    left: pad + px(&c, 16),
+                    top: y + px(&c, 2),
+                    right: w - pad - right_w - px(&c, 4),
+                    bottom: y + px(&c, 17),
+                };
+                draw_text(mem, small_font, STATUS_FG, &mut r, &label, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+                y += px(&c, EXTRA_ROW_H);
+            }
+
+            // ── question preview ──
+            if let Some(question) = state.question.as_ref() {
+                let mut q_rc = RECT {
+                    left: text_x,
+                    top: y + px(&c, 2),
+                    right: w - pad,
+                    bottom: y + px(&c, QUESTION_TEXT_H),
+                };
+                let mut marker_rc =
+                    RECT { left: pad + px(&c, 4), top: y + px(&c, 2), right: text_x, bottom: y + px(&c, 18) };
+                draw_text(mem, title_font, GOLD, &mut marker_rc, "?", DT_LEFT | DT_SINGLELINE);
+                draw_text(mem, body_font, TITLE_FG, &mut q_rc, &question.text, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
+                y += px(&c, QUESTION_TEXT_H);
+
+                if !question.options.is_empty() {
+                    let count = question.options.len().min(3) as i32;
+                    let gap = px(&c, 6);
+                    let btn_w = (w - pad - text_x - gap * (count - 1)) / count;
+                    let btn_h = px(&c, QUESTION_BTN_H);
+                    for (i, option) in question.options.iter().take(3).enumerate() {
+                        let left = text_x + (btn_w + gap) * (i as i32);
+                        let btn = RECT { left, top: y, right: left + btn_w, bottom: y + btn_h };
+                        fill(mem, &btn, BG_RAISED);
+                        let frame_brush = CreateSolidBrush(GREEN_DIM);
+                        FrameRect(mem, &btn, frame_brush);
+                        DeleteObject(frame_brush as HGDIOBJ);
+                        let mut label_rc = btn;
+                        draw_text(
+                            mem,
+                            small_font,
+                            TITLE_FG,
+                            &mut label_rc,
+                            option,
+                            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+                        );
+                        hits.push(Hit {
+                            rect: btn,
+                            action: Action::Answer(question.request_id.clone(), option.clone()),
+                        });
+                    }
+                    let _ = y; // menu row is bottom-anchored; nothing renders below the buttons
                 }
             }
-            UI.lock().unwrap().buttons = buttons;
+
+            // ── menu row (hover only) ──
+            if hovering {
+                let menu_top = h - px(&c, MENU_H);
+                let sep = RECT { left: 1, top: menu_top, right: w - 1, bottom: menu_top + 1 };
+                fill(mem, &sep, EDGE_C);
+
+                let mut entries: Vec<(String, Action, COLORREF)> =
+                    vec![("focus".into(), Action::Focus, STATUS_FG)];
+                if primary.working && !primary.id.is_empty() {
+                    entries.push(("esc".into(), Action::Interrupt(primary.id.clone()), RED));
+                }
+                entries.push((
+                    if state.sound_enabled { "sound: on".into() } else { "sound: off".into() },
+                    Action::Sound,
+                    STATUS_FG,
+                ));
+                entries.push(("hide".into(), Action::Hide, STATUS_FG));
+
+                let count = entries.len() as i32;
+                let cell_w = (w - 2) / count;
+                for (i, (label, action, color)) in entries.into_iter().enumerate() {
+                    let left = 1 + cell_w * (i as i32);
+                    let cell_rc = RECT { left, top: menu_top + 1, right: left + cell_w, bottom: h - 1 };
+                    if i > 0 {
+                        let div = RECT {
+                            left,
+                            top: menu_top + px(&c, 6),
+                            right: left + 1,
+                            bottom: h - px(&c, 6),
+                        };
+                        fill(mem, &div, EDGE_C);
+                    }
+                    let mut label_rc = cell_rc;
+                    draw_text(
+                        mem,
+                        small_font,
+                        color,
+                        &mut label_rc,
+                        &label,
+                        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+                    );
+                    hits.push(Hit { rect: cell_rc, action });
+                }
+            }
 
             DeleteObject(title_font);
             DeleteObject(body_font);
+            DeleteObject(small_font);
         }
 
         drop(guard);
+        UI.lock().unwrap().hits = hits;
 
         BitBlt(hdc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
         SelectObject(mem, old_bmp);
@@ -1126,5 +1442,91 @@ mod win {
         DeleteDC(mem);
 
         EndPaint(hwnd, &ps);
+    }
+
+    // ── entry ────────────────────────────────────────────────────────────────
+
+    pub fn run() -> Result<(), String> {
+        unsafe {
+            let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+            // Whoever is foreground at launch is almost always the terminal the
+            // user toggled the widget from; remember it for click-to-focus.
+            let terminal = GetForegroundWindow();
+
+            let instance = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
+            let class_name = wide("CodeGoblinWidget");
+            let wc = WNDCLASSW {
+                style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_DROPSHADOW,
+                lpfnWndProc: Some(wnd_proc),
+                cbClsExtra: 0,
+                cbWndExtra: 0,
+                hInstance: instance,
+                hIcon: std::ptr::null_mut(),
+                hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
+                hbrBackground: std::ptr::null_mut(),
+                lpszMenuName: std::ptr::null(),
+                lpszClassName: class_name.as_ptr(),
+            };
+            if RegisterClassW(&wc) == 0 {
+                return Err("RegisterClassW failed".into());
+            }
+
+            let dpi = windows_sys::Win32::UI::HiDpi::GetDpiForSystem();
+            let scale = (dpi as f32) / 96.0;
+            *CTX.lock().unwrap() = Some((terminal as isize, scale));
+            let c = ctx();
+
+            let width = px(&c, BUBBLE_W);
+            let height = desired_height(&c);
+            UI.lock().unwrap().desired_h = height;
+
+            let mut work = RECT { left: 0, top: 0, right: 1280, bottom: 720 };
+            SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut work as *mut _ as *mut _, 0);
+            let x = work.right - width - px(&c, 16);
+            let y = work.bottom - height - px(&c, 16);
+
+            let title = wide("CodeGoblin");
+            let hwnd = CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                class_name.as_ptr(),
+                title.as_ptr(),
+                WS_POPUP,
+                x,
+                y,
+                width,
+                height,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null_mut(),
+            );
+            if hwnd.is_null() {
+                return Err("CreateWindowExW failed".into());
+            }
+
+            // Win11 rounded corners; silently ignored on Win10.
+            const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+            const DWMWCP_ROUND: u32 = 2;
+            let pref: u32 = DWMWCP_ROUND;
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                &pref as *const _ as *const _,
+                std::mem::size_of::<u32>() as u32,
+            );
+
+            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            SetTimer(hwnd, TIMER_TICK, 600, None);
+
+            spawn_stdin_reader(hwnd as isize);
+
+            let mut msg: MSG = std::mem::zeroed();
+            while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        Ok(())
     }
 }
