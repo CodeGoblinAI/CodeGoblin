@@ -1042,6 +1042,10 @@ export function options(input: {
 }): Record<string, any> {
   const result: Record<string, any> = {}
 
+  if (input.model.providerID === "claude-code" || input.model.providerID === "cursor-agent") {
+    result["sessionID"] = input.sessionID
+  }
+
   if (
     input.model.api.npm === "@ai-sdk/google-vertex/anthropic" ||
     (!input.model.api.id.includes("claude") && input.model.api.npm === "@ai-sdk/anthropic")

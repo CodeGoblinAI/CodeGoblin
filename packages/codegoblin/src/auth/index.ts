@@ -58,11 +58,18 @@ export const layer = Layer.effect(
       const authContent = process.env.CODEGOBLIN_AUTH_CONTENT ?? process.env.OPENCODE_AUTH_CONTENT
       if (authContent) {
         try {
-          return JSON.parse(authContent)
+          return Record.filterMap(
+            withoutRetiredAnthropicOauth(JSON.parse(authContent) as Record<string, unknown>),
+            (value) => Result.fromOption(decode(value), () => undefined),
+          )
         } catch (err) {}
       }
 
       const data = (yield* fsys.readJson(file).pipe(Effect.orElseSucceed(() => ({})))) as Record<string, unknown>
+      if (isRetiredAnthropicOauth(data.anthropic)) {
+        delete data.anthropic
+        yield* fsys.writeJson(file, data, 0o600).pipe(Effect.mapError(fail("Failed to retire Anthropic OAuth data")))
+      }
       return Record.filterMap(data, (value) => Result.fromOption(decode(value), () => undefined))
     })
 
@@ -91,6 +98,17 @@ export const layer = Layer.effect(
     return Service.of({ get, all, set, remove })
   }),
 )
+
+export function withoutRetiredAnthropicOauth(data: Record<string, unknown>) {
+  if (!isRetiredAnthropicOauth(data.anthropic)) return data
+  const result = { ...data }
+  delete result.anthropic
+  return result
+}
+
+function isRetiredAnthropicOauth(value: unknown): value is { type: "oauth" } {
+  return typeof value === "object" && value !== null && "type" in value && value.type === "oauth"
+}
 
 export const defaultLayer = layer.pipe(Layer.provide(AppFileSystem.defaultLayer))
 
