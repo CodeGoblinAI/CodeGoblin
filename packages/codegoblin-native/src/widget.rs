@@ -234,8 +234,6 @@ mod win {
     const SNAP: i32 = 16;
     const PAD: i32 = 10;
     const STRIPE_W: i32 = 3;
-    const SPRITE_COLS: i32 = 26;
-    const SPRITE_ROWS: i32 = 19;
     const EXTRA_ROW_H: i32 = 20;
     const META_ROW_H: i32 = 16;
     const QUESTION_TEXT_H: i32 = 32;
@@ -261,74 +259,141 @@ mod win {
     }
 
     // ── goblin mascot ────────────────────────────────────────────────────────
-    // The brand mask, downsampled from codegoblin-logo.png into a 26x19 grid.
-    // G skin, B eye cutout, D closed-lid shade, T gold, W sparkle.
+    // The brand mask, sampled from codegoblin-logo.png into a 52x38 coverage
+    // grid (hex 0-f = edge coverage). Rendered as a smoothed mini-bitmap via
+    // StretchDIBits, so edges antialias against the bubble background instead
+    // of reading as chunky pixel art.
 
-    const GOBLIN_OPEN: [&str; 19] = [
-        ".........GGGGGGGG.........",
-        "........GGGGGGGGG.........",
-        "....GGGGGGGGGGGGGGGGG.....",
-        "....GGGGGGGGGGGGGGGGGG....",
-        "GG..GGGGGGGGGGGGGGGGGG...G",
-        "GGGGGGGGGGGGGGGGGGGGGG.GGG",
-        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
-        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
-        "..GGGGGGGGGGGGGGGGGGGGGG..",
-        "...GGGGGBBBBGGGGGBBGGGG...",
-        "....GGGGBBBBGGGGGBBGGG....",
-        ".....GGGBBBBGGGGGBBGG.....",
-        ".....GGGGBBBGGGGGBBGG.....",
-        ".....GGGGGGGGGGGGGGGG.....",
-        "......GGGGGGGGGGGGGG......",
-        "........GGGGGGGGGG........",
-        ".........GGGGGGGGG........",
-        ".........GGGGGGGG.........",
-        "..........GGGGGGG.........",
+    const SPRITE_W: i32 = 52;
+    const SPRITE_H: i32 = 38;
+
+    const GOBLIN_COVERAGE: [&str; 38] = [
+        "000000000000000008fffffffffffffff8000000000000000000",
+        "00000000000000002ffffffffffffffffd000000000000000000",
+        "00000000000000008fffffffffffffffff700000000000000000",
+        "0000000000000558dffffffffffffffffff75200000000000000",
+        "0000000028affffffffffffffffffffffffffffaa53000000000",
+        "00000000affffffffffffffffffffffffffffffffff300000000",
+        "00000000affffffffffffffffffffffffffffffffff500000000",
+        "a3000000affffffffffffffffffffffffffffffffff500000000",
+        "ffc300008ffffffffffffffffffffffffffffffffff50000028d",
+        "afffd5005ffffffffffffffffffffffffffffffffff500028ffc",
+        "5fffffd75ffffffffffffffffffffffffffffffffff3028ffff7",
+        "0ffffffffffffffffffffffffffffffffffffffffff3affffff0",
+        "0affffffffffffffffffffffffffffffffffffffffffffffffa0",
+        "05ffffffffffffffffffffffffffffffffffffffffffffffff30",
+        "00fffffffffffffffffffffffffffffffffffffffffffffffd00",
+        "008ffffffffffffffffffffffffffffffffffffffffffffff800",
+        "002dfffffffffffffffffffffffffffffffffffffffffffff200",
+        "0002cfffffffffff70555aadfffffffffffffffffffffffd2000",
+        "000008ffffffffff50000000affffffffc0007ffffffffa20000",
+        "0000005fffffffff50000000affffffffa0005fffffffa000000",
+        "00000003dfffffffa00000005ffffffffa0007ffffff50000000",
+        "000000000affffffa00000005ffffffffa000affffd500000000",
+        "0000000005ffffffa00000005ffffffffa000affff7000000000",
+        "0000000002ffffffd00000005ffffffffa000affff5000000000",
+        "0000000000fffffff00000005ffffffffa000affff5000000000",
+        "0000000000fffffff00000005ffffffffa025fffff3000000000",
+        "0000000000fffffffc8555307fffffffffffffffff0000000000",
+        "00000000008ffffffffffffffffffffffffffffffa0000000000",
+        "000000000005ffffffffffffffffffffffffffff700000000000",
+        "0000000000002affffffffffffffffffffffffd2000000000000",
+        "000000000000005dfffffffffffffffffffff800000000000000",
+        "0000000000000002afffffffffffffffffff3000000000000000",
+        "00000000000000002ffffffffffffffffff80000000000000000",
+        "000000000000000007fffffffffffffffff20000000000000000",
+        "000000000000000002ffffffffffffffffc00000000000000000",
+        "000000000000000000afffffffffffffff300000000000000000",
+        "0000000000000000002dfffffffffffffd000000000000000000",
+        "00000000000000000000002555aaacfff7000000000000000000",
     ];
 
-    const GOBLIN_BLINK: [&str; 19] = [
-        ".........GGGGGGGG.........",
-        "........GGGGGGGGG.........",
-        "....GGGGGGGGGGGGGGGGG.....",
-        "....GGGGGGGGGGGGGGGGGG....",
-        "GG..GGGGGGGGGGGGGGGGGG...G",
-        "GGGGGGGGGGGGGGGGGGGGGG.GGG",
-        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
-        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
-        "..GGGGGGGGGGGGGGGGGGGGGG..",
-        "...GGGGGGGGGGGGGGGGGGGG...",
-        "....GGGGDDDDGGGGGDDGGG....",
-        ".....GGGGGGGGGGGGGGGG.....",
-        ".....GGGGGGGGGGGGGGGG.....",
-        ".....GGGGGGGGGGGGGGGG.....",
-        "......GGGGGGGGGGGGGG......",
-        "........GGGGGGGGGG........",
-        ".........GGGGGGGGG........",
-        ".........GGGGGGGG.........",
-        "..........GGGGGGG.........",
-    ];
+    /// Blend `fg` over `bg` (both COLORREF 0x00BBGGRR) into a DIB 0x00RRGGBB.
+    fn blend_dib(bg: COLORREF, fg: COLORREF, alpha: f32) -> u32 {
+        let mix = |b: u32, f: u32| -> u32 {
+            ((b as f32) + ((f as f32) - (b as f32)) * alpha).round() as u32
+        };
+        let r = mix(bg & 0xff, fg & 0xff);
+        let g = mix((bg >> 8) & 0xff, (fg >> 8) & 0xff);
+        let b = mix((bg >> 16) & 0xff, (fg >> 16) & 0xff);
+        (r << 16) | (g << 8) | b
+    }
 
-    const GOBLIN_HAPPY: [&str; 19] = [
-        ".........GGGGGGGG...W.....",
-        "........GGGGGGGGG.........",
-        "....GGGGGGGGGGGGGGGGG.....",
-        "....GGGGGGGGGGGGGGGGGG....",
-        "GG..GGGGGGGGGGGGGGGGGG...G",
-        "GGGGGGGGGGGGGGGGGGGGGG.GGG",
-        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
-        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
-        "..GGGGGGGGGGGGGGGGGGGGGG..",
-        "...GGGGGTTTTGGGGGTTGGGG...",
-        "....GGGGTTTTGGGGGTTGGG....",
-        ".....GGGTTTTGGGGGTTGG.....",
-        ".....GGGGTTTGGGGGTTGG.....",
-        ".....GGGGGGGGGGGGGGGG.....",
-        "......GGGGGGGGGGGGGG......",
-        "........GGGGGGGGGG........",
-        ".........GGGGGGGGG........",
-        ".........GGGGGGGG.........",
-        "..........GGGGGGG.........",
-    ];
+    /// Eye cutout cells with hole depth: cells below full coverage that sit
+    /// strictly between skin on both sides, within the eye band of the face.
+    fn eye_mask() -> &'static Vec<(usize, usize, f32)> {
+        static MASK: OnceLock<Vec<(usize, usize, f32)>> = OnceLock::new();
+        MASK.get_or_init(|| {
+            let mut cells = Vec::new();
+            for (row, line) in GOBLIN_COVERAGE.iter().enumerate() {
+                if !(17..=26).contains(&row) {
+                    continue;
+                }
+                let cov: Vec<u32> = line.chars().map(|ch| ch.to_digit(16).unwrap_or(0)).collect();
+                let first = cov.iter().position(|&v| v >= 8);
+                let last = cov.iter().rposition(|&v| v >= 8);
+                if let (Some(first), Some(last)) = (first, last) {
+                    for col in first..=last {
+                        if cov[col] < 8 {
+                            let depth = 1.0 - (cov[col] as f32 / 8.0);
+                            cells.push((row, col, depth));
+                        }
+                    }
+                }
+            }
+            cells
+        })
+    }
+
+    /// Blend `fg` (COLORREF) over an existing DIB pixel by `alpha`.
+    fn blend_over(base: u32, fg: COLORREF, alpha: f32) -> u32 {
+        let mix = |b: u32, f: u32| -> u32 {
+            ((b as f32) + ((f as f32) - (b as f32)) * alpha).round() as u32
+        };
+        let r = mix((base >> 16) & 0xff, fg & 0xff);
+        let g = mix((base >> 8) & 0xff, (fg >> 8) & 0xff);
+        let b = mix(base & 0xff, (fg >> 16) & 0xff);
+        (r << 16) | (g << 8) | b
+    }
+
+    fn build_sprite(variant: u8) -> Vec<u32> {
+        let mut pixels = vec![0u32; (SPRITE_W * SPRITE_H) as usize];
+        for (row, line) in GOBLIN_COVERAGE.iter().enumerate() {
+            for (col, ch) in line.chars().enumerate() {
+                let cov = ch.to_digit(16).unwrap_or(0) as f32 / 15.0;
+                pixels[row * SPRITE_W as usize + col] = blend_dib(BG, GREEN, cov);
+            }
+        }
+        for &(row, col, depth) in eye_mask() {
+            let idx = row * SPRITE_W as usize + col;
+            let base = pixels[idx];
+            pixels[idx] = match variant {
+                // blink: eyes closed — skin with a dim lid line mid-eye
+                1 => {
+                    if (21..=22).contains(&row) {
+                        blend_over(base, GREEN_DIM, depth)
+                    } else {
+                        blend_over(base, GREEN, depth)
+                    }
+                }
+                // open + happy keep the mask's dark cutouts; "done" is
+                // signalled by the sparkle and the gold accents around it
+                _ => blend_over(base, EYE, depth),
+            };
+        }
+        if variant == 2 {
+            // A little sparkle off the crest.
+            for &(row, col) in &[(1usize, 45usize), (2, 44), (2, 45), (2, 46), (3, 45)] {
+                pixels[row * SPRITE_W as usize + col] = blend_dib(BG, WHITE, 1.0);
+            }
+        }
+        pixels
+    }
+
+    fn sprite(variant: u8) -> &'static Vec<u32> {
+        static SPRITES: OnceLock<[Vec<u32>; 3]> = OnceLock::new();
+        &SPRITES.get_or_init(|| [build_sprite(0), build_sprite(1), build_sprite(2)])[variant as usize]
+    }
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -1064,33 +1129,39 @@ mod win {
     }
 
     unsafe fn draw_goblin(dc: HDC, c: &Ctx, x: i32, y: i32, working: bool, done: bool, frame: u8) {
-        let grid: &[&str; 19] = if done {
-            &GOBLIN_HAPPY
+        let variant = if done {
+            2
         } else if working && frame % 4 == 3 {
-            &GOBLIN_BLINK
+            1
         } else {
-            &GOBLIN_OPEN
+            0
         };
-        let cell = px(c, 2).max(2);
-        for (row, line) in grid.iter().enumerate() {
-            for (col, ch) in line.chars().enumerate() {
-                let color = match ch {
-                    'G' => GREEN,
-                    'D' => GREEN_DIM,
-                    'B' => EYE,
-                    'T' => GOLD,
-                    'W' => WHITE,
-                    _ => continue,
-                };
-                let rc = RECT {
-                    left: x + (col as i32) * cell,
-                    top: y + (row as i32) * cell,
-                    right: x + (col as i32 + 1) * cell,
-                    bottom: y + (row as i32 + 1) * cell,
-                };
-                fill(dc, &rc, color);
-            }
-        }
+        let pixels = sprite(variant);
+        let mut bmi: BITMAPINFO = std::mem::zeroed();
+        bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bmi.bmiHeader.biWidth = SPRITE_W;
+        bmi.bmiHeader.biHeight = -SPRITE_H; // top-down
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB as u32;
+        let prev = SetStretchBltMode(dc, HALFTONE);
+        SetBrushOrgEx(dc, 0, 0, std::ptr::null_mut());
+        StretchDIBits(
+            dc,
+            x,
+            y,
+            px(c, SPRITE_W),
+            px(c, SPRITE_H),
+            0,
+            0,
+            SPRITE_W,
+            SPRITE_H,
+            pixels.as_ptr() as *const _,
+            &bmi,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        );
+        SetStretchBltMode(dc, prev);
     }
 
     unsafe fn paint(hwnd: HWND) {
@@ -1173,9 +1244,8 @@ mod win {
             let small_font = make_font(&c, 10, 400);
 
             // Mascot column, centered against the primary block.
-            let cell = px(&c, 2).max(2);
-            let sprite_w = cell * SPRITE_COLS;
-            let sprite_h = cell * SPRITE_ROWS;
+            let sprite_w = px(&c, SPRITE_W);
+            let sprite_h = px(&c, SPRITE_H);
             let primary_block_h = px(&c, PRIMARY_H);
             let sprite_y = pad + (primary_block_h - sprite_h) / 2;
             draw_goblin(mem, &c, pad, sprite_y.max(pad / 2), primary.working, primary.done, frame);
