@@ -183,55 +183,70 @@ mod win {
     // eye cutouts (left bigger than right), tapered chin. G skin, B eye cutout,
     // D closed-lid shade, T gold, W sparkle.
 
-    const GOBLIN_OPEN: [&str; 14] = [
-        "......GGGGGG......",
-        ".....GGGGGGGG.....",
-        "...GGGGGGGGGGGG...",
-        "..GGGGGGGGGGGGGG..",
-        "G.GGGGGGGGGGGGGG.G",
-        "GGGGGGGGGGGGGGGGGG",
-        "GGGGBBBGGGGGBBGGGG",
-        ".GGGBBBGGGGGBBGGG.",
-        "..GGBBBGGGGGBBGG..",
-        "...GGGGGGGGGGGG...",
-        "....GGGGGGGGGG....",
-        ".....GGGGGGGG.....",
-        "......GGGGGG......",
-        ".......GGGG.......",
+    const GOBLIN_OPEN: [&str; 19] = [
+        ".........GGGGGGGG.........",
+        "........GGGGGGGGG.........",
+        "....GGGGGGGGGGGGGGGGG.....",
+        "....GGGGGGGGGGGGGGGGGG....",
+        "GG..GGGGGGGGGGGGGGGGGG...G",
+        "GGGGGGGGGGGGGGGGGGGGGG.GGG",
+        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
+        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
+        "..GGGGGGGGGGGGGGGGGGGGGG..",
+        "...GGGGGBBBBGGGGGBBGGGG...",
+        "....GGGGBBBBGGGGGBBGGG....",
+        ".....GGGBBBBGGGGGBBGG.....",
+        ".....GGGGBBBGGGGGBBGG.....",
+        ".....GGGGGGGGGGGGGGGG.....",
+        "......GGGGGGGGGGGGGG......",
+        "........GGGGGGGGGG........",
+        ".........GGGGGGGGG........",
+        ".........GGGGGGGG.........",
+        "..........GGGGGGG.........",
     ];
 
-    const GOBLIN_BLINK: [&str; 14] = [
-        "......GGGGGG......",
-        ".....GGGGGGGG.....",
-        "...GGGGGGGGGGGG...",
-        "..GGGGGGGGGGGGGG..",
-        "G.GGGGGGGGGGGGGG.G",
-        "GGGGGGGGGGGGGGGGGG",
-        "GGGGGGGGGGGGGGGGGG",
-        ".GGGDDDGGGGGDDGGG.",
-        "..GGGGGGGGGGGGGG..",
-        "...GGGGGGGGGGGG...",
-        "....GGGGGGGGGG....",
-        ".....GGGGGGGG.....",
-        "......GGGGGG......",
-        ".......GGGG.......",
+    const GOBLIN_BLINK: [&str; 19] = [
+        ".........GGGGGGGG.........",
+        "........GGGGGGGGG.........",
+        "....GGGGGGGGGGGGGGGGG.....",
+        "....GGGGGGGGGGGGGGGGGG....",
+        "GG..GGGGGGGGGGGGGGGGGG...G",
+        "GGGGGGGGGGGGGGGGGGGGGG.GGG",
+        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
+        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
+        "..GGGGGGGGGGGGGGGGGGGGGG..",
+        "...GGGGGGGGGGGGGGGGGGGG...",
+        "....GGGGDDDDGGGGGDDGGG....",
+        ".....GGGGGGGGGGGGGGGG.....",
+        ".....GGGGGGGGGGGGGGGG.....",
+        ".....GGGGGGGGGGGGGGGG.....",
+        "......GGGGGGGGGGGGGG......",
+        "........GGGGGGGGGG........",
+        ".........GGGGGGGGG........",
+        ".........GGGGGGGG.........",
+        "..........GGGGGGG.........",
     ];
 
-    const GOBLIN_HAPPY: [&str; 14] = [
-        "......GGGGGG..W...",
-        ".....GGGGGGGG.....",
-        "...GGGGGGGGGGGG...",
-        "..GGGGGGGGGGGGGG..",
-        "G.GGGGGGGGGGGGGG.G",
-        "GGGGGGGGGGGGGGGGGG",
-        "GGGGTTTGGGGGTTGGGG",
-        ".GGGTTTGGGGGTTGGG.",
-        "..GGTTTGGGGGTTGG..",
-        "...GGGGGGGGGGGG...",
-        "....GGGGGGGGGG....",
-        ".....GGGGGGGG.....",
-        "......GGGGGG......",
-        ".......GGGG.......",
+    const GOBLIN_HAPPY: [&str; 19] = [
+        ".........GGGGGGGG...W.....",
+        "........GGGGGGGGG.........",
+        "....GGGGGGGGGGGGGGGGG.....",
+        "....GGGGGGGGGGGGGGGGGG....",
+        "GG..GGGGGGGGGGGGGGGGGG...G",
+        "GGGGGGGGGGGGGGGGGGGGGG.GGG",
+        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
+        ".GGGGGGGGGGGGGGGGGGGGGGGG.",
+        "..GGGGGGGGGGGGGGGGGGGGGG..",
+        "...GGGGGTTTTGGGGGTTGGGG...",
+        "....GGGGTTTTGGGGGTTGGG....",
+        ".....GGGTTTTGGGGGTTGG.....",
+        ".....GGGGTTTGGGGGTTGG.....",
+        ".....GGGGGGGGGGGGGGGG.....",
+        "......GGGGGGGGGGGGGG......",
+        "........GGGGGGGGGG........",
+        ".........GGGGGGGGG........",
+        ".........GGGGGGGG.........",
+        "..........GGGGGGG.........",
     ];
 
     fn wide(s: &str) -> Vec<u16> {
@@ -923,7 +938,7 @@ mod win {
     }
 
     unsafe fn draw_goblin(dc: HDC, c: &Ctx, x: i32, y: i32, state: &State, frame: u8) {
-        let grid: &[&str; 14] = if state.done {
+        let grid: &[&str; 19] = if state.done {
             &GOBLIN_HAPPY
         } else if state.working && frame % 4 == 3 {
             &GOBLIN_BLINK
@@ -1011,8 +1026,8 @@ mod win {
             let pad = px(&c, 10);
 
             // Mascot column.
-            let sprite_w = px(&c, 2).max(2) * 18;
-            draw_goblin(mem, &c, pad, px(&c, 14), state, frame);
+            let sprite_w = px(&c, 2).max(2) * 26;
+            draw_goblin(mem, &c, pad, px(&c, 12), state, frame);
 
             let text_x = pad + sprite_w + px(&c, 8);
             let title_font = make_font(&c, 14, 600);
