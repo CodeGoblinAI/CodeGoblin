@@ -14,6 +14,15 @@ describe("providerOptions", () => {
     expect(providerOptions([{ id: "mistral", name: "Mistral" }])[0]?.category).toBe("Providers")
   })
 
+  test("groups Claude Code under Anthropic instead of listing a transport as a provider", () => {
+    const options = providerOptions([
+      { id: "anthropic", name: "Anthropic" },
+      { id: "claude-code", name: "Claude Code" },
+    ])
+    expect(options.some((option) => option.value === "claude-code")).toBe(false)
+    expect(options.find((option) => option.value === "anthropic")?.description).toContain("Claude Code")
+  })
+
   test("does not collide with a configured provider named other", () => {
     const values = providerOptions([{ id: "other", name: "Other Provider" }]).map((option) => option.value)
     expect(new Set(values).size).toBe(values.length)

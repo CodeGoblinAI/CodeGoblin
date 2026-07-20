@@ -265,7 +265,7 @@ export const layer = Layer.effect(
       if (!firstUser || firstUser.info.role !== "user") return
       const firstInfo = firstUser.info
 
-      if (input.providerID === "claude-code" || input.providerID === "cursor-agent") {
+      if (["claude-code", "cursor-agent", "antigravity-cli"].includes(input.providerID)) {
         const text = firstUser.parts
           .flatMap((part) => (part.type === "text" ? [part.text] : []))
           .join(" ")

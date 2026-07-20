@@ -3,27 +3,43 @@ import {
   buildCliAgentCommand,
   cliAgentProviderInfos,
   deterministicCliSessionID,
+  parseClaudeQuota,
   parseCliAgentEvent,
 } from "../../src/provider/cli-agent"
 import { withoutRetiredAnthropicOauth } from "../../src/auth"
-import { ClaudeCodeCliAuthPlugin, CursorAgentCliAuthPlugin } from "../../src/plugin/cli-agent"
+import {
+  AnthropicCliAuthPlugin,
+  AntigravityCliAuthPlugin,
+  CursorAgentCliAuthPlugin,
+  installCommand,
+} from "../../src/plugin/cli-agent"
 
 describe("local CLI agent providers", () => {
   test("advertises Claude Code and Cursor Agent as local providers", () => {
     const providers = cliAgentProviderInfos()
-    expect(providers.map((provider) => String(provider.id))).toEqual(["claude-code", "cursor-agent"])
+    expect(providers.map((provider) => String(provider.id))).toEqual(["claude-code", "cursor-agent", "antigravity-cli"])
     expect(Object.keys(providers[0].models.sonnet.variants ?? {})).toEqual(["low", "medium", "high", "xhigh", "max"])
   })
 
   test("connects local CLIs through provider auth methods instead of API-key prompts", async () => {
-    const claude = await ClaudeCodeCliAuthPlugin({} as never)
+    const claude = await AnthropicCliAuthPlugin({} as never)
     const cursor = await CursorAgentCliAuthPlugin({} as never)
+    const antigravity = await AntigravityCliAuthPlugin({} as never)
+    expect(claude.auth?.provider).toBe("anthropic")
     expect(claude.auth?.methods).toEqual([
-      expect.objectContaining({ type: "oauth", label: "Connect installed Claude Code" }),
+      expect.objectContaining({ type: "api", label: "API key" }),
+      expect.objectContaining({ type: "oauth", provider: "claude-code" }),
     ])
-    expect(cursor.auth?.methods).toEqual([
-      expect.objectContaining({ type: "oauth", label: "Connect installed Cursor Agent" }),
-    ])
+    expect(cursor.auth?.methods).toEqual([expect.objectContaining({ type: "oauth", provider: "cursor-agent" })])
+    expect(antigravity.auth?.methods).toEqual([expect.objectContaining({ type: "oauth", provider: "antigravity-cli" })])
+  })
+
+  test("uses official installers for missing local CLIs", () => {
+    expect(installCommand("claude-code", "win32")).toContain("irm https://claude.ai/install.ps1 | iex")
+    expect(installCommand("cursor-agent", "win32")?.slice(0, 3)).toEqual(["wsl.exe", "sh", "-lc"])
+    expect(installCommand("antigravity-cli", "linux")).toContain(
+      "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    )
   })
 
   test("uses a stable valid UUID for Claude sessions", () => {
@@ -49,6 +65,20 @@ describe("local CLI agent providers", () => {
     expect(command).not.toContain("--allow-dangerously-skip-permissions")
   })
 
+  test("can fork a Claude-backed chat without overwriting its prior external session", () => {
+    const command = buildCliAgentCommand({
+      providerID: "claude-code",
+      executable: "claude",
+      modelID: "sonnet",
+      sessionID: "ses_example",
+      newSessionID: "11111111-1111-4111-8111-111111111111",
+      permissionMode: "agent",
+    })
+    expect(command).toContain("--session-id")
+    expect(command).toContain("11111111-1111-4111-8111-111111111111")
+    expect(command).not.toContain("--resume")
+  })
+
   test("resumes Cursor sessions without force mode", () => {
     const command = buildCliAgentCommand({
       providerID: "cursor-agent",
@@ -60,6 +90,28 @@ describe("local CLI agent providers", () => {
     })
     expect(command).toContain("--resume=cursor-chat-id")
     expect(command).not.toContain("--force")
+  })
+
+  test("resumes Antigravity conversations and captures a per-turn log", () => {
+    const command = buildCliAgentCommand({
+      providerID: "antigravity-cli",
+      executable: "agy",
+      modelID: "default",
+      externalSessionID: "agy-conversation-id",
+      sessionID: "ses_example",
+      permissionMode: "agent",
+      logFile: "agy.log",
+    })
+    expect(command).toEqual([
+      "agy",
+      "--print",
+      "--log-file",
+      "agy.log",
+      "--mode",
+      "accept-edits",
+      "--conversation",
+      "agy-conversation-id",
+    ])
   })
 
   test("parses Claude partial text and usage", () => {
@@ -80,6 +132,22 @@ describe("local CLI agent providers", () => {
     )
     expect(result?.usage?.inputTokens).toEqual({ total: 12, noCache: 7, cacheRead: 5, cacheWrite: undefined })
     expect(result?.usage?.outputTokens.total).toBe(3)
+  })
+
+  test("keeps only sanitized Claude subscription quota fields", () => {
+    expect(
+      parseClaudeQuota({
+        account: { email: "private@example.com" },
+        result:
+          "Current 5-hour: 50% used\nCurrent week (all models): 20% used · resets Jul 20, 9am\nCurrent week (Fable): 91% used",
+      }),
+    ).toMatchObject({
+      providerID: "claude-code",
+      windows: [
+        { label: "5h", usedPercentage: 50 },
+        { label: "week", usedPercentage: 20, resetsAt: "Jul 20, 9am" },
+      ],
+    })
   })
 
   test("parses Cursor assistant messages", () => {

@@ -59,6 +59,24 @@ describe("CodeGoblin balance display", () => {
     expect(CodeGoblinBalance.formatFooter({ balances: [], spent: 0.5 })).toBeUndefined()
   })
 
+  test("shows subscription quota instead of a meaningless zero-dollar balance", () => {
+    expect(
+      CodeGoblinBalance.formatFooter({
+        providerID: "claude-code",
+        quotas: [
+          {
+            providerID: "claude-code",
+            checkedAt: "2026-07-20T00:00:00Z",
+            windows: [
+              { label: "5h", usedPercentage: 50 },
+              { label: "week", usedPercentage: 20 },
+            ],
+          },
+        ],
+      }),
+    ).toBe("5h 50% left · week 80% left")
+  })
+
   test("resolve returns no balances and no fabricated numbers without keys or manual env", async () => {
     const result = await CodeGoblinBalance.resolve({
       cwd: path.join(os.tmpdir(), "codegoblin-balance-empty"),

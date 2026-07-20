@@ -22,8 +22,8 @@ export const DialogSelectProvider: Component = () => {
   const note = (id: string) => {
     if (id === "anthropic") return language.t("dialog.provider.anthropic.note")
     if (id === "openai") return language.t("dialog.provider.openai.note")
-    if (id === "claude-code") return "Use your installed Claude Code account"
     if (id === "cursor-agent") return "Use your installed Cursor account"
+    if (id === "antigravity-cli") return "Use your Antigravity account"
     if (id === "elevenlabs") return "Voice, TTS, and music API key"
     if (id.startsWith("github-copilot")) return language.t("dialog.provider.copilot.note")
     if (id === "opencode-go") return language.t("dialog.provider.opencodeGo.tagline")
@@ -38,7 +38,10 @@ export const DialogSelectProvider: Component = () => {
         key={(x) => x?.id}
         items={() => {
           language.locale()
-          return [{ id: CUSTOM_ID, name: customLabel() }, ...providers.all().values()]
+          return [
+            { id: CUSTOM_ID, name: customLabel() },
+            ...[...providers.all().values()].filter((provider) => provider.id !== "claude-code"),
+          ]
         }}
         filterKeys={["id", "name"]}
         groupBy={(x) => (popularProviders.includes(x.id) ? popularGroup() : otherGroup())}

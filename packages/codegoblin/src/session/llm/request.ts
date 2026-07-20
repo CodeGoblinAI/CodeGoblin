@@ -87,7 +87,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         providerOptions: input.provider.options,
       })
   const options = mergeOptions(mergeOptions(mergeOptions(base, input.model.options), input.agent.options), variant)
-  if (input.model.providerID === "claude-code" || input.model.providerID === "cursor-agent") {
+  if (["claude-code", "cursor-agent", "antigravity-cli"].includes(input.model.providerID)) {
     options.sessionID = input.small ? `${input.sessionID}:sidecar` : input.sessionID
     options.directory = (yield* InstanceState.context).directory
     options.permissionMode = input.small || input.agent.name === "plan" ? "plan" : "agent"

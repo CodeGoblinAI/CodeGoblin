@@ -40,6 +40,7 @@ const Prompt = Schema.Union([TextPrompt, SelectPrompt])
 export class Method extends Schema.Class<Method>("ProviderAuthMethod")({
   type: Schema.Literals(["oauth", "api"]),
   label: Schema.String,
+  provider: optionalOmitUndefined(Schema.String),
   prompts: optionalOmitUndefined(Schema.Array(Prompt)),
 }) {}
 
@@ -134,6 +135,7 @@ export const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> =
           item.methods.map((method) => ({
             type: method.type,
             label: method.label,
+            ...(method.provider && { provider: method.provider }),
             ...(method.prompts && {
               prompts: method.prompts.map((prompt) => {
                 if (prompt.type === "select") {
@@ -204,8 +206,9 @@ export const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> =
         return yield* new OauthCallbackFailed({})
       }
 
+      const providerID = ProviderID.make(result.provider ?? input.providerID)
       if ("key" in result) {
-        yield* auth.set(input.providerID, {
+        yield* auth.set(providerID, {
           type: "api",
           key: result.key,
           ...(result.metadata ? { metadata: result.metadata } : {}),
@@ -214,7 +217,7 @@ export const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> =
 
       if ("refresh" in result) {
         const { type: _, provider: __, refresh, access, expires, ...extra } = result
-        yield* auth.set(input.providerID, {
+        yield* auth.set(providerID, {
           type: "oauth",
           access,
           refresh,

@@ -11,8 +11,12 @@ import type {
 import { ModelID, ProviderID } from "./schema"
 import type { Info, Model } from "./provider"
 
-export const CLI_AGENT_PROVIDERS = ["claude-code", "cursor-agent"] as const
+export const CLI_AGENT_PROVIDERS = ["claude-code", "cursor-agent", "antigravity-cli"] as const
 export type CliAgentProviderID = (typeof CLI_AGENT_PROVIDERS)[number]
+
+export function isCliAgentProvider(value: string): value is CliAgentProviderID {
+  return CLI_AGENT_PROVIDERS.includes(value as CliAgentProviderID)
+}
 
 type BridgeOptions = {
   sessionID?: string
@@ -22,7 +26,13 @@ type BridgeOptions = {
   executable?: string
 }
 
-type BridgeSessions = Partial<Record<CliAgentProviderID, Record<string, string>>>
+type BridgeSession = {
+  externalSessionID: string
+  directory?: string
+  lastAssistantText?: string
+}
+
+type BridgeSessions = Partial<Record<CliAgentProviderID, Record<string, string | BridgeSession>>>
 
 type ParsedEvent = {
   sessionID?: string
@@ -31,6 +41,12 @@ type ParsedEvent = {
   result?: string
   usage?: LanguageModelV3Usage
   error?: string
+}
+
+export type CliAgentQuota = {
+  providerID: CliAgentProviderID
+  windows: Array<{ label: string; usedPercentage: number; resetsAt?: string }>
+  checkedAt: string
 }
 
 const EMPTY_USAGE: LanguageModelV3Usage = {
@@ -42,6 +58,7 @@ const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 const CLAUDE_VARIANTS = Object.fromEntries(CLAUDE_EFFORTS.map((effort) => [effort, { effort }]))
 
 let sessionWrite = Promise.resolve()
+let usageWrite = Promise.resolve()
 
 export function cliAgentProviderInfos(): Info[] {
   return [
@@ -54,6 +71,9 @@ export function cliAgentProviderInfos(): Info[] {
     ]),
     providerInfo("cursor-agent", "Cursor Agent (local CLI)", [
       model("cursor-agent", "default", "Cursor Agent default", "cursor"),
+    ]),
+    providerInfo("antigravity-cli", "Antigravity (local CLI)", [
+      model("antigravity-cli", "default", "Antigravity default", "antigravity"),
     ]),
   ]
 }
@@ -104,19 +124,35 @@ export function createCliAgentLanguageModel(
       if (!executable) throw new Error(missingExecutableMessage(providerID))
 
       const sessions = await readSessions()
-      const externalSessionID = sessions[providerID]?.[sessionID]
+      const remembered = sessions[providerID]?.[sessionID]
+      const forked =
+        typeof remembered !== "string" &&
+        remembered?.lastAssistantText !== undefined &&
+        remembered.lastAssistantText !== lastAssistantText(input)
+      const externalSessionID = forked
+        ? undefined
+        : typeof remembered === "string"
+          ? remembered
+          : remembered?.externalSessionID
+      const newSessionID = forked ? deterministicCliSessionID(`${sessionID}:${crypto.randomUUID()}`) : undefined
       const prompt = promptText(input, !externalSessionID)
+      const logFile =
+        providerID === "antigravity-cli"
+          ? path.join(Global.Path.data, `antigravity-${sessionID}-${crypto.randomUUID()}.log`)
+          : undefined
       const command = buildCliAgentCommand({
         providerID,
         executable,
         modelID,
         externalSessionID,
         sessionID,
+        newSessionID,
         permissionMode: bridge.permissionMode ?? "agent",
         effort: bridge.effort,
+        logFile,
       })
       const proc = Bun.spawn(command, {
-        cwd: bridge.directory || process.cwd(),
+        cwd: bridge.directory || (typeof remembered === "string" ? undefined : remembered?.directory) || process.cwd(),
         env: process.env,
         stdin: "pipe",
         stdout: "pipe",
@@ -137,6 +173,7 @@ export function createCliAgentLanguageModel(
             let textStarted = false
             let reasoningStarted = false
             let emittedText = false
+            let responseText = ""
             let usage = EMPTY_USAGE
             let discoveredSessionID = externalSessionID
 
@@ -148,6 +185,7 @@ export function createCliAgentLanguageModel(
               }
               controller.enqueue({ type: "text-delta", id: "text-0", delta })
               emittedText = true
+              responseText += delta
             }
             const emitReasoning = (delta: string) => {
               if (!delta) return
@@ -162,7 +200,7 @@ export function createCliAgentLanguageModel(
               if (!event) return
               if (event.sessionID && event.sessionID !== discoveredSessionID) {
                 discoveredSessionID = event.sessionID
-                await rememberSession(providerID, sessionID, event.sessionID)
+                await rememberSession(providerID, sessionID, event.sessionID, bridge.directory, responseText)
               }
               if (event.reasoning) emitReasoning(event.reasoning)
               if (event.text) emitText(event.text)
@@ -187,9 +225,21 @@ export function createCliAgentLanguageModel(
               const exitCode = await proc.exited
               const stderr = (await stderrPromise).trim()
               if (exitCode !== 0) throw new Error(cliFailureMessage(providerID, stderr, exitCode))
+              if (!discoveredSessionID && providerID === "antigravity-cli" && logFile) {
+                const log = await Bun.file(logFile)
+                  .text()
+                  .catch(() => "")
+                discoveredSessionID = /Created conversation ([0-9a-f-]{36})/i.exec(log)?.[1]
+                if (discoveredSessionID) {
+                  await rememberSession(providerID, sessionID, discoveredSessionID, bridge.directory, responseText)
+                }
+              }
               if (!discoveredSessionID && providerID === "claude-code") {
-                discoveredSessionID = deterministicCliSessionID(sessionID)
-                await rememberSession(providerID, sessionID, discoveredSessionID)
+                discoveredSessionID = newSessionID ?? deterministicCliSessionID(sessionID)
+                await rememberSession(providerID, sessionID, discoveredSessionID, bridge.directory, responseText)
+              }
+              if (discoveredSessionID) {
+                await rememberSession(providerID, sessionID, discoveredSessionID, bridge.directory, responseText)
               }
               if (reasoningStarted) controller.enqueue({ type: "reasoning-end", id: "reasoning-0" })
               if (textStarted) controller.enqueue({ type: "text-end", id: "text-0" })
@@ -205,9 +255,14 @@ export function createCliAgentLanguageModel(
                 },
               })
               controller.close()
+              if (providerID === "claude-code") void refreshClaudeQuota(executable).catch(() => {})
             } catch (error) {
               controller.error(error)
             } finally {
+              if (logFile)
+                await Bun.file(logFile)
+                  .delete()
+                  .catch(() => {})
               input.abortSignal?.removeEventListener("abort", abort)
             }
           },
@@ -265,8 +320,30 @@ function model(
 }
 
 export function cliAgentExecutable(providerID: CliAgentProviderID) {
-  const override = process.env[providerID === "claude-code" ? "CODEGOBLIN_CLAUDE_CLI" : "CODEGOBLIN_CURSOR_CLI"]
-  return override || Bun.which(providerID === "claude-code" ? "claude" : "cursor-agent")
+  const env = {
+    "claude-code": "CODEGOBLIN_CLAUDE_CLI",
+    "cursor-agent": "CODEGOBLIN_CURSOR_CLI",
+    "antigravity-cli": "CODEGOBLIN_ANTIGRAVITY_CLI",
+  }[providerID]
+  const command = { "claude-code": "claude", "cursor-agent": "cursor-agent", "antigravity-cli": "agy" }[providerID]
+  const executable = process.env[env] || Bun.which(command)
+  if (executable) return executable
+  if (providerID === "cursor-agent" && process.platform === "win32") {
+    const wsl = Bun.which("wsl.exe")
+    if (!wsl) return
+    const status = Bun.spawnSync([wsl, "sh", "-lc", "command -v cursor-agent"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    })
+    if (status.exitCode === 0) return wsl
+  }
+}
+
+export function cliAgentBaseCommand(providerID: CliAgentProviderID, executable: string) {
+  if (providerID === "cursor-agent" && /(?:^|[\\/])wsl(?:\.exe)?$/i.test(executable)) {
+    return [executable, "cursor-agent"]
+  }
+  return [executable]
 }
 
 export function buildCliAgentCommand(input: {
@@ -275,11 +352,13 @@ export function buildCliAgentCommand(input: {
   modelID: string
   externalSessionID?: string
   sessionID: string
+  newSessionID?: string
   permissionMode: "agent" | "plan"
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
+  logFile?: string
 }) {
   if (input.providerID === "claude-code") {
-    const external = input.externalSessionID ?? deterministicCliSessionID(input.sessionID)
+    const external = input.externalSessionID ?? input.newSessionID ?? deterministicCliSessionID(input.sessionID)
     return [
       input.executable,
       "--print",
@@ -296,8 +375,19 @@ export function buildCliAgentCommand(input: {
       ...(input.externalSessionID ? ["--resume", external] : ["--session-id", external]),
     ]
   }
+  if (input.providerID === "antigravity-cli") {
+    return [
+      ...cliAgentBaseCommand(input.providerID, input.executable),
+      "--print",
+      ...(input.logFile ? ["--log-file", input.logFile] : []),
+      "--mode",
+      input.permissionMode === "plan" ? "plan" : "accept-edits",
+      ...(input.modelID === "default" ? [] : ["--model", input.modelID]),
+      ...(input.externalSessionID ? ["--conversation", input.externalSessionID] : []),
+    ]
+  }
   return [
-    input.executable,
+    ...cliAgentBaseCommand(input.providerID, input.executable),
     "--print",
     "--output-format",
     "stream-json",
@@ -329,8 +419,15 @@ function promptText(input: LanguageModelV3CallOptions, full: boolean) {
   return rendered.join("\n\n")
 }
 
+function lastAssistantText(input: LanguageModelV3CallOptions) {
+  const assistant = input.prompt.findLast((message) => message.role === "assistant")
+  if (!assistant) return
+  return assistant.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
+}
+
 export function parseCliAgentEvent(providerID: CliAgentProviderID, line: string): ParsedEvent | undefined {
   if (!line.trim()) return
+  if (providerID === "antigravity-cli") return { text: `${line}\n` }
   let raw: Record<string, unknown>
   try {
     raw = JSON.parse(line) as Record<string, unknown>
@@ -405,12 +502,25 @@ async function readSessions(): Promise<BridgeSessions> {
   return file.json().catch(() => ({}))
 }
 
-async function rememberSession(providerID: CliAgentProviderID, sessionID: string, externalSessionID: string) {
+async function rememberSession(
+  providerID: CliAgentProviderID,
+  sessionID: string,
+  externalSessionID: string,
+  directory?: string,
+  lastAssistantText?: string,
+) {
   sessionWrite = sessionWrite
     .catch(() => {})
     .then(async () => {
       const sessions = await readSessions()
-      sessions[providerID] = { ...sessions[providerID], [sessionID]: externalSessionID }
+      sessions[providerID] = {
+        ...sessions[providerID],
+        [sessionID]: {
+          externalSessionID,
+          ...(directory && { directory }),
+          ...(lastAssistantText !== undefined && { lastAssistantText }),
+        },
+      }
       await Bun.write(sessionFile(), JSON.stringify(sessions, null, 2))
     })
   await sessionWrite
@@ -420,19 +530,67 @@ function sessionFile() {
   return path.join(Global.Path.data, "cli-agent-sessions.json")
 }
 
+export async function readCliAgentUsage(): Promise<CliAgentQuota[]> {
+  const file = Bun.file(path.join(Global.Path.data, "cli-agent-usage.json"))
+  if (!(await file.exists())) return []
+  const value = await file.json().catch(() => [])
+  return Array.isArray(value) ? (value as CliAgentQuota[]) : []
+}
+
+export function parseClaudeQuota(value: unknown): CliAgentQuota | undefined {
+  if (!isRecord(value)) return
+  const result = stringValue(value.result)
+  if (!result) return
+  const windows = result.split(/\r?\n/).flatMap((line) => {
+    const match = /^Current (5[- ]hour|week \(all models\)):\s*(\d+(?:\.\d+)?)% used(?:\s*·\s*resets (.+))?/i.exec(
+      line.trim(),
+    )
+    if (!match) return []
+    const label = match[1].toLowerCase().startsWith("5") ? "5h" : "week"
+    return [{ label, usedPercentage: Number(match[2]), ...(match[3] && { resetsAt: match[3] }) }]
+  })
+  if (!windows.length) return
+  return { providerID: "claude-code", windows, checkedAt: new Date().toISOString() }
+}
+
+async function refreshClaudeQuota(executable: string) {
+  const proc = Bun.spawn(
+    [...cliAgentBaseCommand("claude-code", executable), "--print", "--output-format", "json", "/usage"],
+    {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+    },
+  )
+  const [exitCode, value] = await Promise.all([proc.exited, new Response(proc.stdout).json().catch(() => undefined)])
+  if (exitCode !== 0) return
+  const quota = parseClaudeQuota(value)
+  if (!quota) return
+  usageWrite = usageWrite
+    .catch(() => {})
+    .then(async () => {
+      const usage = (await readCliAgentUsage()).filter((item) => item.providerID !== quota.providerID)
+      await Bun.write(path.join(Global.Path.data, "cli-agent-usage.json"), JSON.stringify([...usage, quota], null, 2))
+    })
+  await usageWrite
+}
+
 function cliFailureMessage(providerID: CliAgentProviderID, stderr: string, exitCode: number) {
-  const login = providerID === "claude-code" ? "claude auth login" : "cursor-agent login"
+  const login =
+    providerID === "claude-code" ? "claude auth login" : providerID === "cursor-agent" ? "cursor-agent login" : "agy"
   const detail = stderr ? `\n\n${stderr}` : ""
   return `${providerName(providerID)} exited with code ${exitCode}. Run '${login}' in this terminal and retry.${detail}`
 }
 
 function missingExecutableMessage(providerID: CliAgentProviderID) {
-  const command = providerID === "claude-code" ? "claude" : "cursor-agent"
+  const command = providerID === "claude-code" ? "claude" : providerID === "cursor-agent" ? "cursor-agent" : "agy"
   return `${providerName(providerID)} is not installed or is not on PATH. Install the official ${command} CLI, run '${command} auth login', then retry.`
 }
 
 function providerName(providerID: CliAgentProviderID) {
-  return providerID === "claude-code" ? "Claude Code CLI" : "Cursor Agent CLI"
+  if (providerID === "claude-code") return "Claude Code CLI"
+  if (providerID === "cursor-agent") return "Cursor Agent CLI"
+  return "Antigravity CLI"
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

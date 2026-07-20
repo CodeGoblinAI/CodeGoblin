@@ -1042,7 +1042,7 @@ export function options(input: {
 }): Record<string, any> {
   const result: Record<string, any> = {}
 
-  if (input.model.providerID === "claude-code" || input.model.providerID === "cursor-agent") {
+  if (["claude-code", "cursor-agent", "antigravity-cli"].includes(input.model.providerID)) {
     result["sessionID"] = input.sessionID
   }
 
