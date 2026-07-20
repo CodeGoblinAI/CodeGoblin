@@ -22,8 +22,8 @@ export const DialogSelectProvider: Component = () => {
   const note = (id: string) => {
     if (id === "anthropic") return language.t("dialog.provider.anthropic.note")
     if (id === "openai") return language.t("dialog.provider.openai.note")
-    if (id === "cursor-agent") return "Use your installed Cursor account"
-    if (id === "antigravity-cli") return "Use your Antigravity account"
+    if (id === "cursor-agent") return "Native Cursor CLI; installs and opens browser login"
+    if (id === "antigravity-cli") return "AGY CLI; installs and uses Google Sign-In"
     if (id === "elevenlabs") return "Voice, TTS, and music API key"
     if (id.startsWith("github-copilot")) return language.t("dialog.provider.copilot.note")
     if (id === "opencode-go") return language.t("dialog.provider.opencodeGo.tagline")

@@ -57,25 +57,88 @@ const EMPTY_USAGE: LanguageModelV3Usage = {
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 const CLAUDE_VARIANTS = Object.fromEntries(CLAUDE_EFFORTS.map((effort) => [effort, { effort }]))
 
+type DiscoveredModel = { id: string; name: string }
+
+let discoveredProviders: Promise<Info[]> | undefined
+
 let sessionWrite = Promise.resolve()
 let usageWrite = Promise.resolve()
 
-export function cliAgentProviderInfos(): Info[] {
+export function cliAgentProviderInfos(input?: Partial<Record<CliAgentProviderID, DiscoveredModel[]>>): Info[] {
   return [
-    providerInfo("claude-code", "Claude Code (local CLI)", [
-      model("claude-code", "default", "Claude Code default", "claude", CLAUDE_VARIANTS),
-      model("claude-code", "fable", "Claude Fable (latest)", "claude", CLAUDE_VARIANTS),
-      model("claude-code", "opus", "Claude Opus (latest)", "claude", CLAUDE_VARIANTS),
-      model("claude-code", "sonnet", "Claude Sonnet (latest)", "claude", CLAUDE_VARIANTS),
-      model("claude-code", "haiku", "Claude Haiku (latest)", "claude", CLAUDE_VARIANTS),
-    ]),
-    providerInfo("cursor-agent", "Cursor Agent (local CLI)", [
-      model("cursor-agent", "default", "Cursor Agent default", "cursor"),
-    ]),
-    providerInfo("antigravity-cli", "Antigravity (local CLI)", [
-      model("antigravity-cli", "default", "Antigravity default", "antigravity"),
-    ]),
+    providerInfo(
+      "claude-code",
+      "Claude Code (local CLI)",
+      (input?.["claude-code"] ?? [
+        { id: "default", name: "Claude account default (resolved after connection)" },
+        { id: "fable", name: "Claude Fable 5 (alias)" },
+        { id: "opus", name: "Claude Opus 4.8 (alias)" },
+        { id: "sonnet", name: "Claude Sonnet 5 (alias)" },
+        { id: "haiku", name: "Claude Haiku 4.5 (alias)" },
+      ]).map((item) => model("claude-code", item.id, item.name, "claude", CLAUDE_VARIANTS)),
+    ),
+    providerInfo(
+      "cursor-agent",
+      "Cursor Agent (local CLI)",
+      (input?.["cursor-agent"] ?? [{ id: "default", name: "Cursor account default" }]).map((item) =>
+        model("cursor-agent", item.id, item.name, "cursor"),
+      ),
+    ),
+    providerInfo(
+      "antigravity-cli",
+      "Antigravity (local CLI)",
+      (input?.["antigravity-cli"] ?? [{ id: "default", name: "Antigravity account default" }]).map((item) =>
+        model("antigravity-cli", item.id, item.name, "antigravity"),
+      ),
+    ),
   ]
+}
+
+export function discoverCliAgentProviderInfos() {
+  discoveredProviders ??= Promise.all([
+    discoverCursorModels(),
+    discoverAntigravityModels(),
+  ]).then(([cursor, antigravity]) =>
+    cliAgentProviderInfos({
+      ...(cursor.length && { "cursor-agent": cursor }),
+      ...(antigravity.length && { "antigravity-cli": antigravity }),
+    }),
+  )
+  return discoveredProviders
+}
+
+async function discoverCursorModels() {
+  const executable = cliAgentExecutable("cursor-agent")
+  if (!executable) return []
+  const result = await runDiscovery([...cliAgentBaseCommand("cursor-agent", executable), "models"])
+  if (!result) return []
+  return parseModelLines(result)
+}
+
+async function discoverAntigravityModels() {
+  const executable = cliAgentExecutable("antigravity-cli")
+  if (!executable) return []
+  const result = await runDiscovery([...cliAgentBaseCommand("antigravity-cli", executable), "models"])
+  if (!result) return []
+  return parseModelLines(result)
+}
+
+function parseModelLines(value: string) {
+  return value
+    .replace(/\x1b\[[0-9;]*m/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[>*●•-]\s*/, ""))
+    .filter((line) => line && !/^(available )?models?:?$/i.test(line))
+    .map((name) => ({ id: name, name }))
+}
+
+async function runDiscovery(command: string[]) {
+  const proc = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "ignore" })
+  const timeout = setTimeout(() => proc.kill(), 5_000)
+  const [exitCode, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()])
+  clearTimeout(timeout)
+  if (exitCode !== 0) return
+  return stdout.trim()
 }
 
 export function createCliAgentLanguageModel(
@@ -329,13 +392,8 @@ export function cliAgentExecutable(providerID: CliAgentProviderID) {
   const executable = process.env[env] || Bun.which(command)
   if (executable) return executable
   if (providerID === "cursor-agent" && process.platform === "win32") {
-    const wsl = Bun.which("wsl.exe")
-    if (!wsl) return
-    const status = Bun.spawnSync([wsl, "sh", "-lc", "command -v cursor-agent"], {
-      stdout: "ignore",
-      stderr: "ignore",
-    })
-    if (status.exitCode === 0) return wsl
+    const native = path.join(process.env.LOCALAPPDATA ?? "", "cursor-agent", "cursor-agent.exe")
+    if (process.env.LOCALAPPDATA && Bun.file(native).size > 0) return native
   }
 }
 
@@ -497,7 +555,7 @@ export function deterministicCliSessionID(value: string) {
 }
 
 async function readSessions(): Promise<BridgeSessions> {
-  const file = Bun.file(sessionFile())
+  const file = Bun.file(cliAgentSessionFile())
   if (!(await file.exists())) return {}
   return file.json().catch(() => ({}))
 }
@@ -521,12 +579,12 @@ async function rememberSession(
           ...(lastAssistantText !== undefined && { lastAssistantText }),
         },
       }
-      await Bun.write(sessionFile(), JSON.stringify(sessions, null, 2))
+      await Bun.write(cliAgentSessionFile(), JSON.stringify(sessions, null, 2))
     })
   await sessionWrite
 }
 
-function sessionFile() {
+export function cliAgentSessionFile() {
   return path.join(Global.Path.data, "cli-agent-sessions.json")
 }
 
@@ -584,7 +642,9 @@ function cliFailureMessage(providerID: CliAgentProviderID, stderr: string, exitC
 
 function missingExecutableMessage(providerID: CliAgentProviderID) {
   const command = providerID === "claude-code" ? "claude" : providerID === "cursor-agent" ? "cursor-agent" : "agy"
-  return `${providerName(providerID)} is not installed or is not on PATH. Install the official ${command} CLI, run '${command} auth login', then retry.`
+  const login =
+    providerID === "claude-code" ? "claude auth login" : providerID === "cursor-agent" ? "cursor-agent login" : "agy"
+  return `${providerName(providerID)} is not installed or is not on PATH. Install the official ${command} CLI, run '${login}', then retry.`
 }
 
 function providerName(providerID: CliAgentProviderID) {

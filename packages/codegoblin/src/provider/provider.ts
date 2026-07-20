@@ -35,7 +35,7 @@ import {
   augmentLocalRuntimeModels,
   codeGoblinProviderInfo,
 } from "@/codegoblin/provider"
-import { CLI_AGENT_PROVIDERS, cliAgentProviderInfos, createCliAgentLanguageModel } from "./cli-agent"
+import { CLI_AGENT_PROVIDERS, createCliAgentLanguageModel, discoverCliAgentProviderInfos } from "./cli-agent"
 
 const log = Log.create({ service: "provider" })
 
@@ -1256,7 +1256,7 @@ export const layer = Layer.effect(
         const codeGoblin = codeGoblinProviderInfo()
         catalog[codeGoblin.id] = codeGoblin
         database[codeGoblin.id] = toPublicInfo(codeGoblin)
-        for (const provider of cliAgentProviderInfos()) {
+        for (const provider of yield* Effect.promise(discoverCliAgentProviderInfos)) {
           catalog[provider.id] = provider
           database[provider.id] = toPublicInfo(provider)
         }

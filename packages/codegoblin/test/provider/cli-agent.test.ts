@@ -18,7 +18,19 @@ describe("local CLI agent providers", () => {
   test("advertises Claude Code and Cursor Agent as local providers", () => {
     const providers = cliAgentProviderInfos()
     expect(providers.map((provider) => String(provider.id))).toEqual(["claude-code", "cursor-agent", "antigravity-cli"])
+    expect(providers[0].models.sonnet.name).toBe("Claude Sonnet 5 (alias)")
+    expect(providers[0].models.opus.name).toBe("Claude Opus 4.8 (alias)")
     expect(Object.keys(providers[0].models.sonnet.variants ?? {})).toEqual(["low", "medium", "high", "xhigh", "max"])
+  })
+
+  test("uses the exact model labels reported by Antigravity", () => {
+    const provider = cliAgentProviderInfos({
+      "antigravity-cli": [
+        { id: "Gemini 3.5 Flash (High)", name: "Gemini 3.5 Flash (High)" },
+        { id: "Claude Opus 4.6 (Thinking)", name: "Claude Opus 4.6 (Thinking)" },
+      ],
+    })[2]
+    expect(Object.keys(provider.models)).toEqual(["Gemini 3.5 Flash (High)", "Claude Opus 4.6 (Thinking)"])
   })
 
   test("connects local CLIs through provider auth methods instead of API-key prompts", async () => {
@@ -36,7 +48,7 @@ describe("local CLI agent providers", () => {
 
   test("uses official installers for missing local CLIs", () => {
     expect(installCommand("claude-code", "win32")).toContain("irm https://claude.ai/install.ps1 | iex")
-    expect(installCommand("cursor-agent", "win32")?.slice(0, 3)).toEqual(["wsl.exe", "sh", "-lc"])
+    expect(installCommand("cursor-agent", "win32")).toContain("irm 'https://cursor.com/install?win32=true' | iex")
     expect(installCommand("antigravity-cli", "linux")).toContain(
       "curl -fsSL https://antigravity.google/cli/install.sh | bash",
     )
@@ -112,6 +124,18 @@ describe("local CLI agent providers", () => {
       "--conversation",
       "agy-conversation-id",
     ])
+  })
+
+  test("passes Antigravity's exact model label back to AGY", () => {
+    const command = buildCliAgentCommand({
+      providerID: "antigravity-cli",
+      executable: "agy",
+      modelID: "Gemini 3.5 Flash (High)",
+      sessionID: "ses_example",
+      permissionMode: "agent",
+    })
+    expect(command).toContain("--model")
+    expect(command).toContain("Gemini 3.5 Flash (High)")
   })
 
   test("parses Claude partial text and usage", () => {

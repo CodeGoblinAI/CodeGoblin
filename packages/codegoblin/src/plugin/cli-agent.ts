@@ -1,5 +1,10 @@
 import type { Hooks, PluginInput } from "@codegoblin/plugin"
-import { cliAgentBaseCommand, cliAgentExecutable, type CliAgentProviderID } from "@/provider/cli-agent"
+import {
+  cliAgentBaseCommand,
+  cliAgentExecutable,
+  cliAgentSessionFile,
+  type CliAgentProviderID,
+} from "@/provider/cli-agent"
 
 const CONNECTED_KEY = "codegoblin-local-cli"
 
@@ -35,24 +40,20 @@ function cliAgentMethod(providerID: CliAgentProviderID) {
     label: `${providerName(providerID)} (connect or install)`,
     provider: providerID,
     authorize: async () => {
-      const executable = cliAgentExecutable(providerID) ?? (await install(providerID))
-      if (!executable) throw new Error(missingExecutableMessage(providerID))
-
-      const login = (await authenticated(providerID, executable))
-        ? Promise.resolve({ ok: true as const, detail: "" })
-        : providerID === "antigravity-cli"
-          ? Promise.resolve({ ok: true as const, detail: "" })
-          : run([...cliAgentBaseCommand(providerID, executable), ...loginArgs(providerID)])
-
       return {
         url: providerURL(providerID),
         method: "auto" as const,
         instructions:
           providerID === "antigravity-cli"
-            ? "Antigravity will request Google sign-in on its first interactive run if needed. CodeGoblin never receives or stores your Google credentials."
-            : `${providerName(providerID)} will open your browser if sign-in is needed. CodeGoblin never receives or stores your credentials.`,
+            ? `Installing Antigravity CLI if needed. Its first run uses Google Sign-In. AGY owns the chat history; CodeGoblin stores only the session link in ${cliAgentSessionFile()}.`
+            : `Installing ${providerName(providerID)} if needed, then opening its official browser login. The CLI owns the chat history; CodeGoblin stores only the session link in ${cliAgentSessionFile()}.`,
         callback: async () => {
-          const result = await login
+          const executable = cliAgentExecutable(providerID) ?? (await install(providerID))
+          if (!executable) return { type: "failed" as const, message: missingExecutableMessage(providerID) }
+          const result =
+            (await authenticated(providerID, executable)) || providerID === "antigravity-cli"
+              ? { ok: true as const, detail: "" }
+              : await run([...cliAgentBaseCommand(providerID, executable), ...loginArgs(providerID)])
           if (!result.ok) return { type: "failed" as const, message: result.detail }
           if (providerID !== "antigravity-cli" && !(await authenticated(providerID, executable))) {
             return {
@@ -94,7 +95,14 @@ async function install(providerID: CliAgentProviderID) {
 export function installCommand(providerID: CliAgentProviderID, platform = process.platform) {
   if (platform === "win32") {
     if (providerID === "cursor-agent") {
-      return ["wsl.exe", "sh", "-lc", "curl https://cursor.com/install -fsS | bash"]
+      return [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "irm 'https://cursor.com/install?win32=true' | iex",
+      ]
     }
     const url =
       providerID === "claude-code" ? "https://claude.ai/install.ps1" : "https://antigravity.google/cli/install.ps1"
@@ -131,9 +139,6 @@ function loginArgs(providerID: CliAgentProviderID) {
 }
 
 function missingExecutableMessage(providerID: CliAgentProviderID) {
-  if (providerID === "cursor-agent" && process.platform === "win32") {
-    return "Cursor Agent was not found in WSL after installation. Open WSL once, then run /connect again."
-  }
   return `${providerName(providerID)} was not found on PATH after the official installer completed.`
 }
 
