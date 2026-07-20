@@ -11,6 +11,16 @@ const id = "internal:widget"
 const KV_ENABLED = "widget.enabled"
 const KV_SOUND = "widget.sound"
 const KV_LAYOUT = "widget.layout"
+/**
+ * Account-usage strip for the widget's panel header. Subscription/OAuth
+ * providers (Claude Pro/Max, ChatGPT, …) don't have per-session spend — they
+ * have rate-limit windows. Whatever wires those up (the provider-usage PR)
+ * can publish `[{ label: "5h", pct: 11, reset: "4h1m" }, ...]` under this kv
+ * key and the widget renders it; absent, the header falls back to spend·ctx.
+ */
+const KV_USAGE = "widget.usage"
+
+type UsageSegment = { label: string; pct: number; reset?: string }
 
 /**
  * Desktop status widget: a tiny always-on-top native bubble (Rust,
@@ -105,10 +115,17 @@ const tui: TuiPlugin = async (api) => {
     stdin.write(JSON.stringify(payload) + "\n")
   }
 
+  function usageSegments(): UsageSegment[] {
+    const value = api.kv.get<UsageSegment[] | undefined>(KV_USAGE, undefined)
+    if (!Array.isArray(value)) return []
+    return value.filter((u) => u && typeof u.label === "string" && typeof u.pct === "number").slice(0, 3)
+  }
+
   function snapshot(chime?: "done" | "error", extra?: Record<string, unknown>) {
     send({
       sessions: activeRows().map(({ touched: _touched, ...rest }) => rest),
       question: question ?? null,
+      usage: usageSegments(),
       ...(chime ? { chime } : {}),
       ...extra,
     })
@@ -240,6 +257,7 @@ const tui: TuiPlugin = async (api) => {
     send({
       sessions: activeRows().map(({ touched: _touched, ...rest }) => rest),
       question: question ?? null,
+      usage: usageSegments(),
       sound: api.kv.get<boolean>(KV_SOUND, true),
       ...(soundPath ? { soundPath } : {}),
       ...(api.kv.get<Layout | undefined>(KV_LAYOUT, undefined) ? { layout: api.kv.get<Layout>(KV_LAYOUT) } : {}),

@@ -1,29 +1,32 @@
-//! `codegoblin-native widget` — a tiny always-on-top status bubble for Windows.
+//! `codegoblin-native widget` — an always-on-top status island for Windows.
 //!
-//! Protocol v2: the TUI streams full JSON snapshots on stdin, one per line:
+//! Two visual states, vibeisland-style:
+//!   - **Island**: a compact pill (mascot + session title + working-count
+//!     badge) that stays out of the way.
+//!   - **Panel**: click the island to expand a rich panel — account-usage
+//!     header strip, one row per session, question preview with answer
+//!     buttons, and a footer button row (focus / esc / sound / hide).
+//!
+//! Protocol v3: the TUI streams full JSON snapshots on stdin, one per line:
 //!   {"sessions":[{"id":"ses_1","title":"fix auth","working":true,"status":"bash",
 //!     "startedAtMs":123,"spend":"$0.42","ctx":"18.8K · 9%","todoDone":3,"todoTotal":7}],
+//!    "usage":[{"label":"5h","pct":11,"reset":"4h1m"},{"label":"7d","pct":2,"reset":"6h1m"}],
 //!    "question":{"requestID":"q1","sessionID":"ses_1","text":"Deploy target?",
 //!     "options":["Production","Staging"]},
 //!    "sound":true,"soundPath":null,"layout":{...},"chime":"done"}
-//! `sessions`/`question` fully replace previous state each line; `sound`,
-//! `soundPath`, and `layout` apply only when present (sent once at startup);
-//! `chime` is a one-shot play request ("done" | "error"). When stdin closes
-//! (TUI exit), the widget exits. No network, no discovery.
+//! `sessions`/`question`/`usage` fully replace previous state each line;
+//! `sound`, `soundPath`, and `layout` apply only when present (sent once at
+//! startup); `chime` is a one-shot play request ("done" | "error"). When stdin
+//! closes (TUI exit), the widget exits. No network, no discovery.
 //!
 //! The widget reports user actions as JSON lines on stdout:
 //!   {"event":"sound","enabled":false}
 //!   {"event":"layout","mode":"floating","x":12,"y":40}
-//!   {"event":"layout","mode":"docked","edge":"right","along":420}
 //!   {"event":"interrupt","sessionID":"ses_1"}
 //!   {"event":"answer","requestID":"q1","option":"Staging"}
 //!
-//! Interactions:
-//!   - drag anywhere to move; drop near the top/left/right monitor edge to
-//!     dock it as a small tab (PC-Manager style); hover the tab to fly out
-//!   - hover shows a menu row: focus / esc (interrupt) / sound / hide
-//!   - question options render as clickable buttons
-//!   - double-click refocuses the terminal, right-click dismisses
+//! Interactions: click the island to expand, click the panel header (or move
+//! the mouse away) to collapse, drag anywhere to move, right-click to dismiss.
 
 #[cfg(windows)]
 pub fn run() -> Result<(), String> {
@@ -53,7 +56,7 @@ mod win {
         SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        TrackMouseEvent, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT,
+        ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -87,6 +90,17 @@ mod win {
 
     #[derive(Clone, Deserialize)]
     #[serde(rename_all = "camelCase")]
+    struct Usage {
+        #[serde(default)]
+        label: String,
+        #[serde(default)]
+        pct: f32,
+        #[serde(default)]
+        reset: String,
+    }
+
+    #[derive(Clone, Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct Question {
         #[serde(rename = "requestID")]
         request_id: String,
@@ -100,9 +114,8 @@ mod win {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct LayoutIn {
-        mode: String,
-        edge: Option<String>,
-        along: Option<i32>,
+        #[serde(default, rename = "mode")]
+        _mode: String,
         x: Option<i32>,
         y: Option<i32>,
     }
@@ -112,6 +125,7 @@ mod win {
     struct Snapshot {
         sessions: Option<Vec<Row>>,
         question: Option<Question>,
+        usage: Option<Vec<Usage>>,
         sound: Option<bool>,
         sound_path: Option<String>,
         layout: Option<LayoutIn>,
@@ -121,47 +135,29 @@ mod win {
     struct State {
         rows: Vec<Row>,
         question: Option<Question>,
+        usage: Vec<Usage>,
         sound_enabled: bool,
         sound_path: Option<String>,
     }
 
     impl Default for State {
         fn default() -> Self {
-            Self { rows: Vec::new(), question: None, sound_enabled: true, sound_path: None }
+            Self {
+                rows: Vec::new(),
+                question: None,
+                usage: Vec::new(),
+                sound_enabled: true,
+                sound_path: None,
+            }
         }
     }
 
     // ── ui state ─────────────────────────────────────────────────────────────
 
     #[derive(Clone, Copy, PartialEq)]
-    enum Edge {
-        Top,
-        Left,
-        Right,
-    }
-
-    impl Edge {
-        fn name(self) -> &'static str {
-            match self {
-                Edge::Top => "top",
-                Edge::Left => "left",
-                Edge::Right => "right",
-            }
-        }
-        fn parse(s: &str) -> Edge {
-            match s {
-                "left" => Edge::Left,
-                "right" => Edge::Right,
-                _ => Edge::Top,
-            }
-        }
-    }
-
-    #[derive(Clone, Copy, PartialEq)]
     enum Mode {
-        Floating,
-        DockedTab,
-        DockedExpanded,
+        Island,
+        Panel,
     }
 
     struct Anim {
@@ -169,7 +165,7 @@ mod win {
         to: RECT,
         start: u64,
         dur: u32,
-        /// When true, switch to the tab presentation once the slide lands.
+        /// When true, switch to the island presentation once the slide lands.
         collapse: bool,
     }
 
@@ -180,6 +176,7 @@ mod win {
 
     #[derive(Clone, PartialEq)]
     enum Action {
+        Toggle,
         Focus,
         Interrupt(String),
         Sound,
@@ -189,34 +186,41 @@ mod win {
 
     struct Ui {
         mode: Mode,
-        edge: Edge,
-        /// Coordinate along the docked edge (x for top, y for sides).
-        along: i32,
+        /// Island anchor (top-left, screen coords) — where the pill lives and
+        /// what the panel expands from.
+        island: (i32, i32),
         hovering: bool,
-        in_drag: bool,
+        /// Manual drag state (own drag loop so click vs drag stays clean).
+        drag_capture: bool,
+        drag_moved: bool,
+        drag_origin: (i32, i32),
+        win_origin: (i32, i32),
         pulse: bool,
         frame: u8,
         /// Remaining pulse ticks of the "done" border flash.
         flash: u8,
+        /// Ticks since the mouse left an expanded panel (auto-collapse).
+        leave_ticks: u8,
         /// Clickable regions (client coords), rebuilt at paint.
         hits: Vec<Hit>,
         anim: Option<Anim>,
-        desired_h: i32,
     }
 
     static STATE: Mutex<Option<State>> = Mutex::new(None);
     static UI: Mutex<Ui> = Mutex::new(Ui {
-        mode: Mode::Floating,
-        edge: Edge::Top,
-        along: 0,
+        mode: Mode::Island,
+        island: (0, 0),
         hovering: false,
-        in_drag: false,
+        drag_capture: false,
+        drag_moved: false,
+        drag_origin: (0, 0),
+        win_origin: (0, 0),
         pulse: false,
         frame: 0,
         flash: 0,
+        leave_ticks: 0,
         hits: Vec::new(),
         anim: None,
-        desired_h: 0,
     });
     static CTX: Mutex<Option<(isize, f32)>> = Mutex::new(None);
 
@@ -224,26 +228,24 @@ mod win {
     const WM_APP_DONE: u32 = WM_APP + 2;
     const TIMER_TICK: usize = 1;
     const TIMER_ANIM: usize = 2;
-    const ANIM_MS: u32 = 140;
+    const ANIM_MS: u32 = 160;
+    const DRAG_THRESHOLD: i32 = 4;
 
     // 96-dpi layout constants (multiplied by the dpi scale at runtime).
-    const BUBBLE_W: i32 = 330;
-    const MENU_H: i32 = 24;
-    const TAB_LEN: i32 = 56;
-    const TAB_THICK: i32 = 12;
-    const SNAP: i32 = 16;
+    const ISLAND_W: i32 = 210;
+    const ISLAND_H: i32 = 36;
+    const PANEL_W: i32 = 360;
+    const HEADER_H: i32 = 30;
+    const ROW_H: i32 = 40;
+    const FOOTER_H: i32 = 30;
+    const QUESTION_TEXT_H: i32 = 34;
+    const QUESTION_BTN_H: i32 = 24;
     const PAD: i32 = 10;
-    const STRIPE_W: i32 = 3;
-    const EXTRA_ROW_H: i32 = 20;
-    const META_ROW_H: i32 = 16;
-    const QUESTION_TEXT_H: i32 = 32;
-    const QUESTION_BTN_H: i32 = 22;
-    const PRIMARY_H: i32 = 44;
+    const GUTTER: i32 = 46;
 
     const BG: COLORREF = rgb(0x16, 0x18, 0x1c);
     const BG_RAISED: COLORREF = rgb(0x1c, 0x1f, 0x24);
     const EDGE_C: COLORREF = rgb(0x2a, 0x2d, 0x33);
-    const TAB_BG: COLORREF = rgb(0x3a, 0x3d, 0x44);
     const TITLE_FG: COLORREF = rgb(0xe8, 0xe8, 0xe8);
     const STATUS_FG: COLORREF = rgb(0x9a, 0x9f, 0xa6);
     const FAINT_FG: COLORREF = rgb(0x6b, 0x70, 0x78);
@@ -261,8 +263,7 @@ mod win {
     // ── goblin mascot ────────────────────────────────────────────────────────
     // The brand mask, sampled from codegoblin-logo.png into a 52x38 coverage
     // grid (hex 0-f = edge coverage). Rendered as a smoothed mini-bitmap via
-    // StretchDIBits, so edges antialias against the bubble background instead
-    // of reading as chunky pixel art.
+    // StretchDIBits, so edges antialias against the background.
 
     const SPRITE_W: i32 = 52;
     const SPRITE_H: i32 = 38;
@@ -533,37 +534,7 @@ mod win {
         }
     }
 
-    // ── layout math ──────────────────────────────────────────────────────────
-
-    fn desired_height(c: &Ctx) -> i32 {
-        let guard = STATE.lock().unwrap();
-        let (extras, has_meta, question_btns, has_question) = match guard.as_ref() {
-            Some(s) => {
-                let extras = s.rows.len().saturating_sub(1).min(3) as i32;
-                let has_meta = s
-                    .rows
-                    .first()
-                    .map(|r| r.ctx.is_some() || r.todo_total.unwrap_or(0) > 0)
-                    .unwrap_or(false);
-                let btns = s.question.as_ref().map(|q| !q.options.is_empty()).unwrap_or(false);
-                (extras, has_meta, btns, s.question.is_some())
-            }
-            None => (0, false, false, false),
-        };
-        let mut h = PAD + PRIMARY_H;
-        if has_meta {
-            h += META_ROW_H;
-        }
-        h += extras * EXTRA_ROW_H;
-        if has_question {
-            h += QUESTION_TEXT_H;
-            if question_btns {
-                h += QUESTION_BTN_H + 4;
-            }
-        }
-        h += MENU_H;
-        px(c, h)
-    }
+    // ── geometry ─────────────────────────────────────────────────────────────
 
     fn monitor_rect(hwnd: HWND) -> RECT {
         unsafe {
@@ -590,54 +561,43 @@ mod win {
         }
     }
 
-    fn tab_rect(c: &Ctx, mon: &RECT, edge: Edge, along: i32) -> (i32, i32, i32, i32) {
-        let len = px(c, TAB_LEN);
-        let thick = px(c, TAB_THICK);
-        match edge {
-            Edge::Top => (along.clamp(mon.left, mon.right - len), mon.top, len, thick),
-            Edge::Left => (mon.left, along.clamp(mon.top, mon.bottom - len), thick, len),
-            Edge::Right => (mon.right - thick, along.clamp(mon.top, mon.bottom - len), thick, len),
-        }
-    }
-
-    fn expanded_rect(c: &Ctx, mon: &RECT, edge: Edge, along: i32, h: i32) -> (i32, i32, i32, i32) {
-        let w = px(c, BUBBLE_W);
-        match edge {
-            Edge::Top => (along.clamp(mon.left, mon.right - w), mon.top, w, h),
-            Edge::Left => (mon.left, along.clamp(mon.top, mon.bottom - h), w, h),
-            Edge::Right => (mon.right - w, along.clamp(mon.top, mon.bottom - h), w, h),
-        }
-    }
-
-    /// Apply a new desired height after a snapshot; keeps the bottom edge
-    /// anchored when the bubble sits in the lower half of the screen.
-    fn apply_height(hwnd: HWND) {
-        let c = ctx();
-        let h = desired_height(&c);
-        let (mode, edge, along) = {
-            let mut ui = UI.lock().unwrap();
-            ui.desired_h = h;
-            (ui.mode, ui.edge, ui.along)
+    fn desired_panel_h(c: &Ctx) -> i32 {
+        let guard = STATE.lock().unwrap();
+        let (rows, question, question_btns) = match guard.as_ref() {
+            Some(s) => (
+                s.rows.len().clamp(1, 4) as i32,
+                s.question.is_some(),
+                s.question.as_ref().map(|q| !q.options.is_empty()).unwrap_or(false),
+            ),
+            None => (1, false, false),
         };
-        match mode {
-            Mode::Floating => {
-                let rc = window_rect(hwnd);
-                let cur_h = rc.bottom - rc.top;
-                if cur_h == h {
-                    return;
-                }
-                let mon = monitor_rect(hwnd);
-                let mid = (mon.top + mon.bottom) / 2;
-                let y = if rc.top > mid { rc.bottom - h } else { rc.top };
-                set_rect(hwnd, rc.left, y, px(&c, BUBBLE_W), h);
+        let mut h = HEADER_H + rows * ROW_H;
+        if question {
+            h += QUESTION_TEXT_H;
+            if question_btns {
+                h += QUESTION_BTN_H + 6;
             }
-            Mode::DockedExpanded => {
-                let mon = monitor_rect(hwnd);
-                let (x, y, w, hh) = expanded_rect(&c, &mon, edge, along, h);
-                set_rect(hwnd, x, y, w, hh);
-            }
-            Mode::DockedTab => {}
         }
+        h += FOOTER_H;
+        px(c, h)
+    }
+
+    fn island_rect(c: &Ctx, island: (i32, i32)) -> (i32, i32, i32, i32) {
+        (island.0, island.1, px(c, ISLAND_W), px(c, ISLAND_H))
+    }
+
+    fn panel_rect(c: &Ctx, hwnd: HWND, island: (i32, i32)) -> (i32, i32, i32, i32) {
+        let mon = monitor_rect(hwnd);
+        let w = px(c, PANEL_W);
+        let h = desired_panel_h(c);
+        let island_w = px(c, ISLAND_W);
+        let island_h = px(c, ISLAND_H);
+        let cx = island.0 + island_w / 2;
+        let x = (cx - w / 2).clamp(mon.left + 8, (mon.right - w - 8).max(mon.left + 8));
+        let mid = (mon.top + mon.bottom) / 2;
+        let y = if island.1 < mid { island.1 } else { island.1 + island_h - h };
+        let y = y.clamp(mon.top + 8, (mon.bottom - h - 8).max(mon.top + 8));
+        (x, y, w, h)
     }
 
     // ── animation ────────────────────────────────────────────────────────────
@@ -679,7 +639,7 @@ mod win {
                 let collapse = anim.collapse;
                 ui.anim = None;
                 if collapse {
-                    ui.mode = Mode::DockedTab;
+                    ui.mode = Mode::Island;
                 }
             }
             (rect, finished)
@@ -694,142 +654,102 @@ mod win {
         }
     }
 
-    // ── dock / drag ──────────────────────────────────────────────────────────
+    // ── expand / collapse / drag ─────────────────────────────────────────────
 
-    fn emit_layout(hwnd: HWND) {
-        let ui = UI.lock().unwrap();
-        match ui.mode {
-            Mode::Floating => {
-                drop(ui);
-                let rc = window_rect(hwnd);
-                emit_stdout(&format!(
-                    "{{\"event\":\"layout\",\"mode\":\"floating\",\"x\":{},\"y\":{}}}",
-                    rc.left, rc.top
-                ));
+    fn expand(hwnd: HWND) {
+        let c = ctx();
+        let target = {
+            let mut ui = UI.lock().unwrap();
+            if ui.mode == Mode::Panel && ui.anim.is_none() {
+                return;
             }
-            Mode::DockedTab | Mode::DockedExpanded => {
-                emit_stdout(&format!(
-                    "{{\"event\":\"layout\",\"mode\":\"docked\",\"edge\":\"{}\",\"along\":{}}}",
-                    ui.edge.name(),
-                    ui.along
-                ));
+            ui.mode = Mode::Panel;
+            ui.anim = None;
+            ui.leave_ticks = 0;
+            panel_rect(&c, hwnd, ui.island)
+        };
+        start_anim(hwnd, target, false);
+    }
+
+    fn collapse(hwnd: HWND) {
+        let c = ctx();
+        let target = {
+            let ui = UI.lock().unwrap();
+            if ui.mode != Mode::Panel || ui.drag_capture {
+                return;
             }
+            if ui.anim.as_ref().map(|a| a.collapse).unwrap_or(false) {
+                return;
+            }
+            island_rect(&c, ui.island)
+        };
+        start_anim(hwnd, target, true);
+    }
+
+    fn toggle(hwnd: HWND) {
+        let mode = UI.lock().unwrap().mode;
+        match mode {
+            Mode::Island => expand(hwnd),
+            Mode::Panel => collapse(hwnd),
         }
     }
 
+    /// Re-apply the panel size after a snapshot changed the row/question count.
+    fn apply_panel_size(hwnd: HWND) {
+        let c = ctx();
+        let target = {
+            let ui = UI.lock().unwrap();
+            if ui.mode != Mode::Panel || ui.anim.is_some() {
+                return;
+            }
+            panel_rect(&c, hwnd, ui.island)
+        };
+        set_rect(hwnd, target.0, target.1, target.2, target.3);
+    }
+
+    fn emit_layout() {
+        let ui = UI.lock().unwrap();
+        emit_stdout(&format!(
+            "{{\"event\":\"layout\",\"mode\":\"floating\",\"x\":{},\"y\":{}}}",
+            ui.island.0, ui.island.1
+        ));
+    }
+
+    /// After a manual drag ends: derive the island anchor from wherever the
+    /// window landed, clamp on-screen, persist.
     fn settle_after_drag(hwnd: HWND) {
         let c = ctx();
         let mon = monitor_rect(hwnd);
         let rc = window_rect(hwnd);
-        let snap = px(&c, SNAP);
-
-        let edge = if rc.top - mon.top < snap {
-            Some(Edge::Top)
-        } else if mon.right - rc.right < snap {
-            Some(Edge::Right)
-        } else if rc.left - mon.left < snap {
-            Some(Edge::Left)
-        } else {
-            None
-        };
-
-        let mut ui = UI.lock().unwrap();
-        match edge {
-            Some(edge) => {
-                ui.mode = Mode::DockedExpanded;
-                ui.edge = edge;
-                ui.along = match edge {
-                    Edge::Top => rc.left,
-                    Edge::Left | Edge::Right => rc.top,
-                };
-                let target = expanded_rect(&c, &mon, edge, ui.along, ui.desired_h.max(px(&c, 60)));
-                drop(ui);
-                start_anim(hwnd, target, false);
-            }
-            None => {
-                ui.mode = Mode::Floating;
-                ui.anim = None;
-                let h = ui.desired_h.max(px(&c, 60));
-                drop(ui);
-                set_rect(hwnd, rc.left, rc.top, px(&c, BUBBLE_W), h);
-            }
+        let island_w = px(&c, ISLAND_W);
+        let island_h = px(&c, ISLAND_H);
+        {
+            let mut ui = UI.lock().unwrap();
+            let (x, y) = match ui.mode {
+                Mode::Island => (rc.left, rc.top),
+                Mode::Panel => {
+                    let cx = (rc.left + rc.right) / 2;
+                    let mid = (mon.top + mon.bottom) / 2;
+                    let y = if rc.top < mid { rc.top } else { rc.bottom - island_h };
+                    (cx - island_w / 2, y)
+                }
+            };
+            ui.island = (
+                x.clamp(mon.left, (mon.right - island_w).max(mon.left)),
+                y.clamp(mon.top, (mon.bottom - island_h).max(mon.top)),
+            );
         }
-        unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
-        emit_layout(hwnd);
+        emit_layout();
     }
 
-    fn expand_from_tab(hwnd: HWND) {
-        let c = ctx();
-        let mon = monitor_rect(hwnd);
-        let mut ui = UI.lock().unwrap();
-        let collapsing = ui.anim.as_ref().map(|a| a.collapse).unwrap_or(false);
-        if ui.mode != Mode::DockedTab && !collapsing {
-            return;
-        }
-        ui.mode = Mode::DockedExpanded;
-        ui.anim = None;
-        let target = expanded_rect(&c, &mon, ui.edge, ui.along, ui.desired_h.max(px(&c, 60)));
-        drop(ui);
-        start_anim(hwnd, target, false);
-    }
-
-    fn collapse_to_tab(hwnd: HWND) {
-        let c = ctx();
-        let mon = monitor_rect(hwnd);
-        let ui = UI.lock().unwrap();
-        if ui.mode != Mode::DockedExpanded || ui.in_drag {
-            return;
-        }
-        if ui.anim.as_ref().map(|a| a.collapse).unwrap_or(false) {
-            return;
-        }
-        let target = tab_rect(&c, &mon, ui.edge, ui.along);
-        drop(ui);
-        start_anim(hwnd, target, true);
-    }
-
-    fn track_leave(hwnd: HWND, nonclient: bool) {
+    fn track_leave(hwnd: HWND) {
         let mut tme = TRACKMOUSEEVENT {
             cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
-            dwFlags: if nonclient { TME_LEAVE | TME_NONCLIENT } else { TME_LEAVE },
+            dwFlags: TME_LEAVE,
             hwndTrack: hwnd,
             dwHoverTime: 0,
         };
         unsafe { TrackMouseEvent(&mut tme) };
-    }
-
-    fn on_hover(hwnd: HWND, nonclient: bool) {
-        let (was_hovering, is_tab) = {
-            let mut ui = UI.lock().unwrap();
-            let was = ui.hovering;
-            ui.hovering = true;
-            (was, ui.mode == Mode::DockedTab)
-        };
-        track_leave(hwnd, nonclient);
-        if is_tab {
-            expand_from_tab(hwnd);
-        } else if !was_hovering {
-            unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
-        }
-    }
-
-    fn on_leave(hwnd: HWND) {
-        let mut pt = POINT { x: 0, y: 0 };
-        unsafe { GetCursorPos(&mut pt) };
-        let rc = window_rect(hwnd);
-        if pt.x >= rc.left && pt.x < rc.right && pt.y >= rc.top && pt.y < rc.bottom {
-            return;
-        }
-        let expanded = {
-            let mut ui = UI.lock().unwrap();
-            ui.hovering = false;
-            ui.mode == Mode::DockedExpanded
-        };
-        if expanded {
-            collapse_to_tab(hwnd);
-        } else {
-            unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
-        }
     }
 
     fn focus_terminal() {
@@ -861,24 +781,18 @@ mod win {
 
     fn apply_initial_layout(hwnd: HWND, layout: &LayoutIn) {
         let c = ctx();
-        if layout.mode == "docked" {
-            let edge = Edge::parse(layout.edge.as_deref().unwrap_or("top"));
-            let along = layout.along.unwrap_or(0);
-            {
-                let mut ui = UI.lock().unwrap();
-                ui.mode = Mode::DockedTab;
-                ui.edge = edge;
-                ui.along = along;
-            }
-            let mon = monitor_rect(hwnd);
-            let (x, y, w, h) = tab_rect(&c, &mon, edge, along);
-            set_rect(hwnd, x, y, w, h);
-        } else if let (Some(x), Some(y)) = (layout.x, layout.y) {
-            let mon = monitor_rect(hwnd);
-            let w = px(&c, BUBBLE_W);
-            let h = { UI.lock().unwrap().desired_h.max(px(&c, 60)) };
-            let x = x.clamp(mon.left, (mon.right - w).max(mon.left));
-            let y = y.clamp(mon.top, (mon.bottom - h).max(mon.top));
+        let (Some(x), Some(y)) = (layout.x, layout.y) else { return };
+        let mon = monitor_rect(hwnd);
+        let w = px(&c, ISLAND_W);
+        let h = px(&c, ISLAND_H);
+        let x = x.clamp(mon.left, (mon.right - w).max(mon.left));
+        let y = y.clamp(mon.top, (mon.bottom - h).max(mon.top));
+        let apply = {
+            let mut ui = UI.lock().unwrap();
+            ui.island = (x, y);
+            ui.mode == Mode::Island
+        };
+        if apply {
             set_rect(hwnd, x, y, w, h);
         }
         unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
@@ -904,8 +818,14 @@ mod win {
                     if let Some(rows) = snapshot.sessions {
                         state.rows = rows;
                         state.question = snapshot.question;
-                    } else if snapshot.question.is_some() {
-                        state.question = snapshot.question;
+                        state.usage = snapshot.usage.unwrap_or_default();
+                    } else {
+                        if snapshot.question.is_some() {
+                            state.question = snapshot.question;
+                        }
+                        if let Some(usage) = snapshot.usage {
+                            state.usage = usage;
+                        }
                     }
                     if let Some(v) = snapshot.sound {
                         state.sound_enabled = v;
@@ -939,7 +859,7 @@ mod win {
     unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         match msg {
             WM_APP_UPDATE => {
-                apply_height(hwnd);
+                apply_panel_size(hwnd);
                 InvalidateRect(hwnd, std::ptr::null(), 0);
                 0
             }
@@ -948,7 +868,7 @@ mod win {
                     let mut ui = UI.lock().unwrap();
                     ui.flash = 6;
                 }
-                apply_height(hwnd);
+                apply_panel_size(hwnd);
                 InvalidateRect(hwnd, std::ptr::null(), 0);
                 0
             }
@@ -958,6 +878,7 @@ mod win {
             }
             WM_TIMER => {
                 let mut repaint = false;
+                let mut auto_collapse = false;
                 {
                     let mut ui = UI.lock().unwrap();
                     let (any_working, any_done) = {
@@ -981,33 +902,26 @@ mod win {
                         ui.flash -= 1;
                         repaint = true;
                     }
+                    // Auto-collapse the panel a beat after the mouse wanders off.
+                    if ui.mode == Mode::Panel && !ui.hovering && !ui.drag_capture && ui.anim.is_none() {
+                        ui.leave_ticks = ui.leave_ticks.saturating_add(1);
+                        if ui.leave_ticks >= 3 {
+                            ui.leave_ticks = 0;
+                            auto_collapse = true;
+                        }
+                    } else {
+                        ui.leave_ticks = 0;
+                    }
+                }
+                if auto_collapse {
+                    collapse(hwnd);
                 }
                 if repaint {
                     InvalidateRect(hwnd, std::ptr::null(), 0);
                 }
                 0
             }
-            WM_NCHITTEST => {
-                let ui = UI.lock().unwrap();
-                if ui.mode != Mode::DockedTab {
-                    let mut pt = POINT {
-                        x: (lparam & 0xffff) as i16 as i32,
-                        y: ((lparam >> 16) & 0xffff) as i16 as i32,
-                    };
-                    ScreenToClient(hwnd, &mut pt);
-                    if ui
-                        .hits
-                        .iter()
-                        .any(|h| pt.x >= h.rect.left && pt.x < h.rect.right && pt.y >= h.rect.top && pt.y < h.rect.bottom)
-                    {
-                        return HTCLIENT as LRESULT;
-                    }
-                }
-                HTCAPTION as LRESULT
-            }
             WM_DPICHANGED => {
-                // Dragged onto a monitor with a different scale: adopt the new
-                // dpi and the suggested rect, then re-derive our own height.
                 let dpi = (wparam & 0xffff) as u32;
                 {
                     let mut guard = CTX.lock().unwrap();
@@ -1019,33 +933,79 @@ mod win {
                 if !suggested.is_null() {
                     let rc = *suggested;
                     set_rect(hwnd, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
+                    let mut ui = UI.lock().unwrap();
+                    if ui.mode == Mode::Island {
+                        ui.island = (rc.left, rc.top);
+                    }
                 }
-                apply_height(hwnd);
+                apply_panel_size(hwnd);
                 InvalidateRect(hwnd, std::ptr::null(), 0);
                 0
             }
-            WM_ENTERSIZEMOVE => {
-                UI.lock().unwrap().in_drag = true;
+            WM_LBUTTONDOWN => {
+                let mut pt = POINT { x: 0, y: 0 };
+                GetCursorPos(&mut pt);
+                let rc = window_rect(hwnd);
+                {
+                    let mut ui = UI.lock().unwrap();
+                    ui.drag_capture = true;
+                    ui.drag_moved = false;
+                    ui.drag_origin = (pt.x, pt.y);
+                    ui.win_origin = (rc.left, rc.top);
+                }
+                SetCapture(hwnd);
                 0
-            }
-            WM_EXITSIZEMOVE => {
-                UI.lock().unwrap().in_drag = false;
-                settle_after_drag(hwnd);
-                0
-            }
-            WM_NCMOUSEMOVE => {
-                on_hover(hwnd, true);
-                DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_MOUSEMOVE => {
-                on_hover(hwnd, false);
+                let dragging = {
+                    let mut ui = UI.lock().unwrap();
+                    ui.hovering = true;
+                    ui.leave_ticks = 0;
+                    if ui.drag_capture {
+                        let mut pt = POINT { x: 0, y: 0 };
+                        GetCursorPos(&mut pt);
+                        let dx = pt.x - ui.drag_origin.0;
+                        let dy = pt.y - ui.drag_origin.1;
+                        let c = ctx();
+                        if !ui.drag_moved
+                            && (dx.abs() > px(&c, DRAG_THRESHOLD) || dy.abs() > px(&c, DRAG_THRESHOLD))
+                        {
+                            ui.drag_moved = true;
+                        }
+                        if ui.drag_moved {
+                            Some((ui.win_origin.0 + dx, ui.win_origin.1 + dy))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
+                if let Some((wx, wy)) = dragging {
+                    let rc = window_rect(hwnd);
+                    set_rect(hwnd, wx, wy, rc.right - rc.left, rc.bottom - rc.top);
+                } else {
+                    track_leave(hwnd);
+                }
                 0
             }
-            WM_NCMOUSELEAVE | WM_MOUSELEAVE => {
-                on_leave(hwnd);
+            WM_MOUSELEAVE => {
+                UI.lock().unwrap().hovering = false;
                 0
             }
             WM_LBUTTONUP => {
+                ReleaseCapture();
+                let was_drag = {
+                    let mut ui = UI.lock().unwrap();
+                    let was = ui.drag_capture && ui.drag_moved;
+                    ui.drag_capture = false;
+                    ui.drag_moved = false;
+                    was
+                };
+                if was_drag {
+                    settle_after_drag(hwnd);
+                    return 0;
+                }
                 let pt = POINT {
                     x: (lparam & 0xffff) as i16 as i32,
                     y: ((lparam >> 16) & 0xffff) as i16 as i32,
@@ -1058,6 +1018,7 @@ mod win {
                         .map(|h| h.action.clone())
                 };
                 match action {
+                    Some(Action::Toggle) => toggle(hwnd),
                     Some(Action::Focus) => focus_terminal(),
                     Some(Action::Interrupt(session)) => {
                         emit_stdout(&format!(
@@ -1083,11 +1044,7 @@ mod win {
                 }
                 0
             }
-            WM_NCLBUTTONDBLCLK => {
-                focus_terminal();
-                0
-            }
-            WM_NCRBUTTONUP | WM_RBUTTONUP => {
+            WM_RBUTTONUP => {
                 PostMessageW(hwnd, WM_CLOSE, 0, 0);
                 0
             }
@@ -1147,7 +1104,17 @@ mod win {
         DeleteObject(brush as HGDIOBJ);
     }
 
-    unsafe fn draw_goblin(dc: HDC, c: &Ctx, x: i32, y: i32, working: bool, done: bool, frame: u8) {
+    unsafe fn draw_goblin(
+        dc: HDC,
+        c: &Ctx,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        working: bool,
+        done: bool,
+        frame: u8,
+    ) {
         let variant = if done {
             2
         } else if working && frame % 4 == 3 {
@@ -1169,8 +1136,8 @@ mod win {
             dc,
             x,
             y,
-            px(c, SPRITE_W),
-            px(c, SPRITE_H),
+            px(c, w),
+            px(c, h),
             0,
             0,
             SPRITE_W,
@@ -1181,6 +1148,44 @@ mod win {
             SRCCOPY,
         );
         SetStretchBltMode(dc, prev);
+    }
+
+    fn usage_color(pct: f32) -> COLORREF {
+        if pct < 50.0 {
+            GREEN
+        } else if pct < 80.0 {
+            GOLD
+        } else {
+            RED
+        }
+    }
+
+    fn row_elapsed(row: &Row) -> String {
+        if row.working {
+            row.started_at_ms
+                .map(|s| fmt_dur(now_ms().saturating_sub(s) / 1000))
+                .unwrap_or_default()
+        } else if let Some(done_at) = row.done_at_ms {
+            fmt_ago(done_at)
+        } else {
+            String::new()
+        }
+    }
+
+    fn row_state_color(row: &Row, pulse: bool) -> COLORREF {
+        if row.error {
+            RED
+        } else if row.working {
+            if pulse {
+                GREEN
+            } else {
+                GREEN_DIM
+            }
+        } else if row.done {
+            GOLD
+        } else {
+            EDGE_C
+        }
     }
 
     unsafe fn paint(hwnd: HWND) {
@@ -1198,9 +1203,9 @@ mod win {
         let old_bmp = SelectObject(mem, bmp as HGDIOBJ);
         SetBkMode(mem, TRANSPARENT as i32);
 
-        let (mode, edge, pulse, frame, flash, hovering) = {
+        let (mode, pulse, frame, flash) = {
             let ui = UI.lock().unwrap();
-            (ui.mode, ui.edge, ui.pulse, ui.frame, ui.flash, ui.hovering)
+            (ui.mode, ui.pulse, ui.frame, ui.flash)
         };
 
         let guard = STATE.lock().unwrap();
@@ -1217,238 +1222,248 @@ mod win {
             _ => &placeholder,
         };
         let primary = &state.rows[0];
+        let working_count = state.rows.iter().filter(|r| r.working).count();
         let mut hits: Vec<Hit> = Vec::new();
 
-        if mode == Mode::DockedTab {
-            fill(mem, &rc, TAB_BG);
-            let strip_color = if primary.working {
-                if pulse { GREEN } else { GREEN_DIM }
-            } else if primary.done {
-                GOLD
+        fill(mem, &rc, BG);
+        let border = if flash > 0 && flash % 2 == 0 { GREEN } else { EDGE_C };
+        let edge_brush = CreateSolidBrush(border);
+        FrameRect(mem, &rc, edge_brush);
+        DeleteObject(edge_brush as HGDIOBJ);
+
+        let pad = px(&c, PAD);
+        let title_font = make_font(&c, 12, 600);
+        let body_font = make_font(&c, 11, 400);
+        let small_font = make_font(&c, 10, 400);
+
+        if mode == Mode::Island {
+            // ── compact island ──
+            draw_goblin(mem, &c, pad, (h - px(&c, 19)) / 2, 26, 19, primary.working, primary.done, frame);
+
+            // Badge: count of working sessions, or a gold check when done.
+            let badge_w = px(&c, 22);
+            let badge_h = px(&c, 18);
+            let badge = RECT {
+                left: w - pad - badge_w,
+                top: (h - badge_h) / 2,
+                right: w - pad,
+                bottom: (h - badge_h) / 2 + badge_h,
+            };
+            fill(mem, &badge, BG_RAISED);
+            let badge_frame = CreateSolidBrush(if working_count > 0 && pulse { GREEN_DIM } else { EDGE_C });
+            FrameRect(mem, &badge, badge_frame);
+            DeleteObject(badge_frame as HGDIOBJ);
+            let (badge_text, badge_color) = if working_count > 0 {
+                (working_count.to_string(), GREEN)
+            } else if state.rows.iter().any(|r| r.done) {
+                ("✓".to_string(), GOLD)
             } else {
-                EDGE_C
+                ("·".to_string(), FAINT_FG)
             };
-            let t = px(&c, 3);
-            let strip = match edge {
-                Edge::Top => RECT { left: rc.left, top: rc.bottom - t, right: rc.right, bottom: rc.bottom },
-                Edge::Left => RECT { left: rc.right - t, top: rc.top, right: rc.right, bottom: rc.bottom },
-                Edge::Right => RECT { left: rc.left, top: rc.top, right: rc.left + t, bottom: rc.bottom },
-            };
-            fill(mem, &strip, strip_color);
-        } else {
-            fill(mem, &rc, BG);
+            let mut badge_rc = badge;
+            draw_text(
+                mem,
+                small_font,
+                badge_color,
+                &mut badge_rc,
+                &badge_text,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            );
 
-            // Border: green flash right after a run finishes, hairline otherwise.
-            let border = if flash > 0 && flash % 2 == 0 { GREEN } else { EDGE_C };
-            let edge_brush = CreateSolidBrush(border);
-            FrameRect(mem, &rc, edge_brush);
-            DeleteObject(edge_brush as HGDIOBJ);
-
-            // Left accent stripe carries the primary state color.
-            let stripe_color = if primary.error {
-                RED
-            } else if primary.working {
-                if pulse { GREEN } else { GREEN_DIM }
-            } else if primary.done {
-                GOLD
-            } else {
-                EDGE_C
-            };
-            let stripe = RECT { left: 1, top: 1, right: 1 + px(&c, STRIPE_W), bottom: h - 1 };
-            fill(mem, &stripe, stripe_color);
-
-            let pad = px(&c, PAD);
-            let title_font = make_font(&c, 14, 600);
-            let body_font = make_font(&c, 12, 400);
-            let small_font = make_font(&c, 10, 400);
-
-            // Mascot column, centered against the primary block.
-            let sprite_w = px(&c, SPRITE_W);
-            let sprite_h = px(&c, SPRITE_H);
-            let primary_block_h = px(&c, PRIMARY_H);
-            let sprite_y = pad + (primary_block_h - sprite_h) / 2;
-            draw_goblin(mem, &c, pad, sprite_y.max(pad / 2), primary.working, primary.done, frame);
-
-            let text_x = pad + sprite_w + px(&c, 8);
-            let mut y = pad;
-
-            // ── primary session ──
-            // Row 1: title + spend (gold, right).
-            let mut right_w = 0;
-            if let Some(spend) = primary.spend.as_ref().filter(|s| !s.is_empty()) {
-                right_w = px(&c, 64);
-                let mut spend_rc =
-                    RECT { left: w - pad - right_w, top: y, right: w - pad, bottom: y + px(&c, 18) };
-                draw_text(mem, body_font, GOLD, &mut spend_rc, spend, DT_RIGHT | DT_SINGLELINE);
-            }
             let mut title_rc = RECT {
-                left: text_x,
-                top: y,
-                right: w - pad - right_w - px(&c, 4),
-                bottom: y + px(&c, 19),
+                left: pad + px(&c, 32),
+                top: 0,
+                right: w - pad - badge_w - px(&c, 6),
+                bottom: h,
             };
             let title = if primary.title.is_empty() { "CodeGoblin" } else { &primary.title };
-            draw_text(mem, title_font, TITLE_FG, &mut title_rc, title, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-            y += px(&c, 20);
+            draw_text(
+                mem,
+                title_font,
+                TITLE_FG,
+                &mut title_rc,
+                title,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+            );
 
-            // Row 2: status + elapsed / finished-ago (right).
-            let right_text = if primary.working {
-                primary
-                    .started_at_ms
-                    .map(|s| fmt_dur(now_ms().saturating_sub(s) / 1000))
-                    .unwrap_or_default()
-            } else if let Some(done_at) = primary.done_at_ms {
-                fmt_ago(done_at)
-            } else {
-                String::new()
-            };
-            let mut elapsed_w = 0;
-            if !right_text.is_empty() {
-                elapsed_w = px(&c, 60);
-                let mut el_rc =
-                    RECT { left: w - pad - elapsed_w, top: y, right: w - pad, bottom: y + px(&c, 16) };
-                draw_text(mem, body_font, STATUS_FG, &mut el_rc, &right_text, DT_RIGHT | DT_SINGLELINE);
-            }
-            let mut status_rc = RECT {
-                left: text_x,
-                top: y,
-                right: w - pad - elapsed_w - px(&c, 4),
-                bottom: y + px(&c, 16),
-            };
-            let status = if !primary.status.is_empty() {
-                primary.status.as_str()
-            } else if primary.working {
-                "goblin working…"
-            } else {
-                "idle"
-            };
-            let status_color = if primary.error {
-                RED
-            } else if primary.done {
-                GOLD
-            } else if primary.working {
-                GREEN
-            } else {
-                STATUS_FG
-            };
-            draw_text(mem, body_font, status_color, &mut status_rc, status, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-            y = pad + primary_block_h;
+            // The whole island toggles open.
+            hits.push(Hit { rect: rc, action: Action::Toggle });
+        } else {
+            // ── expanded panel ──
+            let header_h = px(&c, HEADER_H);
 
-            // Meta row: todo progress bar + ctx readout.
-            let has_meta = primary.ctx.is_some() || primary.todo_total.unwrap_or(0) > 0;
-            if has_meta {
-                if let (Some(done), Some(total)) = (primary.todo_done, primary.todo_total) {
-                    if total > 0 {
-                        let bar_w = px(&c, 70);
-                        let bar_h = px(&c, 4);
-                        let bar_y = y + px(&c, 6);
-                        let track =
-                            RECT { left: text_x, top: bar_y, right: text_x + bar_w, bottom: bar_y + bar_h };
-                        fill(mem, &track, EDGE_C);
-                        let fill_w = ((bar_w as f32) * (done.min(total) as f32 / total as f32)) as i32;
-                        let done_rc = RECT {
-                            left: text_x,
-                            top: bar_y,
-                            right: text_x + fill_w,
-                            bottom: bar_y + bar_h,
-                        };
-                        fill(mem, &done_rc, GREEN);
-                        let mut label_rc = RECT {
-                            left: text_x + bar_w + px(&c, 6),
-                            top: y,
-                            right: text_x + bar_w + px(&c, 50),
-                            bottom: y + px(&c, 15),
-                        };
-                        draw_text(
-                            mem,
-                            small_font,
-                            FAINT_FG,
-                            &mut label_rc,
-                            &format!("{}/{}", done.min(total), total),
-                            DT_LEFT | DT_SINGLELINE,
-                        );
+            // Header: usage strip (subscription accounts) or spend/ctx fallback.
+            let header_rc = RECT { left: 1, top: 1, right: w - 1, bottom: header_h };
+            fill(mem, &header_rc, BG_RAISED);
+            let sep = RECT { left: 1, top: header_h, right: w - 1, bottom: header_h + 1 };
+            fill(mem, &sep, EDGE_C);
+
+            let mut mark_rc = RECT { left: pad, top: 1, right: pad + px(&c, 14), bottom: header_h };
+            draw_text(mem, body_font, GOLD, &mut mark_rc, "✦", DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+            let mut x_cursor = pad + px(&c, 18);
+            if !state.usage.is_empty() {
+                for (i, usage) in state.usage.iter().take(3).enumerate() {
+                    if i > 0 {
+                        let mut dot_rc =
+                            RECT { left: x_cursor, top: 1, right: x_cursor + px(&c, 12), bottom: header_h };
+                        draw_text(mem, small_font, FAINT_FG, &mut dot_rc, "·", DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                        x_cursor += px(&c, 12);
+                    }
+                    let segment = format!("{} ", usage.label);
+                    let mut seg_rc = RECT { left: x_cursor, top: 1, right: w - pad, bottom: header_h };
+                    draw_text(mem, small_font, STATUS_FG, &mut seg_rc, &segment, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    x_cursor += (segment.chars().count() as i32) * px(&c, 6);
+                    let pct = format!("{}%", usage.pct.round() as i32);
+                    let mut pct_rc = RECT { left: x_cursor, top: 1, right: w - pad, bottom: header_h };
+                    draw_text(mem, small_font, usage_color(usage.pct), &mut pct_rc, &pct, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    x_cursor += (pct.chars().count() as i32) * px(&c, 7);
+                    if !usage.reset.is_empty() {
+                        let reset = format!(" {}", usage.reset);
+                        let mut reset_rc = RECT { left: x_cursor, top: 1, right: w - pad, bottom: header_h };
+                        draw_text(mem, small_font, FAINT_FG, &mut reset_rc, &reset, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                        x_cursor += (reset.chars().count() as i32) * px(&c, 6);
                     }
                 }
-                if let Some(ctx_text) = primary.ctx.as_ref().filter(|s| !s.is_empty()) {
-                    let mut ctx_rc =
-                        RECT { left: w / 2, top: y, right: w - pad, bottom: y + px(&c, 15) };
-                    draw_text(mem, small_font, FAINT_FG, &mut ctx_rc, ctx_text, DT_RIGHT | DT_SINGLELINE);
+            } else {
+                let mut fallback = String::new();
+                if let Some(spend) = primary.spend.as_ref().filter(|s| !s.is_empty()) {
+                    fallback.push_str(spend);
                 }
-                y += px(&c, META_ROW_H);
+                if let Some(ctx_text) = primary.ctx.as_ref().filter(|s| !s.is_empty()) {
+                    if !fallback.is_empty() {
+                        fallback.push_str("  ·  ");
+                    }
+                    fallback.push_str(ctx_text);
+                }
+                if fallback.is_empty() {
+                    fallback.push_str("CodeGoblin");
+                }
+                let mut fb_rc = RECT { left: x_cursor, top: 1, right: w - pad - px(&c, 20), bottom: header_h };
+                draw_text(
+                    mem,
+                    small_font,
+                    STATUS_FG,
+                    &mut fb_rc,
+                    &fallback,
+                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+                );
             }
 
-            // ── extra sessions (compact rows) ──
-            for row in state.rows.iter().skip(1).take(3) {
-                let dot_color = if row.error {
-                    RED
+            let mut chevron_rc = RECT { left: w - pad - px(&c, 14), top: 1, right: w - pad, bottom: header_h };
+            draw_text(mem, body_font, FAINT_FG, &mut chevron_rc, "▴", DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+            hits.push(Hit {
+                rect: RECT { left: 1, top: 1, right: w - 1, bottom: header_h },
+                action: Action::Toggle,
+            });
+
+            // ── session rows ──
+            let gutter = px(&c, GUTTER);
+            let row_h = px(&c, ROW_H);
+            let mut y = header_h + 1;
+            for (i, row) in state.rows.iter().take(4).enumerate() {
+                let row_rc = RECT { left: 1, top: y, right: w - 1, bottom: y + row_h };
+                if i == 0 {
+                    draw_goblin(mem, &c, pad, y + (row_h - px(&c, 22)) / 2, 30, 22, row.working, row.done, frame);
+                } else {
+                    let dot = px(&c, 8);
+                    let dot_x = pad + (gutter - pad - dot) / 2;
+                    let dot_rc = RECT {
+                        left: dot_x,
+                        top: y + (row_h - dot) / 2,
+                        right: dot_x + dot,
+                        bottom: y + (row_h - dot) / 2 + dot,
+                    };
+                    fill(mem, &dot_rc, row_state_color(row, pulse));
+                }
+
+                let elapsed = row_elapsed(row);
+                let mut right_w = 0;
+                if !elapsed.is_empty() {
+                    right_w = px(&c, 58);
+                    let mut el_rc = RECT {
+                        left: w - pad - right_w,
+                        top: y + px(&c, 4),
+                        right: w - pad,
+                        bottom: y + px(&c, 20),
+                    };
+                    draw_text(mem, small_font, FAINT_FG, &mut el_rc, &elapsed, DT_RIGHT | DT_SINGLELINE);
+                }
+                let mut title_rc = RECT {
+                    left: gutter,
+                    top: y + px(&c, 3),
+                    right: w - pad - right_w - px(&c, 4),
+                    bottom: y + px(&c, 21),
+                };
+                let title = if row.title.is_empty() { "CodeGoblin" } else { &row.title };
+                draw_text(mem, title_font, TITLE_FG, &mut title_rc, title, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+                // Sub-line: status left, todo progress right.
+                let mut meta = String::new();
+                if let (Some(done), Some(total)) = (row.todo_done, row.todo_total) {
+                    if total > 0 {
+                        meta = format!("{}/{}", done.min(total), total);
+                    }
+                }
+                let mut meta_w = 0;
+                if !meta.is_empty() {
+                    meta_w = px(&c, 40);
+                    let mut meta_rc = RECT {
+                        left: w - pad - meta_w,
+                        top: y + px(&c, 21),
+                        right: w - pad,
+                        bottom: y + row_h - px(&c, 3),
+                    };
+                    draw_text(mem, small_font, FAINT_FG, &mut meta_rc, &meta, DT_RIGHT | DT_SINGLELINE);
+                }
+                let status = if !row.status.is_empty() {
+                    row.status.as_str()
                 } else if row.working {
-                    if pulse { GREEN } else { GREEN_DIM }
+                    "goblin working…"
+                } else {
+                    "idle"
+                };
+                let status_color = if row.error {
+                    RED
                 } else if row.done {
                     GOLD
+                } else if row.working {
+                    GREEN
                 } else {
-                    EDGE_C
+                    STATUS_FG
                 };
-                let dot = px(&c, 6);
-                let dot_rc = RECT {
-                    left: pad + px(&c, 4),
-                    top: y + px(&c, 7),
-                    right: pad + px(&c, 4) + dot,
-                    bottom: y + px(&c, 7) + dot,
+                let mut status_rc = RECT {
+                    left: gutter,
+                    top: y + px(&c, 21),
+                    right: w - pad - meta_w - px(&c, 4),
+                    bottom: y + row_h - px(&c, 3),
                 };
-                fill(mem, &dot_rc, dot_color);
+                draw_text(mem, small_font, status_color, &mut status_rc, status, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-                let right_text = if row.working {
-                    row.started_at_ms
-                        .map(|s| fmt_dur(now_ms().saturating_sub(s) / 1000))
-                        .unwrap_or_default()
-                } else if let Some(done_at) = row.done_at_ms {
-                    fmt_ago(done_at)
-                } else {
-                    String::new()
-                };
-                let mut right_w = 0;
-                if !right_text.is_empty() {
-                    right_w = px(&c, 56);
-                    let mut r =
-                        RECT { left: w - pad - right_w, top: y + px(&c, 2), right: w - pad, bottom: y + px(&c, 17) };
-                    draw_text(mem, small_font, FAINT_FG, &mut r, &right_text, DT_RIGHT | DT_SINGLELINE);
-                }
-                let label = if row.status.is_empty() {
-                    row.title.clone()
-                } else {
-                    format!("{} — {}", row.title, row.status)
-                };
-                let mut r = RECT {
-                    left: pad + px(&c, 16),
-                    top: y + px(&c, 2),
-                    right: w - pad - right_w - px(&c, 4),
-                    bottom: y + px(&c, 17),
-                };
-                draw_text(mem, small_font, STATUS_FG, &mut r, &label, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-                y += px(&c, EXTRA_ROW_H);
+                hits.push(Hit { rect: row_rc, action: Action::Focus });
+                y += row_h;
             }
 
             // ── question preview ──
             if let Some(question) = state.question.as_ref() {
+                let mut marker_rc = RECT { left: pad, top: y + px(&c, 4), right: gutter, bottom: y + px(&c, 22) };
+                draw_text(mem, title_font, GOLD, &mut marker_rc, "?", DT_CENTER | DT_SINGLELINE);
                 let mut q_rc = RECT {
-                    left: text_x,
-                    top: y + px(&c, 2),
+                    left: gutter,
+                    top: y + px(&c, 3),
                     right: w - pad,
                     bottom: y + px(&c, QUESTION_TEXT_H),
                 };
-                let mut marker_rc =
-                    RECT { left: pad + px(&c, 4), top: y + px(&c, 2), right: text_x, bottom: y + px(&c, 18) };
-                draw_text(mem, title_font, GOLD, &mut marker_rc, "?", DT_LEFT | DT_SINGLELINE);
                 draw_text(mem, body_font, TITLE_FG, &mut q_rc, &question.text, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
                 y += px(&c, QUESTION_TEXT_H);
 
                 if !question.options.is_empty() {
                     let count = question.options.len().min(3) as i32;
                     let gap = px(&c, 6);
-                    let btn_w = (w - pad - text_x - gap * (count - 1)) / count;
+                    let btn_w = (w - pad - gutter - gap * (count - 1)) / count;
                     let btn_h = px(&c, QUESTION_BTN_H);
                     for (i, option) in question.options.iter().take(3).enumerate() {
-                        let left = text_x + (btn_w + gap) * (i as i32);
+                        let left = gutter + (btn_w + gap) * (i as i32);
                         let btn = RECT { left, top: y, right: left + btn_w, bottom: y + btn_h };
                         fill(mem, &btn, BG_RAISED);
                         let frame_brush = CreateSolidBrush(GREEN_DIM);
@@ -1468,66 +1483,51 @@ mod win {
                             action: Action::Answer(question.request_id.clone(), option.clone()),
                         });
                     }
-                    let _ = y; // menu row is bottom-anchored; nothing renders below the buttons
+                    y += btn_h + px(&c, 6);
                 }
             }
+            let _ = y;
 
-            // ── menu row (hover only) ──
-            if hovering {
-                let menu_top = h - px(&c, MENU_H);
-                let sep = RECT { left: 1, top: menu_top, right: w - 1, bottom: menu_top + 1 };
-                fill(mem, &sep, EDGE_C);
+            // ── footer buttons ──
+            let footer_top = h - px(&c, FOOTER_H);
+            let sep = RECT { left: 1, top: footer_top, right: w - 1, bottom: footer_top + 1 };
+            fill(mem, &sep, EDGE_C);
 
-                let mut entries: Vec<(String, Action, COLORREF)> =
-                    vec![("focus".into(), Action::Focus, STATUS_FG)];
-                // Only offer esc when exactly one session is working — with
-                // several running, a bubble-level button can't say which one
-                // it would kill.
-                let working_count = state.rows.iter().filter(|r| r.working).count();
-                if primary.working && working_count == 1 && !primary.id.is_empty() {
-                    entries.push(("esc".into(), Action::Interrupt(primary.id.clone()), RED));
-                }
-                entries.push((
-                    if state.sound_enabled { "sound: on".into() } else { "sound: off".into() },
-                    Action::Sound,
-                    STATUS_FG,
-                ));
-                entries.push(("hide".into(), Action::Hide, STATUS_FG));
-
-                let count = entries.len() as i32;
-                let cell_w = (w - 2) / count;
-                for (i, (label, action, color)) in entries.into_iter().enumerate() {
-                    let left = 1 + cell_w * (i as i32);
-                    let cell_rc = RECT { left, top: menu_top + 1, right: left + cell_w, bottom: h - 1 };
-                    if i > 0 {
-                        let div = RECT {
-                            left,
-                            top: menu_top + px(&c, 6),
-                            right: left + 1,
-                            bottom: h - px(&c, 6),
-                        };
-                        fill(mem, &div, EDGE_C);
-                    }
-                    let mut label_rc = cell_rc;
-                    draw_text(
-                        mem,
-                        small_font,
-                        color,
-                        &mut label_rc,
-                        &label,
-                        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-                    );
-                    hits.push(Hit { rect: cell_rc, action });
-                }
+            let mut entries: Vec<(String, Action, COLORREF)> =
+                vec![("focus".into(), Action::Focus, STATUS_FG)];
+            // Only offer esc when exactly one session is working — with several
+            // running, a panel-level button can't say which one it would kill.
+            if primary.working && working_count == 1 && !primary.id.is_empty() {
+                entries.push(("esc".into(), Action::Interrupt(primary.id.clone()), RED));
             }
+            entries.push((
+                if state.sound_enabled { "sound: on".into() } else { "sound: off".into() },
+                Action::Sound,
+                STATUS_FG,
+            ));
+            entries.push(("hide".into(), Action::Hide, STATUS_FG));
 
-            DeleteObject(title_font);
-            DeleteObject(body_font);
-            DeleteObject(small_font);
+            let count = entries.len() as i32;
+            let cell_w = (w - 2) / count;
+            for (i, (label, action, color)) in entries.into_iter().enumerate() {
+                let left = 1 + cell_w * (i as i32);
+                let cell_rc = RECT { left, top: footer_top + 1, right: left + cell_w, bottom: h - 1 };
+                if i > 0 {
+                    let div = RECT { left, top: footer_top + px(&c, 7), right: left + 1, bottom: h - px(&c, 7) };
+                    fill(mem, &div, EDGE_C);
+                }
+                let mut label_rc = cell_rc;
+                draw_text(mem, small_font, color, &mut label_rc, &label, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                hits.push(Hit { rect: cell_rc, action });
+            }
         }
 
         drop(guard);
         UI.lock().unwrap().hits = hits;
+
+        DeleteObject(title_font);
+        DeleteObject(body_font);
+        DeleteObject(small_font);
 
         BitBlt(hdc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
         SelectObject(mem, old_bmp);
@@ -1550,7 +1550,7 @@ mod win {
             let instance = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
             let class_name = wide("CodeGoblinWidget");
             let wc = WNDCLASSW {
-                style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_DROPSHADOW,
+                style: CS_HREDRAW | CS_VREDRAW | CS_DROPSHADOW,
                 lpfnWndProc: Some(wnd_proc),
                 cbClsExtra: 0,
                 cbWndExtra: 0,
@@ -1566,7 +1566,7 @@ mod win {
             }
 
             // Scale from the terminal's monitor (updated later by WM_DPICHANGED
-            // when the bubble is dragged across monitors).
+            // when the widget is dragged across monitors).
             let dpi = if !terminal.is_null() {
                 let mon = MonitorFromWindow(terminal, MONITOR_DEFAULTTONEAREST);
                 let mut dx: u32 = 96;
@@ -1583,12 +1583,11 @@ mod win {
             *CTX.lock().unwrap() = Some((terminal as isize, scale));
             let c = ctx();
 
-            let width = px(&c, BUBBLE_W);
-            let height = desired_height(&c);
-            UI.lock().unwrap().desired_h = height;
+            let width = px(&c, ISLAND_W);
+            let height = px(&c, ISLAND_H);
 
-            // Land on the monitor the terminal lives on, not always the
-            // primary; bottom-right of its work area.
+            // Land on the monitor the terminal lives on: top-center, like a
+            // proper island; falls back to the primary work area.
             let mut work = RECT { left: 0, top: 0, right: 1280, bottom: 720 };
             let mut placed = false;
             if !terminal.is_null() {
@@ -1603,8 +1602,9 @@ mod win {
             if !placed {
                 SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut work as *mut _ as *mut _, 0);
             }
-            let x = work.right - width - px(&c, 16);
-            let y = work.bottom - height - px(&c, 16);
+            let x = work.left + (work.right - work.left - width) / 2;
+            let y = work.top + px(&c, 8);
+            UI.lock().unwrap().island = (x, y);
 
             let title = wide("CodeGoblin");
             let hwnd = CreateWindowExW(
