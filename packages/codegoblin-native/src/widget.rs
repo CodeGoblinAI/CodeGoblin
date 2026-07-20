@@ -1005,6 +1005,25 @@ mod win {
                 }
                 HTCAPTION as LRESULT
             }
+            WM_DPICHANGED => {
+                // Dragged onto a monitor with a different scale: adopt the new
+                // dpi and the suggested rect, then re-derive our own height.
+                let dpi = (wparam & 0xffff) as u32;
+                {
+                    let mut guard = CTX.lock().unwrap();
+                    if let Some((terminal, _)) = *guard {
+                        *guard = Some((terminal, (dpi as f32) / 96.0));
+                    }
+                }
+                let suggested = lparam as *const RECT;
+                if !suggested.is_null() {
+                    let rc = *suggested;
+                    set_rect(hwnd, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
+                }
+                apply_height(hwnd);
+                InvalidateRect(hwnd, std::ptr::null(), 0);
+                0
+            }
             WM_ENTERSIZEMOVE => {
                 UI.lock().unwrap().in_drag = true;
                 0
@@ -1461,7 +1480,11 @@ mod win {
 
                 let mut entries: Vec<(String, Action, COLORREF)> =
                     vec![("focus".into(), Action::Focus, STATUS_FG)];
-                if primary.working && !primary.id.is_empty() {
+                // Only offer esc when exactly one session is working — with
+                // several running, a bubble-level button can't say which one
+                // it would kill.
+                let working_count = state.rows.iter().filter(|r| r.working).count();
+                if primary.working && working_count == 1 && !primary.id.is_empty() {
                     entries.push(("esc".into(), Action::Interrupt(primary.id.clone()), RED));
                 }
                 entries.push((
@@ -1542,7 +1565,20 @@ mod win {
                 return Err("RegisterClassW failed".into());
             }
 
-            let dpi = windows_sys::Win32::UI::HiDpi::GetDpiForSystem();
+            // Scale from the terminal's monitor (updated later by WM_DPICHANGED
+            // when the bubble is dragged across monitors).
+            let dpi = if !terminal.is_null() {
+                let mon = MonitorFromWindow(terminal, MONITOR_DEFAULTTONEAREST);
+                let mut dx: u32 = 96;
+                let mut dy: u32 = 96;
+                if windows_sys::Win32::UI::HiDpi::GetDpiForMonitor(mon, 0, &mut dx, &mut dy) == 0 {
+                    dx
+                } else {
+                    windows_sys::Win32::UI::HiDpi::GetDpiForSystem()
+                }
+            } else {
+                windows_sys::Win32::UI::HiDpi::GetDpiForSystem()
+            };
             let scale = (dpi as f32) / 96.0;
             *CTX.lock().unwrap() = Some((terminal as isize, scale));
             let c = ctx();
@@ -1551,8 +1587,22 @@ mod win {
             let height = desired_height(&c);
             UI.lock().unwrap().desired_h = height;
 
+            // Land on the monitor the terminal lives on, not always the
+            // primary; bottom-right of its work area.
             let mut work = RECT { left: 0, top: 0, right: 1280, bottom: 720 };
-            SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut work as *mut _ as *mut _, 0);
+            let mut placed = false;
+            if !terminal.is_null() {
+                let mon = MonitorFromWindow(terminal, MONITOR_DEFAULTTONEAREST);
+                let mut info: MONITORINFO = std::mem::zeroed();
+                info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+                if GetMonitorInfoW(mon, &mut info) != 0 {
+                    work = info.rcWork;
+                    placed = true;
+                }
+            }
+            if !placed {
+                SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut work as *mut _ as *mut _, 0);
+            }
             let x = work.right - width - px(&c, 16);
             let y = work.bottom - height - px(&c, 16);
 

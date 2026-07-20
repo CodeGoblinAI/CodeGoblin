@@ -79,12 +79,24 @@ const tui: TuiPlugin = async (api) => {
     return existing
   }
 
+  let primaryID: string | undefined
+
   function activeRows(): Row[] {
     const now = Date.now()
     for (const [key, value] of rows) {
       if (!value.working && (!value.doneAtMs || now - value.doneAtMs > DONE_ROW_TTL)) rows.delete(key)
     }
-    return [...rows.values()].sort((a, b) => b.touched - a.touched).slice(0, MAX_ROWS)
+    const list = [...rows.values()].sort((a, b) => b.touched - a.touched)
+    // Sticky primary: keep the big block pinned to one session while it is
+    // still working, instead of flipping to whichever row was touched last.
+    const current = primaryID ? list.find((r) => r.id === primaryID) : undefined
+    if (current?.working) {
+      list.splice(list.indexOf(current), 1)
+      list.unshift(current)
+    } else {
+      primaryID = list[0]?.id
+    }
+    return list.slice(0, MAX_ROWS)
   }
 
   function send(payload: Record<string, unknown>) {
@@ -139,26 +151,55 @@ const tui: TuiPlugin = async (api) => {
     }
   }
 
-  async function start() {
-    if (child) return true
+  let starting: Promise<boolean> | undefined
+
+  function start(): Promise<boolean> {
+    // Single-flight: concurrent calls (auto-start racing a fast /widget
+    // toggle) share one spawn instead of both slipping past a stale check.
+    if (child) return Promise.resolve(true)
+    starting ??= doStart().finally(() => {
+      starting = undefined
+    })
+    return starting
+  }
+
+  async function doStart() {
     const native = process.env["CODEGOBLIN_NATIVE_BIN"] || nativeBinPath() || (await resolveNativeBinPath())
+    if (child) return true
     if (!native) {
       api.ui.toast({ variant: "error", message: "codegoblin-native binary not found; the widget needs it" })
       return false
     }
     const spawned = spawn(native, ["widget"], {
-      stdio: ["pipe", "pipe", "ignore"],
+      stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     })
-    spawned.on("error", () => {
+    const stderrTail: string[] = []
+    if (spawned.stderr) {
+      const lines = createInterface({ input: spawned.stderr })
+      lines.on("line", (line) => {
+        stderrTail.push(line)
+        if (stderrTail.length > 5) stderrTail.shift()
+      })
+    }
+    spawned.on("error", (error) => {
       if (child === spawned) child = undefined
+      api.ui.toast({ variant: "error", message: `status widget failed to launch: ${error.message}` })
     })
-    spawned.on("exit", () => {
+    spawned.on("exit", (code) => {
       if (child !== spawned) return
       child = undefined
-      // Widget went away without us stopping it (right-click dismiss / hide):
-      // treat that as an opt-out until /widget toggles it back on.
-      if (!stopping) api.kv.set(KV_ENABLED, false)
+      if (stopping) return
+      if (!code) {
+        // Clean exit we didn't ask for = right-click dismiss / hide button:
+        // treat that as an opt-out until /widget toggles it back on.
+        api.kv.set(KV_ENABLED, false)
+        return
+      }
+      // Crash: surface diagnostics and leave the preference enabled so the
+      // widget comes back on the next TUI launch.
+      const detail = stderrTail.length ? ` — ${stderrTail[stderrTail.length - 1]}` : ""
+      api.ui.toast({ variant: "error", message: `status widget exited unexpectedly (code ${code})${detail}` })
     })
 
     // The widget reports preference changes and actions on stdout.
@@ -252,8 +293,22 @@ const tui: TuiPlugin = async (api) => {
     const sessionID = event.properties.sessionID
     if (!sessionID) return
     const target = rows.get(sessionID)
-    if (!target?.working) return
-    target.error = true
+    if (!target) return
+    if (target.working) {
+      // The idle transition that follows reads this flag to pick the chime;
+      // push the visual state now instead of waiting on event ordering.
+      target.error = true
+      target.status = "hit an error — see terminal"
+      snapshot()
+      return
+    }
+    // Error landed after the idle transition already reported "done": fix the
+    // row retroactively (no second chime).
+    if (target.doneAtMs && Date.now() - target.doneAtMs < 10_000) {
+      target.error = true
+      target.status = "hit an error — see terminal"
+      snapshot()
+    }
   })
 
   api.event.on("message.part.updated", (event) => {
