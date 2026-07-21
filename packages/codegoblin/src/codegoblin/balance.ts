@@ -1,6 +1,7 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import { readCliAgentUsage, type CliAgentQuota } from "@/provider/cli-agent"
 
 export type CodeGoblinBalanceProvider = "hoard" | "deepseek" | "moonshot"
 
@@ -49,6 +50,7 @@ export const CodeGoblinBalance = {
     for (const entry of live.balances) byProvider.set(entry.provider, entry)
     return {
       balances: [...byProvider.values()],
+      quotas: await readCliAgentUsage(),
       errors: live.errors,
     }
   },
@@ -174,11 +176,18 @@ function selectedBalanceProvider(input: { providerID?: string; modelID?: string 
 
 function formatFooter(input: {
   balances?: readonly CodeGoblinBalanceEntry[]
+  quotas?: readonly CliAgentQuota[]
   spent?: number
   providerID?: string
   modelID?: string
 }) {
   const balances = input.balances ?? []
+  const providerQuota = input.quotas?.find((item) => item.providerID === input.providerID)
+  if (providerQuota) {
+    return providerQuota.windows
+      .map((window) => `${window.label} ${Math.max(0, Math.round(100 - window.usedPercentage))}% left`)
+      .join(" · ")
+  }
   const selected = selectedBalanceProvider(input)
   if (selected) {
     const providerBalance = balances.find((entry) => entry.provider === selected)

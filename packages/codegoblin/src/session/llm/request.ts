@@ -87,6 +87,11 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         providerOptions: input.provider.options,
       })
   const options = mergeOptions(mergeOptions(mergeOptions(base, input.model.options), input.agent.options), variant)
+  if (["claude-code", "cursor-agent", "antigravity-cli"].includes(input.model.providerID)) {
+    options.sessionID = input.small ? `${input.sessionID}:sidecar` : input.sessionID
+    options.directory = (yield* InstanceState.context).directory
+    options.permissionMode = input.small || input.agent.name === "plan" ? "plan" : "agent"
+  }
   if (isOpenaiOauth) options.instructions = system.join("\n")
 
   const messages =

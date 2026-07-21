@@ -92,6 +92,8 @@ export type AuthHook = {
     | {
         type: "oauth"
         label: string
+        /** Store credentials and select models through this provider after authorization. */
+        provider?: string
         prompts?: Array<
           | {
               type: "text"
@@ -122,6 +124,8 @@ export type AuthHook = {
     | {
         type: "api"
         label: string
+        /** Store credentials and select models through this provider after authorization. */
+        provider?: string
         prompts?: Array<
           | {
               type: "text"
@@ -181,6 +185,7 @@ export type AuthOAuthResult = { url: string; instructions: string } & (
           ))
         | {
             type: "failed"
+            message?: string
           }
       >
     }
@@ -202,6 +207,7 @@ export type AuthOAuthResult = { url: string; instructions: string } & (
           ))
         | {
             type: "failed"
+            message?: string
           }
       >
     }

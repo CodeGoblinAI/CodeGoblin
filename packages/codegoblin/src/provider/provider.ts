@@ -28,7 +28,19 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { augmentAudioModelCatalog, augmentImageModelCatalog, augment3DModelCatalog, augmentLocalRuntimeModels, codeGoblinProviderInfo } from "@/codegoblin/provider"
+import {
+  augmentAudioModelCatalog,
+  augmentImageModelCatalog,
+  augment3DModelCatalog,
+  augmentLocalRuntimeModels,
+  codeGoblinProviderInfo,
+} from "@/codegoblin/provider"
+import {
+  CLI_AGENT_PROVIDERS,
+  createCliAgentLanguageModel,
+  discoverCliAgentProviderInfos,
+  isCliAgentProvider,
+} from "./cli-agent"
 
 const log = Log.create({ service: "provider" })
 
@@ -157,6 +169,17 @@ function selectAzureLanguageModel(sdk: any, modelID: string, useChat: boolean) {
 
 function custom(dep: CustomDep): Record<string, CustomLoader> {
   return {
+    ...Object.fromEntries(
+      CLI_AGENT_PROVIDERS.map((providerID) => [
+        providerID,
+        () =>
+          Effect.succeed({
+            autoload: false,
+            getModel: async (_sdk: unknown, modelID: string, options?: Record<string, unknown>) =>
+              createCliAgentLanguageModel(providerID, modelID, options ?? {}),
+          }),
+      ]),
+    ),
     anthropic: () =>
       Effect.succeed({
         autoload: false,
@@ -199,9 +222,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         (stored?.type === "api" ? stored.key : undefined) ||
         cfg.provider?.["codegoblin"]?.options?.apiKey
       const baseURL =
-        env["CODEGOBLIN_GATEWAY_URL"] ||
-        cfg.provider?.["codegoblin"]?.options?.baseURL ||
-        input.options?.baseURL
+        env["CODEGOBLIN_GATEWAY_URL"] || cfg.provider?.["codegoblin"]?.options?.baseURL || input.options?.baseURL
       const ok = Boolean(configuredKey || env["CODEGOBLIN_GATEWAY_URL"] || cfg.provider?.["codegoblin"])
 
       return {
@@ -1240,6 +1261,10 @@ export const layer = Layer.effect(
         const codeGoblin = codeGoblinProviderInfo()
         catalog[codeGoblin.id] = codeGoblin
         database[codeGoblin.id] = toPublicInfo(codeGoblin)
+        for (const provider of yield* Effect.promise(discoverCliAgentProviderInfos)) {
+          catalog[provider.id] = provider
+          database[provider.id] = toPublicInfo(provider)
+        }
         augmentImageModelCatalog(database)
         augmentAudioModelCatalog(database)
         augment3DModelCatalog(database)
@@ -1766,13 +1791,14 @@ export const layer = Layer.effect(
       const provider = s.providers[model.providerID]
       return yield* EffectPromise.refineRejection(
         async () => {
-          const sdk = await resolveSDK(model, s, envs)
-          const language = s.modelLoaders[model.providerID]
-            ? await s.modelLoaders[model.providerID](sdk, model.api.id, {
+          const loader = s.modelLoaders[model.providerID]
+          const sdk = isCliAgentProvider(model.providerID) ? undefined : await resolveSDK(model, s, envs)
+          const language = loader
+            ? await loader(sdk, model.api.id, {
                 ...provider.options,
                 ...model.options,
               })
-            : sdk.languageModel(model.api.id)
+            : sdk!.languageModel(model.api.id)
           s.models.set(key, language)
           return language
         },

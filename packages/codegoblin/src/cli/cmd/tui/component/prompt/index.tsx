@@ -180,7 +180,7 @@ export function Prompt(props: PromptProps) {
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
   const [balanceState, balanceActions] = createResource(
     () => project.instance.directory() || process.cwd(),
-    (cwd) => CodeGoblinBalance.resolve({ cwd }).catch(() => ({ balances: [], errors: [] })),
+    (cwd) => CodeGoblinBalance.resolve({ cwd }).catch(() => ({ balances: [], quotas: [], errors: [] })),
   )
   const history = usePromptHistory()
   const stash = usePromptStash()
@@ -434,6 +434,7 @@ export function Prompt(props: PromptProps) {
     const selected = local.model.current()
     return CodeGoblinBalance.formatFooter({
       balances: balanceState()?.balances,
+      quotas: balanceState()?.quotas,
       spent: sessionSpend(),
       providerID: selected?.providerID,
       modelID: selected?.modelID,
