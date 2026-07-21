@@ -35,7 +35,12 @@ import {
   augmentLocalRuntimeModels,
   codeGoblinProviderInfo,
 } from "@/codegoblin/provider"
-import { CLI_AGENT_PROVIDERS, createCliAgentLanguageModel, discoverCliAgentProviderInfos } from "./cli-agent"
+import {
+  CLI_AGENT_PROVIDERS,
+  createCliAgentLanguageModel,
+  discoverCliAgentProviderInfos,
+  isCliAgentProvider,
+} from "./cli-agent"
 
 const log = Log.create({ service: "provider" })
 
@@ -1786,12 +1791,14 @@ export const layer = Layer.effect(
       const provider = s.providers[model.providerID]
       return yield* EffectPromise.refineRejection(
         async () => {
-          const language = s.modelLoaders[model.providerID]
-            ? await s.modelLoaders[model.providerID](undefined, model.api.id, {
+          const loader = s.modelLoaders[model.providerID]
+          const sdk = isCliAgentProvider(model.providerID) ? undefined : await resolveSDK(model, s, envs)
+          const language = loader
+            ? await loader(sdk, model.api.id, {
                 ...provider.options,
                 ...model.options,
               })
-            : (await resolveSDK(model, s, envs)).languageModel(model.api.id)
+            : sdk!.languageModel(model.api.id)
           s.models.set(key, language)
           return language
         },
