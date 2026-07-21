@@ -19,6 +19,7 @@ import { useLayout, LocalProject } from "@/context/layout"
 import { useGlobalSync } from "@/context/global-sync"
 import { Persist, persisted } from "@/utils/persist"
 import { base64Encode } from "@codegoblin/core/util/encode"
+import { slashCommandProps } from "@codegoblin/core/command/catalog"
 import { decode64 } from "@/utils/base64"
 import { ResizeHandle } from "@codegoblin/ui/resize-handle"
 import { Button } from "@codegoblin/ui/button"
@@ -91,6 +92,18 @@ import { SidebarContent } from "./layout/sidebar-shell"
 import { ThreePaneSidebar } from "./layout/three-pane-sidebar"
 
 const USE_NEW_DESIGN = true // redesign shipped in 0.2.x — no longer channel-gated
+
+const sharedSlash = (name: string, option: CommandOption): CommandOption => {
+  const command = slashCommandProps(name)
+  return {
+    ...option,
+    title: command.title,
+    description: command.description,
+    category: command.category,
+    slash: command.name,
+    slashAliases: command.aliases,
+  }
+}
 
 export default function Layout(props: ParentProps) {
   const [store, setStore, , ready] = persisted(
@@ -1066,25 +1079,61 @@ export default function Layout(props: ParentProps) {
         keybind: "mod+alt+arrowdown",
         onSelect: () => navigateProjectByOffset(1),
       },
-      {
+      sharedSlash("connect", {
         id: "provider.connect",
         title: language.t("command.provider.connect"),
         category: language.t("command.category.provider"),
         onSelect: () => connectProvider(),
-      },
+      }),
       {
         id: "server.switch",
         title: language.t("command.server.switch"),
         category: language.t("command.category.server"),
         onSelect: () => openServer(),
       },
-      {
+      sharedSlash("settings", {
         id: "settings.open",
         title: language.t("command.settings.open"),
         category: language.t("command.category.settings"),
         keybind: "mod+comma",
         onSelect: () => openSettings(),
-      },
+      }),
+      sharedSlash("logout", {
+        id: "provider.logout",
+        title: "Remove saved provider credentials",
+        onSelect: () => openSettings("providers"),
+      }),
+      sharedSlash("usage", {
+        id: "codegoblin.usage",
+        title: "View usage",
+        onSelect: () => {
+          void import("@/components/dialog-usage").then((x) => dialog.show(() => <x.DialogUsage />))
+        },
+      }),
+      sharedSlash("status", {
+        id: "app.status",
+        title: "View status",
+        onSelect: () => {
+          showToast({ title: "Status", description: "Use the status indicator in the header to inspect servers and MCPs." })
+        },
+      }),
+      sharedSlash("help", {
+        id: "help.show",
+        title: "Keyboard shortcuts",
+        onSelect: () => openSettings("shortcuts"),
+      }),
+      sharedSlash("theme", {
+        id: "theme.switch",
+        title: "Switch theme",
+        onSelect: () => cycleTheme(1),
+      }),
+      sharedSlash("update", {
+        id: "app.update",
+        title: "Check for updates",
+        onSelect: () => {
+          showToast({ title: "Updates", description: "Run `cg update` from the terminal to install updates." })
+        },
+      }),
       ...(platform.platform === "desktop" && platform.exportDebugLogs
         ? [
             {
@@ -1264,11 +1313,11 @@ export default function Layout(props: ParentProps) {
     })
   }
 
-  function openSettings() {
+  function openSettings(initialTab?: "general" | "shortcuts" | "providers" | "models") {
     const run = ++dialogRun
     void import("@/components/dialog-settings").then((x) => {
       if (dialogDead || dialogRun !== run) return
-      dialog.show(() => <x.DialogSettings />)
+      dialog.show(() => <x.DialogSettings initialTab={initialTab} />)
     })
   }
 

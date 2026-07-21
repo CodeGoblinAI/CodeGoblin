@@ -9,13 +9,13 @@ import { SettingsKeybinds } from "./settings-keybinds"
 import { SettingsProviders } from "./settings-providers"
 import { SettingsModels } from "./settings-models"
 
-export const DialogSettings: Component = () => {
+export const DialogSettings: Component<{ initialTab?: "general" | "shortcuts" | "providers" | "models" }> = (props) => {
   const language = useLanguage()
   const platform = usePlatform()
 
   return (
     <Dialog size="x-large" transition>
-      <Tabs orientation="vertical" variant="settings" defaultValue="general" class="h-full settings-dialog">
+      <Tabs orientation="vertical" variant="settings" defaultValue={props.initialTab ?? "general"} class="h-full settings-dialog">
         <Tabs.List>
           <div class="flex flex-col justify-between h-full w-full">
             <div class="flex flex-col gap-3 w-full pt-3">

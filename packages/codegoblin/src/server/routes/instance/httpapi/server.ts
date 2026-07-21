@@ -5,6 +5,7 @@ import os from "os"
 import path from "path"
 import { Global } from "@codegoblin/core/global"
 import { InstallationVersion } from "@codegoblin/core/installation/version"
+import { normalizeUsageQuotas, summarizeUsage } from "@codegoblin/core/usage"
 import {
   FetchHttpClient,
   HttpClient,
@@ -20,6 +21,7 @@ import { Agent } from "@/agent/agent"
 import { Auth } from "@/auth"
 import { Bus } from "@/bus"
 import { Config } from "@/config/config"
+import { CodeGoblinBalance } from "@/codegoblin/balance"
 import { Command } from "@/command"
 import * as Observability from "@codegoblin/core/effect/observability"
 import { File } from "@/file"
@@ -330,6 +332,27 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           Market.listWithStatus(kind ? { kind: kind as any } : undefined, route.directory),
         )
         return HttpServerResponse.jsonUnsafe({ ok: true, entries }, { status: 200 })
+      }),
+    )
+    yield* router.add("GET", "/codegoblin/usage", (request) =>
+      Effect.gen(function* () {
+        const route = yield* WorkspaceRouteContext
+        const url = new URL(request.url, "http://localhost")
+        const sessionID = url.searchParams.get("sessionID") ?? undefined
+        const sessions = yield* session.list({ directory: route.directory })
+        const balance = yield* Effect.promise(() =>
+          CodeGoblinBalance.resolve({ cwd: route.directory }).catch(() => ({ balances: [], quotas: [], errors: [] })),
+        )
+        const snapshot = summarizeUsage(sessions, sessionID)
+        return HttpServerResponse.jsonUnsafe(
+          {
+            ...snapshot,
+            balances: balance.balances,
+            quotas: normalizeUsageQuotas(balance.quotas),
+            errors: balance.errors,
+          },
+          { status: 200 },
+        )
       }),
     )
     yield* router.add("POST", "/codegoblin/market/install", (request) =>

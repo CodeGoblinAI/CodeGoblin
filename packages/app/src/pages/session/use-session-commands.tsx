@@ -19,6 +19,7 @@ import { createSessionTabs } from "@/pages/session/helpers"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { UserMessage } from "@codegoblin/sdk/v2"
 import { useSessionLayout } from "@/pages/session/session-layout"
+import { slashCommandProps } from "@codegoblin/core/command/catalog"
 
 export type SessionCommandContext = {
   navigateMessageByOffset: (offset: number) => void
@@ -32,6 +33,18 @@ const withCategory = (category: string) => {
     ...option,
     category,
   })
+}
+
+const sharedSlash = (name: string, option: CommandOption): CommandOption => {
+  const command = slashCommandProps(name)
+  return {
+    ...option,
+    title: command.title,
+    description: command.description,
+    category: command.category,
+    slash: command.name,
+    slashAliases: command.aliases,
+  }
 }
 
 export const useSessionCommands = (actions: SessionCommandContext) => {
@@ -278,6 +291,18 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     })
   }
 
+  const chooseEffort = (title = "Select effort") => {
+    void import("@/components/dialog-select-effort").then((x) => {
+      dialog.show(() => <x.DialogSelectEffort title={title} />)
+    })
+  }
+
+  const chooseMode = () => {
+    void import("@/components/dialog-select-mode").then((x) => {
+      dialog.show(() => <x.DialogSelectMode />)
+    })
+  }
+
   const toggleAutoAccept = () => {
     const sessionID = params.id
     if (sessionID) permission.toggleAutoAccept(sessionID, sdk.directory)
@@ -391,13 +416,17 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   }
 
   const sessionCmds = () => [
-    sessionCommand({
-      id: "session.new",
-      title: language.t("command.session.new"),
-      keybind: "mod+shift+s",
-      slash: "new",
+    sharedSlash("resume", sessionCommand({
+      id: "session.resume",
+      title: "Resume session",
       onSelect: () => navigate(`/${params.dir}/session`),
-    }),
+    })),
+    sharedSlash("clear", sessionCommand({
+      id: "session.new",
+      title: "Clear and start a new session",
+      keybind: "mod+shift+s",
+      onSelect: () => navigate(`/${params.dir}/session`),
+    })),
     sessionCommand({
       id: "session.undo",
       title: language.t("command.session.undo"),
@@ -523,62 +552,63 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   ]
 
   const modelCmds = () => [
-    modelCommand({
+    sharedSlash("model", modelCommand({
       id: "model.choose",
-      title: language.t("command.model.choose"),
-      description: language.t("command.model.choose.description"),
+      title: "Switch model",
+      description: "Choose the model for this session",
       keybind: "mod+'",
-      slash: "model",
       onSelect: chooseModel,
-    }),
-    modelCommand({
+    })),
+    sharedSlash("variants", modelCommand({
       id: "model.variant.cycle",
-      title: language.t("command.model.variant.cycle"),
-      description: language.t("command.model.variant.cycle.description"),
+      title: "Switch model variant",
+      description: "Choose a model-specific variant",
       keybind: "shift+mod+d",
-      onSelect: () => local.model.variant.cycle(),
-    }),
+      onSelect: () => chooseEffort("Select variant"),
+    })),
+    sharedSlash("effort", modelCommand({
+      id: "model.effort",
+      title: "Select reasoning effort",
+      description: "Choose the model's reasoning effort",
+      onSelect: () => chooseEffort(),
+    })),
   ]
 
   const mcpCmds = () => [
-    mcpCommand({
+    sharedSlash("mcp", mcpCommand({
       id: "mcp.toggle",
-      title: language.t("command.mcp.toggle"),
-      description: language.t("command.mcp.toggle.description"),
+      title: "Toggle MCPs",
+      description: "Connect or disconnect MCP servers",
       keybind: "mod+;",
-      slash: "mcp",
       onSelect: chooseMcp,
-    }),
+    })),
   ]
 
   const codegoblinCommand = withCategory("CodeGoblin")
 
   const codegoblinCmds = () => [
-    codegoblinCommand({
+    sharedSlash("memory", codegoblinCommand({
       id: "codegoblin.memory",
       title: "Memory",
       description: "Browse, pin, archive, and add CodeGoblin memories",
-      slash: "memory",
       onSelect: chooseMemory,
-    }),
-    codegoblinCommand({
+    })),
+    sharedSlash("plugins", codegoblinCommand({
       id: "codegoblin.market",
       title: "Market",
       description: "Add, connect, authenticate, or disconnect MCP servers",
-      slash: "market",
       onSelect: chooseMarket,
-    }),
+    })),
   ]
 
   const agentCmds = () => [
-    agentCommand({
-      id: "agent.cycle",
-      title: language.t("command.agent.cycle"),
-      description: language.t("command.agent.cycle.description"),
+    sharedSlash("mode", agentCommand({
+      id: "agent.list",
+      title: "Switch mode",
+      description: "Choose the active agent or mode",
       keybind: "mod+.",
-      slash: "agent",
-      onSelect: () => local.agent.move(1),
-    }),
+      onSelect: chooseMode,
+    })),
     agentCommand({
       id: "agent.cycle.reverse",
       title: language.t("command.agent.cycle.reverse"),
