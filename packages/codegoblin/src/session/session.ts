@@ -253,7 +253,7 @@ export const CreateInput = Schema.optional(
 export type CreateInput = Types.DeepMutable<Schema.Schema.Type<typeof CreateInput>>
 
 export const ImportExternalInput = Schema.Struct({
-  source: Schema.Literals(["claude-code", "codex"]),
+  source: Schema.Literals(["claude-code", "codex", "antigravity", "cursor-agent"]),
   title: Schema.String,
   model: Schema.optional(Model),
   messages: Schema.Array(
@@ -738,7 +738,14 @@ export const layer: Layer.Layer<
           parentID: state.parentID,
           modelID: historicalModel.modelID,
           providerID: historicalModel.providerID,
-          mode: input.source === "claude-code" ? "claude code" : "codex",
+          mode:
+            input.source === "claude-code"
+              ? "claude code"
+              : input.source === "codex"
+                ? "codex"
+                : input.source === "antigravity"
+                  ? "antigravity"
+                  : "cursor",
           agent: "build",
           path: { cwd: ctx.directory, root: ctx.worktree },
           cost: 0,

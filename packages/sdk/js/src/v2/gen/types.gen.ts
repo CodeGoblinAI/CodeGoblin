@@ -6380,7 +6380,7 @@ export type SessionStatusResponse = SessionStatusResponses[keyof SessionStatusRe
 
 export type SessionImportExternalData = {
   body?: {
-    source: "claude-code" | "codex"
+    source: "claude-code" | "codex" | "antigravity" | "cursor-agent"
     title: string
     model?: {
       id: string

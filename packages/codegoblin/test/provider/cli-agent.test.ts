@@ -3,6 +3,7 @@ import {
   buildCliAgentCommand,
   cliAgentProviderInfos,
   cursorAgentCandidates,
+  cliAgentResumeCommand,
   deterministicCliSessionID,
   parseClaudeQuota,
   parseCliAgentEvent,
@@ -214,6 +215,34 @@ describe("local CLI agent providers", () => {
         }),
       ),
     ).toEqual({ sessionID: "cursor-session", text: "done" })
+  })
+
+  test("keeps native resume commands provider-specific", () => {
+    expect(cliAgentResumeCommand("claude-code", "claude", "claude-id")).toEqual(["claude", "--resume", "claude-id"])
+    expect(cliAgentResumeCommand("cursor-agent", "cursor-agent", "cursor-id")).toEqual([
+      "cursor-agent",
+      "resume",
+      "cursor-id",
+    ])
+    expect(cliAgentResumeCommand("antigravity-cli", "agy", "agy-id")).toEqual(["agy", "--conversation", "agy-id"])
+  })
+
+  test("normalizes Antigravity JSONL without leaking tools or system records", () => {
+    expect(
+      parseCliAgentEvent(
+        "antigravity-cli",
+        JSON.stringify({ source: "USER_EXPLICIT", type: "USER_INPUT", content: "hello" }),
+      ),
+    ).toEqual({ role: "user", text: "hello" })
+    expect(
+      parseCliAgentEvent(
+        "antigravity-cli",
+        JSON.stringify({ source: "MODEL", type: "PLANNER_RESPONSE", content: "done", thinking: "plan" }),
+      ),
+    ).toEqual({ role: "assistant", text: "done", reasoning: "plan" })
+    expect(parseCliAgentEvent("antigravity-cli", JSON.stringify({ source: "TOOL", type: "LIST_DIRECTORY" }))).toEqual(
+      {},
+    )
   })
 
   test("retires Anthropic subscription OAuth without removing API keys", () => {

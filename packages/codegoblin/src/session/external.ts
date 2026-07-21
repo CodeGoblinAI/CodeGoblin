@@ -1,8 +1,9 @@
 import os from "node:os"
 import path from "node:path"
 import { existsSync } from "node:fs"
+import { cliAgentBaseCommand, cliAgentExecutable, cliAgentResumeCommand } from "@/provider/cli-agent"
 
-export type ExternalSessionSource = "claude-code" | "codex"
+export type ExternalSessionSource = "claude-code" | "codex" | "antigravity" | "cursor-agent"
 
 export type ExternalSessionSummary = {
   id: string
@@ -11,6 +12,7 @@ export type ExternalSessionSummary = {
   title: string
   directory?: string
   updated: number
+  nativeSessionID?: string
 }
 
 export type ExternalSessionTranscript = ExternalSessionSummary & {
@@ -32,11 +34,7 @@ const PREVIEW_BYTES = 128 * 1024
 export async function discoverExternalSessions(input?: { home?: string; limit?: number; sources?: ExternalSessionSource[] }) {
   const home = input?.home ?? os.homedir()
   const sources = input?.sources ?? ["claude-code", "codex"]
-  const candidates = await Promise.all(
-    sources.map((source) =>
-      collect(path.join(home, source === "claude-code" ? ".claude/projects" : ".codex/sessions"), source),
-    ),
-  )
+  const candidates = await Promise.all(sources.map((source) => discoverSource(home, source)))
   const recent = candidates
     .flat()
     .toSorted((a, b) => b.updated - a.updated)
@@ -56,6 +54,7 @@ export async function discoverExternalSessions(input?: { home?: string; limit?: 
 }
 
 export async function loadExternalSession(session: ExternalSessionSummary): Promise<ExternalSessionTranscript> {
+  if (session.source === "cursor-agent") return loadCursorSession(session)
   const text = await Bun.file(session.path).text()
   return {
     ...session,
@@ -63,20 +62,123 @@ export async function loadExternalSession(session: ExternalSessionSummary): Prom
   }
 }
 
-async function collect(root: string, source: ExternalSessionSource) {
+async function collect(roots: string[], source: ExternalSessionSource) {
   const glob = new Bun.Glob("**/*.jsonl")
   const files = [] as Array<{ source: ExternalSessionSource; path: string; updated: number }>
-  if (!existsSync(root)) return files
-  for await (const relative of glob.scan({ cwd: root, absolute: false, onlyFiles: true })) {
-    if (source === "claude-code" && relative.split(/[\\/]/).includes("subagents")) continue
-    const file = path.join(root, relative)
-    const stat = await Bun.file(file)
-      .stat()
-      .catch(() => undefined)
-    if (!stat) continue
-    files.push({ source, path: file, updated: stat.mtimeMs })
+  for (const root of roots) {
+    if (!existsSync(root)) continue
+    for await (const relative of glob.scan({ cwd: root, absolute: false, onlyFiles: true, dot: true })) {
+      if (source === "claude-code" && relative.split(/[\\/]/).includes("subagents")) continue
+      const file = path.join(root, relative)
+      const stat = await Bun.file(file)
+        .stat()
+        .catch(() => undefined)
+      if (!stat) continue
+      files.push({ source, path: file, updated: stat.mtimeMs })
+    }
   }
   return files
+}
+
+async function discoverSource(home: string, source: ExternalSessionSource) {
+  if (source === "cursor-agent") return discoverCursorSessions()
+  return collect(
+    source === "claude-code"
+      ? [path.join(home, ".claude/projects")]
+      : source === "codex"
+        ? [path.join(home, ".codex/sessions")]
+        : [path.join(home, ".gemini/antigravity-cli/brain"), path.join(home, ".gemini/antigravity/brain")],
+    source,
+  )
+}
+
+async function discoverCursorSessions() {
+  const executable = cliAgentExecutable("cursor-agent")
+  if (!executable) return []
+  const result = await runCli([...cliAgentBaseCommand("cursor-agent", executable), "ls"])
+  if (!result) return []
+  return parseCursorSessionList(result)
+}
+
+export function parseCursorSessionList(value: string): ExternalSessionSummary[] {
+  const parsed = value
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      try {
+        const record = JSON.parse(line) as Record<string, unknown>
+        const id = string(record.id) ?? string(record.session_id) ?? string(record.sessionId)
+        if (!id) return []
+        return [
+          {
+            id: `cursor-agent:${id}`,
+            source: "cursor-agent" as const,
+            path: `cursor-agent://${encodeURIComponent(id)}`,
+            nativeSessionID: id,
+            title: truncate(string(record.title) ?? string(record.name) ?? `Cursor session ${id.slice(0, 8)}`),
+            directory: string(record.cwd) ?? string(record.directory),
+            updated: timestamp(record.updated_at ?? record.updatedAt ?? record.time) ?? Date.now(),
+          },
+        ]
+      } catch {
+        return []
+      }
+    })
+  if (parsed.length) return parsed
+
+  return value
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const id = /\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/i.exec(line)?.[0]
+      if (!id) return []
+      const title = line.replace(id, "").replace(/[|·].*$/, "").trim()
+      return [
+        {
+          id: `cursor-agent:${id}`,
+          source: "cursor-agent" as const,
+          path: `cursor-agent://${encodeURIComponent(id)}`,
+          nativeSessionID: id,
+          title: truncate(title || `Cursor session ${id.slice(0, 8)}`),
+          updated: Date.now(),
+        },
+      ]
+    })
+}
+
+async function loadCursorSession(session: ExternalSessionSummary): Promise<ExternalSessionTranscript> {
+  const executable = cliAgentExecutable("cursor-agent")
+  if (!executable || !session.nativeSessionID) throw new Error("Cursor Agent CLI is required to import this session.")
+  const value = await runCli([
+    ...cliAgentResumeCommand("cursor-agent", executable, session.nativeSessionID),
+    "--print",
+    "--output-format",
+    "stream-json",
+  ])
+  if (!value) throw new Error("Cursor Agent did not return a readable transcript for this session.")
+  const messages = parseCursorTranscript(value)
+  if (!messages.length) throw new Error("Cursor Agent returned no conversational messages for this session.")
+  return { ...session, messages }
+}
+
+function parseCursorTranscript(value: string) {
+  return value
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const record = parseRecord(line)
+      if (!record) return []
+      const message = object(record.message) ?? record
+      const role = string(message.role) === "user" ? "user" : string(message.role) === "assistant" ? "assistant" : undefined
+      if (!role) return []
+      const text = contentText(message.content ?? message.text)
+      if (!text || synthetic(text)) return []
+      return [{ role, text, time: timestamp(record.timestamp) } satisfies ExternalSessionMessage]
+    })
+}
+
+async function runCli(command: string[]) {
+  const proc = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "ignore" })
+  const [exitCode, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()])
+  if (exitCode !== 0) return
+  return stdout.trim()
 }
 
 function parseSummary(source: ExternalSessionSource, file: string, updated: number, text: string) {
@@ -98,6 +200,22 @@ function parseSummary(source: ExternalSessionSource, file: string, updated: numb
       path: file,
       title: truncate(titleCandidate(first?.text) ?? `Codex session ${id.slice(0, 8)}`),
       directory: string(meta?.cwd),
+      updated,
+    } satisfies ExternalSessionSummary
+  }
+
+  if (source === "antigravity") {
+    const record = records.find((item) => string(item.conversationId) || string(item.type)?.toUpperCase() === "USER_INPUT")
+    const id = string(record?.conversationId) ?? path.basename(path.dirname(path.dirname(path.dirname(file))))
+    if (!id) return
+    const first = records.flatMap(parseAntigravityMessage).find((message) => message?.role === "user")
+    const workspacePaths = record?.workspacePaths
+    return {
+      id: `${source}:${id}`,
+      source,
+      path: file,
+      title: truncate(titleCandidate(first?.text) ?? `Antigravity session ${id.slice(0, 8)}`),
+      directory: Array.isArray(workspacePaths) ? string(workspacePaths[0]) : undefined,
       updated,
     } satisfies ExternalSessionSummary
   }
@@ -124,6 +242,7 @@ function parseTranscript(source: ExternalSessionSource, text: string) {
     .map((line) => parseRecord(line))
     .filter((record): record is Record<string, unknown> => record !== undefined)
   if (source === "claude-code") return parseClaudeTranscript(records)
+  if (source === "antigravity") return parseAntigravityTranscript(records)
 
   return parseCodexTranscript(records)
 }
@@ -145,6 +264,21 @@ function parseClaudeTranscript(records: Record<string, unknown>[]) {
       previous.model ??= message.model
       return turns
     }, result)
+  }, [])
+}
+
+function parseAntigravityTranscript(records: Record<string, unknown>[]) {
+  return records.reduce<ExternalSessionMessage[]>((result, record) => {
+    const message = parseAntigravityMessage(record)
+    if (!message?.text || synthetic(message.text)) return result
+    const previous = result.at(-1)
+    if (message.role === "user" || previous?.role !== "assistant") {
+      result.push({ ...message, text: message.text.trim() })
+      return result
+    }
+    previous.text = `${previous.text}\n\n${message.text.trim()}`
+    previous.model ??= message.model
+    return result
   }, [])
 }
 
@@ -207,6 +341,26 @@ function parseClaudeMessage(record: Record<string, unknown>): ExternalSessionMes
     result.model = { providerID: "anthropic", id: modelID }
   }
   return [result]
+}
+
+function parseAntigravityMessage(record: Record<string, unknown>): ExternalSessionMessage | undefined {
+  const source = string(record.source)
+  const type = string(record.type)?.toUpperCase()
+  if (source === "USER_EXPLICIT" || type === "USER_INPUT") {
+    const text = string(record.content)?.trim()
+    if (!text) return
+    return { role: "user", text, time: timestamp(record.created_at) }
+  }
+  if (source !== "MODEL" && type !== "ASSISTANT" && type !== "RESPONSE" && type !== "PLANNER_RESPONSE") return
+  const text = string(record.content)?.trim()
+  if (!text) return
+  const modelID = string(record.model) ?? string(object(record.metadata)?.model)
+  return {
+    role: "assistant",
+    text,
+    time: timestamp(record.created_at),
+    ...(modelID && { model: { providerID: "antigravity-cli", id: modelID } }),
+  }
 }
 
 function contentText(value: unknown): string {

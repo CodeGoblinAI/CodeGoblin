@@ -36,6 +36,7 @@ type BridgeSessions = Partial<Record<CliAgentProviderID, Record<string, string |
 
 type ParsedEvent = {
   sessionID?: string
+  role?: "user" | "assistant"
   text?: string
   reasoning?: string
   result?: string
@@ -266,7 +267,7 @@ export function createCliAgentLanguageModel(
                 await rememberSession(providerID, sessionID, event.sessionID, bridge.directory, responseText)
               }
               if (event.reasoning) emitReasoning(event.reasoning)
-              if (event.text) emitText(event.text)
+              if (event.role !== "user" && event.text) emitText(event.text)
               if (!emittedText && event.result) emitText(event.result)
               if (event.usage) usage = event.usage
               if (event.error) throw new Error(event.error)
@@ -421,6 +422,16 @@ export function cliAgentBaseCommand(providerID: CliAgentProviderID, executable: 
   return [executable]
 }
 
+export function cliAgentResumeCommand(
+  providerID: CliAgentProviderID,
+  executable: string,
+  externalSessionID: string,
+) {
+  if (providerID === "claude-code") return [executable, "--resume", externalSessionID]
+  if (providerID === "cursor-agent") return [...cliAgentBaseCommand(providerID, executable), "resume", externalSessionID]
+  return [...cliAgentBaseCommand(providerID, executable), "--conversation", externalSessionID]
+}
+
 export function buildCliAgentCommand(input: {
   providerID: CliAgentProviderID
   executable: string
@@ -502,15 +513,19 @@ function lastAssistantText(input: LanguageModelV3CallOptions) {
 
 export function parseCliAgentEvent(providerID: CliAgentProviderID, line: string): ParsedEvent | undefined {
   if (!line.trim()) return
-  if (providerID === "antigravity-cli") return { text: `${line}\n` }
   let raw: Record<string, unknown>
   try {
     raw = JSON.parse(line) as Record<string, unknown>
   } catch {
+    if (providerID === "antigravity-cli") return { text: `${line}\n` }
     return { text: line }
   }
 
   const sessionID = stringValue(raw.session_id) ?? stringValue(raw.sessionId)
+  if (providerID === "antigravity-cli") return parseAntigravityEvent(raw, sessionID)
+  if (raw.type === "user" || (raw.role === "user" && contentText(raw.content))) {
+    return { sessionID, role: "user", text: contentText(raw.content) }
+  }
   if (raw.type === "stream_event" && isRecord(raw.event)) {
     const event = raw.event
     if (event.type === "content_block_delta" && isRecord(event.delta)) {
@@ -533,6 +548,23 @@ export function parseCliAgentEvent(providerID: CliAgentProviderID, line: string)
 
   if (raw.type === "error") return { sessionID, error: stringValue(raw.message) ?? stringValue(raw.error) }
   return { sessionID }
+}
+
+function parseAntigravityEvent(raw: Record<string, unknown>, sessionID?: string): ParsedEvent | undefined {
+  const source = stringValue(raw.source)
+  const type = stringValue(raw.type)?.toUpperCase()
+  if (source === "USER_EXPLICIT" || type === "USER_INPUT") {
+    return { sessionID, role: "user", text: stringValue(raw.content) }
+  }
+  if (source !== "MODEL" && type !== "ASSISTANT" && type !== "RESPONSE" && type !== "PLANNER_RESPONSE") {
+    return { sessionID }
+  }
+  return {
+    sessionID,
+    role: "assistant",
+    text: stringValue(raw.content) ?? contentText(raw.message),
+    reasoning: stringValue(raw.thinking) ?? stringValue(raw.reasoning),
+  }
 }
 
 function contentText(value: unknown) {

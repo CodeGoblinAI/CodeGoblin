@@ -3419,7 +3419,7 @@ export class Session2 extends HeyApiClient {
     parameters?: {
       directory?: string
       workspace?: string
-      source?: "claude-code" | "codex"
+      source?: "claude-code" | "codex" | "antigravity" | "cursor-agent"
       title?: string
       model?: {
         id: string
