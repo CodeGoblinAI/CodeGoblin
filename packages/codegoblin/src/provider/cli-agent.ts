@@ -391,10 +391,27 @@ export function cliAgentExecutable(providerID: CliAgentProviderID) {
   const command = { "claude-code": "claude", "cursor-agent": "cursor-agent", "antigravity-cli": "agy" }[providerID]
   const executable = process.env[env] || Bun.which(command)
   if (executable) return executable
-  if (providerID === "cursor-agent" && process.platform === "win32") {
-    const native = path.join(process.env.LOCALAPPDATA ?? "", "cursor-agent", "cursor-agent.exe")
-    if (process.env.LOCALAPPDATA && Bun.file(native).size > 0) return native
+  if (providerID !== "cursor-agent" || process.platform !== "win32") return
+  for (const command of ["agent", "cursor-agent"]) {
+    const fromPath = Bun.which(command)
+    if (fromPath) return fromPath
   }
+  for (const candidate of cursorAgentCandidates()) {
+    if (Bun.file(candidate).size > 0) return candidate
+  }
+}
+
+export function cursorAgentCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+  platform = process.platform,
+) {
+  if (platform !== "win32" || !env.LOCALAPPDATA) return []
+  const root = path.join(env.LOCALAPPDATA, "cursor-agent")
+  const launchers = ["cursor-agent.exe", "cursor-agent.cmd", "cursor-agent.ps1", "agent.exe", "agent.cmd", "agent.ps1"]
+  return [
+    ...launchers.map((launcher) => path.join(root, launcher)),
+    ...launchers.map((launcher) => path.join(root, "versions", "current", launcher)),
+  ]
 }
 
 export function cliAgentBaseCommand(providerID: CliAgentProviderID, executable: string) {

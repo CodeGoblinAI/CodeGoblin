@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   buildCliAgentCommand,
   cliAgentProviderInfos,
+  cursorAgentCandidates,
   deterministicCliSessionID,
   parseClaudeQuota,
   parseCliAgentEvent,
@@ -40,7 +41,17 @@ describe("local CLI agent providers", () => {
     expect(claude.auth?.provider).toBe("anthropic")
     expect(claude.auth?.methods).toEqual([
       expect.objectContaining({ type: "api", label: "API key" }),
-      expect.objectContaining({ type: "oauth", provider: "claude-code" }),
+      expect.objectContaining({
+        type: "oauth",
+        provider: "claude-code",
+        label: "Claude Code CLI (subscription)",
+        prompts: [
+          expect.objectContaining({
+            key: "setup",
+            options: [expect.objectContaining({ value: "installed" }), expect.objectContaining({ value: "install" })],
+          }),
+        ],
+      }),
     ])
     expect(cursor.auth?.methods).toEqual([expect.objectContaining({ type: "oauth", provider: "cursor-agent" })])
     expect(antigravity.auth?.methods).toEqual([expect.objectContaining({ type: "oauth", provider: "antigravity-cli" })])
@@ -52,6 +63,24 @@ describe("local CLI agent providers", () => {
     expect(installCommand("antigravity-cli", "linux")).toContain(
       "curl -fsSL https://antigravity.google/cli/install.sh | bash",
     )
+  })
+
+  test("recognizes Cursor's Windows launchers and versioned install locations", () => {
+    expect(cursorAgentCandidates({ LOCALAPPDATA: "C:\\Users\\test\\AppData\\Local" }, "win32")).toEqual([
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\cursor-agent.exe",
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\cursor-agent.cmd",
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\cursor-agent.ps1",
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\agent.exe",
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\agent.cmd",
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\agent.ps1",
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\versions\\current\\cursor-agent.exe",
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\versions\\current\\cursor-agent.cmd",
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\versions\\current\\cursor-agent.ps1",
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\versions\\current\\agent.exe",
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\versions\\current\\agent.cmd",
+      "C:\\Users\\test\\AppData\\Local\\cursor-agent\\versions\\current\\agent.ps1",
+    ])
+    expect(cursorAgentCandidates({ LOCALAPPDATA: "C:\\Users\\test" }, "linux")).toEqual([])
   })
 
   test("uses a stable valid UUID for Claude sessions", () => {
