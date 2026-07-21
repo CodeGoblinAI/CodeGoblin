@@ -97,6 +97,7 @@ import { errorLayer } from "./middleware/error"
 import { fenceLayer } from "./middleware/fence"
 import { schemaErrorLayer } from "./middleware/schema-error"
 import { CodeGoblinImageCommand, type ImageInput } from "@/codegoblin/image-command"
+import { getProviderUsage } from "@/codegoblin/provider-usage"
 import { CodeGoblinAudioCommand, type AudioVoiceSettings } from "@/codegoblin/audio-command"
 import { CodeGoblin3DCommand, type Model3DInputMode } from "@/codegoblin/model3d-command"
 import type { Model3DInputImage } from "@/codegoblin/model3d-providers"
@@ -496,6 +497,17 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         .readFile(modelStateFile, "utf8")
         .then((raw) => JSON.parse(raw) as Record<string, unknown>)
         .catch(() => ({}) as Record<string, unknown>)
+    yield* router.add("GET", "/codegoblin/provider-usage", (request) =>
+      Effect.gen(function* () {
+        if (!isHostOnlyHttpRequest(request.headers)) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: "Provider usage is only available on the local server." },
+            { status: 403 },
+          )
+        }
+        return HttpServerResponse.jsonUnsafe({ ok: true, usage: getProviderUsage() }, { status: 200 })
+      }),
+    )
     yield* router.add("GET", "/codegoblin/model-favorites", (request) =>
       Effect.gen(function* () {
         if (!isHostOnlyHttpRequest(request.headers)) {

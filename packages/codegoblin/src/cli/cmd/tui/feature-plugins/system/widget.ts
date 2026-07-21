@@ -19,8 +19,10 @@ const KV_LAYOUT = "widget.layout"
  * key and the widget renders it; absent, the header falls back to spend·ctx.
  */
 const KV_USAGE = "widget.usage"
+const KV_AUTO_COLLAPSE = "widget.autoCollapse"
+const KV_SHOW_USAGE = "widget.showUsage"
 
-type UsageSegment = { label: string; pct: number; reset?: string }
+type UsageSegment = { label: string; pct: number; reset?: string; provider?: string }
 
 /**
  * Desktop status widget: a tiny always-on-top native bubble (Rust,
@@ -46,6 +48,8 @@ type Row = {
   ctx?: string
   todoDone?: number
   todoTotal?: number
+  prompt?: string
+  model?: string
   /** internal: last activity for sorting; not sent */
   touched: number
 }
@@ -115,10 +119,33 @@ const tui: TuiPlugin = async (api) => {
     stdin.write(JSON.stringify(payload) + "\n")
   }
 
+  let liveUsage: UsageSegment[] = []
+
+  async function pollUsage() {
+    try {
+      const response = await api.server.fetch("/codegoblin/provider-usage")
+      if (!response.ok) return
+      const body = (await response.json()) as { usage?: UsageSegment[] }
+      if (Array.isArray(body.usage)) liveUsage = body.usage
+    } catch {
+      // server not reachable — keep whatever we had
+    }
+  }
+
   function usageSegments(): UsageSegment[] {
-    const value = api.kv.get<UsageSegment[] | undefined>(KV_USAGE, undefined)
-    if (!Array.isArray(value)) return []
-    return value.filter((u) => u && typeof u.label === "string" && typeof u.pct === "number").slice(0, 3)
+    if (!api.kv.get<boolean>(KV_SHOW_USAGE, true)) return []
+    // kv override wins (test hook / external publisher); else live capture
+    // from the OAuth plugins' response headers via /codegoblin/provider-usage.
+    const override = api.kv.get<UsageSegment[] | undefined>(KV_USAGE, undefined)
+    const source = Array.isArray(override) && override.length ? override : liveUsage
+    return source
+      .filter((u) => u && typeof u.label === "string" && typeof u.pct === "number")
+      .slice(0, 3)
+      .map((u) => ({
+        label: u.provider ? `${u.provider} ${u.label}` : u.label,
+        pct: u.pct,
+        reset: u.reset,
+      }))
   }
 
   function snapshot(chime?: "done" | "error", extra?: Record<string, unknown>) {
@@ -126,6 +153,7 @@ const tui: TuiPlugin = async (api) => {
       sessions: activeRows().map(({ touched: _touched, ...rest }) => rest),
       question: question ?? null,
       usage: usageSegments(),
+      autoCollapse: api.kv.get<boolean>(KV_AUTO_COLLAPSE, true),
       ...(chime ? { chime } : {}),
       ...extra,
     })
@@ -155,7 +183,20 @@ const tui: TuiPlugin = async (api) => {
     }
     const target = row(sessionID)
     if (spend > 0) target.spend = `$${spend.toFixed(2)}`
+    // Prompt preview: first line of the latest user message.
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message.role !== "user") continue
+      const text = api.state
+        .part(message.id)
+        .find((p) => p.type === "text" && !("synthetic" in p && p.synthetic))
+      if (text && text.type === "text") {
+        target.prompt = text.text.split("\n")[0]?.slice(0, 80)
+      }
+      break
+    }
     if (last && last.role === "assistant") {
+      target.model = last.modelID
       const used = last.tokens.input + last.tokens.cache.read + last.tokens.output
       if (used > 0) {
         const limit = api.state.provider
@@ -169,6 +210,7 @@ const tui: TuiPlugin = async (api) => {
   }
 
   let starting: Promise<boolean> | undefined
+  let usageTimer: ReturnType<typeof setInterval> | undefined
 
   function start(): Promise<boolean> {
     // Single-flight: concurrent calls (auto-start racing a fast /widget
@@ -252,6 +294,13 @@ const tui: TuiPlugin = async (api) => {
     child = spawned
     stopping = false
 
+    void pollUsage().then(() => snapshot())
+    usageTimer ??= setInterval(() => {
+      if (!child) return
+      void pollUsage().then(() => snapshot())
+    }, 5 * 60_000)
+    usageTimer.unref?.()
+
     // Initial payload: sound preference, optional custom chime, saved layout.
     const soundPath = [path.join(api.state.path.config, "widget.wav")].find((p) => existsSync(p))
     send({
@@ -266,6 +315,10 @@ const tui: TuiPlugin = async (api) => {
   }
 
   function stop() {
+    if (usageTimer) {
+      clearInterval(usageTimer)
+      usageTimer = undefined
+    }
     if (!child) return
     stopping = true
     child.stdin?.end()
@@ -291,6 +344,7 @@ const tui: TuiPlugin = async (api) => {
       }
       if (type === "retry") target.status = "retrying…"
       refreshTodo(sessionID)
+      refreshUsage(sessionID)
       snapshot()
       return
     }
@@ -305,6 +359,9 @@ const tui: TuiPlugin = async (api) => {
     refreshUsage(sessionID)
     refreshTodo(sessionID)
     snapshot(target.error ? "error" : "done")
+    // The turn that just finished likely refreshed the provider's rate-limit
+    // headers; pick them up for the usage strip.
+    void pollUsage().then(() => snapshot())
   })
 
   api.event.on("session.error", (event) => {
@@ -400,6 +457,63 @@ const tui: TuiPlugin = async (api) => {
 
   api.keymap.registerLayer({
     commands: [
+      {
+        name: "widget.settings",
+        title: "Status widget settings",
+        desc: "Sound, auto-collapse, usage strip, position",
+        slashName: "widget-settings",
+        category: "System",
+        namespace: "palette",
+        run() {
+          const entry = (label: string, value: string) => `${label}: ${value}`
+          const openSettings = () => {
+            api.ui.dialog.replace(() =>
+              api.ui.DialogSelect({
+                title: "widget settings",
+                options: [
+                  {
+                    title: entry("Sound", api.kv.get<boolean>(KV_SOUND, true) ? "on" : "off"),
+                    value: "sound",
+                    onSelect: () => {
+                      api.kv.set(KV_SOUND, !api.kv.get<boolean>(KV_SOUND, true))
+                      send({ sound: api.kv.get<boolean>(KV_SOUND, true) })
+                      openSettings()
+                    },
+                  },
+                  {
+                    title: entry("Auto-collapse panel", api.kv.get<boolean>(KV_AUTO_COLLAPSE, true) ? "on" : "off"),
+                    value: "autoCollapse",
+                    onSelect: () => {
+                      api.kv.set(KV_AUTO_COLLAPSE, !api.kv.get<boolean>(KV_AUTO_COLLAPSE, true))
+                      snapshot()
+                      openSettings()
+                    },
+                  },
+                  {
+                    title: entry("Usage strip", api.kv.get<boolean>(KV_SHOW_USAGE, true) ? "on" : "off"),
+                    value: "usage",
+                    onSelect: () => {
+                      api.kv.set(KV_SHOW_USAGE, !api.kv.get<boolean>(KV_SHOW_USAGE, true))
+                      snapshot()
+                      openSettings()
+                    },
+                  },
+                  {
+                    title: "Reset widget position",
+                    value: "reset",
+                    onSelect: () => {
+                      api.kv.set(KV_LAYOUT, null)
+                      api.ui.dialog.clear()
+                      api.ui.toast({ variant: "info", message: "Widget position reset — takes effect on next launch" })
+                    },
+                  },
+                ],
+              }),
+            )
+          }
+          openSettings()
+        },
+      },
       {
         name: "widget.toggle",
         title: "Toggle status widget",

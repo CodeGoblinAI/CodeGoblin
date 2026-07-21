@@ -1,6 +1,7 @@
 import type { Hooks, PluginInput } from "@codegoblin/plugin"
 import * as Log from "@codegoblin/core/util/log"
 import { OAUTH_DUMMY_KEY } from "../auth"
+import { captureAnthropicUsageHeaders } from "../codegoblin/provider-usage"
 
 const log = Log.create({ service: "plugin.anthropic" })
 
@@ -189,7 +190,9 @@ export async function AnthropicAuthPlugin(input: PluginInput): Promise<Hooks> {
             let body = init?.body
             if (typeof body === "string") body = withClaudeCodeSystem(body)
 
-            return fetch(requestInput, { ...init, headers, body })
+            const response = await fetch(requestInput, { ...init, headers, body })
+            captureAnthropicUsageHeaders(response.headers)
+            return response
           },
         }
       },

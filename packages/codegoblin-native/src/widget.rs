@@ -84,6 +84,8 @@ mod win {
         done_at_ms: Option<u64>,
         spend: Option<String>,
         ctx: Option<String>,
+        prompt: Option<String>,
+        model: Option<String>,
         todo_done: Option<u32>,
         todo_total: Option<u32>,
     }
@@ -114,10 +116,12 @@ mod win {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct LayoutIn {
-        #[serde(default, rename = "mode")]
-        _mode: String,
+        #[serde(default)]
+        mode: String,
         x: Option<i32>,
         y: Option<i32>,
+        edge: Option<String>,
+        along: Option<i32>,
     }
 
     #[derive(Deserialize)]
@@ -130,6 +134,7 @@ mod win {
         sound_path: Option<String>,
         layout: Option<LayoutIn>,
         chime: Option<String>,
+        auto_collapse: Option<bool>,
     }
 
     struct State {
@@ -137,6 +142,7 @@ mod win {
         question: Option<Question>,
         usage: Vec<Usage>,
         sound_enabled: bool,
+        auto_collapse: bool,
         sound_path: Option<String>,
     }
 
@@ -147,6 +153,7 @@ mod win {
                 question: None,
                 usage: Vec::new(),
                 sound_enabled: true,
+                auto_collapse: true,
                 sound_path: None,
             }
         }
@@ -157,7 +164,32 @@ mod win {
     #[derive(Clone, Copy, PartialEq)]
     enum Mode {
         Island,
+        DockedTab,
         Panel,
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Edge {
+        Top,
+        Left,
+        Right,
+    }
+
+    impl Edge {
+        fn name(self) -> &'static str {
+            match self {
+                Edge::Top => "top",
+                Edge::Left => "left",
+                Edge::Right => "right",
+            }
+        }
+        fn parse(s: &str) -> Edge {
+            match s {
+                "left" => Edge::Left,
+                "right" => Edge::Right,
+                _ => Edge::Top,
+            }
+        }
     }
 
     struct Anim {
@@ -165,8 +197,8 @@ mod win {
         to: RECT,
         start: u64,
         dur: u32,
-        /// When true, switch to the island presentation once the slide lands.
-        collapse: bool,
+        /// Presentation to adopt once the slide lands (None = keep current).
+        finish_mode: Option<Mode>,
     }
 
     struct Hit {
@@ -189,6 +221,11 @@ mod win {
         /// Island anchor (top-left, screen coords) — where the pill lives and
         /// what the panel expands from.
         island: (i32, i32),
+        /// When docked to a monitor edge, the pill renders as a thin tab and
+        /// the panel flies out on hover, PC-Manager style.
+        dock: Option<Edge>,
+        /// Coordinate along the docked edge (x for top, y for sides).
+        along: i32,
         hovering: bool,
         /// Manual drag state (own drag loop so click vs drag stays clean).
         drag_capture: bool,
@@ -210,6 +247,8 @@ mod win {
     static UI: Mutex<Ui> = Mutex::new(Ui {
         mode: Mode::Island,
         island: (0, 0),
+        dock: None,
+        along: 0,
         hovering: false,
         drag_capture: false,
         drag_moved: false,
@@ -234,14 +273,18 @@ mod win {
     // 96-dpi layout constants (multiplied by the dpi scale at runtime).
     const ISLAND_W: i32 = 210;
     const ISLAND_H: i32 = 36;
-    const PANEL_W: i32 = 360;
+    const PANEL_W: i32 = 420;
     const HEADER_H: i32 = 30;
-    const ROW_H: i32 = 40;
+    const ROW_H: i32 = 56;
     const FOOTER_H: i32 = 30;
     const QUESTION_TEXT_H: i32 = 34;
     const QUESTION_BTN_H: i32 = 24;
     const PAD: i32 = 10;
     const GUTTER: i32 = 46;
+    const TAB_LEN: i32 = 56;
+    const TAB_THICK: i32 = 12;
+    const SNAP: i32 = 16;
+    const TAB_BG: COLORREF = rgb(0x3a, 0x3d, 0x44);
 
     const BG: COLORREF = rgb(0x16, 0x18, 0x1c);
     const BG_RAISED: COLORREF = rgb(0x1c, 0x1f, 0x24);
@@ -586,10 +629,37 @@ mod win {
         (island.0, island.1, px(c, ISLAND_W), px(c, ISLAND_H))
     }
 
+    fn tab_rect(c: &Ctx, mon: &RECT, edge: Edge, along: i32) -> (i32, i32, i32, i32) {
+        let len = px(c, TAB_LEN);
+        let thick = px(c, TAB_THICK);
+        match edge {
+            Edge::Top => (along.clamp(mon.left, mon.right - len), mon.top, len, thick),
+            Edge::Left => (mon.left, along.clamp(mon.top, mon.bottom - len), thick, len),
+            Edge::Right => (mon.right - thick, along.clamp(mon.top, mon.bottom - len), thick, len),
+        }
+    }
+
+    fn docked_panel_rect(c: &Ctx, mon: &RECT, edge: Edge, along: i32, h: i32) -> (i32, i32, i32, i32) {
+        let w = px(c, PANEL_W);
+        match edge {
+            Edge::Top => ((along - w / 2 + px(c, TAB_LEN) / 2).clamp(mon.left + 8, (mon.right - w - 8).max(mon.left + 8)), mon.top, w, h),
+            Edge::Left => (mon.left, along.clamp(mon.top + 8, (mon.bottom - h - 8).max(mon.top + 8)), w, h),
+            Edge::Right => (mon.right - w, along.clamp(mon.top + 8, (mon.bottom - h - 8).max(mon.top + 8)), w, h),
+        }
+    }
+
     fn panel_rect(c: &Ctx, hwnd: HWND, island: (i32, i32)) -> (i32, i32, i32, i32) {
         let mon = monitor_rect(hwnd);
-        let w = px(c, PANEL_W);
         let h = desired_panel_h(c);
+        {
+            let ui = UI.lock().unwrap();
+            if let Some(edge) = ui.dock {
+                let along = ui.along;
+                drop(ui);
+                return docked_panel_rect(c, &mon, edge, along, h);
+            }
+        }
+        let w = px(c, PANEL_W);
         let island_w = px(c, ISLAND_W);
         let island_h = px(c, ISLAND_H);
         let cx = island.0 + island_w / 2;
@@ -602,7 +672,7 @@ mod win {
 
     // ── animation ────────────────────────────────────────────────────────────
 
-    fn start_anim(hwnd: HWND, to: (i32, i32, i32, i32), collapse: bool) {
+    fn start_anim(hwnd: HWND, to: (i32, i32, i32, i32), finish_mode: Option<Mode>) {
         let from = window_rect(hwnd);
         {
             let mut ui = UI.lock().unwrap();
@@ -611,7 +681,7 @@ mod win {
                 to: RECT { left: to.0, top: to.1, right: to.0 + to.2, bottom: to.1 + to.3 },
                 start: now_ms(),
                 dur: ANIM_MS,
-                collapse,
+                finish_mode,
             });
         }
         unsafe {
@@ -636,10 +706,10 @@ mod win {
             );
             let finished = p >= 1.0;
             if finished {
-                let collapse = anim.collapse;
+                let finish_mode = anim.finish_mode;
                 ui.anim = None;
-                if collapse {
-                    ui.mode = Mode::Island;
+                if let Some(mode) = finish_mode {
+                    ui.mode = mode;
                 }
             }
             (rect, finished)
@@ -658,7 +728,7 @@ mod win {
 
     fn expand(hwnd: HWND) {
         let c = ctx();
-        let target = {
+        let island = {
             let mut ui = UI.lock().unwrap();
             if ui.mode == Mode::Panel && ui.anim.is_none() {
                 return;
@@ -666,30 +736,37 @@ mod win {
             ui.mode = Mode::Panel;
             ui.anim = None;
             ui.leave_ticks = 0;
-            panel_rect(&c, hwnd, ui.island)
+            ui.island
         };
-        start_anim(hwnd, target, false);
+        let target = panel_rect(&c, hwnd, island);
+        start_anim(hwnd, target, None);
     }
 
     fn collapse(hwnd: HWND) {
         let c = ctx();
-        let target = {
+        let (target, finish) = {
             let ui = UI.lock().unwrap();
             if ui.mode != Mode::Panel || ui.drag_capture {
                 return;
             }
-            if ui.anim.as_ref().map(|a| a.collapse).unwrap_or(false) {
-                return;
+            if ui.anim.as_ref().and_then(|a| a.finish_mode).is_some() {
+                return; // already collapsing
             }
-            island_rect(&c, ui.island)
+            match ui.dock {
+                Some(edge) => {
+                    let mon = monitor_rect(hwnd);
+                    (tab_rect(&c, &mon, edge, ui.along), Mode::DockedTab)
+                }
+                None => (island_rect(&c, ui.island), Mode::Island),
+            }
         };
-        start_anim(hwnd, target, true);
+        start_anim(hwnd, target, Some(finish));
     }
 
     fn toggle(hwnd: HWND) {
         let mode = UI.lock().unwrap().mode;
         match mode {
-            Mode::Island => expand(hwnd),
+            Mode::Island | Mode::DockedTab => expand(hwnd),
             Mode::Panel => collapse(hwnd),
         }
     }
@@ -709,24 +786,60 @@ mod win {
 
     fn emit_layout() {
         let ui = UI.lock().unwrap();
-        emit_stdout(&format!(
-            "{{\"event\":\"layout\",\"mode\":\"floating\",\"x\":{},\"y\":{}}}",
-            ui.island.0, ui.island.1
-        ));
+        match ui.dock {
+            Some(edge) => emit_stdout(&format!(
+                "{{\"event\":\"layout\",\"mode\":\"docked\",\"edge\":\"{}\",\"along\":{}}}",
+                edge.name(),
+                ui.along
+            )),
+            None => emit_stdout(&format!(
+                "{{\"event\":\"layout\",\"mode\":\"floating\",\"x\":{},\"y\":{}}}",
+                ui.island.0, ui.island.1
+            )),
+        }
     }
 
-    /// After a manual drag ends: derive the island anchor from wherever the
-    /// window landed, clamp on-screen, persist.
+    /// After a manual drag ends: dock when dropped near a monitor edge
+    /// (PC-Manager tab), otherwise derive the island anchor from wherever the
+    /// window landed. Clamp on-screen, persist either way.
     fn settle_after_drag(hwnd: HWND) {
         let c = ctx();
         let mon = monitor_rect(hwnd);
         let rc = window_rect(hwnd);
         let island_w = px(&c, ISLAND_W);
         let island_h = px(&c, ISLAND_H);
+        let snap = px(&c, SNAP);
+
+        let edge = if rc.top - mon.top < snap {
+            Some(Edge::Top)
+        } else if mon.right - rc.right < snap {
+            Some(Edge::Right)
+        } else if rc.left - mon.left < snap {
+            Some(Edge::Left)
+        } else {
+            None
+        };
+
+        if let Some(edge) = edge {
+            let target = {
+                let mut ui = UI.lock().unwrap();
+                ui.dock = Some(edge);
+                ui.along = match edge {
+                    Edge::Top => rc.left,
+                    Edge::Left | Edge::Right => rc.top,
+                };
+                tab_rect(&c, &mon, edge, ui.along)
+            };
+            start_anim(hwnd, target, Some(Mode::DockedTab));
+            emit_layout();
+            return;
+        }
+
         {
             let mut ui = UI.lock().unwrap();
+            ui.dock = None;
             let (x, y) = match ui.mode {
-                Mode::Island => (rc.left, rc.top),
+                Mode::Island | Mode::DockedTab => (rc.left, rc.top),
                 Mode::Panel => {
                     let cx = (rc.left + rc.right) / 2;
                     let mid = (mon.top + mon.bottom) / 2;
@@ -738,6 +851,12 @@ mod win {
                 x.clamp(mon.left, (mon.right - island_w).max(mon.left)),
                 y.clamp(mon.top, (mon.bottom - island_h).max(mon.top)),
             );
+            // Dragging a tab away from the edge turns it back into an island.
+            if ui.mode == Mode::DockedTab {
+                ui.mode = Mode::Island;
+                drop(ui);
+                set_rect(hwnd, rc.left, rc.top, island_w, island_h);
+            }
         }
         emit_layout();
     }
@@ -781,6 +900,21 @@ mod win {
 
     fn apply_initial_layout(hwnd: HWND, layout: &LayoutIn) {
         let c = ctx();
+        if layout.mode == "docked" {
+            let edge = Edge::parse(layout.edge.as_deref().unwrap_or("top"));
+            let along = layout.along.unwrap_or(0);
+            let mon = monitor_rect(hwnd);
+            {
+                let mut ui = UI.lock().unwrap();
+                ui.dock = Some(edge);
+                ui.along = along;
+                ui.mode = Mode::DockedTab;
+            }
+            let (x, y, w, h) = tab_rect(&c, &mon, edge, along);
+            set_rect(hwnd, x, y, w, h);
+            unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) };
+            return;
+        }
         let (Some(x), Some(y)) = (layout.x, layout.y) else { return };
         let mon = monitor_rect(hwnd);
         let w = px(&c, ISLAND_W);
@@ -832,6 +966,9 @@ mod win {
                     }
                     if snapshot.sound_path.is_some() {
                         state.sound_path = snapshot.sound_path;
+                    }
+                    if let Some(v) = snapshot.auto_collapse {
+                        state.auto_collapse = v;
                     }
                 }
                 if let Some(layout) = snapshot.layout {
@@ -902,8 +1039,12 @@ mod win {
                         ui.flash -= 1;
                         repaint = true;
                     }
-                    // Auto-collapse the panel a beat after the mouse wanders off.
-                    if ui.mode == Mode::Panel && !ui.hovering && !ui.drag_capture && ui.anim.is_none() {
+                    // Auto-collapse the panel a beat after the mouse wanders off
+                    // (docked panels always retract; floating ones only when the
+                    // auto-collapse preference is on).
+                    let auto_ok = ui.dock.is_some()
+                        || STATE.lock().unwrap().as_ref().map(|s| s.auto_collapse).unwrap_or(true);
+                    if auto_ok && ui.mode == Mode::Panel && !ui.hovering && !ui.drag_capture && ui.anim.is_none() {
                         ui.leave_ticks = ui.leave_ticks.saturating_add(1);
                         if ui.leave_ticks >= 3 {
                             ui.leave_ticks = 0;
@@ -985,6 +1126,11 @@ mod win {
                     let rc = window_rect(hwnd);
                     set_rect(hwnd, wx, wy, rc.right - rc.left, rc.bottom - rc.top);
                 } else {
+                    // Hovering a docked tab flies the panel out, PC-Manager style.
+                    let is_tab = { UI.lock().unwrap().mode == Mode::DockedTab };
+                    if is_tab {
+                        expand(hwnd);
+                    }
                     track_leave(hwnd);
                 }
                 0
@@ -1236,7 +1382,28 @@ mod win {
         let body_font = make_font(&c, 11, 400);
         let small_font = make_font(&c, 10, 400);
 
-        if mode == Mode::Island {
+        if mode == Mode::DockedTab {
+            // ── docked tab (PC-Manager) ──
+            fill(mem, &rc, TAB_BG);
+            let strip_color = if primary.error {
+                RED
+            } else if primary.working {
+                if pulse { GREEN } else { GREEN_DIM }
+            } else if primary.done {
+                GOLD
+            } else {
+                EDGE_C
+            };
+            let dock_edge = { UI.lock().unwrap().dock.unwrap_or(Edge::Top) };
+            let t = px(&c, 3);
+            let strip = match dock_edge {
+                Edge::Top => RECT { left: rc.left, top: rc.bottom - t, right: rc.right, bottom: rc.bottom },
+                Edge::Left => RECT { left: rc.right - t, top: rc.top, right: rc.right, bottom: rc.bottom },
+                Edge::Right => RECT { left: rc.left, top: rc.top, right: rc.left + t, bottom: rc.bottom },
+            };
+            fill(mem, &strip, strip_color);
+            hits.push(Hit { rect: rc, action: Action::Toggle });
+        } else if mode == Mode::Island {
             // ── compact island ──
             draw_goblin(mem, &c, pad, (h - px(&c, 19)) / 2, 26, 19, primary.working, primary.done, frame);
 
@@ -1391,30 +1558,48 @@ mod win {
                 }
                 let mut title_rc = RECT {
                     left: gutter,
-                    top: y + px(&c, 3),
+                    top: y + px(&c, 4),
                     right: w - pad - right_w - px(&c, 4),
-                    bottom: y + px(&c, 21),
+                    bottom: y + px(&c, 22),
                 };
                 let title = if row.title.is_empty() { "CodeGoblin" } else { &row.title };
                 draw_text(mem, title_font, TITLE_FG, &mut title_rc, title, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-                // Sub-line: status left, todo progress right.
+                // Line 2: the prompt that started this run (vibeisland's "You: …").
+                if let Some(prompt) = row.prompt.as_ref().filter(|s| !s.is_empty()) {
+                    let mut prompt_rc = RECT {
+                        left: gutter,
+                        top: y + px(&c, 22),
+                        right: w - pad,
+                        bottom: y + px(&c, 36),
+                    };
+                    let line = format!("You: {}", prompt);
+                    draw_text(mem, small_font, FAINT_FG, &mut prompt_rc, &line, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+                }
+
+                // Line 3: status left; todo count and model right.
                 let mut meta = String::new();
                 if let (Some(done), Some(total)) = (row.todo_done, row.todo_total) {
                     if total > 0 {
                         meta = format!("{}/{}", done.min(total), total);
                     }
                 }
+                if let Some(model) = row.model.as_ref().filter(|s| !s.is_empty()) {
+                    if !meta.is_empty() {
+                        meta.push_str(" · ");
+                    }
+                    meta.push_str(model);
+                }
                 let mut meta_w = 0;
                 if !meta.is_empty() {
-                    meta_w = px(&c, 40);
+                    meta_w = px(&c, 130);
                     let mut meta_rc = RECT {
                         left: w - pad - meta_w,
-                        top: y + px(&c, 21),
+                        top: y + px(&c, 37),
                         right: w - pad,
                         bottom: y + row_h - px(&c, 3),
                     };
-                    draw_text(mem, small_font, FAINT_FG, &mut meta_rc, &meta, DT_RIGHT | DT_SINGLELINE);
+                    draw_text(mem, small_font, FAINT_FG, &mut meta_rc, &meta, DT_RIGHT | DT_SINGLELINE | DT_END_ELLIPSIS);
                 }
                 let status = if !row.status.is_empty() {
                     row.status.as_str()
@@ -1434,7 +1619,7 @@ mod win {
                 };
                 let mut status_rc = RECT {
                     left: gutter,
-                    top: y + px(&c, 21),
+                    top: y + px(&c, 37),
                     right: w - pad - meta_w - px(&c, 4),
                     bottom: y + row_h - px(&c, 3),
                 };
