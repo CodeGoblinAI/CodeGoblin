@@ -64,6 +64,8 @@ let discoveredProviders: Promise<Info[]> | undefined
 
 let sessionWrite = Promise.resolve()
 let usageWrite = Promise.resolve()
+let usageRefresh: Promise<CliAgentQuota[]> | undefined
+let usageRefreshAt = 0
 
 export function cliAgentProviderInfos(input?: Partial<Record<CliAgentProviderID, DiscoveredModel[]>>): Info[] {
   return [
@@ -660,6 +662,20 @@ export function parseClaudeQuota(value: unknown): CliAgentQuota | undefined {
   return { providerID: "claude-code", windows, checkedAt: new Date().toISOString() }
 }
 
+export async function refreshCliAgentUsage() {
+  if (usageRefresh) return usageRefresh
+  if (Date.now() - usageRefreshAt < 60_000) return readCliAgentUsage()
+  usageRefreshAt = Date.now()
+  usageRefresh = (async () => {
+    const executable = cliAgentExecutable("claude-code")
+    if (executable) await refreshClaudeQuota(executable).catch(() => {})
+    return readCliAgentUsage()
+  })().finally(() => {
+    usageRefresh = undefined
+  })
+  return usageRefresh
+}
+
 async function refreshClaudeQuota(executable: string) {
   const proc = Bun.spawn(
     [...cliAgentBaseCommand("claude-code", executable), "--print", "--output-format", "json", "/usage"],
@@ -669,7 +685,9 @@ async function refreshClaudeQuota(executable: string) {
       stderr: "ignore",
     },
   )
+  const timeout = setTimeout(() => proc.kill(), 10_000)
   const [exitCode, value] = await Promise.all([proc.exited, new Response(proc.stdout).json().catch(() => undefined)])
+  clearTimeout(timeout)
   if (exitCode !== 0) return
   const quota = parseClaudeQuota(value)
   if (!quota) return

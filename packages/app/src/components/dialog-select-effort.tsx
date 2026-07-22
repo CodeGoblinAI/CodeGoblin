@@ -4,18 +4,25 @@ import { List } from "@codegoblin/ui/list"
 import { useDialog } from "@codegoblin/ui/context/dialog"
 import { useLocal } from "@/context/local"
 import { useLanguage } from "@/context/language"
+import { reasoningEffortOptions } from "@codegoblin/core/usage"
 
-export const DialogSelectEffort: Component<{ title?: string }> = (props) => {
+export const DialogSelectEffort: Component<{ kind?: "effort" | "variant" }> = (props) => {
   const local = useLocal()
   const dialog = useDialog()
   const language = useLanguage()
-  const items = createMemo(() => ["default", ...local.model.variant.list()])
+  const options = createMemo(() =>
+    props.kind === "variant" ? local.model.variant.list() : reasoningEffortOptions(local.model.variant.list()),
+  )
+  const items = createMemo(() => ["default", ...options()])
 
   return (
-    <Dialog title={props.title ?? "Select effort"} description="Choose a provider-supported reasoning level.">
+    <Dialog
+      title={props.kind === "variant" ? "Select variant" : "Select effort"}
+      description={props.kind === "variant" ? "Choose a model-specific variant." : "Choose a provider-supported reasoning level."}
+    >
       <Show
-        when={local.model.variant.list().length > 0}
-        fallback={<div class="p-4 text-13-regular text-text-weak">The current model does not expose effort controls.</div>}
+        when={options().length > 0}
+        fallback={<div class="p-4 text-13-regular text-text-weak">The current model does not expose supported {props.kind === "variant" ? "variants" : "effort controls"}.</div>}
       >
         <List
           search={{ placeholder: language.t("common.search.placeholder"), autofocus: true }}

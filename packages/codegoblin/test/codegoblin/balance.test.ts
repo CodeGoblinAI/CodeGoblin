@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import os from "os"
 import path from "path"
+import fs from "fs/promises"
 import { CodeGoblinBalance } from "@/codegoblin/balance"
 
 describe("CodeGoblin balance display", () => {
@@ -137,6 +138,43 @@ describe("CodeGoblin balance display", () => {
     })
 
     expect(result.balances).toMatchObject([{ provider: "deepseek", amount: 2.12, live: false }])
+    expect(result.errors.some((item) => item.provider === "deepseek")).toBe(true)
+  })
+
+  test("can disable request-selected local env discovery", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "codegoblin-balance-boundary-"))
+    await Bun.write(path.join(root, ".env"), "CODEGOBLIN_TOKEN_HOARD_USD=9876")
+    const result = await CodeGoblinBalance.resolve({
+      cwd: root,
+      env: {},
+      includeLocalEnv: false,
+      fetch: async () => {
+        throw new Error("network should not be reachable without an API key")
+      },
+    })
+    await fs.rm(root, { recursive: true, force: true })
+
+    expect(result.balances.some((balance) => balance.provider === "hoard" && balance.amount === 9876)).toBe(false)
+  })
+
+  test("bounds live provider balance requests", async () => {
+    const started = Date.now()
+    const result = await CodeGoblinBalance.resolve({
+      cwd: os.tmpdir(),
+      env: { DEEPSEEK_API_KEY: "test-key" },
+      includeLocalEnv: false,
+      timeoutMs: 10,
+      fetch: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"balance_infos":'))
+            },
+          }),
+        ),
+    })
+
+    expect(Date.now() - started).toBeLessThan(1_000)
     expect(result.errors.some((item) => item.provider === "deepseek")).toBe(true)
   })
 })

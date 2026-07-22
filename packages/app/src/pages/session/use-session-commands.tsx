@@ -291,15 +291,23 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     })
   }
 
-  const chooseEffort = (title = "Select effort") => {
+  const chooseEffort = (kind: "effort" | "variant" = "effort") => {
     void import("@/components/dialog-select-effort").then((x) => {
-      dialog.show(() => <x.DialogSelectEffort title={title} />)
+      dialog.show(() => <x.DialogSelectEffort kind={kind} />)
     })
   }
 
   const chooseMode = () => {
     void import("@/components/dialog-select-mode").then((x) => {
       dialog.show(() => <x.DialogSelectMode />)
+    })
+  }
+
+  const chooseSession = () => {
+    void import("@/components/dialog-select-session").then((x) => {
+      dialog.show(() => (
+        <x.DialogSelectSession onSelect={(sessionID) => navigate(`/${params.dir}/session/${sessionID}`)} />
+      ))
     })
   }
 
@@ -419,7 +427,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     sharedSlash("resume", sessionCommand({
       id: "session.resume",
       title: "Resume session",
-      onSelect: () => navigate(`/${params.dir}/session`),
+      onSelect: chooseSession,
     })),
     sharedSlash("clear", sessionCommand({
       id: "session.new",
@@ -564,13 +572,13 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: "Switch model variant",
       description: "Choose a model-specific variant",
       keybind: "shift+mod+d",
-      onSelect: () => chooseEffort("Select variant"),
+      onSelect: () => chooseEffort("variant"),
     })),
     sharedSlash("effort", modelCommand({
       id: "model.effort",
       title: "Select reasoning effort",
       description: "Choose the model's reasoning effort",
-      onSelect: () => chooseEffort(),
+      onSelect: () => chooseEffort("effort"),
     })),
   ]
 

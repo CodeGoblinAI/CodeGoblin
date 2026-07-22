@@ -1,14 +1,17 @@
-import { For, Show, createResource, type Component } from "solid-js"
+import { For, Show, createResource, createSignal, type Component } from "solid-js"
 import { Dialog } from "@codegoblin/ui/dialog"
 import { useSDK } from "@/context/sdk"
 import type { UsageSnapshot, UsageTotals } from "@codegoblin/core/usage"
 
-export const DialogUsage: Component = () => {
+export const DialogUsage: Component<{ sessionID?: string }> = (props) => {
   const sdk = useSDK()
-  const [snapshot, { refetch }] = createResource<UsageSnapshot>(async () => {
-    const response = await fetch(`${sdk.url}/codegoblin/usage`, {
-      headers: { "x-opencode-directory": encodeURIComponent(sdk.directory) },
+  const [refresh, setRefresh] = createSignal(1)
+  const [snapshot] = createResource(refresh, async (version) => {
+    const query = new URLSearchParams({
+      ...(props.sessionID ? { sessionID: props.sessionID } : {}),
+      ...(version > 1 ? { refresh: "1" } : {}),
     })
+    const response = await sdk.fetch(`${sdk.url}/codegoblin/usage?${query}`)
     if (!response.ok) throw new Error("Usage is unavailable")
     return (await response.json()) as UsageSnapshot
   })
@@ -36,7 +39,7 @@ export const DialogUsage: Component = () => {
               <Show when={value().errors.length > 0}>
                 <For each={value().errors}>{(item) => <div class="text-text-weak">{item.message}</div>}</For>
               </Show>
-              <button class="self-start text-text-link hover:underline" type="button" onClick={() => void refetch()}>
+              <button class="self-start text-text-link hover:underline" type="button" onClick={() => setRefresh((value) => value + 1)}>
                 Refresh
               </button>
             </div>

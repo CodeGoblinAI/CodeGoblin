@@ -3,11 +3,12 @@ import { useLocal } from "@tui/context/local"
 import { DialogSelect } from "@tui/ui/dialog-select"
 import { DialogAlert } from "@tui/ui/dialog-alert"
 import { useDialog } from "@tui/ui/dialog"
+import { reasoningEffortOptions } from "@codegoblin/core/usage"
 
 export function DialogEffort() {
   const local = useLocal()
   const dialog = useDialog()
-  const options = createMemo(() => local.model.variant.list())
+  const options = createMemo(() => reasoningEffortOptions(local.model.variant.list()))
 
   return (
     <Show

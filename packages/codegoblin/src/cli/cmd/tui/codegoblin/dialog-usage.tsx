@@ -16,15 +16,16 @@ export function DialogUsage() {
   const [loading, setLoading] = createSignal(true)
   const [error, setError] = createSignal<string>()
 
-  const refresh = async () => {
+  const refresh = async (active = false) => {
     setLoading(true)
     setError(undefined)
     const sessionID = route.data.type === "session" ? route.data.sessionID : undefined
-    const query = new URLSearchParams({ ...(sessionID ? { sessionID } : {}) })
+    const query = new URLSearchParams({
+      ...(sessionID ? { sessionID } : {}),
+      ...(active ? { refresh: "1" } : {}),
+    })
     const response = await sdk
-      .fetch(`${sdk.url}/codegoblin/usage?${query}`, {
-        headers: { "x-opencode-directory": encodeURIComponent(sdk.directory ?? "") },
-      })
+      .fetch(`${sdk.url}/codegoblin/usage?${query}`)
       .catch(() => undefined)
     if (!response?.ok) {
       setError("Usage is unavailable right now.")
@@ -44,7 +45,7 @@ export function DialogUsage() {
         key: "r",
         desc: "Refresh usage",
         group: "Dialog",
-        cmd: () => void refresh(),
+        cmd: () => void refresh(true),
       },
     ],
   }))

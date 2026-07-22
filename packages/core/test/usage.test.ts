@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { normalizeUsageQuotas, summarizeUsage } from "@codegoblin/core/usage"
+import { normalizeUsageQuotas, reasoningEffortOptions, summarizeUsage } from "@codegoblin/core/usage"
 
 describe("usage summary", () => {
   test("sums token classes and zero-cost subscription sessions without fabrication", () => {
@@ -52,4 +52,17 @@ test("usage summary > normalizes quota windows and preserves unavailable provide
       checkedAt: "2026-07-20T00:00:00.000Z",
     },
   ])
+})
+
+test("usage summary > separates reasoning effort from generic model variants", () => {
+  expect(reasoningEffortOptions(["fast", "none", "minimal", "low", "medium", "high", "xhigh", "max", "thinking"])).toEqual([
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ])
+  expect(reasoningEffortOptions(["fast", "thinking"])).toEqual([])
 })

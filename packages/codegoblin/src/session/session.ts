@@ -19,6 +19,8 @@ import { like } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
+import { sum } from "drizzle-orm"
+import { count } from "drizzle-orm"
 import { SyncEvent } from "../sync"
 import type { SQL } from "drizzle-orm"
 import { PartTable, SessionTable } from "./session.sql"
@@ -1097,6 +1099,45 @@ export function* listGlobal(input?: {
     const project = projects.get(row.project_id) ?? null
     yield { ...fromRow(row), project }
   }
+}
+
+export function usage(sessionID?: string) {
+  const totals = (id?: string) => {
+    if (id && !id.startsWith("ses")) return
+    const [row] = Database.use((db) => {
+      const query = db
+        .select({
+          count: count(SessionTable.id),
+          spend: sum(SessionTable.cost),
+          input: sum(SessionTable.tokens_input),
+          output: sum(SessionTable.tokens_output),
+          reasoning: sum(SessionTable.tokens_reasoning),
+          cacheRead: sum(SessionTable.tokens_cache_read),
+          cacheWrite: sum(SessionTable.tokens_cache_write),
+        })
+        .from(SessionTable)
+      return (id ? query.where(eq(SessionTable.id, SessionID.make(id))) : query).all()
+    })
+    if (id && Number(row?.count ?? 0) === 0) return
+    const input = Number(row?.input ?? 0)
+    const output = Number(row?.output ?? 0)
+    const reasoning = Number(row?.reasoning ?? 0)
+    const cacheRead = Number(row?.cacheRead ?? 0)
+    const cacheWrite = Number(row?.cacheWrite ?? 0)
+    return {
+      tokens: {
+        total: input + output + reasoning + cacheRead + cacheWrite,
+        input,
+        output,
+        reasoning,
+        cacheRead,
+        cacheWrite,
+      },
+      spend: Number(row?.spend ?? 0),
+    }
+  }
+  const session = sessionID ? totals(sessionID) : undefined
+  return { aggregate: totals()!, ...(session && { session }) }
 }
 
 export * as Session from "./session"

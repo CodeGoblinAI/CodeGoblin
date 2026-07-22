@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { readCliAgentUsage, type CliAgentQuota } from "@/provider/cli-agent"
+import { readCliAgentUsage, refreshCliAgentUsage, type CliAgentQuota } from "@/provider/cli-agent"
 
 export type CodeGoblinBalanceProvider = "hoard" | "deepseek" | "moonshot"
 
@@ -41,16 +41,33 @@ const API_KEY_ENV = {
 } satisfies Record<Exclude<CodeGoblinBalanceProvider, "hoard">, readonly string[]>
 
 export const CodeGoblinBalance = {
-  async resolve(input: { cwd: string; env?: Env; fetch?: FetchLike; now?: Date }) {
-    const env = { ...process.env, ...(await loadLocalEnv(input.cwd)), ...(input.env ?? {}) }
+  async resolve(input: {
+    cwd: string
+    env?: Env
+    fetch?: FetchLike
+    now?: Date
+    includeLocalEnv?: boolean
+    refreshQuotas?: boolean
+    timeoutMs?: number
+  }) {
+    const env = {
+      ...process.env,
+      ...(input.includeLocalEnv === false ? {} : await loadLocalEnv(input.cwd)),
+      ...(input.env ?? {}),
+    }
     const configured = configuredBalances(env)
-    const live = await liveBalances({ env, fetch: input.fetch ?? fetch, now: input.now ?? new Date() })
+    const live = await liveBalances({
+      env,
+      fetch: input.fetch ?? fetch,
+      now: input.now ?? new Date(),
+      timeoutMs: input.timeoutMs ?? 5_000,
+    })
     const byProvider = new Map<CodeGoblinBalanceProvider, CodeGoblinBalanceEntry>()
     for (const entry of configured) byProvider.set(entry.provider, entry)
     for (const entry of live.balances) byProvider.set(entry.provider, entry)
     return {
       balances: [...byProvider.values()],
-      quotas: await readCliAgentUsage(),
+      quotas: input.refreshQuotas ? await refreshCliAgentUsage() : await readCliAgentUsage(),
       errors: live.errors,
     }
   },
@@ -79,7 +96,7 @@ function configuredBalances(env: Env): CodeGoblinBalanceEntry[] {
   })
 }
 
-async function liveBalances(input: { env: Env; fetch: FetchLike; now: Date }) {
+async function liveBalances(input: { env: Env; fetch: FetchLike; now: Date; timeoutMs: number }) {
   const results = await Promise.all(PROVIDERS.map((provider) => liveBalance(provider, input)))
   return {
     balances: results.flatMap((result) => (result.ok ? [result.balance] : [])),
@@ -89,27 +106,22 @@ async function liveBalances(input: { env: Env; fetch: FetchLike; now: Date }) {
 
 async function liveBalance(
   provider: Exclude<CodeGoblinBalanceProvider, "hoard">,
-  input: { env: Env; fetch: FetchLike; now: Date },
+  input: { env: Env; fetch: FetchLike; now: Date; timeoutMs: number },
 ) {
   const key = firstValue(input.env, API_KEY_ENV[provider])
   if (!key) return { ok: false as const, error: { provider, message: "No API key configured." } }
 
   const endpoint =
     provider === "deepseek" ? "https://api.deepseek.com/user/balance" : "https://api.moonshot.cn/v1/users/me/balance"
-  const response = await input
-    .fetch(endpoint, {
-      headers: {
-        authorization: `Bearer ${key.value}`,
-      },
-    })
-    .catch((error) => ({ error }))
+  const result = await fetchBalance({ ...input, endpoint, key: key.value })
 
-  if ("error" in response) {
+  if ("error" in result) {
     return {
       ok: false as const,
       error: { provider, message: "Balance API is unavailable; using any manual fallback." },
     }
   }
+  const response = result.response
   if (!response.ok) {
     return {
       ok: false as const,
@@ -117,8 +129,7 @@ async function liveBalance(
     }
   }
 
-  const json = await response.json().catch(() => undefined)
-  const parsed = provider === "deepseek" ? parseDeepSeekBalance(json) : parseMoonshotBalance(json)
+  const parsed = provider === "deepseek" ? parseDeepSeekBalance(result.json) : parseMoonshotBalance(result.json)
   if (!parsed) {
     return {
       ok: false as const,
@@ -137,6 +148,59 @@ async function liveBalance(
       checkedAt: input.now.toISOString(),
     } satisfies CodeGoblinBalanceEntry,
   }
+}
+
+async function fetchBalance(input: {
+  fetch: FetchLike
+  endpoint: string
+  key: string
+  timeoutMs: number
+}) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), input.timeoutMs)
+  const result = await Promise.race([
+    input
+      .fetch(input.endpoint, {
+        signal: controller.signal,
+        headers: { authorization: `Bearer ${input.key}` },
+      })
+      .then(async (response) => ({ response, ...(response.ok && { json: await readLimitedJson(response) }) }))
+      .catch((error) => ({ error })),
+    new Promise<{ error: Error }>((resolve) =>
+      controller.signal.addEventListener("abort", () => resolve({ error: new Error("Balance request timed out") }), {
+        once: true,
+      }),
+    ),
+  ])
+  clearTimeout(timeout)
+  return result
+}
+
+async function readLimitedJson(response: Response) {
+  const limit = 1_048_576
+  const size = Number(response.headers.get("content-length"))
+  if (Number.isFinite(size) && size > limit) return
+  if (!response.body) return
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const chunk = await reader.read()
+    if (chunk.done) break
+    total += chunk.value.byteLength
+    if (total > limit) {
+      await reader.cancel()
+      return
+    }
+    chunks.push(chunk.value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return JSON.parse(new TextDecoder().decode(bytes)) as unknown
 }
 
 function parseDeepSeekBalance(value: unknown) {

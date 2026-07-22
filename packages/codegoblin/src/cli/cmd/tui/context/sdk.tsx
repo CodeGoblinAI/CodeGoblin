@@ -135,7 +135,19 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       },
       directory: props.directory,
       event: emitter,
-      fetch: props.fetch ?? fetch,
+      fetch(request: RequestInfo | URL, init?: RequestInit) {
+        const target = new URL(request instanceof Request ? request.url : request.toString(), props.url)
+        if (target.origin !== new URL(props.url).origin) {
+          throw new Error("Authenticated server requests must use the configured server origin")
+        }
+        const headers = new Headers(props.headers)
+        if (request instanceof Request) {
+          request.headers.forEach((value, key) => headers.set(key, value))
+        }
+        new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+        if (props.directory) headers.set("x-opencode-directory", props.directory)
+        return (props.fetch ?? fetch)(request instanceof Request ? request : target, { ...init, headers })
+      },
       url: props.url,
     }
   },

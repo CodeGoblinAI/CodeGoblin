@@ -5,7 +5,7 @@ import os from "os"
 import path from "path"
 import { Global } from "@codegoblin/core/global"
 import { InstallationVersion } from "@codegoblin/core/installation/version"
-import { normalizeUsageQuotas, summarizeUsage } from "@codegoblin/core/usage"
+import { normalizeUsageQuotas } from "@codegoblin/core/usage"
 import {
   FetchHttpClient,
   HttpClient,
@@ -337,19 +337,24 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
     yield* router.add("GET", "/codegoblin/usage", (request) =>
       Effect.gen(function* () {
         const route = yield* WorkspaceRouteContext
+        const auth = yield* ServerAuth.Config
         const url = new URL(request.url, "http://localhost")
         const sessionID = url.searchParams.get("sessionID") ?? undefined
-        const sessions = yield* session.list({ directory: route.directory })
         const balance = yield* Effect.promise(() =>
-          CodeGoblinBalance.resolve({ cwd: route.directory }).catch(() => ({ balances: [], quotas: [], errors: [] })),
+          CodeGoblinBalance.resolve({
+            cwd: route.directory,
+            includeLocalEnv: false,
+            refreshQuotas: url.searchParams.get("refresh") === "1" && ServerAuth.required(auth),
+          }).catch(() => ({ balances: [], quotas: [], errors: [] })),
         )
-        const snapshot = summarizeUsage(sessions, sessionID)
+        const snapshot = Session.usage(sessionID)
         return HttpServerResponse.jsonUnsafe(
           {
             ...snapshot,
             balances: balance.balances,
             quotas: normalizeUsageQuotas(balance.quotas),
             errors: balance.errors,
+            refreshedAt: new Date().toISOString(),
           },
           { status: 200 },
         )

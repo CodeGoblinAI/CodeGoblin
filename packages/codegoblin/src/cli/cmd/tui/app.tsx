@@ -653,7 +653,6 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       {
         name: "effort.select",
         ...sharedSlash("effort"),
-        hidden: local.model.variant.list().length === 0,
         run: () => {
           dialog.replace(() => <DialogEffort />)
         },
@@ -748,7 +747,6 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         run: () => {
           dialog.replace(() => <DialogGoblinHub />)
         },
-        category: "CodeGoblin",
       },
       {
         name: "codegoblin.usage",

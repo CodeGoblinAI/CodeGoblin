@@ -61,6 +61,14 @@ export type UsageQuotaSource = {
   }[]
 }
 
+export const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
+
+export function reasoningEffortOptions(variants: readonly string[]) {
+  return variants.filter((variant): variant is (typeof REASONING_EFFORTS)[number] =>
+    REASONING_EFFORTS.includes(variant as (typeof REASONING_EFFORTS)[number]),
+  )
+}
+
 export function normalizeUsageQuotas(sources: readonly UsageQuotaSource[]): UsageQuota[] {
   return sources.flatMap((source) =>
     source.windows.map((window) => {

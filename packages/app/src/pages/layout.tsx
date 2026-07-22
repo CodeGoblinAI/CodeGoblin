@@ -1107,7 +1107,7 @@ export default function Layout(props: ParentProps) {
         id: "codegoblin.usage",
         title: "View usage",
         onSelect: () => {
-          void import("@/components/dialog-usage").then((x) => dialog.show(() => <x.DialogUsage />))
+          void import("@/components/dialog-usage").then((x) => dialog.show(() => <x.DialogUsage sessionID={params.id} />))
         },
       }),
       sharedSlash("status", {
