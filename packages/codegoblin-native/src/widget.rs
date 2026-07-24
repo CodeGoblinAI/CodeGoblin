@@ -648,16 +648,20 @@ mod win {
         }
     }
 
-    fn panel_rect(c: &Ctx, hwnd: HWND, island: (i32, i32)) -> (i32, i32, i32, i32) {
+    /// Dock state is passed in rather than read from `UI` here: every caller
+    /// already holds (or just held) that lock, and `Mutex` is not reentrant —
+    /// locking it again would deadlock the UI thread.
+    fn panel_rect(
+        c: &Ctx,
+        hwnd: HWND,
+        island: (i32, i32),
+        dock: Option<Edge>,
+        along: i32,
+    ) -> (i32, i32, i32, i32) {
         let mon = monitor_rect(hwnd);
         let h = desired_panel_h(c);
-        {
-            let ui = UI.lock().unwrap();
-            if let Some(edge) = ui.dock {
-                let along = ui.along;
-                drop(ui);
-                return docked_panel_rect(c, &mon, edge, along, h);
-            }
+        if let Some(edge) = dock {
+            return docked_panel_rect(c, &mon, edge, along, h);
         }
         let w = px(c, PANEL_W);
         let island_w = px(c, ISLAND_W);
@@ -728,7 +732,7 @@ mod win {
 
     fn expand(hwnd: HWND) {
         let c = ctx();
-        let island = {
+        let (island, dock, along) = {
             let mut ui = UI.lock().unwrap();
             if ui.mode == Mode::Panel && ui.anim.is_none() {
                 return;
@@ -736,9 +740,9 @@ mod win {
             ui.mode = Mode::Panel;
             ui.anim = None;
             ui.leave_ticks = 0;
-            ui.island
+            (ui.island, ui.dock, ui.along)
         };
-        let target = panel_rect(&c, hwnd, island);
+        let target = panel_rect(&c, hwnd, island, dock, along);
         start_anim(hwnd, target, None);
     }
 
@@ -774,13 +778,17 @@ mod win {
     /// Re-apply the panel size after a snapshot changed the row/question count.
     fn apply_panel_size(hwnd: HWND) {
         let c = ctx();
-        let target = {
+        // Read everything under one lock, release it, then compute — calling
+        // panel_rect() with the guard still held used to deadlock the UI
+        // thread on the next snapshot after the panel was opened.
+        let (island, dock, along) = {
             let ui = UI.lock().unwrap();
             if ui.mode != Mode::Panel || ui.anim.is_some() {
                 return;
             }
-            panel_rect(&c, hwnd, ui.island)
+            (ui.island, ui.dock, ui.along)
         };
+        let target = panel_rect(&c, hwnd, island, dock, along);
         set_rect(hwnd, target.0, target.1, target.2, target.3);
     }
 
@@ -1349,9 +1357,12 @@ mod win {
         let old_bmp = SelectObject(mem, bmp as HGDIOBJ);
         SetBkMode(mem, TRANSPARENT as i32);
 
-        let (mode, pulse, frame, flash) = {
+        // Take every UI field up front: painting holds the STATE lock below,
+        // and locking UI underneath it would invert the lock order the timer
+        // handler uses (UI → STATE).
+        let (mode, pulse, frame, flash, dock) = {
             let ui = UI.lock().unwrap();
-            (ui.mode, ui.pulse, ui.frame, ui.flash)
+            (ui.mode, ui.pulse, ui.frame, ui.flash, ui.dock)
         };
 
         let guard = STATE.lock().unwrap();
@@ -1394,7 +1405,7 @@ mod win {
             } else {
                 EDGE_C
             };
-            let dock_edge = { UI.lock().unwrap().dock.unwrap_or(Edge::Top) };
+            let dock_edge = dock.unwrap_or(Edge::Top);
             let t = px(&c, 3);
             let strip = match dock_edge {
                 Edge::Top => RECT { left: rc.left, top: rc.bottom - t, right: rc.right, bottom: rc.bottom },
@@ -1725,6 +1736,12 @@ mod win {
     // ── entry ────────────────────────────────────────────────────────────────
 
     pub fn run() -> Result<(), String> {
+        // A panic on the UI thread would otherwise unwind into the Win32
+        // message loop and vanish; the TUI surfaces our stderr in a toast.
+        std::panic::set_hook(Box::new(|info| {
+            eprintln!("codegoblin-native widget panicked: {info}");
+        }));
+
         unsafe {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
