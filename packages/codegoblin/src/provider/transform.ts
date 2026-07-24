@@ -597,13 +597,24 @@ function openaiCompatibleReasoningEfforts(id: string) {
 }
 
 function anthropicAdaptiveEfforts(apiId: string): string[] | null {
-  if (["opus-4-7", "opus-4.7"].some((v) => apiId.includes(v))) {
+  const id = apiId.toLowerCase()
+  // Opus 4.7+/5, Sonnet 5, Fable 5: full effort ladder including xhigh
+  if (
+    ["opus-4-7", "opus-4.7", "opus-4-8", "opus-4.8", "opus-5", "sonnet-5", "fable-5", "mythos-5"].some((v) =>
+      id.includes(v),
+    )
+  ) {
     return ["low", "medium", "high", "xhigh", "max"]
   }
-  if (["opus-4-6", "opus-4.6", "sonnet-4-6", "sonnet-4.6"].some((v) => apiId.includes(v))) {
+  if (["opus-4-6", "opus-4.6", "sonnet-4-6", "sonnet-4.6"].some((v) => id.includes(v))) {
     return ["low", "medium", "high", "max"]
   }
   return null
+}
+
+function anthropicSummarizedThinking(apiId: string) {
+  const id = apiId.toLowerCase()
+  return ["opus-4-7", "opus-4.7", "opus-4-8", "opus-4.8", "opus-5"].some((v) => id.includes(v))
 }
 
 function googleThinkingLevelEfforts(apiId: string) {
@@ -833,9 +844,7 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
             {
               thinking: {
                 type: "adaptive",
-                ...(model.api.id.includes("opus-4-7") || model.api.id.includes("opus-4.7")
-                  ? { display: "summarized" }
-                  : {}),
+                ...(anthropicSummarizedThinking(model.api.id) ? { display: "summarized" } : {}),
               },
               effort,
             },
@@ -872,9 +881,7 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
               reasoningConfig: {
                 type: "adaptive",
                 maxReasoningEffort: effort,
-                ...(model.api.id.includes("opus-4-7") || model.api.id.includes("opus-4.7")
-                  ? { display: "summarized" }
-                  : {}),
+                ...(anthropicSummarizedThinking(model.api.id) ? { display: "summarized" } : {}),
               },
             },
           ]),
