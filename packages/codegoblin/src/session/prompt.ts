@@ -15,6 +15,8 @@ import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
 import { Bus } from "../bus"
 import { SystemPrompt } from "./system"
+import { ContextReport } from "./context-report"
+import { Flag } from "@codegoblin/core/flag/flag"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
@@ -1547,17 +1549,35 @@ export const layer = Layer.effect(
             // Local GGUF models run a lean chat prompt only (no coding-agent instructions/skills/env
             // dump, and NOT the memory recall — small models echo/confabulate from injected context,
             // tested on gemma-3n). Keeps them a clean chat assistant that fits a small context.
+            const blocks: ContextReport.SystemBlock[] = isLocalRuntimeModel(model)
+              ? [{ label: "local chat prompt", text: LOCAL_CHAT_SYSTEM_PROMPT, stability: "static" }]
+              : [
+                  {
+                    label: "base prompt",
+                    text: agent.prompt ?? SystemPrompt.provider(model).join("\n"),
+                    stability: "static",
+                  },
+                  // `env` carries the wall-clock date, so it churns at midnight even
+                  // though the rest of the block is session-stable.
+                  ...env.map((text) => ({ label: "env", text, stability: "turn" as const })),
+                  ...instructions.map((text) => ({ label: "instructions", text, stability: "session" as const })),
+                  ...(skills ? [{ label: "skills", text: skills, stability: "session" as const }] : []),
+                  // Ranked against the latest user message, so this is different text
+                  // on every single request.
+                  ...(memory ? [{ label: "memory", text: memory, stability: "turn" as const }] : []),
+                ]
+
             const system = isLocalRuntimeModel(model)
               ? [LOCAL_CHAT_SYSTEM_PROMPT]
               : [...env, ...instructions, ...(skills ? [skills] : []), ...(memory ? [memory] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+
+            const report = ContextReport.buildContextReport({ system: blocks, tools })
             log.info("context policy", {
               sessionID,
               mode: isLocalRuntimeModel(model) ? "local-chat" : "agent",
-              systemChars:
-                system.reduce((total, item) => total + item.length, 0) +
-                (agent.prompt ?? SystemPrompt.provider(model).join("\n")).length,
+              ...ContextReport.summarize(report),
               conversationChars: JSON.stringify(modelMsgs).length,
               toolSchemaChars: resolved.schemaChars,
               toolsAvailable: resolved.available,
@@ -1565,6 +1585,9 @@ export const layer = Layer.effect(
               memory: Boolean(memory),
               instructions: instructions.length,
             })
+            if (Flag.CODEGOBLIN_CONTEXT_REPORT) {
+              yield* Effect.sync(() => process.stderr.write(ContextReport.format(report) + "\n\n"))
+            }
             const result = yield* handle.process({
               user: lastUser,
               agent,
