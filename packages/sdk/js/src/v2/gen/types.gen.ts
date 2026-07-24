@@ -183,6 +183,7 @@ export type PermissionRequest = {
     [key: string]: unknown
   }
   always: Array<string>
+  denyOnly?: Array<string>
   tool?: {
     messageID: string
     callID: string
@@ -2617,7 +2618,7 @@ export type EventPermissionReplied = {
   properties: {
     sessionID: string
     requestID: string
-    reply: "once" | "always" | "reject"
+    reply: "once" | "always" | "reject" | "never"
   }
 }
 
@@ -6102,7 +6103,7 @@ export type PermissionListResponse = PermissionListResponses[keyof PermissionLis
 
 export type PermissionReplyData = {
   body?: {
-    reply: "once" | "always" | "reject"
+    reply: "once" | "always" | "reject" | "never"
     message?: string
   }
   path: {
@@ -7248,7 +7249,7 @@ export type SessionUnrevertResponse = SessionUnrevertResponses[keyof SessionUnre
 
 export type PermissionRespondData = {
   body?: {
-    response: "once" | "always" | "reject"
+    response: "once" | "always" | "reject" | "never"
   }
   path: {
     sessionID: string

@@ -18,7 +18,7 @@ import { useTuiConfig } from "../../context/tui-config"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 
-type PermissionStage = "permission" | "always" | "reject"
+type PermissionStage = "permission" | "always" | "never" | "reject"
 
 function filetype(input?: string) {
   if (!input) return "none"
@@ -170,6 +170,46 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
             if (option === "cancel") return
             void sdk.client.permission.reply({
               reply: "always",
+              requestID: props.request.id,
+              workspace: project.workspace.current(),
+            })
+          }}
+        />
+      </Match>
+      <Match when={store.stage === "never"}>
+        <Prompt
+          title="Never allow"
+          body={
+            <Switch>
+              <Match when={props.request.always.length === 1 && props.request.always[0] === "*"}>
+                <TextBody
+                  title={"This will block " + props.request.permission + " until CodeGoblin is restarted."}
+                />
+              </Match>
+              <Match when={true}>
+                <box paddingLeft={1} gap={1}>
+                  <text fg={theme.textMuted}>This will block the following patterns until CodeGoblin is restarted</text>
+                  <box>
+                    <For each={props.request.always}>
+                      {(pattern) => (
+                        <text fg={theme.text}>
+                          {"- "}
+                          {pattern}
+                        </text>
+                      )}
+                    </For>
+                  </box>
+                </box>
+              </Match>
+            </Switch>
+          }
+          options={{ confirm: "Confirm", cancel: "Cancel" }}
+          escapeKey="cancel"
+          onSelect={(option) => {
+            setStore("stage", "permission")
+            if (option === "cancel") return
+            void sdk.client.permission.reply({
+              reply: "never",
               requestID: props.request.id,
               workspace: project.workspace.current(),
             })
@@ -423,12 +463,21 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
               title="Permission required"
               header={header()}
               body={current.body}
-              options={{ once: "Allow once", always: "Allow always", reject: "Reject" }}
+              options={{
+                once: "Allow once",
+                always: "Allow always",
+                reject: "Reject",
+                never: "Never allow",
+              }}
               escapeKey="reject"
               fullscreen
               onSelect={(option) => {
                 if (option === "always") {
                   setStore("stage", "always")
+                  return
+                }
+                if (option === "never") {
+                  setStore("stage", "never")
                   return
                 }
                 if (option === "reject") {

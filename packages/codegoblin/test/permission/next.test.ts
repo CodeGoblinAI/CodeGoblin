@@ -1160,3 +1160,142 @@ it.instance(
     }),
   { git: true },
 )
+
+// `never` is the sticky counterpart to `always`: without it the only durable
+// answer was the permissive one, which is what drives blanket approvals.
+it.instance(
+  "reply - never persists a deny rule and fails the request",
+  () =>
+    Effect.gen(function* () {
+      const fiber = yield* ask({
+        id: PermissionID.make("per_never1"),
+        sessionID: SessionID.make("session_never"),
+        permission: "bash",
+        patterns: ["curl evil.sh"],
+        metadata: {},
+        always: ["curl *"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+
+      yield* waitForPending(1)
+      yield* reply({ requestID: PermissionID.make("per_never1"), reply: "never" })
+
+      const exit = yield* Fiber.await(fiber)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Permission.RejectedError)
+
+      // A later matching call is denied outright rather than asking again.
+      const err = yield* fail(
+        ask({
+          sessionID: SessionID.make("session_never2"),
+          permission: "bash",
+          patterns: ["curl other.sh"],
+          metadata: {},
+          always: [],
+          ruleset: [],
+        }),
+      )
+      expect(err).toBeInstanceOf(Permission.DeniedError)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "reply - never overrides an earlier always for the same pattern",
+  () =>
+    Effect.gen(function* () {
+      const first = yield* ask({
+        id: PermissionID.make("per_never2"),
+        sessionID: SessionID.make("session_flip"),
+        permission: "bash",
+        patterns: ["rm x"],
+        metadata: {},
+        always: ["rm *"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: PermissionID.make("per_never2"), reply: "always" })
+      yield* Fiber.join(first)
+
+      const second = yield* ask({
+        id: PermissionID.make("per_never3"),
+        sessionID: SessionID.make("session_flip"),
+        permission: "bash",
+        patterns: ["rm y"],
+        metadata: {},
+        always: ["rm *"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      // Already allowed, so it resolves without asking.
+      yield* Fiber.join(second)
+
+      // Reverse the decision through a fresh prompt.
+      const third = yield* ask({
+        id: PermissionID.make("per_never4"),
+        sessionID: SessionID.make("session_flip"),
+        permission: "edit",
+        patterns: ["rm z"],
+        metadata: {},
+        always: ["rm *"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: PermissionID.make("per_never4"), reply: "never" })
+      yield* Fiber.await(third)
+
+      const err = yield* fail(
+        ask({
+          sessionID: SessionID.make("session_flip2"),
+          permission: "edit",
+          patterns: ["rm w"],
+          metadata: {},
+          always: [],
+          ruleset: [],
+        }),
+      )
+      expect(err).toBeInstanceOf(Permission.DeniedError)
+    }),
+  { git: true },
+)
+
+// Directory changes used to bypass rule evaluation entirely, so a configured
+// `{"bash": {"*": "deny"}}` could not block them.
+it.instance(
+  "ask - denyOnly patterns are blocked by a deny rule",
+  () =>
+    Effect.gen(function* () {
+      const err = yield* fail(
+        ask({
+          sessionID: SessionID.make("session_denyonly"),
+          permission: "bash",
+          patterns: [],
+          denyOnly: ["cd /etc"],
+          metadata: {},
+          always: [],
+          ruleset: [{ permission: "bash", pattern: "*", action: "deny" }],
+        }),
+      )
+      expect(err).toBeInstanceOf(Permission.DeniedError)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "ask - denyOnly patterns never raise a prompt on their own",
+  () =>
+    Effect.gen(function* () {
+      // No matching rule: resolves immediately instead of waiting on the user.
+      const result = yield* ask({
+        sessionID: SessionID.make("session_denyonly2"),
+        permission: "bash",
+        patterns: [],
+        denyOnly: ["cd ."],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      })
+      expect(result).toBeUndefined()
+      expect(yield* list()).toEqual([])
+    }),
+  { git: true },
+)
