@@ -247,6 +247,17 @@ const raceNoLLMServer = testEffect(makeHttpNoLLMServer({ processor: "blocking" }
 const unix = process.platform !== "win32" ? it.instance : it.instance.skip
 const unixNoLLMServer = process.platform !== "win32" ? noLLMServer.instance : noLLMServer.instance.skip
 
+/**
+ * A sub-second sleep that behaves the same in every shell we run under.
+ *
+ * `sleep 0.2` is not portable: in Windows PowerShell `sleep` is an alias for
+ * Start-Sleep, whose -Seconds parameter is an Int32, so 0.2 rounds to 0 and the
+ * command returns in ~17ms. Tests that need the shell to still be running while
+ * they assert then raced it and hung on waitForBusy. Going through bun keeps the
+ * behaviour identical across bash, PowerShell and cmd.
+ */
+const SLEEP_SHORT = `bun -e "Bun.sleepSync(300)"`
+
 // Config that registers a custom "test" provider with a "test-model" model
 // so provider model lookup succeeds inside the loop.
 const cfg = {
@@ -1166,7 +1177,7 @@ it.instance(
       }
     }),
   { git: true },
-  3_000,
+  15_000,
 )
 
 // Queue semantics
@@ -1530,7 +1541,7 @@ it.instance(
       yield* llm.text("after-shell")
 
       const sh = yield* prompt
-        .shell({ sessionID: chat.id, agent: "build", command: "sleep 0.2" })
+        .shell({ sessionID: chat.id, agent: "build", command: SLEEP_SHORT })
         .pipe(Effect.forkChild)
       yield* waitForBusy(chat.id)
 
@@ -1550,7 +1561,7 @@ it.instance(
       expect(yield* llm.calls).toBe(1)
     }),
   { git: true },
-  3_000,
+  15_000,
 )
 
 it.instance(
@@ -1567,7 +1578,7 @@ it.instance(
       yield* llm.text("done")
 
       const sh = yield* prompt
-        .shell({ sessionID: chat.id, agent: "build", command: "sleep 0.2" })
+        .shell({ sessionID: chat.id, agent: "build", command: SLEEP_SHORT })
         .pipe(Effect.forkChild)
       yield* waitForBusy(chat.id)
 
@@ -1589,7 +1600,7 @@ it.instance(
       expect(yield* llm.calls).toBe(1)
     }),
   { git: true },
-  3_000,
+  15_000,
 )
 
 unix(
