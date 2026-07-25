@@ -335,6 +335,14 @@ export function createTuiApi(input: Input): TuiPluginApi {
     get client() {
       return input.sdk.client
     },
+    server: {
+      get url() {
+        return input.sdk.url
+      },
+      fetch(path: string, init?: RequestInit) {
+        return input.sdk.fetch(`${input.sdk.url}${path}`, init)
+      },
+    },
     event: input.event,
     renderer: input.renderer,
     slots: {

@@ -1,0 +1,557 @@
+import { spawn, type ChildProcess } from "node:child_process"
+import { createInterface } from "node:readline"
+import { existsSync } from "node:fs"
+import path from "node:path"
+import { nativeBinPath, resolveNativeBinPath } from "@/codegoblin/memory-native"
+import type { TuiPlugin } from "@codegoblin/plugin/tui"
+import type { InternalTuiPlugin } from "../../plugin/internal"
+
+const id = "internal:widget"
+
+const KV_ENABLED = "widget.enabled"
+const KV_SOUND = "widget.sound"
+const KV_LAYOUT = "widget.layout"
+/**
+ * Account-usage strip for the widget's panel header. Subscription/OAuth
+ * providers (Claude Pro/Max, ChatGPT, …) don't have per-session spend — they
+ * have rate-limit windows. Whatever wires those up (the provider-usage PR)
+ * can publish `[{ label: "5h", pct: 11, reset: "4h1m" }, ...]` under this kv
+ * key and the widget renders it; absent, the header falls back to spend·ctx.
+ */
+const KV_USAGE = "widget.usage"
+const KV_AUTO_COLLAPSE = "widget.autoCollapse"
+const KV_SHOW_USAGE = "widget.showUsage"
+
+type UsageSegment = { label: string; pct: number; reset?: string; provider?: string }
+
+/**
+ * Desktop status widget: a tiny always-on-top native bubble (Rust,
+ * `codegoblin-native widget`) showing what the goblin is doing while the
+ * terminal is buried under other windows. Windows-only for now.
+ *
+ * Protocol v2: full JSON snapshots over stdin (all active sessions, question
+ * previews, one-shot chime triggers, saved layout); the widget reports user
+ * actions (sound toggle, layout moves, interrupt, question answers) as JSON
+ * lines on stdout. No server, no polling — the bubble exits with the TUI.
+ */
+
+type Row = {
+  id: string
+  title: string
+  status: string
+  working: boolean
+  done: boolean
+  error: boolean
+  startedAtMs?: number
+  doneAtMs?: number
+  spend?: string
+  ctx?: string
+  todoDone?: number
+  todoTotal?: number
+  prompt?: string
+  model?: string
+  /** internal: last activity for sorting; not sent */
+  touched: number
+}
+
+type QuestionOut = {
+  requestID: string
+  sessionID: string
+  text: string
+  options: string[]
+}
+
+type Layout = { mode: "floating"; x: number; y: number } | { mode: "docked"; edge: string; along: number }
+
+const DONE_ROW_TTL = 5 * 60_000
+const MAX_ROWS = 4
+
+const tui: TuiPlugin = async (api) => {
+  const supported = process.platform === "win32"
+
+  let child: ChildProcess | undefined
+  let stopping = false
+  let question: QuestionOut | undefined
+  const rows = new Map<string, Row>()
+  const toolThrottle = new Map<string, number>()
+  const usageThrottle = new Map<string, number>()
+
+  function row(sessionID: string): Row {
+    let existing = rows.get(sessionID)
+    if (!existing) {
+      existing = {
+        id: sessionID,
+        title: api.state.session.get(sessionID)?.title || "CodeGoblin",
+        status: "",
+        working: false,
+        done: false,
+        error: false,
+        touched: Date.now(),
+      }
+      rows.set(sessionID, existing)
+    }
+    return existing
+  }
+
+  let primaryID: string | undefined
+
+  function activeRows(): Row[] {
+    const now = Date.now()
+    for (const [key, value] of rows) {
+      if (!value.working && (!value.doneAtMs || now - value.doneAtMs > DONE_ROW_TTL)) rows.delete(key)
+    }
+    const list = [...rows.values()].sort((a, b) => b.touched - a.touched)
+    // Sticky primary: keep the big block pinned to one session while it is
+    // still working, instead of flipping to whichever row was touched last.
+    const current = primaryID ? list.find((r) => r.id === primaryID) : undefined
+    if (current?.working) {
+      list.splice(list.indexOf(current), 1)
+      list.unshift(current)
+    } else {
+      primaryID = list[0]?.id
+    }
+    return list.slice(0, MAX_ROWS)
+  }
+
+  function send(payload: Record<string, unknown>) {
+    const stdin = child?.stdin
+    if (!stdin || stdin.destroyed) return
+    stdin.write(JSON.stringify(payload) + "\n")
+  }
+
+  let liveUsage: UsageSegment[] = []
+
+  async function pollUsage() {
+    try {
+      const response = await api.server.fetch("/codegoblin/provider-usage")
+      if (!response.ok) return
+      const body = (await response.json()) as { usage?: UsageSegment[] }
+      if (Array.isArray(body.usage)) liveUsage = body.usage
+    } catch {
+      // server not reachable — keep whatever we had
+    }
+  }
+
+  function usageSegments(): UsageSegment[] {
+    if (!api.kv.get<boolean>(KV_SHOW_USAGE, true)) return []
+    // kv override wins (test hook / external publisher); else live capture
+    // from the OAuth plugins' response headers via /codegoblin/provider-usage.
+    const override = api.kv.get<UsageSegment[] | undefined>(KV_USAGE, undefined)
+    const source = Array.isArray(override) && override.length ? override : liveUsage
+    return source
+      .filter((u) => u && typeof u.label === "string" && typeof u.pct === "number")
+      .slice(0, 3)
+      .map((u) => ({
+        label: u.provider ? `${u.provider} ${u.label}` : u.label,
+        pct: u.pct,
+        reset: u.reset,
+      }))
+  }
+
+  function snapshot(chime?: "done" | "error", extra?: Record<string, unknown>) {
+    send({
+      sessions: activeRows().map(({ touched: _touched, ...rest }) => rest),
+      question: question ?? null,
+      usage: usageSegments(),
+      autoCollapse: api.kv.get<boolean>(KV_AUTO_COLLAPSE, true),
+      ...(chime ? { chime } : {}),
+      ...extra,
+    })
+  }
+
+  function refreshTodo(sessionID: string) {
+    const todos = api.state.session.todo(sessionID)
+    const target = row(sessionID)
+    const counted = todos.filter((t) => t.status !== "cancelled")
+    target.todoTotal = counted.length
+    target.todoDone = counted.filter((t) => t.status === "completed").length
+  }
+
+  function fmtTokens(count: number) {
+    if (count >= 1000) return `${(count / 1000).toFixed(1)}K`
+    return String(count)
+  }
+
+  function refreshUsage(sessionID: string) {
+    const messages = api.state.session.messages(sessionID)
+    let spend = 0
+    let last: (typeof messages)[number] | undefined
+    for (const message of messages) {
+      if (message.role !== "assistant") continue
+      spend += message.cost
+      last = message
+    }
+    const target = row(sessionID)
+    if (spend > 0) target.spend = `$${spend.toFixed(2)}`
+    // Prompt preview: first line of the latest user message.
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message.role !== "user") continue
+      const text = api.state
+        .part(message.id)
+        .find((p) => p.type === "text" && !("synthetic" in p && p.synthetic))
+      if (text && text.type === "text") {
+        target.prompt = text.text.split("\n")[0]?.slice(0, 80)
+      }
+      break
+    }
+    if (last && last.role === "assistant") {
+      target.model = last.modelID
+      const used = last.tokens.input + last.tokens.cache.read + last.tokens.output
+      if (used > 0) {
+        const limit = api.state.provider
+          .find((p) => p.id === last.providerID)
+          ?.models[last.modelID]?.limit?.context
+        target.ctx = limit
+          ? `${fmtTokens(used)} · ${Math.min(99, Math.round((used / limit) * 100))}%`
+          : fmtTokens(used)
+      }
+    }
+  }
+
+  let starting: Promise<boolean> | undefined
+  let usageTimer: ReturnType<typeof setInterval> | undefined
+
+  function start(): Promise<boolean> {
+    // Single-flight: concurrent calls (auto-start racing a fast /widget
+    // toggle) share one spawn instead of both slipping past a stale check.
+    if (child) return Promise.resolve(true)
+    starting ??= doStart().finally(() => {
+      starting = undefined
+    })
+    return starting
+  }
+
+  async function doStart() {
+    const native = process.env["CODEGOBLIN_NATIVE_BIN"] || nativeBinPath() || (await resolveNativeBinPath())
+    if (child) return true
+    if (!native) {
+      api.ui.toast({ variant: "error", message: "codegoblin-native binary not found; the widget needs it" })
+      return false
+    }
+    const spawned = spawn(native, ["widget"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    })
+    const stderrTail: string[] = []
+    if (spawned.stderr) {
+      const lines = createInterface({ input: spawned.stderr })
+      lines.on("line", (line) => {
+        stderrTail.push(line)
+        if (stderrTail.length > 5) stderrTail.shift()
+      })
+    }
+    spawned.on("error", (error) => {
+      if (child === spawned) child = undefined
+      api.ui.toast({ variant: "error", message: `status widget failed to launch: ${error.message}` })
+    })
+    spawned.on("exit", (code) => {
+      if (child !== spawned) return
+      child = undefined
+      if (stopping) return
+      if (!code) {
+        // Clean exit we didn't ask for = right-click dismiss / hide button:
+        // treat that as an opt-out until /widget toggles it back on.
+        api.kv.set(KV_ENABLED, false)
+        return
+      }
+      // Crash: surface diagnostics and leave the preference enabled so the
+      // widget comes back on the next TUI launch.
+      const detail = stderrTail.length ? ` — ${stderrTail[stderrTail.length - 1]}` : ""
+      api.ui.toast({ variant: "error", message: `status widget exited unexpectedly (code ${code})${detail}` })
+    })
+
+    // The widget reports preference changes and actions on stdout.
+    if (spawned.stdout) {
+      const lines = createInterface({ input: spawned.stdout })
+      lines.on("line", (line) => {
+        try {
+          const event = JSON.parse(line)
+          if (event.event === "sound") {
+            api.kv.set(KV_SOUND, event.enabled === true)
+          } else if (event.event === "layout") {
+            const layout: Layout =
+              event.mode === "docked"
+                ? { mode: "docked", edge: String(event.edge ?? "top"), along: Number(event.along ?? 0) }
+                : { mode: "floating", x: Number(event.x ?? 0), y: Number(event.y ?? 0) }
+            api.kv.set(KV_LAYOUT, layout)
+          } else if (event.event === "interrupt" && typeof event.sessionID === "string") {
+            void api.client.session.abort({ sessionID: event.sessionID })
+          } else if (event.event === "answer" && typeof event.requestID === "string") {
+            if (question?.requestID === event.requestID) question = undefined
+            void api.client.question.reply({
+              requestID: event.requestID,
+              answers: [[String(event.option ?? "")]],
+            })
+            snapshot()
+          }
+        } catch {
+          // not JSON — ignore
+        }
+      })
+    }
+
+    child = spawned
+    stopping = false
+
+    void pollUsage().then(() => snapshot())
+    usageTimer ??= setInterval(() => {
+      if (!child) return
+      void pollUsage().then(() => snapshot())
+    }, 5 * 60_000)
+    usageTimer.unref?.()
+
+    // Initial payload: sound preference, optional custom chime, saved layout.
+    const soundPath = [path.join(api.state.path.config, "widget.wav")].find((p) => existsSync(p))
+    send({
+      sessions: activeRows().map(({ touched: _touched, ...rest }) => rest),
+      question: question ?? null,
+      usage: usageSegments(),
+      sound: api.kv.get<boolean>(KV_SOUND, true),
+      ...(soundPath ? { soundPath } : {}),
+      ...(api.kv.get<Layout | undefined>(KV_LAYOUT, undefined) ? { layout: api.kv.get<Layout>(KV_LAYOUT) } : {}),
+    })
+    return true
+  }
+
+  function stop() {
+    if (usageTimer) {
+      clearInterval(usageTimer)
+      usageTimer = undefined
+    }
+    if (!child) return
+    stopping = true
+    child.stdin?.end()
+    const dying = child
+    child = undefined
+    setTimeout(() => {
+      if (!dying.killed) dying.kill()
+    }, 1500).unref?.()
+  }
+
+  api.event.on("session.status", (event) => {
+    const sessionID = event.properties.sessionID
+    const type = event.properties.status.type
+    const target = row(sessionID)
+    target.touched = Date.now()
+    if (type === "busy" || type === "retry") {
+      if (!target.working) {
+        target.working = true
+        target.done = false
+        target.error = false
+        target.startedAtMs = Date.now()
+        target.doneAtMs = undefined
+      }
+      if (type === "retry") target.status = "retrying…"
+      refreshTodo(sessionID)
+      refreshUsage(sessionID)
+      snapshot()
+      return
+    }
+    if (type !== "idle" || !target.working) return
+    const elapsed = target.startedAtMs ? Math.round((Date.now() - target.startedAtMs) / 1000) : 0
+    target.working = false
+    target.done = true
+    target.doneAtMs = Date.now()
+    target.status = target.error
+      ? "hit an error — see terminal"
+      : `done · ${elapsed >= 60 ? `${Math.floor(elapsed / 60)}m${String(elapsed % 60).padStart(2, "0")}s` : `${elapsed}s`}`
+    refreshUsage(sessionID)
+    refreshTodo(sessionID)
+    snapshot(target.error ? "error" : "done")
+    // The turn that just finished likely refreshed the provider's rate-limit
+    // headers; pick them up for the usage strip.
+    void pollUsage().then(() => snapshot())
+  })
+
+  api.event.on("session.error", (event) => {
+    const sessionID = event.properties.sessionID
+    if (!sessionID) return
+    const target = rows.get(sessionID)
+    if (!target) return
+    if (target.working) {
+      // The idle transition that follows reads this flag to pick the chime;
+      // push the visual state now instead of waiting on event ordering.
+      target.error = true
+      target.status = "hit an error — see terminal"
+      snapshot()
+      return
+    }
+    // Error landed after the idle transition already reported "done": fix the
+    // row retroactively (no second chime).
+    if (target.doneAtMs && Date.now() - target.doneAtMs < 10_000) {
+      target.error = true
+      target.status = "hit an error — see terminal"
+      snapshot()
+    }
+  })
+
+  api.event.on("message.part.updated", (event) => {
+    const part = event.properties.part
+    const target = rows.get(part.sessionID)
+    if (!target?.working) return
+    if (part.type === "step-finish") {
+      const now = Date.now()
+      if (now - (usageThrottle.get(part.sessionID) ?? 0) > 2000) {
+        usageThrottle.set(part.sessionID, now)
+        refreshUsage(part.sessionID)
+        snapshot()
+      }
+      return
+    }
+    if (part.type !== "tool") return
+    if (part.state.status !== "running" && part.state.status !== "pending") return
+    const now = Date.now()
+    if (now - (toolThrottle.get(part.sessionID) ?? 0) < 300) return
+    toolThrottle.set(part.sessionID, now)
+    target.status = part.tool
+    snapshot()
+  })
+
+  api.event.on("todo.updated", (event) => {
+    const target = rows.get(event.properties.sessionID)
+    if (!target) return
+    refreshTodo(event.properties.sessionID)
+    snapshot()
+  })
+
+  api.event.on("session.updated", (event) => {
+    const target = rows.get(event.properties.info.id)
+    if (!target) return
+    target.title = event.properties.info.title || "CodeGoblin"
+    snapshot()
+  })
+
+  api.event.on("question.asked", (event) => {
+    const request = event.properties
+    const first = request.questions[0]
+    if (!first) return
+    // Only offer inline answers for a single single-select question; anything
+    // richer gets a "come back to the terminal" preview without buttons.
+    const simple = request.questions.length === 1 && !first.multiple
+    question = {
+      requestID: request.id,
+      sessionID: request.sessionID,
+      text: first.question,
+      options: simple ? first.options.slice(0, 3).map((o) => o.label) : [],
+    }
+    const target = rows.get(request.sessionID)
+    if (target) target.status = "has a question for you"
+    snapshot()
+  })
+
+  const clearQuestion = (requestID: string) => {
+    if (question?.requestID !== requestID) return
+    question = undefined
+    snapshot()
+  }
+  api.event.on("question.replied", (event) => clearQuestion(event.properties.requestID))
+  api.event.on("question.rejected", (event) => clearQuestion(event.properties.requestID))
+
+  api.event.on("permission.asked", (event) => {
+    const target = rows.get(event.properties.sessionID)
+    if (!target?.working) return
+    target.status = "needs permission — come back!"
+    snapshot()
+  })
+
+  api.keymap.registerLayer({
+    commands: [
+      {
+        name: "widget.settings",
+        title: "Status widget settings",
+        desc: "Sound, auto-collapse, usage strip, position",
+        slashName: "widget-settings",
+        category: "System",
+        namespace: "palette",
+        run() {
+          const entry = (label: string, value: string) => `${label}: ${value}`
+          const openSettings = () => {
+            api.ui.dialog.replace(() =>
+              api.ui.DialogSelect({
+                title: "widget settings",
+                options: [
+                  {
+                    title: entry("Sound", api.kv.get<boolean>(KV_SOUND, true) ? "on" : "off"),
+                    value: "sound",
+                    onSelect: () => {
+                      api.kv.set(KV_SOUND, !api.kv.get<boolean>(KV_SOUND, true))
+                      send({ sound: api.kv.get<boolean>(KV_SOUND, true) })
+                      openSettings()
+                    },
+                  },
+                  {
+                    title: entry("Auto-collapse panel", api.kv.get<boolean>(KV_AUTO_COLLAPSE, true) ? "on" : "off"),
+                    value: "autoCollapse",
+                    onSelect: () => {
+                      api.kv.set(KV_AUTO_COLLAPSE, !api.kv.get<boolean>(KV_AUTO_COLLAPSE, true))
+                      snapshot()
+                      openSettings()
+                    },
+                  },
+                  {
+                    title: entry("Usage strip", api.kv.get<boolean>(KV_SHOW_USAGE, true) ? "on" : "off"),
+                    value: "usage",
+                    onSelect: () => {
+                      api.kv.set(KV_SHOW_USAGE, !api.kv.get<boolean>(KV_SHOW_USAGE, true))
+                      snapshot()
+                      openSettings()
+                    },
+                  },
+                  {
+                    title: "Reset widget position",
+                    value: "reset",
+                    onSelect: () => {
+                      api.kv.set(KV_LAYOUT, null)
+                      api.ui.dialog.clear()
+                      api.ui.toast({ variant: "info", message: "Widget position reset — takes effect on next launch" })
+                    },
+                  },
+                ],
+              }),
+            )
+          }
+          openSettings()
+        },
+      },
+      {
+        name: "widget.toggle",
+        title: "Toggle status widget",
+        desc: "Floating always-on-top bubble showing what the goblin is doing",
+        slashName: "widget",
+        category: "System",
+        namespace: "palette",
+        async run() {
+          if (!supported) {
+            api.ui.toast({ variant: "info", message: "The status widget is Windows-only for now" })
+            return
+          }
+          if (child) {
+            stop()
+            api.kv.set(KV_ENABLED, false)
+            api.ui.toast({ variant: "info", message: "Status widget hidden" })
+            return
+          }
+          if (await start()) {
+            api.kv.set(KV_ENABLED, true)
+            api.ui.toast({
+              variant: "info",
+              message: "Status widget on — drag to a screen edge to dock it, right-click to dismiss",
+            })
+          }
+        },
+      },
+    ],
+  })
+
+  if (supported && api.kv.get<boolean>(KV_ENABLED, false)) {
+    void start()
+  }
+}
+
+const plugin: InternalTuiPlugin = {
+  id,
+  tui,
+}
+
+export default plugin

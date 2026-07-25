@@ -208,6 +208,10 @@ export function createTuiPluginApi(opts: Opts = {}): HostPluginApi {
     get client() {
       return client()
     },
+    server: {
+      url: "http://localhost:4096",
+      fetch: (path: string, init?: RequestInit) => fetch(`http://localhost:4096${path}`, init),
+    },
     event: opts.event ?? {
       on: () => {
         if (count) count.event_add += 1
