@@ -1540,7 +1540,6 @@ mod win {
             let row_h = px(&c, ROW_H);
             let mut y = header_h + 1;
             for (i, row) in state.rows.iter().take(4).enumerate() {
-                let row_rc = RECT { left: 1, top: y, right: w - 1, bottom: y + row_h };
                 if i == 0 {
                     draw_goblin(mem, &c, pad, y + (row_h - px(&c, 22)) / 2, 30, 22, row.working, row.done, frame);
                 } else {
@@ -1636,7 +1635,9 @@ mod win {
                 };
                 draw_text(mem, small_font, status_color, &mut status_rc, status, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-                hits.push(Hit { rect: row_rc, action: Action::Focus });
+                // Rows are read-only: only the footer's "focus" button raises
+                // the terminal, so clicking anywhere in the panel doesn't
+                // yank you out of whatever you were doing.
                 y += row_h;
             }
 
