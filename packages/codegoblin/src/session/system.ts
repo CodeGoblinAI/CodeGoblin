@@ -37,6 +37,14 @@ export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly memory: (input: { sessionID?: string; query?: string }) => Effect.Effect<string | undefined>
+  /**
+   * Content that changes every request — currently just the wall-clock date.
+   * Deliberately kept out of the system prompt: anything in the cached prefix
+   * that differs between turns invalidates the whole entry (the date alone used
+   * to drop the entire cache at midnight). Callers append this to the newest
+   * user message, where churn costs nothing.
+   */
+  readonly turn: () => Effect.Effect<string>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@codegoblin/SystemPrompt") {}
@@ -58,10 +66,13 @@ export const layer = Layer.effect(
             `  Workspace root folder: ${ctx.worktree}`,
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
-            `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
           ].join("\n"),
         ]
+      }),
+
+      turn: Effect.fn("SystemPrompt.turn")(function* () {
+        return `<turn-context>\n  Today's date: ${new Date().toDateString()}\n</turn-context>`
       }),
 
       skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info) {

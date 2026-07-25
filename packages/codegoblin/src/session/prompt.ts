@@ -82,6 +82,32 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
+/**
+ * Appends per-turn context to the newest user message so it lands after the
+ * cacheable prefix instead of inside it. Returns false when there is no user
+ * message to attach to, in which case the caller keeps it in the system prompt.
+ */
+export function appendToLastUserMessage(msgs: { role: string; content: unknown }[], text: string) {
+  if (!text) return true
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const msg = msgs[i]
+    if (msg.role !== "user") continue
+    if (typeof msg.content === "string") {
+      msg.content = [
+        { type: "text", text: msg.content },
+        { type: "text", text },
+      ]
+      return true
+    }
+    if (Array.isArray(msg.content)) {
+      msg.content.push({ type: "text", text })
+      return true
+    }
+    return false
+  }
+  return false
+}
+
 // Lean CHAT system prompt for small local GGUF models. They run on-device with a tiny trained
 // context and are not agents, so the full coding-agent instructions/skills/environment do not fit
 // and only confuse them. NOTE (tested on gemma-3n / Qwen3): a strong identity like "You are
@@ -1539,13 +1565,15 @@ export const layer = Layer.effect(
               .join(" ")
               .slice(0, 500)
 
-            const [skills, env, instructions, memory, modelMsgs] = yield* Effect.all([
+            const [skills, env, instructions, memory, turnContext, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
               instruction.system().pipe(Effect.orDie),
               sys.memory({ sessionID, query: memoryQuery }),
+              sys.turn(),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
+
             // Local GGUF models run a lean chat prompt only (no coding-agent instructions/skills/env
             // dump, and NOT the memory recall — small models echo/confabulate from injected context,
             // tested on gemma-3n). Keeps them a clean chat assistant that fits a small context.
@@ -1557,21 +1585,29 @@ export const layer = Layer.effect(
                     text: agent.prompt ?? SystemPrompt.provider(model).join("\n"),
                     stability: "static",
                   },
-                  // `env` carries the wall-clock date, so it churns at midnight even
-                  // though the rest of the block is session-stable.
-                  ...env.map((text) => ({ label: "env", text, stability: "turn" as const })),
                   ...instructions.map((text) => ({ label: "instructions", text, stability: "session" as const })),
                   ...(skills ? [{ label: "skills", text: skills, stability: "session" as const }] : []),
-                  // Ranked against the latest user message, so this is different text
-                  // on every single request.
-                  ...(memory ? [{ label: "memory", text: memory, stability: "turn" as const }] : []),
+                  ...env.map((text) => ({ label: "env", text, stability: "session" as const })),
                 ]
 
             const system = isLocalRuntimeModel(model)
               ? [LOCAL_CHAT_SYSTEM_PROMPT]
-              : [...env, ...instructions, ...(skills ? [skills] : []), ...(memory ? [memory] : [])]
+              : [...instructions, ...(skills ? [skills] : []), ...env]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+
+            // Everything that changes per turn rides on the newest user message
+            // rather than the system prefix. The prefix (system + all prior
+            // messages) then stays byte-identical between turns, so the provider
+            // cache can actually serve it; only the fresh tail is uncached.
+            //
+            // Memory is the important one: it is ranked against the latest user
+            // message, so as a system block it was different text on every
+            // request and invalidated the entire conversation behind it.
+            if (!isLocalRuntimeModel(model)) {
+              const turn = [turnContext, ...(memory ? [memory] : [])].join("\n\n")
+              if (!appendToLastUserMessage(modelMsgs, turn)) system.push(turn)
+            }
 
             const report = ContextReport.buildContextReport({ system: blocks, tools })
             log.info("context policy", {
