@@ -20,10 +20,12 @@ const PROVIDER_PRIORITY: Record<string, number> = {
   opencode: 0,
   "opencode-go": 1,
   openai: 2,
-  "github-copilot": 3,
-  anthropic: 4,
-  google: 5,
-  elevenlabs: 6,
+  anthropic: 3,
+  "cursor-agent": 4,
+  "antigravity-cli": 5,
+  "github-copilot": 6,
+  google: 7,
+  elevenlabs: 8,
 }
 
 const CUSTOM_PROVIDER_OPTION_VALUE = "__codegoblin_custom_provider__"
@@ -48,7 +50,7 @@ type ProviderOption =
 export function providerOptions(list: { id: string; name: string }[]): ProviderOption[] {
   return [
     ...pipe(
-      list,
+      list.filter((provider) => provider.id !== "claude-code"),
       sortBy((x) => PROVIDER_PRIORITY[x.id] ?? 99),
       map((provider) => ({
         type: "provider" as const,
@@ -57,8 +59,10 @@ export function providerOptions(list: { id: string; name: string }[]): ProviderO
         providerID: provider.id,
         description: {
           opencode: "(Hosted coding models)",
-          anthropic: "(API key)",
+          anthropic: "(API key or Claude Code subscription)",
           openai: "(ChatGPT Plus/Pro or API key)",
+          "cursor-agent": "(Native Cursor CLI; installs and opens browser login)",
+          "antigravity-cli": "(AGY CLI; installs and uses Google Sign-In)",
           elevenlabs: "(Voice, TTS, and music API key)",
           "opencode-go": "Low-cost hosted subscription",
         }[provider.id],
@@ -169,6 +173,7 @@ export function createDialogProviderOptions() {
             }
             if (index == null) return
             const method = methods[index]
+            const modelProviderID = method.provider ?? providerID
             if (method.type === "oauth") {
               let inputs: Record<string, string> | undefined
               if (method.prompts?.length) {
@@ -195,12 +200,24 @@ export function createDialogProviderOptions() {
               }
               if (result.data?.method === "code") {
                 dialog.replace(() => (
-                  <CodeMethod providerID={providerID} title={method.label} index={index} authorization={result.data!} />
+                  <CodeMethod
+                    providerID={providerID}
+                    modelProviderID={modelProviderID}
+                    title={method.label}
+                    index={index}
+                    authorization={result.data!}
+                  />
                 ))
               }
               if (result.data?.method === "auto") {
                 dialog.replace(() => (
-                  <AutoMethod providerID={providerID} title={method.label} index={index} authorization={result.data!} />
+                  <AutoMethod
+                    providerID={providerID}
+                    modelProviderID={modelProviderID}
+                    title={method.label}
+                    index={index}
+                    authorization={result.data!}
+                  />
                 ))
               }
             }
@@ -231,6 +248,7 @@ export function DialogProvider() {
 interface AutoMethodProps {
   index: number
   providerID: string
+  modelProviderID: string
   title: string
   authorization: ProviderAuthAuthorization
 }
@@ -269,7 +287,7 @@ function AutoMethod(props: AutoMethodProps) {
     }
     await sdk.client.instance.dispose()
     await sync.bootstrap()
-    dialog.replace(() => <DialogModel providerID={props.providerID} />)
+    dialog.replace(() => <DialogModel providerID={props.modelProviderID} />)
   })
 
   return (
@@ -298,6 +316,7 @@ interface CodeMethodProps {
   index: number
   title: string
   providerID: string
+  modelProviderID: string
   authorization: ProviderAuthAuthorization
 }
 function CodeMethod(props: CodeMethodProps) {
@@ -320,7 +339,7 @@ function CodeMethod(props: CodeMethodProps) {
         if (!error) {
           await sdk.client.instance.dispose()
           await sync.bootstrap()
-          dialog.replace(() => <DialogModel providerID={props.providerID} />)
+          dialog.replace(() => <DialogModel providerID={props.modelProviderID} />)
           return
         }
         setError(true)

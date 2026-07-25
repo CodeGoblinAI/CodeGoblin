@@ -439,7 +439,7 @@ it.instance("merges keybind overrides across precedence layers", () =>
   ),
 )
 
-it.instance("ignores unknown keybind names without dropping valid overrides from the same file", () =>
+it.instance("ignores unknown and retired keybind names without dropping valid overrides from the same file", () =>
   withCleanState(
     Effect.gen(function* () {
       const fs = yield* AppFileSystem.Service
@@ -448,12 +448,14 @@ it.instance("ignores unknown keybind names without dropping valid overrides from
         keybinds: {
           session_delete: "ctrl+d",
           not_a_real_keybind: "ctrl+q",
+          variant_list: "alt+v",
         },
       })
 
       const config = yield* getTuiConfig(test.directory)
       expect(config.keybinds.get("session.delete")?.[0]?.key).toBe("ctrl+d")
       expect(config.keybinds.get("not_a_real_keybind")).toEqual([])
+      expect(config.keybinds.get("variant.list")).toEqual([])
     }),
   ),
 )
@@ -511,6 +513,7 @@ it.instance("keeps Ctrl+G dedicated to the action palette in sessions", () =>
 
       expect(config.keybinds.get("command.palette.show").map((binding) => binding.key)).toContain("ctrl+g")
       expect(config.keybinds.get("session.first").map((binding) => binding.key)).toEqual(["ctrl+home"])
+      expect(config.keybinds.get("variant.cycle").map((binding) => binding.key)).toEqual(["ctrl+t"])
     }),
   ),
 )

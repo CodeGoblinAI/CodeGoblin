@@ -40,6 +40,7 @@ const Prompt = Schema.Union([TextPrompt, SelectPrompt])
 export class Method extends Schema.Class<Method>("ProviderAuthMethod")({
   type: Schema.Literals(["oauth", "api"]),
   label: Schema.String,
+  provider: optionalOmitUndefined(Schema.String),
   prompts: optionalOmitUndefined(Schema.Array(Prompt)),
 }) {}
 
@@ -134,6 +135,7 @@ export const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> =
           item.methods.map((method) => ({
             type: method.type,
             label: method.label,
+            ...(method.provider && { provider: method.provider }),
             ...(method.prompts && {
               prompts: method.prompts.map((prompt) => {
                 if (prompt.type === "select") {
@@ -175,7 +177,10 @@ export const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> =
         }
       }
 
-      const result = yield* Effect.promise(() => method.authorize(input.inputs))
+      const result = yield* Effect.tryPromise({
+        try: () => method.authorize(input.inputs),
+        catch: (error) => new ValidationFailed({ field: "provider", message: errorMessage(error) }),
+      })
       pending.set(input.providerID, result)
       return {
         url: result.url,
@@ -192,13 +197,18 @@ export const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> =
         return yield* new OauthCodeMissing({ providerID: input.providerID })
       }
 
-      const result = yield* Effect.promise(() =>
-        match.method === "code" ? match.callback(input.code!) : match.callback(),
-      )
-      if (!result || result.type !== "success") return yield* new OauthCallbackFailed({})
+      const result = yield* Effect.tryPromise({
+        try: () => (match.method === "code" ? match.callback(input.code!) : match.callback()),
+        catch: (error) => new ValidationFailed({ field: "provider", message: errorMessage(error) }),
+      })
+      if (!result || result.type !== "success") {
+        if (result?.message) return yield* new ValidationFailed({ field: "provider", message: result.message })
+        return yield* new OauthCallbackFailed({})
+      }
 
+      const providerID = ProviderID.make(result.provider ?? input.providerID)
       if ("key" in result) {
-        yield* auth.set(input.providerID, {
+        yield* auth.set(providerID, {
           type: "api",
           key: result.key,
           ...(result.metadata ? { metadata: result.metadata } : {}),
@@ -207,7 +217,7 @@ export const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> =
 
       if ("refresh" in result) {
         const { type: _, provider: __, refresh, access, expires, ...extra } = result
-        yield* auth.set(input.providerID, {
+        yield* auth.set(providerID, {
           type: "oauth",
           access,
           refresh,
@@ -224,5 +234,11 @@ export const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> =
 export const defaultLayer = Layer.suspend(() =>
   layer.pipe(Layer.provide(Auth.defaultLayer), Layer.provide(Plugin.defaultLayer)),
 )
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error) return error
+  return "Provider authentication failed"
+}
 
 export * as ProviderAuth from "./auth"

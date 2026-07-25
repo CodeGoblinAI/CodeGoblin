@@ -1,9 +1,15 @@
 /**
- * Subscription-account usage windows (Claude Pro/Max, ChatGPT/Codex, …),
- * captured opportunistically from provider response headers by the OAuth
- * plugin fetch wrappers. Consumed by `GET /codegoblin/provider-usage` for the
- * status widget's usage strip; a richer provider-usage feature can replace
- * this store later without changing the wire shape.
+ * Subscription-account usage windows (ChatGPT/Codex, …), captured
+ * opportunistically from provider response headers by the OAuth plugin fetch
+ * wrappers. Consumed by `GET /codegoblin/provider-usage` for the status
+ * widget's usage strip; a richer provider-usage feature can replace this
+ * store later without changing the wire shape.
+ *
+ * Only Codex feeds this today: Claude access now runs through the Claude Code
+ * CLI bridge (`provider/cli-agent.ts`) rather than an OAuth fetch wrapper, so
+ * there are no HTTP response headers to read. `captureAnthropicUsageHeaders`
+ * is kept for whenever a direct Anthropic request path exists again; wiring
+ * Claude usage today means asking the CLI, not parsing headers.
  */
 
 export type ProviderUsageSegment = {

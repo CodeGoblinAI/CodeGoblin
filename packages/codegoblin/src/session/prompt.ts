@@ -265,6 +265,24 @@ export const layer = Layer.effect(
       if (!firstUser || firstUser.info.role !== "user") return
       const firstInfo = firstUser.info
 
+      if (["claude-code", "cursor-agent", "antigravity-cli"].includes(input.providerID)) {
+        const text = firstUser.parts
+          .flatMap((part) => (part.type === "text" ? [part.text] : []))
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim()
+        if (!text) return
+        const title = text.length > 100 ? text.substring(0, 97) + "..." : text
+        yield* sessions
+          .setTitle({ sessionID: input.session.id, title })
+          .pipe(
+            Effect.catchCause((cause) =>
+              elog.error("failed to set local CLI session title", { error: Cause.squash(cause) }),
+            ),
+          )
+        return
+      }
+
       const subtasks = firstUser.parts.filter((p): p is MessageV2.SubtaskPart => p.type === "subtask")
       const onlySubtasks = subtasks.length > 0 && firstUser.parts.every((p) => p.type === "subtask")
 
