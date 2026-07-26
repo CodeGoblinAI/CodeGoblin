@@ -1,16 +1,27 @@
 /**
- * Subscription-account usage windows (ChatGPT/Codex, …), captured
- * opportunistically from provider response headers by the OAuth plugin fetch
- * wrappers. Consumed by `GET /codegoblin/provider-usage` for the status
- * widget's usage strip; a richer provider-usage feature can replace this
- * store later without changing the wire shape.
+ * Subscription-account usage windows, surfaced by `GET /codegoblin/provider-usage`
+ * for the status widget's usage strip. Two sources feed it:
  *
- * Only Codex feeds this today: Claude access now runs through the Claude Code
- * CLI bridge (`provider/cli-agent.ts`) rather than an OAuth fetch wrapper, so
- * there are no HTTP response headers to read. `captureAnthropicUsageHeaders`
- * is kept for whenever a direct Anthropic request path exists again; wiring
- * Claude usage today means asking the CLI, not parsing headers.
+ * - **HTTP headers** (Codex/ChatGPT): the OAuth plugin fetch wrappers call
+ *   `captureCodexUsageHeaders` opportunistically, into the in-memory store below.
+ * - **CLI quota** (Claude Code): access runs through the CLI bridge, which has
+ *   no HTTP response headers, so `provider/cli-agent.ts` asks the CLI itself
+ *   (`claude --print /usage`) after a turn and persists the result. We read
+ *   that file rather than duplicating the polling.
+ *
+ * `captureAnthropicUsageHeaders` is kept for whenever a direct Anthropic
+ * request path exists again; it is unused while Claude goes through the CLI.
+ *
+ * CONSOLIDATION: a shared usage model is in flight (`@codegoblin/core/usage`
+ * plus a richer `GET /codegoblin/usage` snapshot for the web/TUI usage
+ * dialogs). This module is deliberately narrow — the flat, already-formatted
+ * segments the status widget's one-line header needs. When that shared model
+ * lands, this should become a projection of it rather than a second source:
+ * keep `compactReset`/ordering (presentation) and drop the duplicate quota
+ * read below in favour of the shared snapshot.
  */
+
+import { readCliAgentUsage, type CliAgentQuota } from "@/provider/cli-agent"
 
 export type ProviderUsageSegment = {
   /** Short window label, e.g. "5h", "7d", or the provider name. */
@@ -47,6 +58,99 @@ export function getProviderUsage(): ProviderUsageSegment[] {
     out.push(...value.segments)
   }
   return out
+}
+
+/** Display names for the CLI-bridged providers; the raw ids are too long for
+ * the widget's one-line header. */
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+
+/** Quota windows run from a few hours to a week; allow some slack past that. */
+const PLAUSIBLE_WINDOW_MS = 10 * 24 * 60 * 60 * 1000
+
+const CLI_PROVIDER_LABEL: Record<string, string> = {
+  "claude-code": "claude",
+  "cursor-agent": "cursor",
+  "antigravity-cli": "antigravity",
+}
+
+/**
+ * The CLI reports absolute reset times with a timezone suffix
+ * ("Jul 24, 7:40pm (America/New_York)"), which is far too wide for the
+ * widget's single-line header — three of those overflow the panel. Turn them
+ * into the same compact countdown the header-based providers already use
+ * ("4h20m"), falling back to just the clock time if the date won't parse.
+ */
+export function compactReset(value: string | undefined, now: Date = new Date()): string | undefined {
+  if (!value) return undefined
+  const trimmed = value.replace(/\s*\([^)]*\)\s*$/, "").trim()
+  if (!trimmed) return undefined
+
+  // Parse the components directly; Date.parse is too loose about formats like
+  // "Jul 24, 7:40pm" and silently disagrees across runtimes.
+  const match = /^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i.exec(trimmed)
+  if (match) {
+    const month = MONTHS.indexOf(match[1].slice(0, 3).toLowerCase())
+    const day = Number(match[2])
+    const minute = Number(match[4] ?? 0)
+    const meridiem = match[5].toLowerCase()
+    let hour = Number(match[3]) % 12
+    if (meridiem === "pm") hour += 12
+    if (month >= 0) {
+      const at = new Date(now.getFullYear(), month, day, hour, minute)
+      // Only a date far in the past is a year boundary (seeing "Jan 2" in
+      // December); a recently-passed one just means the quota file is stale.
+      if (at.getTime() - now.getTime() < -PLAUSIBLE_WINDOW_MS) at.setFullYear(now.getFullYear() + 1)
+      const delta = at.getTime() - now.getTime()
+      // These windows are hours-to-a-week wide. Anything already elapsed, or
+      // implausibly far out, means we are reading stale data — say nothing
+      // rather than invent a countdown.
+      if (delta > 0 && delta <= PLAUSIBLE_WINDOW_MS) {
+        const mins = Math.round(delta / 60_000)
+        if (mins < 60) return `${mins}m`
+        const hours = Math.floor(mins / 60)
+        if (hours < 24) return mins % 60 ? `${hours}h${mins % 60}m` : `${hours}h`
+        const days = Math.floor(hours / 24)
+        return hours % 24 ? `${days}d${hours % 24}h` : `${days}d`
+      }
+      return undefined
+    }
+  }
+  // Unparseable (or already elapsed): keep just the clock time if there is one.
+  return /\d{1,2}(:\d{2})?\s*(am|pm)/i.exec(trimmed)?.[0]?.replace(/\s+/g, "") ?? trimmed
+}
+
+/**
+ * Every known usage window: header-captured providers plus whatever the CLI
+ * bridge last recorded. Shortest windows first so a truncated strip still
+ * shows the limit you are most likely to hit (the 5-hour one).
+ *
+ * `quotas` is injectable for tests; by default it reads what the CLI bridge
+ * persisted after its last turn.
+ */
+export async function getAllProviderUsage(
+  quotas?: CliAgentQuota[] | (() => Promise<CliAgentQuota[]>),
+): Promise<ProviderUsageSegment[]> {
+  const segments = getProviderUsage()
+  const source = typeof quotas === "function" ? quotas : quotas ? async () => quotas : readCliAgentUsage
+  const resolved = await Promise.resolve(source()).catch(() => [] as CliAgentQuota[])
+  for (const quota of resolved) {
+    for (const window of quota?.windows ?? []) {
+      if (typeof window?.usedPercentage !== "number" || !Number.isFinite(window.usedPercentage)) continue
+      const reset = compactReset(window.resetsAt)
+      // A window whose reset time has already passed has rolled over, so the
+      // recorded percentage no longer describes it — drop it instead of
+      // reporting a number we know is wrong. It returns on the next CLI turn.
+      if (window.resetsAt && !reset) continue
+      segments.push({
+        label: window.label,
+        pct: Math.max(0, Math.min(100, window.usedPercentage)),
+        ...(reset && { reset }),
+        provider: CLI_PROVIDER_LABEL[quota.providerID] ?? quota.providerID,
+      })
+    }
+  }
+  const rank = (label: string) => (/^\d+\s*h/i.test(label) ? 0 : 1)
+  return segments.sort((a, b) => rank(a.label) - rank(b.label))
 }
 
 function fmtReset(seconds: number): string {
