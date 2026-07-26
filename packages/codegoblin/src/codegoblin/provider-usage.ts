@@ -11,6 +11,14 @@
  *
  * `captureAnthropicUsageHeaders` is kept for whenever a direct Anthropic
  * request path exists again; it is unused while Claude goes through the CLI.
+ *
+ * CONSOLIDATION: a shared usage model is in flight (`@codegoblin/core/usage`
+ * plus a richer `GET /codegoblin/usage` snapshot for the web/TUI usage
+ * dialogs). This module is deliberately narrow — the flat, already-formatted
+ * segments the status widget's one-line header needs. When that shared model
+ * lands, this should become a projection of it rather than a second source:
+ * keep `compactReset`/ordering (presentation) and drop the duplicate quota
+ * read below in favour of the shared snapshot.
  */
 
 import { readCliAgentUsage, type CliAgentQuota } from "@/provider/cli-agent"
