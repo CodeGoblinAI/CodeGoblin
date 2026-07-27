@@ -1,6 +1,7 @@
 import { NamedError } from "@codegoblin/core/util/error"
 import { errorFormat } from "@/util/error"
 import { isRecord } from "@/util/record"
+import { modelNotFoundMessage } from "@/provider/model-error"
 
 type ConfigIssue = { message: string; path: string[] }
 
@@ -62,10 +63,13 @@ export function FormatError(input: unknown): string | undefined {
       ? providerModelNotFound.suggestions.filter((x) => typeof x === "string")
       : []
     return [
-      `Model not found: ${stringField(providerModelNotFound, "providerID")}/${stringField(providerModelNotFound, "modelID")}`,
-      ...(suggestions.length ? ["Did you mean: " + suggestions.join(", ")] : []),
+      modelNotFoundMessage({
+        providerID: stringField(providerModelNotFound, "providerID") ?? "",
+        modelID: stringField(providerModelNotFound, "modelID") ?? "",
+        suggestions,
+      }),
       `Try: \`codegoblin models\` to list available models`,
-      `Or check your CodeGoblin config (opencode.json) provider/model names`,
+      `Or check your CodeGoblin config (codegoblin.json) provider/model names`,
     ].join("\n")
   }
 

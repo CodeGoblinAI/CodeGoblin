@@ -705,12 +705,12 @@ export const layer = Layer.effect(
       if (Exit.isSuccess(exit)) return exit.value
       const err = Cause.squash(exit.cause)
       if (Provider.ModelNotFoundError.isInstance(err)) {
-        const hint = err.suggestions?.length ? ` Did you mean: ${err.suggestions.join(", ")}?` : ""
+        // Use the error's own message rather than rebuilding it here: it already
+        // appends the suggestions, and it explains the local-runtime case that a
+        // bare "not found" leaves the user guessing about.
         yield* bus.publish(Session.Event.Error, {
           sessionID,
-          error: new NamedError.Unknown({
-            message: `Model not found: ${err.providerID}/${err.modelID}.${hint}`,
-          }).toObject(),
+          error: new NamedError.Unknown({ message: err.message }).toObject(),
         })
       }
       return yield* Effect.die(err)
