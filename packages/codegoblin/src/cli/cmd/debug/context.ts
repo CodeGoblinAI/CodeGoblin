@@ -10,6 +10,8 @@ import { Permission } from "@/permission"
 import { Instruction } from "@/session/instruction"
 import { SystemPrompt } from "@/session/system"
 import { ContextReport } from "@/session/context-report"
+import { buildMemoryContextRanked } from "@/codegoblin/memory-context"
+import { Token } from "@/util/token"
 import { ModelID } from "@/provider/schema"
 import { InstanceRef } from "@/effect/instance-ref"
 import { effectCmd, fail } from "../../effect-cmd"
@@ -39,6 +41,11 @@ export const ContextCommand = effectCmd({
         type: "boolean",
         default: false,
         description: "Emit the raw report as JSON",
+      })
+      .option("prompt", {
+        type: "string",
+        default: "hi",
+        description: "Message to model a first turn with (memory is ranked against it)",
       }),
   handler: Effect.fn("Cli.debug.context")(function* (args) {
     const ctx = yield* InstanceRef
@@ -118,8 +125,22 @@ export const ContextCommand = effectCmd({
 
     const report = ContextReport.buildContextReport({ system: blocks, tools })
 
+    // Everything above is the cacheable prefix. These ride the user message
+    // instead, so they do not poison the prefix — but they are still real tokens
+    // on turn one, which is the number people actually notice when a bare "hi"
+    // costs more than they expect.
+    const memory = yield* Effect.promise(() =>
+      buildMemoryContextRanked({ projectID: ctx.project.id, query: args.prompt }),
+    )
+    const turn: Array<{ label: string; tokens: number }> = [
+      { label: "turn context (date)", tokens: Token.estimate(SystemPrompt.turnText()) },
+      ...(memory ? [{ label: "memory recall", tokens: Token.estimate(memory) }] : []),
+      { label: "user message", tokens: Token.estimate(args.prompt) },
+    ]
+    const turnTotal = turn.reduce((sum, item) => sum + item.tokens, 0)
+
     if (args.json) {
-      process.stdout.write(JSON.stringify(report, null, 2) + EOL)
+      process.stdout.write(JSON.stringify({ ...report, turn, firstTurn: report.totals.baseline + turnTotal }, null, 2) + EOL)
       return
     }
 
@@ -132,6 +153,16 @@ export const ContextCommand = effectCmd({
         `tools:  ${Object.keys(tools).length} builtin schemas sent (${disabled.size} disabled)`,
         "",
         ContextReport.format(report, { tools: args.tools }),
+        "",
+        `first turn (prompt: ${JSON.stringify(args.prompt)})`,
+        "  " + "-".repeat(58),
+        ...turn.map(
+          (item) => "  " + item.label.padEnd(45) + item.tokens.toLocaleString("en-US").padStart(9),
+        ),
+        "  " + "cacheable prefix + tools".padEnd(45) + report.totals.baseline.toLocaleString("en-US").padStart(9),
+        "  " +
+          "TOTAL sent for this first message".padEnd(45) +
+          (report.totals.baseline + turnTotal).toLocaleString("en-US").padStart(9),
         "",
         "Note: MCP tool schemas are deferred behind mcp_tool_search and are not",
         "counted here until the model loads them.",
