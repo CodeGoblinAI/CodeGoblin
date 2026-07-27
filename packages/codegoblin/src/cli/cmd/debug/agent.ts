@@ -194,7 +194,10 @@ const createToolContext = Effect.fn("Cli.debug.agent.createToolContext")(functio
     metadata: () => Effect.void,
     ask(req: Omit<Permission.Request, "id" | "sessionID" | "tool">) {
       return Effect.sync(() => {
-        for (const pattern of req.patterns) {
+        // denyOnly carries patterns that never prompt but must still be blocked
+        // by an explicit deny rule. Checking only `patterns` made this harness
+        // disagree with the real Permission.ask.
+        for (const pattern of [...(req.denyOnly ?? []), ...req.patterns]) {
           const rule = Permission.evaluate(req.permission, pattern, ruleset)
           if (rule.action === "deny") {
             throw new Permission.DeniedError({ ruleset })
