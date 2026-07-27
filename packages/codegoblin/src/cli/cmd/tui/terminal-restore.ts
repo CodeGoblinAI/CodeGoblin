@@ -11,10 +11,22 @@ import fs from "fs"
  * coordinates, with no way back short of `reset`.
  *
  * Hooks only the paths the app does not already own. `exit` covers normal
- * termination and explicit process.exit; SIGTERM otherwise bypasses `exit`
- * entirely. SIGINT and SIGHUP are deliberately left alone — the TUI handles
- * ctrl+c itself (`exitOnCtrlC: false`) and context/exit.tsx owns SIGHUP, so
- * hooking them here would fight the existing handlers.
+ * termination, explicit process.exit and uncaught exceptions; SIGTERM otherwise
+ * bypasses `exit` entirely. SIGINT and SIGHUP are deliberately left alone — the
+ * TUI handles ctrl+c itself (`exitOnCtrlC: false`) and context/exit.tsx owns
+ * SIGHUP, so hooking them here would fight the existing handlers.
+ *
+ * Two limits, both measured through a real ConPTY rather than assumed:
+ *
+ * - A hard kill (TerminateProcess, i.e. `taskkill /F`) runs no handlers at all
+ *   on Windows, so nothing here can save that case. The SIGTERM hook is the
+ *   Unix path, where the signal is deliverable and the handler does run.
+ * - ConPTY owns mouse mode on Windows and consumes the ?1000/?1002/?1003/?1006
+ *   disables instead of forwarding them, restoring mouse state itself on exit.
+ *   They are still written for Unix, where they reach the terminal directly.
+ *   What demonstrably gets through on Windows is the kitty keyboard pop, the
+ *   alt-screen exit, bracketed paste off and the cursor — which are the modes
+ *   that actually strand a user today.
  */
 
 // Order matters: leave the alternate screen last so the restored primary
