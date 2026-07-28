@@ -3,6 +3,8 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { augmentLocalRuntimeModels } from "@/codegoblin/provider"
+import { Provider } from "@/provider/provider"
+import { ModelID, ProviderID } from "@/provider/schema"
 
 describe("augmentLocalRuntimeModels", () => {
   let dir: string
@@ -40,5 +42,36 @@ describe("augmentLocalRuntimeModels", () => {
     const empty: any = {}
     await augmentLocalRuntimeModels(empty, empty)
     expect(empty).toEqual({})
+  })
+})
+
+describe("ModelNotFoundError message", () => {
+  test("explains local runtime setup for codegoblin models", () => {
+    const error = new Provider.ModelNotFoundError({
+      providerID: ProviderID.make("codegoblin"),
+      modelID: ModelID.make("qwen3-0.6b"),
+    })
+    // pi #6922: a local default with no runtime installed showed nothing but an
+    // empty picker. The error now names the commands that fix it.
+    expect(error.message).toContain("codegoblin/qwen3-0.6b is not installed")
+    expect(error.message).toContain("codegoblin runtime list")
+    expect(error.message).toContain("codegoblin runtime pull")
+  })
+
+  test("keeps the generic message for cloud providers", () => {
+    const error = new Provider.ModelNotFoundError({
+      providerID: ProviderID.make("anthropic"),
+      modelID: ModelID.make("claude-nope"),
+    })
+    expect(error.message).toBe("Model anthropic/claude-nope not found.")
+  })
+
+  test("includes suggestions when present", () => {
+    const error = new Provider.ModelNotFoundError({
+      providerID: ProviderID.make("anthropic"),
+      modelID: ModelID.make("claude-nope"),
+      suggestions: ["claude-opus-5", "claude-sonnet-5"],
+    })
+    expect(error.message).toContain("Did you mean: claude-opus-5, claude-sonnet-5?")
   })
 })

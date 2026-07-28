@@ -1,6 +1,9 @@
 import { ModelID, ProviderID } from "@/provider/schema"
 import type { Info, Model } from "@/provider/provider"
 import { listInstalledModels, readRuntimeState, resolveRuntimeCtx } from "./local-runtime"
+import * as Log from "@codegoblin/core/util/log"
+
+const log = Log.create({ service: "codegoblin.provider" })
 
 export const CodeGoblinProvider = {
   id: ProviderID.make("codegoblin"),
@@ -211,10 +214,19 @@ export async function augmentLocalRuntimeModels(
   let installed: Awaited<ReturnType<typeof listInstalledModels>>
   try {
     installed = await listInstalledModels()
-  } catch {
+  } catch (error) {
+    // Best-effort by design, but a bare return left no breadcrumb at all: an
+    // unreadable runtime directory looked identical to having no models, and the
+    // picker just came up empty.
+    log.warn("local runtime model discovery failed", {
+      error: error instanceof Error ? error.message : String(error),
+    })
     return
   }
-  if (installed.length === 0) return
+  if (installed.length === 0) {
+    log.info("no local runtime models installed", {})
+    return
+  }
   const baseURL = process.env.CODEGOBLIN_GATEWAY_URL || CodeGoblinProvider.baseURL
   // Advertise the SAME context the runtime was actually started with (persisted in runtime.json),
   // so the agent's compaction (session/overflow.ts) trims before llama-server hard-rejects.
