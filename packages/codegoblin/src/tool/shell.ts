@@ -63,6 +63,53 @@ const CMD_FILES = new Set([
   "rmdir",
   "type",
 ])
+// Interpreters that take a program to run as an argument rather than a file.
+// Approving one of these must never widen into approving the interpreter itself:
+// `python3 -c 'print(1)'` and `python3 -c 'print(open(key).read())'` share every
+// token that an arity prefix would keep.
+const INLINE_CODE_RUNNERS = new Set([
+  "ash",
+  "bash",
+  "bun",
+  "dash",
+  "deno",
+  "node",
+  "osascript",
+  "perl",
+  "php",
+  "powershell",
+  "powershell.exe",
+  "pwsh",
+  "py",
+  "python",
+  "python2",
+  "python3",
+  "ruby",
+  "sh",
+  "zsh",
+])
+const INLINE_CODE_FLAGS = new Set([
+  "-c",
+  "-e",
+  "-E",
+  "-p",
+  "-r",
+  "--eval",
+  "--print",
+  "-command",
+  "-encodedcommand",
+])
+
+export function inlineCode(tokens: string[]) {
+  const runner = tokens[0]
+  if (!runner) return false
+  // Strip any directory and a Windows extension so an absolute path to the
+  // interpreter is treated the same as a bare name.
+  const name = runner.replace(/\\/g, "/").split("/").pop()?.toLowerCase() ?? ""
+  if (!INLINE_CODE_RUNNERS.has(name) && !INLINE_CODE_RUNNERS.has(name.replace(/\.exe$/, ""))) return false
+  return tokens.slice(1).some((token) => INLINE_CODE_FLAGS.has(token.toLowerCase()))
+}
+
 const FLAGS = new Set(["-destination", "-literalpath", "-path"])
 const SWITCHES = new Set(["-confirm", "-debug", "-force", "-nonewline", "-recurse", "-verbose", "-whatif"])
 
@@ -75,6 +122,7 @@ type Scan = {
   dirs: Set<string>
   patterns: Set<string>
   always: Set<string>
+  denyOnly: Set<string>
 }
 
 type Chunk = {
@@ -277,11 +325,12 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan)
     })
   }
 
-  if (scan.patterns.size === 0) return
+  if (scan.patterns.size === 0 && scan.denyOnly.size === 0) return
   yield* ctx.ask({
     permission: ShellID.ToolID,
     patterns: Array.from(scan.patterns),
     always: Array.from(scan.always),
+    denyOnly: Array.from(scan.denyOnly),
     metadata: {},
   })
 })
@@ -382,6 +431,7 @@ export const ShellTool = Tool.define(
         dirs: new Set<string>(),
         patterns: new Set<string>(),
         always: new Set<string>(),
+        denyOnly: new Set<string>(),
       }
       const shellKind = ShellID.toKind(Shell.name(shell))
 
@@ -400,10 +450,22 @@ export const ShellTool = Tool.define(
           }
         }
 
-        if (tokens.length && (!cmd || !CWD.has(cmd))) {
-          scan.patterns.add(source(node))
-          scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
+        if (!tokens.length) continue
+
+        // Directory changes aren't worth a prompt, but they still have to be
+        // evaluated so an explicit deny rule can block them. Skipping the scan
+        // entirely (as we used to) made them unblockable.
+        if (cmd && CWD.has(cmd)) {
+          scan.denyOnly.add(source(node))
+          continue
         }
+
+        scan.patterns.add(source(node))
+        // An interpreter invoked with inline code carries its whole payload in
+        // the argument, so the arity prefix ("python *") would turn one approval
+        // into blanket permission to run any script. Pin those to the exact
+        // command instead.
+        scan.always.add(inlineCode(tokens) ? source(node) : BashArity.prefix(tokens).join(" ") + " *")
       }
 
       return scan

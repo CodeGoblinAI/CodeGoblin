@@ -40,6 +40,14 @@ export const Request = Schema.Struct({
   patterns: Schema.Array(Schema.String),
   metadata: Schema.Record(Schema.String, Schema.Unknown),
   always: Schema.Array(Schema.String),
+  /**
+   * Patterns evaluated for `deny` only: a matching deny rule blocks the call,
+   * but an unmatched pattern never raises a prompt. Used for commands we don't
+   * consider worth interrupting the user over (directory changes) while still
+   * honouring an explicit rule like `{"bash": {"*": "deny"}}` — previously
+   * those commands skipped rule evaluation entirely and were unblockable.
+   */
+  denyOnly: Schema.optional(Schema.Array(Schema.String)),
   tool: Schema.optional(
     Schema.Struct({
       messageID: MessageID,
@@ -49,7 +57,12 @@ export const Request = Schema.Struct({
 }).annotate({ identifier: "PermissionRequest" })
 export type Request = Schema.Schema.Type<typeof Request>
 
-export const Reply = Schema.Literals(["once", "always", "reject"])
+/**
+ * `always`/`never` are the two sticky answers: they persist a rule for the
+ * request's `always` patterns. Without `never` the only durable choice is the
+ * permissive one, which is what pushes people into blanket-approving things.
+ */
+export const Reply = Schema.Literals(["once", "always", "reject", "never"])
 export type Reply = Schema.Schema.Type<typeof Reply>
 
 const reply = {
@@ -173,6 +186,15 @@ export const layer = Layer.effect(
       const { ruleset, ...request } = input
       let needsAsk = false
 
+      for (const pattern of request.denyOnly ?? []) {
+        const rule = evaluate(request.permission, pattern, ruleset, approved)
+        log.info("evaluated deny-only", { permission: request.permission, pattern, action: rule })
+        if (rule.action !== "deny") continue
+        return yield* new DeniedError({
+          ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
+        })
+      }
+
       for (const pattern of request.patterns) {
         const rule = evaluate(request.permission, pattern, ruleset, approved)
         log.info("evaluated", { permission: request.permission, pattern, action: rule })
@@ -221,6 +243,39 @@ export const layer = Layer.effect(
         requestID: existing.info.id,
         reply: input.reply,
       })
+
+      // `never` is the mirror of `always`, not of `reject`: it persists a deny
+      // rule and then settles anything already waiting that the new rule covers.
+      // Unrelated pending requests are deliberately left alone — refusing one
+      // pattern is not a reason to abandon a concurrent, unrelated tool call
+      // (which is what falling through to `reject`'s cascade would do).
+      if (input.reply === "never") {
+        for (const pattern of existing.info.always) {
+          approved.push({
+            permission: existing.info.permission,
+            pattern,
+            action: "deny",
+          })
+        }
+
+        yield* Deferred.fail(existing.deferred, new RejectedError())
+
+        for (const [id, item] of pending.entries()) {
+          if (item.info.sessionID !== existing.info.sessionID) continue
+          const denied = item.info.patterns.some(
+            (pattern) => evaluate(item.info.permission, pattern, approved).action === "deny",
+          )
+          if (!denied) continue
+          pending.delete(id)
+          yield* bus.publish(Event.Replied, {
+            sessionID: item.info.sessionID,
+            requestID: item.info.id,
+            reply: "never",
+          })
+          yield* Deferred.fail(item.deferred, new RejectedError())
+        }
+        return
+      }
 
       if (input.reply === "reject") {
         yield* Deferred.fail(
