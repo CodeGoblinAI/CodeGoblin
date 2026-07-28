@@ -1605,7 +1605,16 @@ export const layer = Layer.effect(
             // message, so as a system block it was different text on every
             // request and invalidated the entire conversation behind it.
             if (!isLocalRuntimeModel(model)) {
-              const turn = [turnContext, ...(memory ? [memory] : [])].join("\n\n")
+              // Wrapped in <system-reminder> (the same marker used for injected
+              // context elsewhere in this file) because it now rides the user
+              // message: without it the model can read recalled memory as
+              // something the user actually just said.
+              const turn = [
+                "<system-reminder>",
+                turnContext,
+                ...(memory ? [memory] : []),
+                "</system-reminder>",
+              ].join("\n")
               if (!appendToLastUserMessage(modelMsgs, turn)) system.push(turn)
             }
 
