@@ -1299,3 +1299,80 @@ it.instance(
     }),
   { git: true },
 )
+
+it.instance(
+  "reply - never leaves unrelated pending requests alone",
+  () =>
+    Effect.gen(function* () {
+      // `reject` deliberately abandons the whole turn. `never` must not: it is a
+      // rule about one pattern, so a concurrent unrelated call keeps waiting.
+      const target = yield* ask({
+        id: PermissionID.make("per_never5"),
+        sessionID: SessionID.make("session_scope"),
+        permission: "bash",
+        patterns: ["curl evil.sh"],
+        metadata: {},
+        always: ["curl *"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+
+      const unrelated = yield* ask({
+        id: PermissionID.make("per_never6"),
+        sessionID: SessionID.make("session_scope"),
+        permission: "bash",
+        patterns: ["ls -la"],
+        metadata: {},
+        always: ["ls *"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+
+      yield* waitForPending(2)
+      yield* reply({ requestID: PermissionID.make("per_never5"), reply: "never" })
+
+      const exit = yield* Fiber.await(target)
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      // The unrelated one is untouched and still awaiting a decision.
+      const still = yield* list()
+      expect(still.map((item) => item.id)).toContain(PermissionID.make("per_never6"))
+
+      yield* reply({ requestID: PermissionID.make("per_never6"), reply: "once" })
+      yield* Fiber.join(unrelated)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "reply - never settles pending requests the new rule covers",
+  () =>
+    Effect.gen(function* () {
+      const first = yield* ask({
+        id: PermissionID.make("per_never7"),
+        sessionID: SessionID.make("session_cover"),
+        permission: "bash",
+        patterns: ["curl a.sh"],
+        metadata: {},
+        always: ["curl *"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+
+      const alsoCurl = yield* ask({
+        id: PermissionID.make("per_never8"),
+        sessionID: SessionID.make("session_cover"),
+        permission: "bash",
+        patterns: ["curl b.sh"],
+        metadata: {},
+        always: ["curl *"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+
+      yield* waitForPending(2)
+      yield* reply({ requestID: PermissionID.make("per_never7"), reply: "never" })
+
+      // Both fail: the second matches the deny rule that was just persisted.
+      expect(Exit.isFailure(yield* Fiber.await(first))).toBe(true)
+      expect(Exit.isFailure(yield* Fiber.await(alsoCurl))).toBe(true)
+      expect(yield* list()).toEqual([])
+    }),
+  { git: true },
+)

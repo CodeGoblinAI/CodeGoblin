@@ -244,6 +244,11 @@ export const layer = Layer.effect(
         reply: input.reply,
       })
 
+      // `never` is the mirror of `always`, not of `reject`: it persists a deny
+      // rule and then settles anything already waiting that the new rule covers.
+      // Unrelated pending requests are deliberately left alone — refusing one
+      // pattern is not a reason to abandon a concurrent, unrelated tool call
+      // (which is what falling through to `reject`'s cascade would do).
       if (input.reply === "never") {
         for (const pattern of existing.info.always) {
           approved.push({
@@ -252,9 +257,27 @@ export const layer = Layer.effect(
             action: "deny",
           })
         }
+
+        yield* Deferred.fail(existing.deferred, new RejectedError())
+
+        for (const [id, item] of pending.entries()) {
+          if (item.info.sessionID !== existing.info.sessionID) continue
+          const denied = item.info.patterns.some(
+            (pattern) => evaluate(item.info.permission, pattern, approved).action === "deny",
+          )
+          if (!denied) continue
+          pending.delete(id)
+          yield* bus.publish(Event.Replied, {
+            sessionID: item.info.sessionID,
+            requestID: item.info.id,
+            reply: "never",
+          })
+          yield* Deferred.fail(item.deferred, new RejectedError())
+        }
+        return
       }
 
-      if (input.reply === "reject" || input.reply === "never") {
+      if (input.reply === "reject") {
         yield* Deferred.fail(
           existing.deferred,
           input.message ? new CorrectedError({ feedback: input.message }) : new RejectedError(),
