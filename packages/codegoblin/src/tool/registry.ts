@@ -292,19 +292,19 @@ export const layer: Layer.Layer<
     const describeSkill = Effect.fn("ToolRegistry.describeSkill")(function* (agent: Agent.Info) {
       const list = yield* skill.available(agent)
       if (list.length === 0) return "No skills are currently available."
+      // Deliberately does NOT enumerate the skills. The system prompt already
+      // carries the full <available_skills> catalogue, and repeating every
+      // name+description here duplicated it in the cached prefix — together the
+      // two copies were the single largest line item in the baseline.
       return [
         "Load a specialized skill that provides domain-specific instructions and workflows.",
         "",
-        "When you recognize that a task matches one of the available skills listed below, use this tool to load the full skill instructions.",
+        "The available skills are listed in the <available_skills> block in your system prompt.",
+        "When a task matches one of them, call this tool with that skill's name to load its full instructions.",
         "",
         "The skill will inject detailed instructions, workflows, and access to bundled resources (scripts, references, templates) into the conversation context.",
         "",
         'Tool output includes a `<skill_content name="...">` block with the loaded content.',
-        "",
-        "The following skills provide specialized sets of instructions for particular tasks",
-        "Invoke this tool to load a skill when a task matches one of the available skills listed below:",
-        "",
-        Skill.fmt(list, { verbose: false }),
       ].join("\n")
     })
 

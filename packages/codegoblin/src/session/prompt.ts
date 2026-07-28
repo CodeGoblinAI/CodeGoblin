@@ -15,6 +15,8 @@ import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
 import { Bus } from "../bus"
 import { SystemPrompt } from "./system"
+import { ContextReport } from "./context-report"
+import { Flag } from "@codegoblin/core/flag/flag"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
@@ -79,6 +81,32 @@ IMPORTANT:
 - This tool provides your final answer - no further actions are taken after calling it`
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
+
+/**
+ * Appends per-turn context to the newest user message so it lands after the
+ * cacheable prefix instead of inside it. Returns false when there is no user
+ * message to attach to, in which case the caller keeps it in the system prompt.
+ */
+export function appendToLastUserMessage(msgs: { role: string; content: unknown }[], text: string) {
+  if (!text) return true
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const msg = msgs[i]
+    if (msg.role !== "user") continue
+    if (typeof msg.content === "string") {
+      msg.content = [
+        { type: "text", text: msg.content },
+        { type: "text", text },
+      ]
+      return true
+    }
+    if (Array.isArray(msg.content)) {
+      msg.content.push({ type: "text", text })
+      return true
+    }
+    return false
+  }
+  return false
+}
 
 // Lean CHAT system prompt for small local GGUF models. They run on-device with a tiny trained
 // context and are not agents, so the full coding-agent instructions/skills/environment do not fit
@@ -1537,27 +1565,64 @@ export const layer = Layer.effect(
               .join(" ")
               .slice(0, 500)
 
-            const [skills, env, instructions, memory, modelMsgs] = yield* Effect.all([
+            const [skills, env, instructions, memory, turnContext, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
               instruction.system().pipe(Effect.orDie),
               sys.memory({ sessionID, query: memoryQuery }),
+              sys.turn(),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
+
             // Local GGUF models run a lean chat prompt only (no coding-agent instructions/skills/env
             // dump, and NOT the memory recall — small models echo/confabulate from injected context,
             // tested on gemma-3n). Keeps them a clean chat assistant that fits a small context.
+            const blocks: ContextReport.SystemBlock[] = isLocalRuntimeModel(model)
+              ? [{ label: "local chat prompt", text: LOCAL_CHAT_SYSTEM_PROMPT, stability: "static" }]
+              : [
+                  {
+                    label: "base prompt",
+                    text: agent.prompt ?? SystemPrompt.provider(model).join("\n"),
+                    stability: "static",
+                  },
+                  ...instructions.map((text) => ({ label: "instructions", text, stability: "session" as const })),
+                  ...(skills ? [{ label: "skills", text: skills, stability: "session" as const }] : []),
+                  ...env.map((text) => ({ label: "env", text, stability: "session" as const })),
+                ]
+
             const system = isLocalRuntimeModel(model)
               ? [LOCAL_CHAT_SYSTEM_PROMPT]
-              : [...env, ...instructions, ...(skills ? [skills] : []), ...(memory ? [memory] : [])]
+              : [...instructions, ...(skills ? [skills] : []), ...env]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+
+            // Everything that changes per turn rides on the newest user message
+            // rather than the system prefix. The prefix (system + all prior
+            // messages) then stays byte-identical between turns, so the provider
+            // cache can actually serve it; only the fresh tail is uncached.
+            //
+            // Memory is the important one: it is ranked against the latest user
+            // message, so as a system block it was different text on every
+            // request and invalidated the entire conversation behind it.
+            if (!isLocalRuntimeModel(model)) {
+              // Wrapped in <system-reminder> (the same marker used for injected
+              // context elsewhere in this file) because it now rides the user
+              // message: without it the model can read recalled memory as
+              // something the user actually just said.
+              const turn = [
+                "<system-reminder>",
+                turnContext,
+                ...(memory ? [memory] : []),
+                "</system-reminder>",
+              ].join("\n")
+              if (!appendToLastUserMessage(modelMsgs, turn)) system.push(turn)
+            }
+
+            const report = ContextReport.buildContextReport({ system: blocks, tools })
             log.info("context policy", {
               sessionID,
               mode: isLocalRuntimeModel(model) ? "local-chat" : "agent",
-              systemChars:
-                system.reduce((total, item) => total + item.length, 0) +
-                (agent.prompt ?? SystemPrompt.provider(model).join("\n")).length,
+              ...ContextReport.summarize(report),
               conversationChars: JSON.stringify(modelMsgs).length,
               toolSchemaChars: resolved.schemaChars,
               toolsAvailable: resolved.available,
@@ -1565,6 +1630,9 @@ export const layer = Layer.effect(
               memory: Boolean(memory),
               instructions: instructions.length,
             })
+            if (Flag.CODEGOBLIN_CONTEXT_REPORT) {
+              yield* Effect.sync(() => process.stderr.write(ContextReport.format(report) + "\n\n"))
+            }
             const result = yield* handle.process({
               user: lastUser,
               agent,

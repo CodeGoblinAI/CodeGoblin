@@ -37,9 +37,54 @@ export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly memory: (input: { sessionID?: string; query?: string }) => Effect.Effect<string | undefined>
+  /**
+   * Content that changes every request — currently just the wall-clock date.
+   * Deliberately kept out of the system prompt: anything in the cached prefix
+   * that differs between turns invalidates the whole entry (the date alone used
+   * to drop the entire cache at midnight). Callers append this to the newest
+   * user message, where churn costs nothing.
+   */
+  readonly turn: () => Effect.Effect<string>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@codegoblin/SystemPrompt") {}
+
+/**
+ * Pure prompt builders, kept separate from the service so tooling that isn't
+ * wired for `SystemPrompt.Service` (the `debug context` diagnostic) can measure
+ * the exact same text the request path sends, instead of a copy that drifts.
+ */
+export function environmentText(input: {
+  model: Provider.Model
+  directory: string
+  worktree: string
+  git: boolean
+}) {
+  return [
+    `You are powered by the model named ${input.model.api.id}. The exact model ID is ${input.model.providerID}/${input.model.api.id}`,
+    `Here is some useful information about the environment you are running in:`,
+    `<env>`,
+    `  Working directory: ${input.directory}`,
+    `  Workspace root folder: ${input.worktree}`,
+    `  Is directory a git repo: ${input.git ? "yes" : "no"}`,
+    `  Platform: ${process.platform}`,
+    `</env>`,
+  ].join("\n")
+}
+
+export function skillsText(list: Skill.Info[]) {
+  return [
+    "Skills provide specialized instructions and workflows for specific tasks.",
+    "Use the skill tool to load a skill when a task matches its description.",
+    // the agents seem to ingest the information about skills a bit better if we present a more verbose
+    // version of them here and a less verbose version in tool description, rather than vice versa.
+    Skill.fmt(list, { verbose: true }),
+  ].join("\n")
+}
+
+export function turnText() {
+  return `<turn-context>\n  Today's date: ${new Date().toDateString()}\n</turn-context>`
+}
 
 export const layer = Layer.effect(
   Service,
@@ -50,32 +95,22 @@ export const layer = Layer.effect(
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
         const ctx = yield* InstanceState.context
         return [
-          [
-            `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
-            `Here is some useful information about the environment you are running in:`,
-            `<env>`,
-            `  Working directory: ${ctx.directory}`,
-            `  Workspace root folder: ${ctx.worktree}`,
-            `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
-            `  Platform: ${process.platform}`,
-            `  Today's date: ${new Date().toDateString()}`,
-            `</env>`,
-          ].join("\n"),
+          environmentText({
+            model,
+            directory: ctx.directory,
+            worktree: ctx.worktree,
+            git: ctx.project.vcs === "git",
+          }),
         ]
+      }),
+
+      turn: Effect.fn("SystemPrompt.turn")(function* () {
+        return turnText()
       }),
 
       skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info) {
         if (Permission.disabled(["skill"], agent.permission).has("skill")) return
-
-        const list = yield* skill.available(agent)
-
-        return [
-          "Skills provide specialized instructions and workflows for specific tasks.",
-          "Use the skill tool to load a skill when a task matches its description.",
-          // the agents seem to ingest the information about skills a bit better if we present a more verbose
-          // version of them here and a less verbose version in tool description, rather than vice versa.
-          Skill.fmt(list, { verbose: true }),
-        ].join("\n")
+        return skillsText(yield* skill.available(agent))
       }),
 
       memory: Effect.fn("SystemPrompt.memory")(function* (input: { sessionID?: string; query?: string }) {
