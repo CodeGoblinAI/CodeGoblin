@@ -112,6 +112,31 @@ const live: Layer.Layer<
         isWorkflow,
       })
 
+      if (input.model.providerID === "claude-code") {
+        const bridge = yield* EffectBridge.make()
+        prepared.params.options.requestWorkspaceTrust = bridge.bind(async (directory: string) => {
+          try {
+            await bridge.promise(
+              perm.ask({
+                sessionID: SessionID.make(input.sessionID),
+                permission: "workspace_trust",
+                patterns: [directory],
+                metadata: { directory, provider: "Claude Code" },
+                always: [directory],
+                ruleset: Permission.merge(input.agent.permission ?? [], input.permission ?? []),
+                // Claude only reaches this callback when its native CLI has
+                // presented a workspace-trust gate. General agent allow rules
+                // must not silently answer that separate security decision.
+                forceAsk: true,
+              }),
+            )
+            return true
+          } catch {
+            return false
+          }
+        })
+      }
+
       // Wire up toolExecutor for DWS workflow models so that tool calls
       // from the workflow service are executed via CodeGoblin's tool system
       // and results sent back over the WebSocket.

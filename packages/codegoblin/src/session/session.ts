@@ -256,16 +256,16 @@ export type CreateInput = Types.DeepMutable<Schema.Schema.Type<typeof CreateInpu
 
 export const ImportExternalInput = Schema.Struct({
   source: Schema.Literals(["claude-code", "codex", "antigravity", "cursor-agent"]),
-  title: Schema.String,
+  title: Schema.String.check(Schema.isMaxLength(500)),
   model: Schema.optional(Model),
   messages: Schema.Array(
     Schema.Struct({
       role: Schema.Literals(["user", "assistant"]),
-      text: Schema.String,
+      text: Schema.String.check(Schema.isMaxLength(256 * 1024)),
       time: Schema.optional(NonNegativeInt),
       model: Schema.optional(Model),
     }),
-  ),
+  ).check(Schema.isMaxLength(128)),
 })
 export type ImportExternalInput = Types.DeepMutable<Schema.Schema.Type<typeof ImportExternalInput>>
 
@@ -695,6 +695,10 @@ export const layer: Layer.Layer<
     })
 
     const importExternal = Effect.fn("Session.importExternal")(function* (input: ImportExternalInput) {
+      const total = input.messages.reduce((sum, message) => sum + message.text.length, 0)
+      if (total > 32 * 1024 * 1024) {
+        return yield* Effect.die(new Error("External session exceeds the 32 MB import limit."))
+      }
       const ctx = yield* InstanceState.context
       const imported = yield* create({ title: input.title, model: input.model })
       const continuationModel = input.model

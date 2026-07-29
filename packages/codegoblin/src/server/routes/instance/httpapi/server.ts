@@ -37,6 +37,7 @@ import { InstanceLayer } from "@/project/instance-layer"
 import { Plugin } from "@/plugin"
 import { Project } from "@/project/project"
 import { ProviderAuth } from "@/provider/auth"
+import { isCliAgentUsageRefreshing, startCliAgentUsageRefresh } from "@/provider/cli-agent"
 import { ModelsDev } from "@codegoblin/core/models-dev"
 import { Provider } from "@/provider/provider"
 import { Pty } from "@/pty"
@@ -338,15 +339,15 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
     yield* router.add("GET", "/codegoblin/usage", (request) =>
       Effect.gen(function* () {
         const route = yield* WorkspaceRouteContext
-        const auth = yield* ServerAuth.Config
         const url = new URL(request.url, "http://localhost")
         const sessionID = url.searchParams.get("sessionID") ?? undefined
         const balance = yield* Effect.promise(() =>
           CodeGoblinBalance.resolve({
             cwd: route.directory,
             includeLocalEnv: false,
-            refreshQuotas: url.searchParams.get("refresh") === "1" && ServerAuth.required(auth),
-          }).catch(() => ({ balances: [], quotas: [], errors: [] })),
+            timeoutMs: 1_000,
+            cacheLive: true,
+          }).catch(() => ({ balances: [], quotas: [], quotaStatuses: [], errors: [] })),
         )
         const snapshot = Session.usage(sessionID)
         return HttpServerResponse.jsonUnsafe(
@@ -354,11 +355,22 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
             ...snapshot,
             balances: balance.balances,
             quotas: normalizeUsageQuotas(balance.quotas),
+            quotaStatuses: balance.quotaStatuses,
             errors: balance.errors,
+            refreshing: isCliAgentUsageRefreshing(),
             refreshedAt: new Date().toISOString(),
           },
           { status: 200 },
         )
+      }),
+    )
+    yield* router.add("POST", "/codegoblin/usage/refresh", (request) =>
+      Effect.gen(function* () {
+        if (request.headers["x-codegoblin-action"] !== "usage-refresh") {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Missing usage refresh header." }, { status: 403 })
+        }
+        startCliAgentUsageRefresh(request.headers["x-codegoblin-refresh"] === "force")
+        return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 202 })
       }),
     )
     yield* router.add("POST", "/codegoblin/market/install", (request) =>

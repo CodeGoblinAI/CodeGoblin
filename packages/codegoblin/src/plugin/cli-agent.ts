@@ -7,6 +7,8 @@ import {
 } from "@/provider/cli-agent"
 
 const CONNECTED_KEY = "codegoblin-local-cli"
+const COMMAND_TIMEOUT_MS = 10 * 60 * 1000
+const MAX_COMMAND_OUTPUT_BYTES = 1024 * 1024
 
 export async function AnthropicCliAuthPlugin(_input: PluginInput): Promise<Hooks> {
   return {
@@ -63,9 +65,9 @@ function cliAgentMethod(providerID: CliAgentProviderID) {
       return {
         url: providerURL(providerID),
         method: "auto" as const,
-        instructions: `${setup === "install" ? "The official installer will run first. " : "Using the installed CLI. "}Complete the ${providerName(providerID)} browser login if prompted. The CLI owns chat history; CodeGoblin stores only the session link in ${cliAgentSessionFile()}. Press Esc to cancel before starting.`,
+        instructions: `${setup === "install" ? "CodeGoblin will use an existing installation if one is already detected; otherwise the official installer will run for this operating system. " : "Using the installed CLI. "}Complete the ${providerName(providerID)} browser login if prompted. The CLI owns chat history; CodeGoblin stores only the session link in ${cliAgentSessionFile()}. Press Esc to cancel before starting.`,
         callback: async () => {
-          const executable = setup === "install" ? await install(providerID) : cliAgentExecutable(providerID)
+          const executable = cliAgentExecutable(providerID) ?? (setup === "install" ? await install(providerID) : undefined)
           if (!executable) return { type: "failed" as const, message: missingExecutableMessage(providerID) }
           const result = (await authenticated(providerID, executable))
             ? { ok: true as const, detail: "" }
@@ -85,13 +87,15 @@ function cliAgentMethod(providerID: CliAgentProviderID) {
 }
 
 async function authenticated(providerID: CliAgentProviderID, executable: string) {
-  if (providerID === "antigravity-cli") return true
   const result = await run([
     ...cliAgentBaseCommand(providerID, executable),
-    ...(providerID === "claude-code" ? ["auth", "status"] : ["status"]),
+    ...(providerID === "claude-code" ? ["auth", "status"] : providerID === "cursor-agent" ? ["status"] : ["models"]),
   ])
   if (!result.ok) return false
   if (providerID === "cursor-agent") return !/not authenticated|not logged in|logged out/i.test(result.detail)
+  if (providerID === "antigravity-cli") {
+    return Boolean(result.detail) && !/not authenticated|not logged in|log in|sign in|authentication required/i.test(result.detail)
+  }
   try {
     const status = JSON.parse(result.detail) as { loggedIn?: boolean }
     return status.loggedIn === true
@@ -140,15 +144,41 @@ async function run(command: string[]) {
     stdout: "pipe",
     stderr: "pipe",
   })
-  const [exitCode, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  return {
-    ok: exitCode === 0,
-    detail: (exitCode === 0 ? stdout : stderr || stdout).trim() || `Command exited with code ${exitCode}`,
+  const timeout = setTimeout(() => proc.kill(), COMMAND_TIMEOUT_MS)
+  timeout.unref?.()
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      readLimitedText(proc.stdout),
+      readLimitedText(proc.stderr),
+    ])
+    return {
+      ok: exitCode === 0,
+      detail: (exitCode === 0 ? stdout : stderr || stdout).trim() || `Command exited with code ${exitCode}`,
+    }
+  } catch (error) {
+    proc.kill()
+    await proc.exited.catch(() => undefined)
+    return { ok: false, detail: error instanceof Error ? error.message : "Command failed." }
+  } finally {
+    clearTimeout(timeout)
   }
+}
+
+async function readLimitedText(stream: ReadableStream<Uint8Array>) {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let value = ""
+  for (;;) {
+    const next = await reader.read()
+    if (next.done) break
+    value += decoder.decode(next.value, { stream: true })
+    if (value.length > MAX_COMMAND_OUTPUT_BYTES) {
+      await reader.cancel()
+      throw new Error("Command output exceeded the 1 MB limit.")
+    }
+  }
+  return value + decoder.decode()
 }
 
 function loginArgs(providerID: CliAgentProviderID) {
@@ -161,7 +191,7 @@ function missingExecutableMessage(providerID: CliAgentProviderID) {
 
 function providerName(providerID: CliAgentProviderID) {
   if (providerID === "claude-code") return "Claude Code CLI"
-  if (providerID === "cursor-agent") return "Cursor Agent"
+  if (providerID === "cursor-agent") return "Cursor Agent CLI"
   return "Antigravity CLI"
 }
 

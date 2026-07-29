@@ -1,5 +1,6 @@
 import path from "path"
 import { Global } from "@codegoblin/core/global"
+import * as Log from "@codegoblin/core/util/log"
 import type {
   LanguageModelV3,
   LanguageModelV3CallOptions,
@@ -10,9 +11,19 @@ import type {
 } from "@ai-sdk/provider"
 import { ModelID, ProviderID } from "./schema"
 import type { Info, Model } from "./provider"
+import { antigravityQuotaFrom, captureAntigravityUsage } from "./antigravity-usage"
+import { sendToAntigravitySession } from "./antigravity-session"
+import { sendToClaudeSession } from "./claude-session"
+
+const log = Log.create({ service: "cli-agent" })
+const MAX_CLI_LINE = 8 * 1024 * 1024
+const MAX_CLI_RESPONSE = 16 * 1024 * 1024
+const MAX_CLI_STDERR = 1024 * 1024
 
 export const CLI_AGENT_PROVIDERS = ["claude-code", "cursor-agent", "antigravity-cli"] as const
 export type CliAgentProviderID = (typeof CLI_AGENT_PROVIDERS)[number]
+const CLI_QUOTA_PROVIDERS = [...CLI_AGENT_PROVIDERS, "codex"] as const
+type CliQuotaProviderID = (typeof CLI_QUOTA_PROVIDERS)[number]
 
 export function isCliAgentProvider(value: string): value is CliAgentProviderID {
   return CLI_AGENT_PROVIDERS.includes(value as CliAgentProviderID)
@@ -21,9 +32,14 @@ export function isCliAgentProvider(value: string): value is CliAgentProviderID {
 type BridgeOptions = {
   sessionID?: string
   directory?: string
+  title?: string
   permissionMode?: "agent" | "plan"
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
   executable?: string
+  requestWorkspaceTrust?: (directory: string) => Promise<boolean>
+  trustWorkspace?: boolean
+  /** Antigravity only: set false to force the slow one-shot path. */
+  warmSession?: boolean
 }
 
 type BridgeSession = {
@@ -42,6 +58,22 @@ type ParsedEvent = {
   result?: string
   usage?: LanguageModelV3Usage
   error?: string
+}
+
+async function limitedText(stream: ReadableStream<Uint8Array>, limit: number) {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let value = ""
+  while (true) {
+    const next = await reader.read()
+    if (next.done) break
+    value += decoder.decode(next.value, { stream: true })
+    if (value.length > limit) {
+      await reader.cancel().catch(() => {})
+      throw new Error("CLI output exceeded the safety limit")
+    }
+  }
+  return value + decoder.decode()
 }
 
 export type CliAgentQuota = {
@@ -71,26 +103,26 @@ export function cliAgentProviderInfos(input?: Partial<Record<CliAgentProviderID,
   return [
     providerInfo(
       "claude-code",
-      "Claude Code (local CLI)",
+      "Claude Code CLI",
       (input?.["claude-code"] ?? [
-        { id: "default", name: "Claude account default (resolved after connection)" },
-        { id: "fable", name: "Claude Fable 5 (alias)" },
-        { id: "opus", name: "Claude Opus 4.8 (alias)" },
-        { id: "sonnet", name: "Claude Sonnet 5 (alias)" },
-        { id: "haiku", name: "Claude Haiku 4.5 (alias)" },
+        { id: "default", name: "Claude Code default" },
+        { id: "fable", name: "Fable 5" },
+        { id: "opus", name: "Opus 4.8" },
+        { id: "sonnet", name: "Sonnet 5" },
+        { id: "haiku", name: "Haiku 4.5" },
       ]).map((item) => model("claude-code", item.id, item.name, "claude", CLAUDE_VARIANTS)),
     ),
     providerInfo(
       "cursor-agent",
-      "Cursor Agent (local CLI)",
-      (input?.["cursor-agent"] ?? [{ id: "default", name: "Cursor account default" }]).map((item) =>
+      "Cursor Agent CLI",
+      (input?.["cursor-agent"] ?? [{ id: "auto", name: "Auto (Cursor default)" }]).map((item) =>
         model("cursor-agent", item.id, item.name, "cursor"),
       ),
     ),
     providerInfo(
       "antigravity-cli",
-      "Antigravity (local CLI)",
-      (input?.["antigravity-cli"] ?? [{ id: "default", name: "Antigravity account default" }]).map((item) =>
+      "Antigravity CLI",
+      (input?.["antigravity-cli"] ?? [{ id: "default", name: "Antigravity CLI default" }]).map((item) =>
         model("antigravity-cli", item.id, item.name, "antigravity"),
       ),
     ),
@@ -115,29 +147,89 @@ async function discoverCursorModels() {
   if (!executable) return []
   const result = await runDiscovery([...cliAgentBaseCommand("cursor-agent", executable), "models"])
   if (!result) return []
-  return parseModelLines(result)
+  return parseCursorModelLines(result)
 }
 
 async function discoverAntigravityModels() {
   const executable = cliAgentExecutable("antigravity-cli")
   if (!executable) return []
-  const result = await runDiscovery([...cliAgentBaseCommand("antigravity-cli", executable), "models"])
+  // `agy models` measured ~13s on a warm machine, so a 15s budget loses the
+  // race often enough that the provider silently falls back to a placeholder
+  // id that then fails to resolve. Give it real headroom.
+  const result = await runDiscovery([...cliAgentBaseCommand("antigravity-cli", executable), "models"], 45_000)
   if (!result) return []
-  return parseModelLines(result)
+  return parseAntigravityModelLines(result)
 }
 
-function parseModelLines(value: string) {
+export type CliAgentQuotaStatus = {
+  providerID: CliQuotaProviderID
+  label: string
+  available: boolean
+  reason: string
+}
+
+export function parseCursorModelLines(value: string) {
+  return value
+    .replace(/\x1b\[[0-9;]*m/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .flatMap((line) => {
+      const match = /^(\S+)\s+-\s+(.+)$/.exec(line)
+      if (!match || /^tip:/i.test(line) || /^(available )?models?:?$/i.test(line)) return []
+      const [, id, displayName] = match
+      return [
+        {
+          id,
+          name: id === "auto" ? "Auto (Cursor default)" : displayName.replace(/\s+\(current(?:,\s*default)?\)$/i, ""),
+        },
+      ]
+    })
+}
+
+export function parseAntigravityModelLines(value: string) {
   return value
     .replace(/\x1b\[[0-9;]*m/g, "")
     .split(/\r?\n/)
     .map((line) => line.trim().replace(/^[>*●•-]\s*/, ""))
-    .filter((line) => line && !/^(available )?models?:?$/i.test(line))
-    .map((name) => ({ id: name, name }))
+    .filter((line) => line && !/^(available )?models?:?$/i.test(line) && !/^tip:/i.test(line))
+    .map((id) => ({ id, name: displayAntigravityModel(id) }))
 }
 
-async function runDiscovery(command: string[]) {
+function displayAntigravityModel(id: string) {
+  const parts = id.split("-")
+  const effort = ["low", "medium", "high", "thinking", "max"].includes(parts.at(-1) ?? "")
+    ? parts.pop()
+    : undefined
+  const base = parts.join(" ").replace(/(\d) (\d)$/, "$1.$2")
+  const name = base
+    .split(" ")
+    .map((part) => {
+      if (/^gpt$/i.test(part)) return "GPT"
+      if (/^oss$/i.test(part)) return "OSS"
+      if (/^\d+b$/i.test(part)) return part.toUpperCase()
+      return part.charAt(0).toUpperCase() + part.slice(1)
+    })
+    .join(" ")
+  return effort ? `${name} (${effort.charAt(0).toUpperCase()}${effort.slice(1)})` : name
+}
+
+/**
+ * Whether this `agy` understands `--output-format`. Structured streaming landed
+ * in 1.1.8; older builds treat the unknown flag as an error and drop into help
+ * mode, so probe the CLI's own help text rather than assuming a version.
+ */
+let antigravityStreamSupport: Promise<boolean> | undefined
+export function antigravitySupportsStreamJson(executable: string) {
+  antigravityStreamSupport ??= (async () => {
+    const help = await runDiscovery([executable, "--help"], 20_000)
+    return Boolean(help && /--output-format/.test(help))
+  })().catch(() => false)
+  return antigravityStreamSupport
+}
+
+async function runDiscovery(command: string[], timeoutMs = 15_000) {
   const proc = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "ignore" })
-  const timeout = setTimeout(() => proc.kill(), 5_000)
+  const timeout = setTimeout(() => proc.kill(), timeoutMs)
   const [exitCode, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()])
   clearTimeout(timeout)
   if (exitCode !== 0) return
@@ -201,7 +293,7 @@ export function createCliAgentLanguageModel(
           ? remembered
           : remembered?.externalSessionID
       const newSessionID = forked ? deterministicCliSessionID(`${sessionID}:${crypto.randomUUID()}`) : undefined
-      const prompt = promptText(input, !externalSessionID)
+      const prompt = promptText(input, !externalSessionID, providerID === "antigravity-cli" ? 20_000 : undefined)
       const logFile =
         providerID === "antigravity-cli"
           ? path.join(Global.Path.data, `antigravity-${sessionID}-${crypto.randomUUID()}.log`)
@@ -216,7 +308,145 @@ export function createCliAgentLanguageModel(
         permissionMode: bridge.permissionMode ?? "agent",
         effort: bridge.effort,
         logFile,
+        prompt,
+        title: bridge.title,
+        trustWorkspace: bridge.trustWorkspace,
+        streamJson: providerID === "antigravity-cli" ? await antigravitySupportsStreamJson(executable) : undefined,
       })
+      // Antigravity charges ~20s of setup per `--print` run. A warm interactive
+      // session answers in about a second, so use one when we can and fall back
+      // to the one-shot below if it cannot be established.
+      if (providerID === "antigravity-cli" && bridge.warmSession !== false) {
+        const warmCwd = bridge.directory || process.cwd()
+        return {
+          stream: new ReadableStream<LanguageModelV3StreamPart>({
+            async start(controller) {
+              controller.enqueue({ type: "stream-start", warnings: [] })
+              let reasoningOpen = false
+              const result = await sendToAntigravitySession({
+                sessionID,
+                conversationID: externalSessionID,
+                executable,
+                cwd: warmCwd,
+                modelID,
+                permissionMode: bridge.permissionMode ?? "agent",
+                prompt,
+                signal: input.abortSignal ?? undefined,
+                onActivity: (line) => {
+                  if (!reasoningOpen) {
+                    controller.enqueue({ type: "reasoning-start", id: "reasoning-0" })
+                    reasoningOpen = true
+                  }
+                  controller.enqueue({ type: "reasoning-delta", id: "reasoning-0", delta: `${line}
+` })
+                },
+              }).catch(() => undefined)
+              if (reasoningOpen) controller.enqueue({ type: "reasoning-end", id: "reasoning-0" })
+              if (!result) {
+                controller.error(
+                  new Error(
+                    "Antigravity did not answer. The warm session was dropped; sending again starts a fresh one.",
+                  ),
+                )
+                return
+              }
+              controller.enqueue({ type: "text-start", id: "text-0" })
+              controller.enqueue({ type: "text-delta", id: "text-0", delta: result.text })
+              controller.enqueue({ type: "text-end", id: "text-0" })
+              if (result.conversationID) {
+                await rememberSession(providerID, sessionID, result.conversationID, warmCwd, result.text)
+              }
+              controller.enqueue({
+                type: "finish",
+                usage: EMPTY_USAGE,
+                finishReason: { unified: "stop", raw: "cli-complete" },
+                providerMetadata: {
+                  [providerID]: { sessionID: result.conversationID ?? null, transport: "local-cli-warm" },
+                },
+              })
+              controller.close()
+              const cwd = warmCwd
+              void refreshAntigravityQuota(executable, cwd).catch(() => {})
+            },
+          }),
+          request: { body: { transport: "local-cli-warm", providerID, modelID } },
+        }
+      }
+      // Claude's --print transport writes SDK-style sessions that do not show
+      // up in the native /resume picker. Keep a real interactive Claude process
+      // behind CodeGoblin and read its structured native transcript instead.
+      if (providerID === "claude-code" && bridge.warmSession !== false) {
+        const nativeCwd =
+          bridge.directory || (typeof remembered === "string" ? undefined : remembered?.directory) || process.cwd()
+        const nativeSessionID =
+          externalSessionID ?? newSessionID ?? deterministicCliSessionID(sessionID)
+        return {
+          stream: new ReadableStream<LanguageModelV3StreamPart>({
+            async start(controller) {
+              controller.enqueue({ type: "stream-start", warnings: [] })
+              let reasoningOpen = false
+              let failure: string | undefined
+              const result = await sendToClaudeSession({
+                sessionID,
+                externalSessionID: nativeSessionID,
+                resume: Boolean(externalSessionID),
+                executable,
+                cwd: nativeCwd,
+                modelID,
+                permissionMode: bridge.permissionMode ?? "agent",
+                effort: bridge.effort,
+                title: bridge.title,
+                prompt,
+                requestWorkspaceTrust: bridge.requestWorkspaceTrust,
+                signal: input.abortSignal ?? undefined,
+                onActivity: (line) => {
+                  if (!reasoningOpen) {
+                    controller.enqueue({ type: "reasoning-start", id: "reasoning-0" })
+                    reasoningOpen = true
+                  }
+                  controller.enqueue({ type: "reasoning-delta", id: "reasoning-0", delta: `${line}\n` })
+                },
+                onThinking: (delta) => {
+                  if (!reasoningOpen) {
+                    controller.enqueue({ type: "reasoning-start", id: "reasoning-0" })
+                    reasoningOpen = true
+                  }
+                  controller.enqueue({ type: "reasoning-delta", id: "reasoning-0", delta })
+                },
+              }).catch((error) => {
+                failure = error instanceof Error ? error.message : undefined
+                return undefined
+              })
+              if (reasoningOpen) controller.enqueue({ type: "reasoning-end", id: "reasoning-0" })
+              if (!result) {
+                controller.error(
+                  new Error(
+                    failure ??
+                      "Claude Code did not answer. The native session was dropped; sending again restarts it.",
+                  ),
+                )
+                return
+              }
+              controller.enqueue({ type: "text-start", id: "text-0" })
+              controller.enqueue({ type: "text-delta", id: "text-0", delta: result.text })
+              controller.enqueue({ type: "text-end", id: "text-0" })
+              await rememberSession(providerID, sessionID, result.externalSessionID, nativeCwd, result.text)
+              controller.enqueue({
+                type: "finish",
+                usage: usageFrom(result.usage) ?? EMPTY_USAGE,
+                finishReason: { unified: "stop", raw: "cli-complete" },
+                providerMetadata: {
+                  [providerID]: { sessionID: result.externalSessionID, transport: "local-cli-native" },
+                },
+              })
+              controller.close()
+              void refreshClaudeQuota(executable).catch(() => {})
+            },
+          }),
+          request: { body: { transport: "local-cli-native", providerID, modelID } },
+        }
+      }
+
       const proc = Bun.spawn(command, {
         cwd: bridge.directory || (typeof remembered === "string" ? undefined : remembered?.directory) || process.cwd(),
         env: process.env,
@@ -224,7 +454,9 @@ export function createCliAgentLanguageModel(
         stdout: "pipe",
         stderr: "pipe",
       })
-      proc.stdin.write(prompt)
+      if (providerID !== "antigravity-cli") {
+        proc.stdin.write(prompt)
+      }
       proc.stdin.end()
 
       const abort = () => proc.kill()
@@ -234,7 +466,10 @@ export function createCliAgentLanguageModel(
         stream: new ReadableStream<LanguageModelV3StreamPart>({
           async start(controller) {
             controller.enqueue({ type: "stream-start", warnings: [] })
-            const stderrPromise = new Response(proc.stderr).text()
+            const stderrPromise = limitedText(proc.stderr, MAX_CLI_STDERR).catch((error) => {
+              proc.kill()
+              return error instanceof Error ? error.message : "CLI stderr exceeded the safety limit"
+            })
             let buffer = ""
             let textStarted = false
             let reasoningStarted = false
@@ -242,7 +477,6 @@ export function createCliAgentLanguageModel(
             let responseText = ""
             let usage = EMPTY_USAGE
             let discoveredSessionID = externalSessionID
-
             const emitText = (delta: string) => {
               if (!delta) return
               if (!textStarted) {
@@ -252,6 +486,10 @@ export function createCliAgentLanguageModel(
               controller.enqueue({ type: "text-delta", id: "text-0", delta })
               emittedText = true
               responseText += delta
+              if (responseText.length > MAX_CLI_RESPONSE) {
+                proc.kill()
+                throw new Error("CLI response exceeded the safety limit")
+              }
             }
             const emitReasoning = (delta: string) => {
               if (!delta) return
@@ -282,6 +520,10 @@ export function createCliAgentLanguageModel(
                 const next = await reader.read()
                 if (next.done) break
                 buffer += decoder.decode(next.value, { stream: true })
+                if (buffer.length > MAX_CLI_LINE) {
+                  proc.kill()
+                  throw new Error("CLI stream record exceeded the safety limit")
+                }
                 const lines = buffer.split(/\r?\n/)
                 buffer = lines.pop() ?? ""
                 for (const line of lines) await handle(line)
@@ -293,6 +535,7 @@ export function createCliAgentLanguageModel(
               if (exitCode !== 0) throw new Error(cliFailureMessage(providerID, stderr, exitCode))
               if (!discoveredSessionID && providerID === "antigravity-cli" && logFile) {
                 const log = await Bun.file(logFile)
+                  .slice(0, MAX_CLI_STDERR)
                   .text()
                   .catch(() => "")
                 discoveredSessionID = /Created conversation ([0-9a-f-]{36})/i.exec(log)?.[1]
@@ -322,6 +565,12 @@ export function createCliAgentLanguageModel(
               })
               controller.close()
               if (providerID === "claude-code") void refreshClaudeQuota(executable).catch(() => {})
+              if (providerID === "antigravity-cli") {
+                const cwd = bridge.directory || process.cwd()
+                void refreshAntigravityQuota(executable, cwd).catch((error) =>
+                  log.warn("antigravity quota refresh failed", { error: error instanceof Error ? error.message : error }),
+                )
+              }
             } catch (error) {
               controller.error(error)
             } finally {
@@ -394,6 +643,21 @@ export function cliAgentExecutable(providerID: CliAgentProviderID) {
   const command = { "claude-code": "claude", "cursor-agent": "cursor-agent", "antigravity-cli": "agy" }[providerID]
   const executable = process.env[env] || Bun.which(command)
   if (executable) return executable
+  if (providerID === "claude-code") {
+    for (const candidate of claudeAgentCandidates()) {
+      if (Bun.file(candidate).size > 0) return candidate
+    }
+  }
+  if (providerID === "antigravity-cli") {
+    // `agy` is commonly installed somewhere that is not on PATH yet (a fresh
+    // install before the shell is restarted, or a non-login shell), and unlike
+    // the other CLIs it had no fallback — so it silently vanished from the
+    // model list on machines where PATH lookup missed it.
+    for (const candidate of antigravityAgentCandidates()) {
+      if (Bun.file(candidate).size > 0) return candidate
+    }
+    return
+  }
   if (providerID !== "cursor-agent" || process.platform !== "win32") return
   for (const command of ["agent", "cursor-agent"]) {
     const fromPath = Bun.which(command)
@@ -402,6 +666,40 @@ export function cliAgentExecutable(providerID: CliAgentProviderID) {
   for (const candidate of cursorAgentCandidates()) {
     if (Bun.file(candidate).size > 0) return candidate
   }
+}
+
+export function claudeAgentCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+  platform = process.platform,
+) {
+  const home = platform === "win32" ? env.USERPROFILE : env.HOME
+  if (!home) return []
+  const launchers = platform === "win32" ? ["claude.exe", "claude.cmd", "claude.ps1"] : ["claude"]
+  return launchers.map((launcher) => path.join(home, ".local", "bin", launcher))
+}
+
+export function antigravityAgentCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+  platform = process.platform,
+) {
+  // Join with the *target* platform's rules, not the host's: `path.join` would
+  // emit backslashes while resolving posix candidates on a Windows dev box.
+  if (platform === "win32") {
+    const root = env.LOCALAPPDATA
+    if (!root) return []
+    return [
+      path.win32.join(root, "agy", "bin", "agy.exe"),
+      path.win32.join(root, "agy", "bin", "agy.cmd"),
+    ]
+  }
+  const home = env.HOME
+  if (!home) return []
+  return [
+    path.posix.join(home, ".local", "bin", "agy"),
+    path.posix.join(home, ".antigravity", "bin", "agy"),
+    "/usr/local/bin/agy",
+    "/opt/homebrew/bin/agy",
+  ]
 }
 
 export function cursorAgentCandidates(
@@ -444,6 +742,11 @@ export function buildCliAgentCommand(input: {
   permissionMode: "agent" | "plan"
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
   logFile?: string
+  prompt?: string
+  title?: string
+  trustWorkspace?: boolean
+  /** AGY only: request the typed NDJSON stream (1.1.8+). */
+  streamJson?: boolean
 }) {
   if (input.providerID === "claude-code") {
     const external = input.externalSessionID ?? input.newSessionID ?? deterministicCliSessionID(input.sessionID)
@@ -460,18 +763,24 @@ export function buildCliAgentCommand(input: {
       input.permissionMode === "plan" ? "plan" : "auto",
       ...(input.effort ? ["--effort", input.effort] : []),
       ...(input.modelID === "default" ? [] : ["--model", input.modelID]),
+      ...(!input.externalSessionID && input.title?.trim() ? ["--name", input.title.trim().slice(0, 80)] : []),
       ...(input.externalSessionID ? ["--resume", external] : ["--session-id", external]),
     ]
   }
   if (input.providerID === "antigravity-cli") {
     return [
       ...cliAgentBaseCommand(input.providerID, input.executable),
-      "--print",
-      ...(input.logFile ? ["--log-file", input.logFile] : []),
-      "--mode",
-      input.permissionMode === "plan" ? "plan" : "accept-edits",
+      ...(input.prompt !== undefined ? [`--print=${input.prompt}`] : ["--print"]),
+      // AGY 1.1.8+ streams typed NDJSON events as it works. Without this the
+      // CLI stays silent until the whole run finishes, which is why a turn
+      // looked frozen for a minute; with it the first event lands in ~3s.
+      // Older builds reject the flag, so it is only sent when supported.
+      ...(input.streamJson ? ["--output-format", "stream-json"] : []),
       ...(input.modelID === "default" ? [] : ["--model", input.modelID]),
       ...(input.externalSessionID ? ["--conversation", input.externalSessionID] : []),
+      "--mode",
+      input.permissionMode === "plan" ? "plan" : "accept-edits",
+      ...(input.logFile ? ["--log-file", input.logFile] : []),
     ]
   }
   return [
@@ -479,12 +788,13 @@ export function buildCliAgentCommand(input: {
     "--print",
     "--output-format",
     "stream-json",
+    ...(input.trustWorkspace !== false ? ["--trust"] : []),
     ...(input.modelID === "default" ? [] : ["--model", input.modelID]),
     ...(input.externalSessionID ? [`--resume=${input.externalSessionID}`] : []),
   ]
 }
 
-function promptText(input: LanguageModelV3CallOptions, full: boolean) {
+function promptText(input: LanguageModelV3CallOptions, full: boolean, maxChars?: number) {
   const messages = full
     ? input.prompt.filter((item) => item.role !== "system")
     : input.prompt.filter((item) => item.role === "user").slice(-1)
@@ -504,7 +814,9 @@ function promptText(input: LanguageModelV3CallOptions, full: boolean) {
     return full ? [`${message.role === "assistant" ? "Assistant" : "User"}:\n${text}`] : [text]
   })
   if (!rendered.length) throw new Error("The local CLI bridge could not find a user text prompt to send")
-  return rendered.join("\n\n")
+  const prompt = rendered.join("\n\n")
+  if (!maxChars || prompt.length <= maxChars) return prompt
+  return `[Earlier conversation omitted to fit the local CLI limit]\n\n${prompt.slice(-(maxChars - 60))}`
 }
 
 function lastAssistantText(input: LanguageModelV3CallOptions) {
@@ -552,20 +864,94 @@ export function parseCliAgentEvent(providerID: CliAgentProviderID, line: string)
   return { sessionID }
 }
 
+/**
+ * AGY 1.1.8's `stream-json` vocabulary:
+ *   init        → { conversation_id, init: { model, cwd, tools } }
+ *   step_update → { step_update: { conversation_id, step_index, state, step_type,
+ *                   tool_info?, tool_name?, text_delta?, usage? } }
+ *   result      → { result: { conversation_id, status, response, usage } }
+ *
+ * These are typed and officially supported, so nothing here guesses: tool
+ * activity comes from real `tool` steps, and no text is presented as model
+ * reasoning (AGY does not expose hidden chain-of-thought).
+ */
 function parseAntigravityEvent(raw: Record<string, unknown>, sessionID?: string): ParsedEvent | undefined {
+  const event = stringValue(raw.event)
+
+  if (event === "init") {
+    return { sessionID: stringValue(raw.conversation_id) ?? sessionID }
+  }
+
+  if (event === "step_update") {
+    const step = isRecord(raw.step_update) ? raw.step_update : {}
+    const id = stringValue(step.conversation_id) ?? sessionID
+    const stepType = stringValue(step.step_type)
+    const state = stringValue(step.state)
+
+    if (stepType === "tool") {
+      // Announce once, when the tool starts; the DONE echo would duplicate it.
+      if (state !== "ACTIVE") return { sessionID: id }
+      const info = isRecord(step.tool_info) ? step.tool_info : undefined
+      const name = stringValue(info?.name) ?? stringValue(step.tool_name)
+      return { sessionID: id, reasoning: name ? `${name.replace(/_/g, " ")}\n` : undefined }
+    }
+
+    if (stepType === "agent_response") {
+      return {
+        sessionID: id,
+        role: "assistant",
+        text: stringValue(step.text_delta),
+        usage: antigravityUsage(step.usage),
+      }
+    }
+
+    // user_input / checkpoint / unknown carry no user-facing content.
+    return { sessionID: id }
+  }
+
+  if (event === "result") {
+    const result = isRecord(raw.result) ? raw.result : {}
+    const id = stringValue(result.conversation_id) ?? sessionID
+    const status = stringValue(result.status)
+    if (status && status.toUpperCase() !== "SUCCESS") {
+      return { sessionID: id, error: `Antigravity run ${status.toLowerCase()}` }
+    }
+    return { sessionID: id, result: stringValue(result.response), usage: antigravityUsage(result.usage) }
+  }
+
+  // Legacy AGY (pre-1.1.8, no --output-format): plain records keyed by
+  // source/type. Kept so older installs keep working rather than silently
+  // producing empty replies.
   const source = stringValue(raw.source)
-  const type = stringValue(raw.type)?.toUpperCase()
-  if (source === "USER_EXPLICIT" || type === "USER_INPUT") {
-    return { sessionID, role: "user", text: stringValue(raw.content) }
+  const legacyType = stringValue(raw.type)?.toUpperCase()
+  if (source || legacyType) {
+    if (source === "USER_EXPLICIT" || legacyType === "USER_INPUT") {
+      return { sessionID, role: "user", text: stringValue(raw.content) }
+    }
+    if (source !== "MODEL" && legacyType !== "ASSISTANT" && legacyType !== "RESPONSE" && legacyType !== "PLANNER_RESPONSE") {
+      return { sessionID }
+    }
+    return {
+      sessionID,
+      role: "assistant",
+      text: stringValue(raw.content) ?? contentText(raw.message),
+      reasoning: stringValue(raw.thinking) ?? stringValue(raw.reasoning),
+    }
   }
-  if (source !== "MODEL" && type !== "ASSISTANT" && type !== "RESPONSE" && type !== "PLANNER_RESPONSE") {
-    return { sessionID }
-  }
+
+  return undefined
+}
+
+function antigravityUsage(value: unknown): LanguageModelV3Usage | undefined {
+  if (!isRecord(value)) return undefined
+  const num = (key: string) => (typeof value[key] === "number" ? (value[key] as number) : undefined)
+  const input = num("input_tokens")
+  const output = num("output_tokens")
+  if (input === undefined && output === undefined) return undefined
+  const cacheRead = num("cache_read_tokens")
   return {
-    sessionID,
-    role: "assistant",
-    text: stringValue(raw.content) ?? contentText(raw.message),
-    reasoning: stringValue(raw.thinking) ?? stringValue(raw.reasoning),
+    inputTokens: { total: input, noCache: input, cacheRead, cacheWrite: undefined },
+    outputTokens: { total: output, text: output, reasoning: num("thinking_tokens") },
   }
 }
 
@@ -583,10 +969,14 @@ function usageFrom(value: unknown): LanguageModelV3Usage | undefined {
   const output = numberValue(value.output_tokens) ?? numberValue(value.outputTokens)
   const cacheRead = numberValue(value.cache_read_input_tokens) ?? numberValue(value.cacheReadInputTokens)
   const cacheWrite = numberValue(value.cache_creation_input_tokens) ?? numberValue(value.cacheCreationInputTokens)
+  const totalInput =
+    input === undefined
+      ? undefined
+      : input + (cacheRead ?? 0) + (cacheWrite ?? 0)
   return {
     inputTokens: {
-      total: input,
-      noCache: input !== undefined && cacheRead !== undefined ? Math.max(0, input - cacheRead) : input,
+      total: totalInput,
+      noCache: input,
       cacheRead,
       cacheWrite,
     },
@@ -651,24 +1041,43 @@ export function parseClaudeQuota(value: unknown): CliAgentQuota | undefined {
   const result = stringValue(value.result)
   if (!result) return
   const windows = result.split(/\r?\n/).flatMap((line) => {
-    const match = /^Current (5[- ]hour|week \(all models\)):\s*(\d+(?:\.\d+)?)% used(?:\s*·\s*resets (.+))?/i.exec(
+    const match = /^Current (session|5[- ]hour|week \(all models\)):\s*(\d+(?:\.\d+)?)% used(?:\s*·\s*resets (.+))?/i.exec(
       line.trim(),
     )
     if (!match) return []
-    const label = match[1].toLowerCase().startsWith("5") ? "5h" : "week"
+    const label = match[1].toLowerCase().startsWith("week") ? "week" : "5h"
     return [{ label, usedPercentage: Number(match[2]), ...(match[3] && { resetsAt: match[3] }) }]
   })
   if (!windows.length) return
   return { providerID: "claude-code", windows, checkedAt: new Date().toISOString() }
 }
 
-export async function refreshCliAgentUsage() {
+/**
+ * Re-read quota for every CLI that reports it. Callers hit this on a timer and
+ * whenever the usage panel opens, so the work is guarded twice: this debounce
+ * collapses bursts, and each provider's own TTL decides whether its CLI is
+ * actually worth spawning. `force` is the panel's refresh key and skips both.
+ */
+export async function refreshCliAgentUsage(force = false) {
   if (usageRefresh) return usageRefresh
-  if (Date.now() - usageRefreshAt < 60_000) return readCliAgentUsage()
+  if (!force && Date.now() - usageRefreshAt < 60_000) return readCliAgentUsage()
   usageRefreshAt = Date.now()
   usageRefresh = (async () => {
-    const executable = cliAgentExecutable("claude-code")
-    if (executable) await refreshClaudeQuota(executable).catch(() => {})
+    const claude = cliAgentExecutable("claude-code")
+    const antigravity = cliAgentExecutable("antigravity-cli")
+    // Refresh every CLI that can report quota, not just Claude — otherwise the
+    // usage panel permanently reads "No supported quota API" for the others,
+    // because nothing ever populates their entry.
+    await Promise.all([
+      claude ? refreshClaudeQuota(claude, force).catch(() => {}) : undefined,
+      antigravity
+        ? refreshAntigravityQuota(antigravity, process.cwd(), force).catch((error) =>
+            log.warn("antigravity quota refresh failed", {
+              error: error instanceof Error ? error.message : error,
+            }),
+          )
+        : undefined,
+    ])
     return readCliAgentUsage()
   })().finally(() => {
     usageRefresh = undefined
@@ -676,9 +1085,78 @@ export async function refreshCliAgentUsage() {
   return usageRefresh
 }
 
-async function refreshClaudeQuota(executable: string) {
+/** Start a slow native quota refresh without making an HTTP request or dialog
+ * wait for providers such as Antigravity. The existing single-flight guard
+ * keeps repeated UI polling from spawning duplicate CLIs. */
+export function startCliAgentUsageRefresh(force = false) {
+  void refreshCliAgentUsage(force).catch((error) =>
+    log.warn("background CLI usage refresh failed", { error: error instanceof Error ? error.message : error }),
+  )
+}
+
+export function isCliAgentUsageRefreshing() {
+  return Boolean(usageRefresh)
+}
+
+export function cliAgentQuotaStatuses(quotas: readonly CliAgentQuota[]): CliAgentQuotaStatus[] {
+  return CLI_QUOTA_PROVIDERS.map((providerID) => ({
+    providerID,
+    label: providerID === "codex" ? "Codex" : providerName(providerID),
+    available: quotas.some((quota) => quota.providerID === providerID),
+    reason: quotas.some((quota) => quota.providerID === providerID) ? "Supported quota data" : "No supported quota API",
+  }))
+}
+
+/** AGY exposes quota only behind an interactive slash command that costs ~25s
+ * to reach, so refresh it sparingly rather than after every turn. */
+const ANTIGRAVITY_QUOTA_TTL_MS = 30 * 60 * 1000
+
+/** Quota already re-read recently enough that asking the CLI again would only
+ * cost time. `force` (the usage panel's refresh key) bypasses this. */
+async function isFresh(providerID: CliAgentProviderID, ttlMs: number) {
+  const current = (await readCliAgentUsage()).find((item) => item.providerID === providerID)
+  if (!current?.checkedAt) return false
+  const age = Date.now() - Date.parse(current.checkedAt)
+  return Number.isFinite(age) && age >= 0 && age < ttlMs
+}
+
+async function refreshAntigravityQuota(executable: string, cwd: string, force = false) {
+  if (!force && (await isFresh("antigravity-cli", ANTIGRAVITY_QUOTA_TTL_MS))) return
+  const panel = await captureAntigravityUsage({ executable, cwd }).catch(() => undefined)
+  if (!panel) return
+  const quota = antigravityQuotaFrom(panel)
+  if (!quota) return
+  usageWrite = usageWrite
+    .catch(() => {})
+    .then(async () => {
+      const usage = (await readCliAgentUsage()).filter((item) => item.providerID !== quota.providerID)
+      await Bun.write(path.join(Global.Path.data, "cli-agent-usage.json"), JSON.stringify([...usage, quota], null, 2))
+    })
+  await usageWrite
+}
+
+/** Stable id so quota checks reuse a single throwaway conversation. */
+const CLAUDE_QUOTA_SESSION_ID = deterministicCliSessionID("codegoblin:quota-probe")
+
+/** Cheaper than AGY's scrape but still a CLI spawn, so it gets a TTL too —
+ * the usage panel and footer both refresh on a timer. */
+const CLAUDE_QUOTA_TTL_MS = 10 * 60 * 1000
+
+async function refreshClaudeQuota(executable: string, force = false) {
+  if (!force && (await isFresh("claude-code", CLAUDE_QUOTA_TTL_MS))) return
+  // Reuse one fixed session id for every quota check. Without it each check
+  // starts a brand-new conversation that then clutters the user's `/resume`
+  // picker with untitled "/usage" entries.
   const proc = Bun.spawn(
-    [...cliAgentBaseCommand("claude-code", executable), "--print", "--output-format", "json", "/usage"],
+    [
+      ...cliAgentBaseCommand("claude-code", executable),
+      "--print",
+      "--output-format",
+      "json",
+      "--session-id",
+      CLAUDE_QUOTA_SESSION_ID,
+      "/usage",
+    ],
     {
       stdin: "ignore",
       stdout: "pipe",

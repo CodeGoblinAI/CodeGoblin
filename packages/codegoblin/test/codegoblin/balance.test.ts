@@ -76,6 +76,123 @@ describe("CodeGoblin balance display", () => {
         ],
       }),
     ).toBe("5h 50% left · week 80% left")
+    expect(
+      CodeGoblinBalance.formatFooter({
+        providerID: "antigravity-cli",
+        quotaStatuses: [{ providerID: "antigravity-cli", available: false }],
+      }),
+    ).toBe("usage unavailable")
+  })
+
+  test("shows a reset time only for a window that is nearly spent", () => {
+    // A full window's reset time is the longest thing on the footer line and
+    // pushes apart the two percentages you actually read.
+    expect(
+      CodeGoblinBalance.formatFooter({
+        providerID: "antigravity-cli",
+        quotas: [
+          {
+            providerID: "antigravity-cli",
+            checkedAt: "2026-07-29T06:07:00.000Z",
+            windows: [
+              { label: "5h", usedPercentage: 48, resetsAt: "3h53m" },
+              { label: "week", usedPercentage: 15, resetsAt: "155h47m" },
+            ],
+          },
+        ],
+      }),
+    ).toBe("5h 52% left · week 85% left")
+    expect(
+      CodeGoblinBalance.formatFooter({
+        providerID: "antigravity-cli",
+        quotas: [
+          {
+            providerID: "antigravity-cli",
+            checkedAt: "2026-07-29T06:07:00.000Z",
+            windows: [
+              { label: "5h", usedPercentage: 94, resetsAt: "42m" },
+              { label: "week", usedPercentage: 15, resetsAt: "155h47m" },
+            ],
+          },
+        ],
+      }),
+    ).toBe("5h 6% left (42m) · week 85% left")
+  })
+
+  describe("quota freshness", () => {
+    const now = new Date("2026-07-29T06:17:00.000Z")
+
+    test("drops a window whose reset time has already passed", () => {
+      // Quota is only re-read after a turn on that CLI, so a provider you have
+      // not used today keeps serving yesterday's percentages. The 5-hour window
+      // below expired a day ago; reporting "62% left" from it would be a lie.
+      expect(
+        CodeGoblinBalance.liveQuotas(
+          [
+            {
+              providerID: "claude-code",
+              checkedAt: "2026-07-28T04:16:14.210Z",
+              windows: [
+                { label: "5h", usedPercentage: 38, resetsAt: "Jul 28, 4:50am" },
+                { label: "week", usedPercentage: 16, resetsAt: "Aug 3, 8:59am" },
+              ],
+            },
+          ],
+          now,
+        ),
+      ).toEqual([
+        {
+          providerID: "claude-code",
+          checkedAt: "2026-07-28T04:16:14.210Z",
+          windows: [{ label: "week", usedPercentage: 16, resetsAt: "5d2h" }],
+        },
+      ])
+    })
+
+    test("ticks a recorded countdown down by the time since it was recorded", () => {
+      // AGY reports "resets in 3h53m", which was true when captured — ten
+      // minutes later the footer must not still claim 3h53m.
+      const [quota] = CodeGoblinBalance.liveQuotas(
+        [
+          {
+            providerID: "antigravity-cli",
+            checkedAt: "2026-07-29T06:07:00.000Z",
+            windows: [
+              { label: "week", usedPercentage: 15, resetsAt: "155h47m" },
+              { label: "5h", usedPercentage: 48, resetsAt: "3h53m" },
+            ],
+          },
+        ],
+        now,
+      )
+      // Shortest window first: it is the one you are likeliest to hit.
+      expect(quota.windows).toEqual([
+        { label: "5h", usedPercentage: 48, resetsAt: "3h43m" },
+        { label: "week", usedPercentage: 15, resetsAt: "6d11h" },
+      ])
+    })
+
+    test("drops a provider once every one of its windows has rolled over", () => {
+      expect(
+        CodeGoblinBalance.liveQuotas(
+          [
+            {
+              providerID: "antigravity-cli",
+              checkedAt: "2026-07-29T00:00:00.000Z",
+              windows: [{ label: "5h", usedPercentage: 48, resetsAt: "1h" }],
+            },
+          ],
+          now,
+        ),
+      ).toEqual([])
+    })
+
+    test("keeps a window that reports no reset time at all", () => {
+      const quotas = [
+        { providerID: "cursor-agent" as const, checkedAt: now.toISOString(), windows: [{ label: "5h", usedPercentage: 10 }] },
+      ]
+      expect(CodeGoblinBalance.liveQuotas(quotas, now)).toEqual(quotas)
+    })
   })
 
   test("resolve returns no balances and no fabricated numbers without keys or manual env", async () => {

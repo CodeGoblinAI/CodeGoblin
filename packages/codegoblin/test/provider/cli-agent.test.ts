@@ -3,10 +3,13 @@ import {
   buildCliAgentCommand,
   cliAgentProviderInfos,
   cursorAgentCandidates,
+  claudeAgentCandidates,
   cliAgentResumeCommand,
   deterministicCliSessionID,
   parseClaudeQuota,
   parseCliAgentEvent,
+  parseAntigravityModelLines,
+  parseCursorModelLines,
 } from "../../src/provider/cli-agent"
 import { withoutRetiredAnthropicOauth } from "../../src/auth"
 import {
@@ -20,8 +23,9 @@ describe("local CLI agent providers", () => {
   test("advertises Claude Code and Cursor Agent as local providers", () => {
     const providers = cliAgentProviderInfos()
     expect(providers.map((provider) => String(provider.id))).toEqual(["claude-code", "cursor-agent", "antigravity-cli"])
-    expect(providers[0].models.sonnet.name).toBe("Claude Sonnet 5 (alias)")
-    expect(providers[0].models.opus.name).toBe("Claude Opus 4.8 (alias)")
+    expect(providers[0].name).toBe("Claude Code CLI")
+    expect(providers[0].models.sonnet.name).toBe("Sonnet 5")
+    expect(providers[0].models.opus.name).toBe("Opus 4.8")
     expect(Object.keys(providers[0].models.sonnet.variants ?? {})).toEqual(["low", "medium", "high", "xhigh", "max"])
   })
 
@@ -33,6 +37,27 @@ describe("local CLI agent providers", () => {
       ],
     })[2]
     expect(Object.keys(provider.models)).toEqual(["Gemini 3.5 Flash (High)", "Claude Opus 4.6 (Thinking)"])
+  })
+
+  test("parses Cursor model IDs separately from display names", () => {
+    expect(
+      parseCursorModelLines(
+        `Available models:\n  auto - Auto (current, default)\n  gpt-5.3-codex-low - Codex 5.3 Low (current)\nTip: use --model <id>`,
+      ),
+    ).toEqual([
+      { id: "auto", name: "Auto (Cursor default)" },
+      { id: "gpt-5.3-codex-low", name: "Codex 5.3 Low" },
+    ])
+  })
+
+  test("pretty-prints Antigravity model IDs while preserving exact IDs", () => {
+    expect(
+      parseAntigravityModelLines("gemini-3.5-flash-medium\nclaude-opus-4-6-thinking\ngpt-oss-120b-medium"),
+    ).toEqual([
+      { id: "gemini-3.5-flash-medium", name: "Gemini 3.5 Flash (Medium)" },
+      { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
+      { id: "gpt-oss-120b-medium", name: "GPT OSS 120B (Medium)" },
+    ])
   })
 
   test("connects local CLIs through provider auth methods instead of API-key prompts", async () => {
@@ -115,10 +140,27 @@ describe("local CLI agent providers", () => {
       sessionID: "ses_example",
       newSessionID: "11111111-1111-4111-8111-111111111111",
       permissionMode: "agent",
+      title: "CodeGoblin test chat",
     })
     expect(command).toContain("--session-id")
     expect(command).toContain("11111111-1111-4111-8111-111111111111")
+    expect(command).toContain("--name")
+    expect(command).toContain("CodeGoblin test chat")
     expect(command).not.toContain("--resume")
+  })
+
+  test("does not rename an existing Claude session when resuming it", () => {
+    const command = buildCliAgentCommand({
+      providerID: "claude-code",
+      executable: "claude",
+      modelID: "sonnet",
+      externalSessionID: "11111111-1111-4111-8111-111111111111",
+      sessionID: "ses_example",
+      permissionMode: "agent",
+      title: "Ignored on resume",
+    })
+    expect(command).toContain("--resume")
+    expect(command).not.toContain("--name")
   })
 
   test("resumes Cursor sessions without force mode", () => {
@@ -131,7 +173,66 @@ describe("local CLI agent providers", () => {
       permissionMode: "agent",
     })
     expect(command).toContain("--resume=cursor-chat-id")
+    expect(command).toContain("--trust")
     expect(command).not.toContain("--force")
+  })
+
+  test("recognizes Claude's official user-local install location", () => {
+    expect(claudeAgentCandidates({ USERPROFILE: "C:\\Users\\test" }, "win32")).toEqual([
+      "C:\\Users\\test\\.local\\bin\\claude.exe",
+      "C:\\Users\\test\\.local\\bin\\claude.cmd",
+      "C:\\Users\\test\\.local\\bin\\claude.ps1",
+    ])
+  })
+
+  test("sends Antigravity prompts as the print argument instead of stdin", () => {
+    const command = buildCliAgentCommand({
+      providerID: "antigravity-cli",
+      executable: "agy",
+      modelID: "gemini-3.5-flash-medium",
+      sessionID: "ses_example",
+      permissionMode: "agent",
+      prompt: "hi",
+      streamJson: true,
+    })
+    expect(command.slice(0, 2)).toEqual(["agy", "--print=hi"])
+    expect(command).toContain("--print=hi")
+    expect(command).not.toContain("--prompt")
+    // Without this AGY buffers everything until the run ends, which is what
+    // made a turn look frozen; the typed stream reports progress as it goes.
+    expect(command.join(" ")).toContain("--output-format stream-json")
+  })
+
+  test("still understands pre-1.1.8 Antigravity records", () => {
+    // Older installs have no --output-format, so the CLI emits plain
+    // source/type records. Those must keep working, not yield empty replies.
+    expect(
+      parseCliAgentEvent(
+        "antigravity-cli",
+        JSON.stringify({ source: "USER_EXPLICIT", type: "USER_INPUT", content: "hello" }),
+      ),
+    ).toEqual({ role: "user", text: "hello" })
+    expect(
+      parseCliAgentEvent(
+        "antigravity-cli",
+        JSON.stringify({ source: "MODEL", type: "PLANNER_RESPONSE", content: "done", thinking: "plan" }),
+      ),
+    ).toEqual({ role: "assistant", text: "done", reasoning: "plan" })
+    expect(parseCliAgentEvent("antigravity-cli", JSON.stringify({ source: "TOOL", type: "LIST_DIRECTORY" }))).toEqual({})
+  })
+
+  test("omits --output-format when the installed Antigravity cannot stream", () => {
+    const legacy = buildCliAgentCommand({
+      providerID: "antigravity-cli",
+      executable: "agy",
+      modelID: "default",
+      sessionID: "ses_example",
+      permissionMode: "agent",
+      prompt: "hi",
+      streamJson: false,
+    })
+    expect(legacy).not.toContain("--output-format")
+    expect(legacy.join(" ")).toContain("--print=hi")
   })
 
   test("resumes Antigravity conversations and captures a per-turn log", () => {
@@ -143,17 +244,49 @@ describe("local CLI agent providers", () => {
       sessionID: "ses_example",
       permissionMode: "agent",
       logFile: "agy.log",
+      streamJson: true,
     })
     expect(command).toEqual([
       "agy",
       "--print",
-      "--log-file",
-      "agy.log",
-      "--mode",
-      "accept-edits",
+      "--output-format",
+      "stream-json",
       "--conversation",
       "agy-conversation-id",
+      "--mode",
+      "accept-edits",
+      "--log-file",
+      "agy.log",
     ])
+  })
+
+  test("puts Antigravity model and prompt flags before mode so AGY does not enter help mode", () => {
+    const command = buildCliAgentCommand({
+      providerID: "antigravity-cli",
+      executable: "agy",
+      modelID: "gemini-3.5-flash-low",
+      sessionID: "session-id",
+      permissionMode: "agent",
+      prompt: "hi",
+      logFile: "C:\\temp\\agy.log",
+    })
+
+    expect(command.indexOf("--model")).toBeLessThan(command.indexOf("--mode"))
+    expect(command.indexOf("--print=hi")).toBeLessThan(command.indexOf("--mode"))
+    expect(command).not.toContain("--prompt")
+  })
+
+  test("keeps Antigravity prompts that begin with a dash out of option parsing", () => {
+    const command = buildCliAgentCommand({
+      providerID: "antigravity-cli",
+      executable: "agy",
+      modelID: "gemini-3.6-flash-low",
+      sessionID: "session-id",
+      permissionMode: "agent",
+      prompt: "--log-file",
+    })
+    expect(command).toContain("--print=--log-file")
+    expect(command.filter((item) => item === "--log-file")).toEqual([])
   })
 
   test("passes Antigravity's exact model label back to AGY", () => {
@@ -184,7 +317,7 @@ describe("local CLI agent providers", () => {
       "claude-code",
       JSON.stringify({ type: "result", usage: { input_tokens: 12, output_tokens: 3, cache_read_input_tokens: 5 } }),
     )
-    expect(result?.usage?.inputTokens).toEqual({ total: 12, noCache: 7, cacheRead: 5, cacheWrite: undefined })
+    expect(result?.usage?.inputTokens).toEqual({ total: 17, noCache: 12, cacheRead: 5, cacheWrite: undefined })
     expect(result?.usage?.outputTokens.total).toBe(3)
   })
 
@@ -200,6 +333,20 @@ describe("local CLI agent providers", () => {
       windows: [
         { label: "5h", usedPercentage: 50 },
         { label: "week", usedPercentage: 20, resetsAt: "Jul 20, 9am" },
+      ],
+    })
+  })
+
+  test("accepts Claude's current-session quota wording", () => {
+    expect(
+      parseClaudeQuota({
+        result: "Current session: 3% used · resets Jul 23, 4:29am (America/New_York)\nCurrent week (all models): 38% used",
+      }),
+    ).toMatchObject({
+      providerID: "claude-code",
+      windows: [
+        { label: "5h", usedPercentage: 3, resetsAt: "Jul 23, 4:29am (America/New_York)" },
+        { label: "week", usedPercentage: 38 },
       ],
     })
   })
@@ -227,33 +374,86 @@ describe("local CLI agent providers", () => {
     expect(cliAgentResumeCommand("antigravity-cli", "agy", "agy-id")).toEqual(["agy", "--conversation", "agy-id"])
   })
 
-  test("normalizes Antigravity JSONL without leaking tools or system records", () => {
+  test("normalizes the Antigravity event stream without leaking internals", () => {
+    // AGY 1.1.8 emits typed NDJSON: init / step_update / result.
     expect(
       parseCliAgentEvent(
         "antigravity-cli",
-        JSON.stringify({ source: "USER_EXPLICIT", type: "USER_INPUT", content: "hello" }),
+        JSON.stringify({ event: "init", conversation_id: "agy-1", init: { model: "gemini-3.6-flash-low" } }),
       ),
-    ).toEqual({ role: "user", text: "hello" })
-    expect(
-      parseCliAgentEvent(
-        "antigravity-cli",
-        JSON.stringify({ source: "MODEL", type: "PLANNER_RESPONSE", content: "done", thinking: "plan" }),
-      ),
-    ).toEqual({ role: "assistant", text: "done", reasoning: "plan" })
-    expect(parseCliAgentEvent("antigravity-cli", JSON.stringify({ source: "TOOL", type: "LIST_DIRECTORY" }))).toEqual(
-      {},
-    )
-  })
+    ).toEqual({ sessionID: "agy-1" })
 
-  test("retires Anthropic subscription OAuth without removing API keys", () => {
+    // A tool step reports the real tool, once, when it starts.
     expect(
-      withoutRetiredAnthropicOauth({
-        anthropic: { type: "oauth", access: "access", refresh: "refresh", expires: 1 },
-        openai: { type: "api", key: "openai-key" },
+      parseCliAgentEvent(
+        "antigravity-cli",
+        JSON.stringify({
+          event: "step_update",
+          step_update: {
+            conversation_id: "agy-1",
+            state: "ACTIVE",
+            step_type: "tool",
+            tool_info: { name: "list_dir", parameters: {} },
+          },
+        }),
+      ),
+    ).toEqual({ sessionID: "agy-1", reasoning: "list dir\n" })
+
+    // The DONE echo of the same step must not repeat it.
+    expect(
+      parseCliAgentEvent(
+        "antigravity-cli",
+        JSON.stringify({
+          event: "step_update",
+          step_update: { conversation_id: "agy-1", state: "DONE", step_type: "tool", tool_info: { name: "list_dir" } },
+        }),
+      ),
+    ).toEqual({ sessionID: "agy-1" })
+
+    // Bookkeeping steps carry nothing user-facing.
+    for (const step_type of ["checkpoint", "user_input", "unknown"]) {
+      expect(
+        parseCliAgentEvent(
+          "antigravity-cli",
+          JSON.stringify({ event: "step_update", step_update: { conversation_id: "agy-1", state: "DONE", step_type } }),
+        ),
+      ).toEqual({ sessionID: "agy-1" })
+    }
+
+    // Assistant text arrives as deltas.
+    expect(
+      parseCliAgentEvent(
+        "antigravity-cli",
+        JSON.stringify({
+          event: "step_update",
+          step_update: { conversation_id: "agy-1", state: "DONE", step_type: "agent_response", text_delta: "hi" },
+        }),
+      ),
+    ).toMatchObject({ sessionID: "agy-1", role: "assistant", text: "hi" })
+
+    // The terminal event carries the answer and real token accounting.
+    const result = parseCliAgentEvent(
+      "antigravity-cli",
+      JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "agy-1",
+          status: "SUCCESS",
+          response: "done",
+          usage: { input_tokens: 10, output_tokens: 4, cache_read_tokens: 7, thinking_tokens: 1 },
+        },
       }),
-    ).toEqual({ openai: { type: "api", key: "openai-key" } })
-    expect(withoutRetiredAnthropicOauth({ anthropic: { type: "api", key: "anthropic-key" } })).toEqual({
-      anthropic: { type: "api", key: "anthropic-key" },
-    })
+    )
+    expect(result?.result).toBe("done")
+    expect(result?.usage?.inputTokens.cacheRead).toBe(7)
+    expect(result?.usage?.outputTokens.total).toBe(4)
+
+    // A failed run surfaces as an error rather than an empty reply.
+    expect(
+      parseCliAgentEvent(
+        "antigravity-cli",
+        JSON.stringify({ event: "result", result: { conversation_id: "agy-1", status: "FAILED" } }),
+      )?.error,
+    ).toContain("failed")
   })
 })

@@ -24,11 +24,21 @@ export type UsageBalance = {
 
 export type UsageQuota = {
   providerID: string
+  /** Provider-qualified label, e.g. "claude-code 5h". */
   label: string
+  /** Just the window, e.g. "5h" — for views that already name the provider. */
+  window: string
   usedPercentage: number
   remainingPercentage: number
   resetsAt?: string
   checkedAt?: string
+}
+
+export type UsageQuotaStatus = {
+  providerID: string
+  label: string
+  available: boolean
+  reason: string
 }
 
 export type UsageSnapshot = {
@@ -36,7 +46,10 @@ export type UsageSnapshot = {
   aggregate: UsageTotals
   balances: UsageBalance[]
   quotas: UsageQuota[]
+  quotaStatuses: UsageQuotaStatus[]
   errors: { provider: string; message: string }[]
+  /** A slow native provider quota check is running in the background. */
+  refreshing?: boolean
   refreshedAt: string
 }
 
@@ -76,6 +89,7 @@ export function normalizeUsageQuotas(sources: readonly UsageQuotaSource[]): Usag
       return {
         providerID: source.providerID,
         label: `${source.providerID} ${window.label}`,
+        window: window.label,
         usedPercentage,
         remainingPercentage: 100 - usedPercentage,
         ...(window.resetsAt && { resetsAt: window.resetsAt }),
@@ -113,6 +127,7 @@ export function summarizeUsage(sessions: readonly UsageSessionLike[], sessionID?
     aggregate: totals(sessions),
     balances: [],
     quotas: [],
+    quotaStatuses: [],
     errors: [],
     refreshedAt: new Date().toISOString(),
   }

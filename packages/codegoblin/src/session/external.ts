@@ -30,6 +30,10 @@ export type ExternalSessionMessage = {
 }
 
 const PREVIEW_BYTES = 128 * 1024
+const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024
+const MAX_DISCOVERY_FILES = 5_000
+const MAX_CLI_OUTPUT_BYTES = 8 * 1024 * 1024
+const CLI_TIMEOUT_MS = 30_000
 
 export async function discoverExternalSessions(input?: { home?: string; limit?: number; sources?: ExternalSessionSource[] }) {
   const home = input?.home ?? os.homedir()
@@ -55,7 +59,11 @@ export async function discoverExternalSessions(input?: { home?: string; limit?: 
 
 export async function loadExternalSession(session: ExternalSessionSummary): Promise<ExternalSessionTranscript> {
   if (session.source === "cursor-agent") return loadCursorSession(session)
-  const text = await Bun.file(session.path).text()
+  const file = Bun.file(session.path)
+  if (file.size > MAX_TRANSCRIPT_BYTES) {
+    throw new Error(`External transcript exceeds the ${MAX_TRANSCRIPT_BYTES / 1024 / 1024} MB import limit.`)
+  }
+  const text = await file.text()
   return {
     ...session,
     messages: parseTranscript(session.source, text),
@@ -68,6 +76,7 @@ async function collect(roots: string[], source: ExternalSessionSource) {
   for (const root of roots) {
     if (!existsSync(root)) continue
     for await (const relative of glob.scan({ cwd: root, absolute: false, onlyFiles: true, dot: true })) {
+      if (files.length >= MAX_DISCOVERY_FILES) break
       if (source === "claude-code" && relative.split(/[\\/]/).includes("subagents")) continue
       const file = path.join(root, relative)
       const stat = await Bun.file(file)
@@ -176,9 +185,40 @@ function parseCursorTranscript(value: string) {
 
 async function runCli(command: string[]) {
   const proc = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "ignore" })
-  const [exitCode, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()])
-  if (exitCode !== 0) return
-  return stdout.trim()
+  const timeout = setTimeout(() => proc.kill(), CLI_TIMEOUT_MS)
+  try {
+    const result = await Promise.all([proc.exited, readLimitedText(proc.stdout, MAX_CLI_OUTPUT_BYTES)])
+    if (result[0] !== 0) return
+    return result[1].trim()
+  } catch {
+    proc.kill()
+    await proc.exited.catch(() => undefined)
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function readLimitedText(stream: ReadableStream<Uint8Array>, limit: number) {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const next = await reader.read()
+    if (next.done) break
+    total += next.value.byteLength
+    if (total > limit) {
+      await reader.cancel()
+      throw new Error("CLI output exceeded the import limit.")
+    }
+    chunks.push(next.value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(bytes)
 }
 
 function parseSummary(source: ExternalSessionSource, file: string, updated: number, text: string) {

@@ -480,6 +480,7 @@ export function message(msgs: ModelMessage[], model: Provider.Model, options: Re
 
 export function temperature(model: Provider.Model) {
   const id = model.id.toLowerCase()
+  if (model.api.id.toLowerCase() === "gemini-3.6-flash") return undefined
   if (id.includes("qwen")) return 0.55
   if (id.includes("claude")) return undefined
   if (id.includes("gemini")) return 1.0
@@ -498,6 +499,7 @@ export function temperature(model: Provider.Model) {
 
 export function topP(model: Provider.Model) {
   const id = model.id.toLowerCase()
+  if (model.api.id.toLowerCase() === "gemini-3.6-flash") return undefined
   if (id.includes("qwen")) return 1
   if (["minimax-m2", "gemini", "kimi-k2.5", "kimi-k2p5", "kimi-k2-5"].some((s) => id.includes(s))) {
     return 0.95
@@ -507,6 +509,7 @@ export function topP(model: Provider.Model) {
 
 export function topK(model: Provider.Model) {
   const id = model.id.toLowerCase()
+  if (model.api.id.toLowerCase() === "gemini-3.6-flash") return undefined
   if (id.includes("minimax-m2")) {
     if (["m2.", "m25", "m21"].some((s) => id.includes(s))) return 40
     return 20
@@ -1109,7 +1112,7 @@ export function options(input: {
       result["thinkingConfig"] = {
         includeThoughts: true,
       }
-      if (input.model.api.id.includes("gemini-3")) {
+      if (input.model.api.id.includes("gemini-3") && input.model.api.id !== "gemini-3.6-flash") {
         result["thinkingConfig"]["thinkingLevel"] = "high"
       }
     }

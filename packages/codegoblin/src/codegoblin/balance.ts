@@ -1,7 +1,13 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { readCliAgentUsage, refreshCliAgentUsage, type CliAgentQuota } from "@/provider/cli-agent"
+import {
+  cliAgentQuotaStatuses,
+  readCliAgentUsage,
+  refreshCliAgentUsage,
+  type CliAgentQuota,
+} from "@/provider/cli-agent"
+import { compactReset } from "@/codegoblin/provider-usage"
 
 export type CodeGoblinBalanceProvider = "hoard" | "deepseek" | "moonshot"
 
@@ -22,6 +28,12 @@ export type CodeGoblinBalanceError = {
 
 type Env = Record<string, string | undefined>
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
+let liveCache:
+  | {
+      expiresAt: number
+      value: Awaited<ReturnType<typeof liveBalances>>
+    }
+  | undefined
 
 const PROVIDERS = ["deepseek", "moonshot"] as const
 const MANUAL_BALANCE_ENV = {
@@ -47,8 +59,11 @@ export const CodeGoblinBalance = {
     fetch?: FetchLike
     now?: Date
     includeLocalEnv?: boolean
-    refreshQuotas?: boolean
+    /** `"force"` ignores the per-provider TTLs; plain `true` respects them. */
+    refreshQuotas?: boolean | "force"
     timeoutMs?: number
+    /** Reuse provider API balances briefly while usage dialogs poll local quota state. */
+    cacheLive?: boolean
   }) {
     const env = {
       ...process.env,
@@ -56,26 +71,106 @@ export const CodeGoblinBalance = {
       ...(input.env ?? {}),
     }
     const configured = configuredBalances(env)
-    const live = await liveBalances({
-      env,
-      fetch: input.fetch ?? fetch,
-      now: input.now ?? new Date(),
-      timeoutMs: input.timeoutMs ?? 5_000,
-    })
+    const live =
+      input.cacheLive && liveCache && liveCache.expiresAt > Date.now()
+        ? liveCache.value
+        : await liveBalances({
+            env,
+            fetch: input.fetch ?? fetch,
+            now: input.now ?? new Date(),
+            timeoutMs: input.timeoutMs ?? 5_000,
+          }).then((value) => {
+            if (input.cacheLive) liveCache = { expiresAt: Date.now() + 30_000, value }
+            return value
+          })
+    const quotas = liveQuotas(
+      input.refreshQuotas ? await refreshCliAgentUsage(input.refreshQuotas === "force") : await readCliAgentUsage(),
+      input.now ?? new Date(),
+    )
     const byProvider = new Map<CodeGoblinBalanceProvider, CodeGoblinBalanceEntry>()
     for (const entry of configured) byProvider.set(entry.provider, entry)
     for (const entry of live.balances) byProvider.set(entry.provider, entry)
     return {
       balances: [...byProvider.values()],
-      quotas: input.refreshQuotas ? await refreshCliAgentUsage() : await readCliAgentUsage(),
+      quotas,
+      quotaStatuses: cliAgentQuotaStatuses(quotas),
       errors: live.errors,
     }
   },
   configured: configuredBalances,
   formatFooter,
+  liveQuotas,
   selectedBalanceProvider,
   parseDeepSeekBalance,
   parseMoonshotBalance,
+}
+
+/** Ordering key in minutes, so the window you are likeliest to hit shows first. */
+const WINDOW_MINUTES: Record<string, number> = { session: 300, hour: 60, day: 1440, week: 10080, month: 43200 }
+
+function windowRank(label: string) {
+  const key = label.trim().toLowerCase()
+  const known = WINDOW_MINUTES[key]
+  if (known) return known
+  const match = /^(\d+)\s*([mhdw])/.exec(key)
+  if (!match) return Number.MAX_SAFE_INTEGER
+  return Number(match[1]) * { m: 1, h: 60, d: 1440, w: 10080 }[match[2] as "m" | "h" | "d" | "w"]
+}
+
+const COUNTDOWN = /^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$/
+
+function formatDuration(ms: number) {
+  const mins = Math.round(ms / 60_000)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return mins % 60 ? `${hours}h${mins % 60}m` : `${hours}h`
+  const days = Math.floor(hours / 24)
+  return hours % 24 ? `${days}d${hours % 24}h` : `${days}d`
+}
+
+/**
+ * What a recorded reset time means *now*.
+ *
+ * Providers report resets two different ways and both go stale on disk. An
+ * absolute time ("Jul 28, 4:50am (America/New_York)") is re-expressed as a
+ * countdown against the clock; a countdown ("3h53m") was true when it was
+ * captured, so the time since then is subtracted. Either way, `undefined` means
+ * the window has already rolled over — the percentage stored alongside it no
+ * longer describes anything real.
+ */
+export function quotaReset(resetsAt: string, elapsedMs: number, now: Date): string | undefined {
+  const raw = resetsAt.trim()
+  const match = COUNTDOWN.exec(raw)
+  if (match && match.slice(1).some(Boolean)) {
+    const total = ((Number(match[1] ?? 0) * 24 + Number(match[2] ?? 0)) * 60 + Number(match[3] ?? 0)) * 60_000
+    const left = total - elapsedMs
+    return left > 0 ? formatDuration(left) : undefined
+  }
+  return compactReset(raw, now)
+}
+
+/**
+ * Quota windows that still describe the present, newest-expiring first.
+ *
+ * A stored percentage is only meaningful until its window resets, and quota is
+ * only re-read for whichever CLI you last ran — so a provider you have not used
+ * today keeps serving yesterday's numbers. Dropping elapsed windows here, in
+ * the one place both the footer and the usage panel read from, means neither
+ * can show a figure we already know is wrong, and the two can never disagree.
+ */
+export function liveQuotas(quotas: readonly CliAgentQuota[], now: Date = new Date()): CliAgentQuota[] {
+  return quotas.flatMap((quota) => {
+    const checkedAt = quota.checkedAt ? Date.parse(quota.checkedAt) : Number.NaN
+    const elapsed = Number.isFinite(checkedAt) ? Math.max(0, now.getTime() - checkedAt) : 0
+    const windows = quota.windows.flatMap((window) => {
+      if (!window.resetsAt) return [window]
+      const reset = quotaReset(window.resetsAt, elapsed, now)
+      if (!reset) return []
+      return [{ ...window, resetsAt: reset }]
+    })
+    if (!windows.length) return []
+    return [{ ...quota, windows: [...windows].sort((a, b) => windowRank(a.label) - windowRank(b.label)) }]
+  })
 }
 
 function configuredBalances(env: Env): CodeGoblinBalanceEntry[] {
@@ -99,7 +194,7 @@ function configuredBalances(env: Env): CodeGoblinBalanceEntry[] {
 async function liveBalances(input: { env: Env; fetch: FetchLike; now: Date; timeoutMs: number }) {
   const results = await Promise.all(PROVIDERS.map((provider) => liveBalance(provider, input)))
   return {
-    balances: results.flatMap((result) => (result.ok ? [result.balance] : [])),
+    balances: results.flatMap((result) => (result.ok && result.balance ? [result.balance] : [])),
     errors: results.flatMap((result) => (result.ok ? [] : [result.error])),
   }
 }
@@ -109,7 +204,7 @@ async function liveBalance(
   input: { env: Env; fetch: FetchLike; now: Date; timeoutMs: number },
 ) {
   const key = firstValue(input.env, API_KEY_ENV[provider])
-  if (!key) return { ok: false as const, error: { provider, message: "No API key configured." } }
+  if (!key) return { ok: true as const, balance: undefined }
 
   const endpoint =
     provider === "deepseek" ? "https://api.deepseek.com/user/balance" : "https://api.moonshot.cn/v1/users/me/balance"
@@ -238,20 +333,33 @@ function selectedBalanceProvider(input: { providerID?: string; modelID?: string 
   }
 }
 
+/** Below this much remaining, the footer starts showing when the window resets. */
+const FOOTER_RESET_BELOW = 15
+
 function formatFooter(input: {
   balances?: readonly CodeGoblinBalanceEntry[]
   quotas?: readonly CliAgentQuota[]
+  quotaStatuses?: readonly { providerID: string; available: boolean }[]
   spent?: number
   providerID?: string
   modelID?: string
 }) {
   const balances = input.balances ?? []
   const providerQuota = input.quotas?.find((item) => item.providerID === input.providerID)
-  if (providerQuota) {
+  if (providerQuota?.windows.length) {
     return providerQuota.windows
-      .map((window) => `${window.label} ${Math.max(0, Math.round(100 - window.usedPercentage))}% left`)
+      .map((window) => {
+        const left = Math.max(0, Math.round(100 - window.usedPercentage))
+        // The reset time is what you need only when a window is nearly spent.
+        // The rest of the time it is the longest thing on the line and pushes
+        // the two percentages — the part you actually read — apart.
+        const reset = left <= FOOTER_RESET_BELOW && window.resetsAt ? ` (${window.resetsAt})` : ""
+        return `${window.label} ${left}% left${reset}`
+      })
       .join(" · ")
   }
+  const quotaStatus = input.quotaStatuses?.find((item) => item.providerID === input.providerID)
+  if (quotaStatus && !quotaStatus.available) return "usage unavailable"
   const selected = selectedBalanceProvider(input)
   if (selected) {
     const providerBalance = balances.find((entry) => entry.provider === selected)

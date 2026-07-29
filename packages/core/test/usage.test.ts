@@ -39,6 +39,7 @@ test("usage summary > normalizes quota windows and preserves unavailable provide
     {
       providerID: "claude-code",
       label: "claude-code 5h",
+      window: "5h",
       usedPercentage: 50,
       remainingPercentage: 50,
       resetsAt: "soon",
@@ -47,6 +48,7 @@ test("usage summary > normalizes quota windows and preserves unavailable provide
     {
       providerID: "claude-code",
       label: "claude-code week",
+      window: "week",
       usedPercentage: 100,
       remainingPercentage: 0,
       checkedAt: "2026-07-20T00:00:00.000Z",

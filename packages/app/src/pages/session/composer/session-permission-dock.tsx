@@ -11,6 +11,11 @@ export function SessionPermissionDock(props: {
   onDecide: (response: "once" | "always" | "reject" | "never") => void
 }) {
   const language = useLanguage()
+  const workspaceTrust = () => props.request.permission === "workspace_trust"
+  const directory = () => {
+    const value = props.request.metadata?.directory
+    return typeof value === "string" ? value : props.request.patterns[0]
+  }
 
   const toolDescription = () => {
     const key = `settings.permissions.tool.${props.request.permission}.description`
@@ -31,30 +36,69 @@ export function SessionPermissionDock(props: {
         </div>
       }
       footer={
-        <>
+        <Show
+          when={workspaceTrust()}
+          fallback={
+            <>
+              <div />
+              <div data-slot="permission-footer-actions">
+                <Button
+                  variant="ghost"
+                  size="normal"
+                  onClick={() => props.onDecide("never")}
+                  disabled={props.responding}
+                >
+                  {language.t("ui.permission.denyAlways")}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="normal"
+                  onClick={() => props.onDecide("reject")}
+                  disabled={props.responding}
+                >
+                  {language.t("ui.permission.deny")}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="normal"
+                  onClick={() => props.onDecide("always")}
+                  disabled={props.responding}
+                >
+                  {language.t("ui.permission.allowAlways")}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="normal"
+                  onClick={() => props.onDecide("once")}
+                  disabled={props.responding}
+                >
+                  {language.t("ui.permission.allowOnce")}
+                </Button>
+              </div>
+            </>
+          }
+        >
           <div />
           <div data-slot="permission-footer-actions">
-            <Button variant="ghost" size="normal" onClick={() => props.onDecide("never")} disabled={props.responding}>
-              {language.t("ui.permission.denyAlways")}
-            </Button>
             <Button variant="ghost" size="normal" onClick={() => props.onDecide("reject")} disabled={props.responding}>
-              {language.t("ui.permission.deny")}
-            </Button>
-            <Button
-              variant="secondary"
-              size="normal"
-              onClick={() => props.onDecide("always")}
-              disabled={props.responding}
-            >
-              {language.t("ui.permission.allowAlways")}
+              Cancel
             </Button>
             <Button variant="primary" size="normal" onClick={() => props.onDecide("once")} disabled={props.responding}>
-              {language.t("ui.permission.allowOnce")}
+              Trust folder
             </Button>
           </div>
-        </>
+        </Show>
       }
     >
+      <Show when={workspaceTrust()}>
+        <div data-slot="permission-row">
+          <span data-slot="permission-spacer" aria-hidden="true" />
+          <div data-slot="permission-hint">
+            Claude Code can execute code and access files in this folder. Claude stores this approval.
+          </div>
+        </div>
+      </Show>
+
       <Show when={toolDescription()}>
         <div data-slot="permission-row">
           <span data-slot="permission-spacer" aria-hidden="true" />
@@ -62,13 +106,20 @@ export function SessionPermissionDock(props: {
         </div>
       </Show>
 
-      <Show when={props.request.patterns.length > 0}>
+      <Show when={workspaceTrust() ? directory() : props.request.patterns.length > 0}>
         <div data-slot="permission-row">
           <span data-slot="permission-spacer" aria-hidden="true" />
           <div data-slot="permission-patterns">
-            <For each={props.request.patterns}>
-              {(pattern) => <code class="text-12-regular text-text-base break-all">{pattern}</code>}
-            </For>
+            <Show
+              when={workspaceTrust()}
+              fallback={
+                <For each={props.request.patterns}>
+                  {(pattern) => <code class="text-12-regular text-text-base break-all">{pattern}</code>}
+                </For>
+              }
+            >
+              <code class="text-12-regular text-text-base break-all">{directory()}</code>
+            </Show>
           </div>
         </div>
       </Show>

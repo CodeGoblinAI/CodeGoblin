@@ -400,6 +400,29 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
               }
             }
 
+            if (permission === "workspace_trust") {
+              const directory =
+                typeof props.request.metadata?.directory === "string"
+                  ? props.request.metadata.directory
+                  : props.request.patterns[0]
+              const provider =
+                typeof props.request.metadata?.provider === "string" ? props.request.metadata.provider : "Local CLI"
+              return {
+                icon: "◇",
+                title: `Trust this folder for ${provider}?`,
+                body: (
+                  <box paddingLeft={1} gap={1}>
+                    <text fg={theme.textMuted}>
+                      The local CLI can execute code and access files in this folder. Approval is stored by the CLI.
+                    </text>
+                    <Show when={directory}>
+                      <text fg={theme.text}>{directory}</text>
+                    </Show>
+                  </box>
+                ),
+              }
+            }
+
             if (permission === "doom_loop") {
               return {
                 icon: "⟳",
@@ -463,12 +486,19 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
               title="Permission required"
               header={header()}
               body={current.body}
-              options={{
-                once: "Allow once",
-                always: "Allow always",
-                reject: "Reject",
-                never: "Never allow",
-              }}
+              options={
+                props.request.permission === "workspace_trust"
+                  ? {
+                      once: "Trust folder",
+                      reject: "Cancel",
+                    }
+                  : {
+                      once: "Allow once",
+                      always: "Allow always",
+                      reject: "Reject",
+                      never: "Never allow",
+                    }
+              }
               escapeKey="reject"
               fullscreen
               onSelect={(option) => {

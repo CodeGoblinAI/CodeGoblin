@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { getSlashCommand, SHARED_SLASH_COMMANDS, slashCommandNames } from "@codegoblin/core/command/catalog"
+import { getSlashCommand, SHARED_SLASH_COMMANDS, slashCommandNames, slashCommandProps } from "@codegoblin/core/command/catalog"
 
 describe("shared slash command catalog", () => {
   test("TUI and web expose the same built-in names and aliases", () => {
@@ -10,6 +10,13 @@ describe("shared slash command catalog", () => {
     expect(getSlashCommand("/reasoning")?.name).toBe("effort")
     expect(getSlashCommand("/market")?.name).toBe("plugins")
     expect(getSlashCommand("/continue")?.name).toBe("resume")
+  })
+
+  test("keeps the reasoning alias compatible with effort", () => {
+    expect(slashCommandNames("tui")).toContain("effort")
+    expect(slashCommandNames("tui")).toContain("reasoning")
+    expect(slashCommandProps("effort").aliases).toContain("reasoning")
+    expect(getSlashCommand("reasoning")?.name).toBe("effort")
   })
 
   test("server-defined commands stay outside the built-in catalog", () => {

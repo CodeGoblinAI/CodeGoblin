@@ -648,16 +648,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const slashCommands = createMemo<SlashCommand[]>(() => {
     const builtin = command.options
       .filter((opt) => !opt.disabled && !opt.id.startsWith("suggested.") && opt.slash)
-      .flatMap((opt) =>
-        [opt.slash!, ...(opt.slashAliases ?? [])].map((trigger) => ({
-          id: opt.id,
-          trigger,
-          title: opt.title,
-          description: opt.description,
-          keybind: opt.keybind,
-          type: "builtin" as const,
-        })),
-      )
+      .map((opt) => ({
+        id: opt.id,
+        trigger: opt.slash!,
+        aliasSearch: opt.slashAliases?.join(" "),
+        title: opt.title,
+        description: opt.description,
+        keybind: opt.keybind,
+        type: "builtin" as const,
+      }))
 
     const custom = sync.data.command.map((cmd) => ({
       id: `custom.${cmd.name}`,
@@ -815,7 +814,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   } = useFilteredList<SlashCommand>({
     items: slashCommands,
     key: (x) => x?.id,
-    filterKeys: ["trigger", "title"],
+    filterKeys: ["trigger", "aliasSearch", "title"],
     onSelect: handleSlashSelect,
   })
 

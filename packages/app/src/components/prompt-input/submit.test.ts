@@ -101,6 +101,8 @@ beforeAll(async () => {
   mock.module("@codegoblin/core/util/encode", () => ({
     base64Decode: (value: string) => value,
     base64Encode: (value: string) => value,
+    checksum: () => undefined,
+    sampledChecksum: () => undefined,
   }))
 
   mock.module("@/context/local", () => ({

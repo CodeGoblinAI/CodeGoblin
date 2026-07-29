@@ -525,4 +525,33 @@ describe("HttpApi UI fallback", () => {
       expect(response.headers.get("access-control-allow-origin")).toBe("http://localhost:3000")
     }),
   )
+
+  it.live("serves usage data for a workspace without a session", () =>
+    Effect.gen(function* () {
+      const response = yield* app().request("/codegoblin/usage", {
+        headers: { "x-opencode-directory": process.cwd() },
+      })
+
+      const value = (yield* responseText(response)) as string
+      expect(response.status).toBe(200)
+      const usage = JSON.parse(value)
+      expect(usage).toHaveProperty("aggregate")
+      expect(usage).toHaveProperty("balances")
+      expect(usage).toHaveProperty("quotas")
+      expect(usage).toHaveProperty("refreshing")
+      expect(usage).toHaveProperty("refreshedAt")
+    }),
+  )
+
+  it.live("requires a non-simple action header for forced usage refresh", () =>
+    Effect.gen(function* () {
+      const response = yield* app().request("/codegoblin/usage/refresh", {
+        method: "POST",
+        headers: { "x-opencode-directory": process.cwd() },
+      })
+
+      expect(response.status).toBe(403)
+    }),
+  )
+
 })

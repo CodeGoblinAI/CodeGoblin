@@ -87,10 +87,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         providerOptions: input.provider.options,
       })
   const options = mergeOptions(mergeOptions(mergeOptions(base, input.model.options), input.agent.options), variant)
+  const gemini36 = input.model.api.id.toLowerCase() === "gemini-3.6-flash"
   if (["claude-code", "cursor-agent", "antigravity-cli"].includes(input.model.providerID)) {
     options.sessionID = input.small ? `${input.sessionID}:sidecar` : input.sessionID
     options.directory = (yield* InstanceState.context).directory
     options.permissionMode = input.small || input.agent.name === "plan" ? "plan" : "agent"
+    options.title = cliSessionTitle(input.messages)
   }
   if (isOpenaiOauth) options.instructions = system.join("\n")
 
@@ -117,11 +119,11 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       message: input.user,
     },
     {
-      temperature: input.model.capabilities.temperature
+      temperature: !gemini36 && input.model.capabilities.temperature
         ? (input.agent.temperature ?? ProviderTransform.temperature(input.model))
         : undefined,
-      topP: input.agent.topP ?? ProviderTransform.topP(input.model),
-      topK: ProviderTransform.topK(input.model),
+      topP: gemini36 ? undefined : input.agent.topP ?? ProviderTransform.topP(input.model),
+      topK: gemini36 ? undefined : ProviderTransform.topK(input.model),
       maxOutputTokens: ProviderTransform.maxOutputTokens(input.model, input.flags.outputTokenMax),
       options,
     },
@@ -189,6 +191,25 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     },
   }
 })
+
+function cliSessionTitle(messages: ModelMessage[]) {
+  const message = messages.find((item) => item.role === "user")
+  if (!message) return
+  const text =
+    typeof message.content === "string"
+      ? message.content
+      : message.content
+          .flatMap((part) => (part.type === "text" ? [part.text] : []))
+          .join(" ")
+  const normalized = text.split("<system-reminder>")[0].replace(/\s+/g, " ").trim()
+  const title =
+    (normalized.startsWith('"') && normalized.endsWith('"')) ||
+    (normalized.startsWith("'") && normalized.endsWith("'"))
+      ? normalized.slice(1, -1).trim()
+      : normalized
+  if (!title) return
+  return title.slice(0, 80)
+}
 
 function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission" | "user">) {
   const disabled = Permission.disabled(

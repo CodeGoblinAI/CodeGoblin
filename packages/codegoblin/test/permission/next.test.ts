@@ -574,6 +574,27 @@ it.instance(
 )
 
 it.instance(
+  "ask - forceAsk stays pending even when action is allow",
+  () =>
+    Effect.gen(function* () {
+      const fiber = yield* ask({
+        sessionID: SessionID.make("session_test"),
+        permission: "workspace_trust",
+        patterns: ["C:\\workspace"],
+        metadata: {},
+        always: [],
+        ruleset: [{ permission: "*", pattern: "*", action: "allow" }],
+        forceAsk: true,
+      }).pipe(Effect.forkScoped)
+
+      expect(yield* waitForPending(1)).toHaveLength(1)
+      yield* rejectAll()
+      yield* Fiber.await(fiber)
+    }),
+  { git: true },
+)
+
+it.instance(
   "ask - throws DeniedError when action is deny",
   () =>
     Effect.gen(function* () {
