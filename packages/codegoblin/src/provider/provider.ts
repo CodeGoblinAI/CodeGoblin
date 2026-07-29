@@ -27,6 +27,7 @@ import { optionalOmitUndefined } from "@codegoblin/core/schema"
 import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
+import { modelNotFoundMessage } from "./model-error"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import {
   augmentAudioModelCatalog,
@@ -1034,6 +1035,10 @@ export class ModelNotFoundError extends Schema.TaggedErrorClass<ModelNotFoundErr
 }) {
   static isInstance(input: unknown): input is ModelNotFoundError {
     return input instanceof ModelNotFoundError
+  }
+
+  override get message() {
+    return modelNotFoundMessage(this)
   }
 }
 

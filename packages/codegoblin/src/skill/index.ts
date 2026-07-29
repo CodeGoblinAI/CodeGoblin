@@ -335,7 +335,9 @@ export function fmt(list: Info[], opts: { verbose: boolean }) {
           "  <skill>",
           `    <name>${skill.name}</name>`,
           `    <description>${skill.description}</description>`,
-          `    <location>${pathToFileURL(skill.location).href}</location>`,
+          // No <location>: the skill tool resolves by name, and the loaded
+          // output already reports the base directory. Emitting a file:// URL
+          // per skill cost real prefix tokens for something never referenced.
           "  </skill>",
         ]),
       "</available_skills>",

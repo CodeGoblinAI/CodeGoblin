@@ -71,14 +71,27 @@ describe("cli.error", () => {
       suggestions: ["claude-sonnet-4"],
     }
     const expected = [
-      "Model not found: anthropic/claude-sonet-4",
-      "Did you mean: claude-sonnet-4",
+      "Model anthropic/claude-sonet-4 not found. Did you mean: claude-sonnet-4?",
       "Try: `codegoblin models` to list available models",
-      "Or check your CodeGoblin config (opencode.json) provider/model names",
+      "Or check your CodeGoblin config (codegoblin.json) provider/model names",
     ].join("\n")
 
     expect(FormatError({ name: "ProviderModelNotFoundError", data })).toBe(expected)
     expect(FormatError({ _tag: "ProviderModelNotFoundError", ...data })).toBe(expected)
+  })
+
+  test("explains local runtime setup for codegoblin models", () => {
+    // A missing local model is nearly always "the runtime isn't set up here"
+    // rather than a typo, so the formatter names the commands that fix it.
+    const output = FormatError({
+      _tag: "ProviderModelNotFoundError",
+      providerID: "codegoblin",
+      modelID: "qwen3-0.6b",
+    })
+
+    expect(output).toContain("Local model codegoblin/qwen3-0.6b is not installed")
+    expect(output).toContain("codegoblin runtime list")
+    expect(output).toContain("codegoblin runtime pull")
   })
 
   test("formats legacy and tagged provider init errors the same way", () => {

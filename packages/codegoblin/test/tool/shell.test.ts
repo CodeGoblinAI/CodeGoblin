@@ -258,6 +258,31 @@ describe("tool.shell permissions", () => {
     }),
   )
 
+  // Directory changes used to skip the scan entirely, which meant a configured
+  // `{"bash": {"*": "deny"}}` could not block them. They now travel on the
+  // deny-only channel: rule-evaluated, but never prompting.
+  each("still asks for the non-cwd half of a compound command", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+          yield* run(
+            {
+              command: "cd . && echo hello",
+              description: "Change directory then echo",
+            },
+            capture(requests),
+          )
+          expect(requests.length).toBe(1)
+          expect(requests[0].patterns).toContain("echo hello")
+          expect(requests[0].denyOnly?.join("\n")).toContain("cd")
+        }),
+      )
+    }),
+  )
+
   for (const item of ps) {
     it.live(`parses PowerShell conditionals for permission prompts [${item.label}]`, () =>
       withShell(
@@ -688,7 +713,9 @@ describe("tool.shell permissions", () => {
               expect(extDirReq!.patterns).toContain(
                 Filesystem.normalizePathPattern(path.join(process.env.WINDIR!, "*")),
               )
-              expect(bashReq).toBeUndefined()
+              // Deny-only, so no bash prompt — but still rule-evaluated.
+              expect(bashReq!.patterns).toEqual([])
+              expect(bashReq!.denyOnly?.join("\n")).toContain("Set-Location")
             }),
           ),
         ),
@@ -965,7 +992,7 @@ describe("tool.shell permissions", () => {
     }),
   )
 
-  each("does not ask for bash permission when command is cd only", () =>
+  each("does not prompt for bash permission when command is cd only", () =>
     Effect.gen(function* () {
       const tmp = yield* tmpdirScoped()
       yield* runIn(
@@ -980,7 +1007,12 @@ describe("tool.shell permissions", () => {
             capture(requests),
           )
           const bashReq = requests.find((r) => r.permission === "bash")
-          expect(bashReq).toBeUndefined()
+          // The request is still made so an explicit deny rule can block it, but
+          // it carries nothing promptable, so the user is never interrupted.
+          expect(bashReq).toBeDefined()
+          expect(bashReq!.patterns).toEqual([])
+          expect(bashReq!.always).toEqual([])
+          expect(bashReq!.denyOnly?.join("\n")).toContain("cd")
         }),
       )
     }),

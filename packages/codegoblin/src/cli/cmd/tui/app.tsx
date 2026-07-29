@@ -4,6 +4,7 @@ import * as Clipboard from "@tui/util/clipboard"
 import * as Selection from "@tui/util/selection"
 import * as TuiAudio from "@tui/util/audio"
 import { createCliRenderer, MouseButton, type CliRendererConfig } from "@opentui/core"
+import { installTerminalRestore } from "./terminal-restore"
 import { RouteProvider, useRoute } from "@tui/context/route"
 import {
   Switch,
@@ -208,6 +209,10 @@ export function tui(input: {
       await TuiPluginRuntime.dispose()
       TuiAudio.dispose()
     }
+
+    // Registered before the renderer touches the terminal, so even a failure
+    // during startup unwinds the modes it managed to set.
+    installTerminalRestore()
 
     const renderer = await createCliRenderer(rendererConfig(input.config))
     // Prewarm palette before ThemeProvider mounts so `system` theme avoids a first-paint fallback flash.

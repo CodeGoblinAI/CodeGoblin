@@ -68,6 +68,11 @@ export const Flag = {
   get CODEGOBLIN_DISABLE_PROJECT_CONFIG() {
     return truthy("DISABLE_PROJECT_CONFIG")
   },
+  // Prints the per-request system-prompt/tool token breakdown to stderr so the
+  // cacheable-vs-poisoned split can be measured against a real session.
+  get CODEGOBLIN_CONTEXT_REPORT() {
+    return truthy("CONTEXT_REPORT")
+  },
   get CODEGOBLIN_TUI_CONFIG() {
     return raw("TUI_CONFIG")
   },

@@ -2,6 +2,7 @@ import type { Hooks, PluginInput } from "@codegoblin/plugin"
 import * as Log from "@codegoblin/core/util/log"
 import { InstallationVersion } from "@codegoblin/core/installation/version"
 import { OAUTH_DUMMY_KEY } from "../auth"
+import { captureCodexUsageHeaders } from "../codegoblin/provider-usage"
 import os from "os"
 import { setTimeout as sleep } from "node:timers/promises"
 import { createServer } from "http"
@@ -507,10 +508,12 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 ? new URL(codexApiEndpoint)
                 : parsed
 
-            return fetch(url, {
+            const response = await fetch(url, {
               ...init,
               headers,
             })
+            captureCodexUsageHeaders(response.headers)
+            return response
           },
         }
       },

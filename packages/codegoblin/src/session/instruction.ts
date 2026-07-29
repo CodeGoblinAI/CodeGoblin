@@ -101,6 +101,33 @@ export const layer: Layer.Layer<
       return new TextDecoder().decode(body)
     })
 
+    // Instruction sources used to be re-read — and remote ones re-fetched, each
+    // on a 5s timeout — on every single turn. Past the wasted IO and latency,
+    // a remote file that changes mid-session silently rewrites the prompt
+    // prefix, which stops the provider cache from matching. Cache both: files
+    // keyed on mtime+size so edits are still picked up, remote content for the
+    // life of the instance.
+    const fileCache = new Map<string, { key: string; content: string }>()
+    const remoteCache = new Map<string, string>()
+
+    const readCached = Effect.fnUntraced(function* (filepath: string) {
+      const stat = yield* fs.stat(filepath).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      const key = stat ? JSON.stringify({ m: stat.mtime, s: String(stat.size) }) : "missing"
+      const hit = fileCache.get(filepath)
+      if (hit && hit.key === key) return hit.content
+      const content = yield* read(filepath)
+      fileCache.set(filepath, { key, content })
+      return content
+    })
+
+    const fetchCached = Effect.fnUntraced(function* (url: string) {
+      const hit = remoteCache.get(url)
+      if (hit !== undefined) return hit
+      const content = yield* fetch(url)
+      remoteCache.set(url, content)
+      return content
+    })
+
     const clear = Effect.fn("Instruction.clear")(function* (messageID: MessageID) {
       const s = yield* InstanceState.get(state)
       s.claims.delete(messageID)
@@ -158,8 +185,8 @@ export const layer: Layer.Layer<
         (item) => item.startsWith("https://") || item.startsWith("http://"),
       )
 
-      const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
-      const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
+      const files = yield* Effect.forEach(Array.from(paths), readCached, { concurrency: 8 })
+      const remote = yield* Effect.forEach(urls, fetchCached, { concurrency: 4 })
 
       return [
         ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),

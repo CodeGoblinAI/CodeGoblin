@@ -17,6 +17,7 @@
 mod inference;
 mod llama;
 mod serve;
+mod widget;
 
 use std::io::{Read, Write};
 
@@ -48,6 +49,12 @@ fn main() {
                 .unwrap_or_else(|_| "codegoblin-local".to_string());
             if let Err(err) = serve::run(&addr, &model) {
                 eprintln!("codegoblin-native serve: {err}");
+                std::process::exit(1);
+            }
+        }
+        Some("widget") => {
+            if let Err(err) = widget::run() {
+                eprintln!("codegoblin-native widget: {err}");
                 std::process::exit(1);
             }
         }

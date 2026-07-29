@@ -612,6 +612,12 @@ export type TuiPluginApi = {
   state: TuiState
   theme: TuiTheme
   client: OpencodeClient
+  /** Raw access to the local server for CodeGoblin-specific plain routes
+   * (`/codegoblin/*`) that aren't part of the typed SDK surface. */
+  server: {
+    readonly url: string
+    fetch: (path: string, init?: RequestInit) => Promise<Response>
+  }
   event: TuiEventBus
   renderer: CliRenderer
   slots: TuiSlots
