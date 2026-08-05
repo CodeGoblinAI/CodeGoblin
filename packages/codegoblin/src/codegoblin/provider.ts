@@ -289,6 +289,33 @@ export function augmentImageModelCatalog(catalog: Record<string, Info>) {
   })
 }
 
+/**
+ * Meta's developer catalog published Muse Spark 1.2 before models.dev exposed
+ * the new direct Meta and OpenRouter entries. Keep both model routes available
+ * until the upstream catalog catches up; this becomes a no-op once it does.
+ */
+export function augmentMuseSparkModelCatalog(catalog: Record<string, Info>) {
+  ;[
+    { providerID: "meta", sourceID: "muse-spark-1.1", modelID: "muse-spark-1.2" },
+    { providerID: "openrouter", sourceID: "meta/muse-spark-1.1", modelID: "meta/muse-spark-1.2" },
+  ].forEach((variant) => {
+    const provider = catalog[variant.providerID]
+    const source = provider?.models[variant.sourceID]
+    if (!provider || !source || provider.models[variant.modelID]) return
+
+    provider.models[variant.modelID] = {
+      ...source,
+      id: ModelID.make(variant.modelID),
+      name: "Muse Spark 1.2",
+      api: {
+        ...source.api,
+        id: variant.modelID,
+      },
+      release_date: "2026-08-05",
+    }
+  })
+}
+
 export const TripoProvider = {
   id: ProviderID.make("tripo"),
   name: "Tripo 3D",

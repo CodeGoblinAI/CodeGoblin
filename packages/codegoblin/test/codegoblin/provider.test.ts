@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { augmentAudioModelCatalog, codeGoblinProviderInfo } from "@/codegoblin/provider"
+import { augmentAudioModelCatalog, augmentMuseSparkModelCatalog, codeGoblinProviderInfo } from "@/codegoblin/provider"
+import { Provider } from "@/provider/provider"
 import type { Info } from "@/provider/provider"
 
 describe("CodeGoblin provider catalog", () => {
@@ -27,5 +28,65 @@ describe("CodeGoblin provider catalog", () => {
     expect(catalog.elevenlabs?.name).toBe("ElevenLabs")
     expect(catalog.elevenlabs?.env).toContain("ELEVENLABS_API_KEY")
     expect(catalog.elevenlabs?.models["eleven_multilingual_v2"]?.capabilities.output.audio).toBe(true)
+  })
+
+  test("exposes the newly released Muse Spark 1.2 models", () => {
+    const catalog: Record<string, Info> = {
+      meta: Provider.fromModelsDevProvider({
+        id: "meta",
+        name: "Meta",
+        env: ["META_MODEL_API_KEY"],
+        npm: "@ai-sdk/openai",
+        api: "https://api.meta.ai/v1",
+        models: {
+          "muse-spark-1.1": {
+            id: "muse-spark-1.1",
+            name: "Muse Spark 1.1",
+            release_date: "2026-04-08",
+            attachment: true,
+            reasoning: true,
+            temperature: true,
+            tool_call: true,
+            modalities: { input: ["text", "image"], output: ["text"] },
+            limit: { context: 1_000_000, output: 32_000 },
+            cost: { input: 1.25, output: 4.25, cache_read: 0.15 },
+          },
+        },
+      }),
+      openrouter: Provider.fromModelsDevProvider({
+        id: "openrouter",
+        name: "OpenRouter",
+        env: ["OPENROUTER_API_KEY"],
+        npm: "@ai-sdk/openai-compatible",
+        api: "https://openrouter.ai/api/v1",
+        models: {
+          "meta/muse-spark-1.1": {
+            id: "meta/muse-spark-1.1",
+            name: "Muse Spark 1.1",
+            release_date: "2026-04-08",
+            attachment: true,
+            reasoning: true,
+            temperature: true,
+            tool_call: true,
+            modalities: { input: ["text", "image"], output: ["text"] },
+            limit: { context: 1_000_000, output: 32_000 },
+            cost: { input: 1.25, output: 4.25, cache_read: 0.15 },
+          },
+        },
+      }),
+    }
+
+    augmentMuseSparkModelCatalog(catalog)
+    augmentMuseSparkModelCatalog(catalog)
+
+    expect(String(catalog.meta.models["muse-spark-1.2"]?.id)).toBe("muse-spark-1.2")
+    expect(catalog.meta.models["muse-spark-1.2"]?.name).toBe("Muse Spark 1.2")
+    expect(catalog.meta.models["muse-spark-1.2"]?.api.id).toBe("muse-spark-1.2")
+    expect(catalog.meta.models["muse-spark-1.2"]?.api.url).toBe("https://api.meta.ai/v1")
+    expect(catalog.meta.models["muse-spark-1.2"]?.cost.input).toBe(1.25)
+    expect(String(catalog.openrouter.models["meta/muse-spark-1.2"]?.id)).toBe("meta/muse-spark-1.2")
+    expect(catalog.openrouter.models["meta/muse-spark-1.2"]?.name).toBe("Muse Spark 1.2")
+    expect(catalog.openrouter.models["meta/muse-spark-1.2"]?.api.id).toBe("meta/muse-spark-1.2")
+    expect(catalog.openrouter.models["meta/muse-spark-1.2"]?.api.url).toBe("https://openrouter.ai/api/v1")
   })
 })
