@@ -33,6 +33,7 @@ import {
   augmentAudioModelCatalog,
   augmentImageModelCatalog,
   augment3DModelCatalog,
+  augmentMuseSparkModelCatalog,
   augmentLocalRuntimeModels,
   codeGoblinProviderInfo,
 } from "@/codegoblin/provider"
@@ -1270,6 +1271,8 @@ export const layer = Layer.effect(
           catalog[provider.id] = provider
           database[provider.id] = toPublicInfo(provider)
         }
+        augmentMuseSparkModelCatalog(catalog)
+        augmentMuseSparkModelCatalog(database)
         augmentImageModelCatalog(database)
         augmentAudioModelCatalog(database)
         augment3DModelCatalog(database)
