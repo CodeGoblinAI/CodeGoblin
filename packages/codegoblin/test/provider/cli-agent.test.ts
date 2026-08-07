@@ -163,7 +163,7 @@ describe("local CLI agent providers", () => {
     expect(command).not.toContain("--name")
   })
 
-  test("resumes Cursor sessions without force mode", () => {
+  test("resumes Cursor sessions without force mode or implicit workspace trust", () => {
     const command = buildCliAgentCommand({
       providerID: "cursor-agent",
       executable: "cursor-agent",
@@ -173,16 +173,36 @@ describe("local CLI agent providers", () => {
       permissionMode: "agent",
     })
     expect(command).toContain("--resume=cursor-chat-id")
-    expect(command).toContain("--trust")
+    expect(command).not.toContain("--trust")
     expect(command).not.toContain("--force")
+
+    expect(
+      buildCliAgentCommand({
+        providerID: "cursor-agent",
+        executable: "cursor-agent",
+        modelID: "default",
+        sessionID: "ses_example",
+        permissionMode: "agent",
+        trustWorkspace: true,
+      }),
+    ).toContain("--trust")
   })
 
   test("recognizes Claude's official user-local install location", () => {
+    // Both branches are asserted from whichever machine runs this: separators
+    // must follow the platform being described, not the host. Only the win32
+    // case was covered before, so building these with the host's `path.join`
+    // passed locally on Windows and failed CI on Linux.
     expect(claudeAgentCandidates({ USERPROFILE: "C:\\Users\\test" }, "win32")).toEqual([
       "C:\\Users\\test\\.local\\bin\\claude.exe",
       "C:\\Users\\test\\.local\\bin\\claude.cmd",
       "C:\\Users\\test\\.local\\bin\\claude.ps1",
     ])
+    expect(claudeAgentCandidates({ HOME: "/home/test" }, "linux")).toEqual(["/home/test/.local/bin/claude"])
+    expect(claudeAgentCandidates({ HOME: "/Users/test" }, "darwin")).toEqual(["/Users/test/.local/bin/claude"])
+    // The other platform's variable is not a substitute for the missing one.
+    expect(claudeAgentCandidates({ HOME: "/home/test" }, "win32")).toEqual([])
+    expect(claudeAgentCandidates({ USERPROFILE: "C:\\Users\\test" }, "linux")).toEqual([])
   })
 
   test("sends Antigravity prompts as the print argument instead of stdin", () => {
@@ -351,6 +371,20 @@ describe("local CLI agent providers", () => {
     })
   })
 
+  test("deduplicates Claude's equivalent session and five-hour quota rows", () => {
+    expect(
+      parseClaudeQuota({
+        result:
+          "Current session: 9% used · resets Jul 23, 4:29am\nCurrent 5-hour: 10% used · resets Jul 23, 4:30am\nCurrent week (all models): 38% used",
+      }),
+    ).toMatchObject({
+      windows: [
+        { label: "5h", usedPercentage: 10, resetsAt: "Jul 23, 4:30am" },
+        { label: "week", usedPercentage: 38 },
+      ],
+    })
+  })
+
   test("parses Cursor assistant messages", () => {
     expect(
       parseCliAgentEvent(
@@ -368,7 +402,7 @@ describe("local CLI agent providers", () => {
     expect(cliAgentResumeCommand("claude-code", "claude", "claude-id")).toEqual(["claude", "--resume", "claude-id"])
     expect(cliAgentResumeCommand("cursor-agent", "cursor-agent", "cursor-id")).toEqual([
       "cursor-agent",
-      "resume",
+      "--resume",
       "cursor-id",
     ])
     expect(cliAgentResumeCommand("antigravity-cli", "agy", "agy-id")).toEqual(["agy", "--conversation", "agy-id"])

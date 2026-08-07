@@ -97,6 +97,7 @@ let discoveredProviders: Promise<Info[]> | undefined
 let sessionWrite = Promise.resolve()
 let usageWrite = Promise.resolve()
 let usageRefresh: Promise<CliAgentQuota[]> | undefined
+let usageRefreshForced = false
 let usageRefreshAt = 0
 
 export function cliAgentProviderInfos(input?: Partial<Record<CliAgentProviderID, DiscoveredModel[]>>): Info[] {
@@ -298,6 +299,16 @@ export function createCliAgentLanguageModel(
         providerID === "antigravity-cli"
           ? path.join(Global.Path.data, `antigravity-${sessionID}-${crypto.randomUUID()}.log`)
           : undefined
+      const cwd = bridge.directory || (typeof remembered === "string" ? undefined : remembered?.directory) || process.cwd()
+      const trustWorkspace =
+        providerID !== "cursor-agent"
+          ? bridge.trustWorkspace
+          : bridge.trustWorkspace === true
+            ? true
+            : await bridge.requestWorkspaceTrust?.(cwd)
+      if (providerID === "cursor-agent" && trustWorkspace !== true) {
+        throw new Error(`Cursor Agent needs workspace trust for ${cwd}. Approve the trust request in CodeGoblin and retry.`)
+      }
       const command = buildCliAgentCommand({
         providerID,
         executable,
@@ -310,7 +321,7 @@ export function createCliAgentLanguageModel(
         logFile,
         prompt,
         title: bridge.title,
-        trustWorkspace: bridge.trustWorkspace,
+        trustWorkspace,
         streamJson: providerID === "antigravity-cli" ? await antigravitySupportsStreamJson(executable) : undefined,
       })
       // Antigravity charges ~20s of setup per `--print` run. A warm interactive
@@ -448,7 +459,7 @@ export function createCliAgentLanguageModel(
       }
 
       const proc = Bun.spawn(command, {
-        cwd: bridge.directory || (typeof remembered === "string" ? undefined : remembered?.directory) || process.cwd(),
+        cwd,
         env: process.env,
         stdin: "pipe",
         stdout: "pipe",
@@ -674,8 +685,11 @@ export function claudeAgentCandidates(
 ) {
   const home = platform === "win32" ? env.USERPROFILE : env.HOME
   if (!home) return []
+  // Join with the *target* platform's rules, not the host's: `path.join` would
+  // emit forward slashes for Windows candidates when this runs on Linux.
+  const join = platform === "win32" ? path.win32.join : path.posix.join
   const launchers = platform === "win32" ? ["claude.exe", "claude.cmd", "claude.ps1"] : ["claude"]
-  return launchers.map((launcher) => path.join(home, ".local", "bin", launcher))
+  return launchers.map((launcher) => join(home, ".local", "bin", launcher))
 }
 
 export function antigravityAgentCandidates(
@@ -706,12 +720,14 @@ export function cursorAgentCandidates(
   env: NodeJS.ProcessEnv = process.env,
   platform = process.platform,
 ) {
+  // Windows-only by definition, so always join with Windows rules — the host
+  // running this (CI on Linux, for one) is not the platform being described.
   if (platform !== "win32" || !env.LOCALAPPDATA) return []
-  const root = path.join(env.LOCALAPPDATA, "cursor-agent")
+  const root = path.win32.join(env.LOCALAPPDATA, "cursor-agent")
   const launchers = ["cursor-agent.exe", "cursor-agent.cmd", "cursor-agent.ps1", "agent.exe", "agent.cmd", "agent.ps1"]
   return [
-    ...launchers.map((launcher) => path.join(root, launcher)),
-    ...launchers.map((launcher) => path.join(root, "versions", "current", launcher)),
+    ...launchers.map((launcher) => path.win32.join(root, launcher)),
+    ...launchers.map((launcher) => path.win32.join(root, "versions", "current", launcher)),
   ]
 }
 
@@ -728,7 +744,9 @@ export function cliAgentResumeCommand(
   externalSessionID: string,
 ) {
   if (providerID === "claude-code") return [executable, "--resume", externalSessionID]
-  if (providerID === "cursor-agent") return [...cliAgentBaseCommand(providerID, executable), "resume", externalSessionID]
+  if (providerID === "cursor-agent") {
+    return [...cliAgentBaseCommand(providerID, executable), "--resume", externalSessionID]
+  }
   return [...cliAgentBaseCommand(providerID, executable), "--conversation", externalSessionID]
 }
 
@@ -788,7 +806,7 @@ export function buildCliAgentCommand(input: {
     "--print",
     "--output-format",
     "stream-json",
-    ...(input.trustWorkspace !== false ? ["--trust"] : []),
+    ...(input.trustWorkspace === true ? ["--trust"] : []),
     ...(input.modelID === "default" ? [] : ["--model", input.modelID]),
     ...(input.externalSessionID ? [`--resume=${input.externalSessionID}`] : []),
   ]
@@ -1040,13 +1058,32 @@ export function parseClaudeQuota(value: unknown): CliAgentQuota | undefined {
   if (!isRecord(value)) return
   const result = stringValue(value.result)
   if (!result) return
-  const windows = result.split(/\r?\n/).flatMap((line) => {
+  const parsed = result.split(/\r?\n/).flatMap((line) => {
     const match = /^Current (session|5[- ]hour|week \(all models\)):\s*(\d+(?:\.\d+)?)% used(?:\s*·\s*resets (.+))?/i.exec(
       line.trim(),
     )
     if (!match) return []
     const label = match[1].toLowerCase().startsWith("week") ? "week" : "5h"
-    return [{ label, usedPercentage: Number(match[2]), ...(match[3] && { resetsAt: match[3] }) }]
+    return [
+      {
+        label,
+        usedPercentage: Number(match[2]),
+        ...(match[3] && { resetsAt: match[3] }),
+        explicit: !match[1].toLowerCase().startsWith("session"),
+      },
+    ]
+  })
+  const windows = ["5h", "week"].flatMap((label) => {
+    const matches = parsed.filter((item) => item.label === label)
+    const selected = matches.find((item) => item.explicit) ?? matches[0]
+    if (!selected) return []
+    return [
+      {
+        label: selected.label,
+        usedPercentage: selected.usedPercentage,
+        ...(selected.resetsAt && { resetsAt: selected.resetsAt }),
+      },
+    ]
   })
   if (!windows.length) return
   return { providerID: "claude-code", windows, checkedAt: new Date().toISOString() }
@@ -1059,9 +1096,14 @@ export function parseClaudeQuota(value: unknown): CliAgentQuota | undefined {
  * actually worth spawning. `force` is the panel's refresh key and skips both.
  */
 export async function refreshCliAgentUsage(force = false) {
-  if (usageRefresh) return usageRefresh
+  if (usageRefresh) {
+    if (!force || usageRefreshForced) return usageRefresh
+    await usageRefresh
+    return refreshCliAgentUsage(true)
+  }
   if (!force && Date.now() - usageRefreshAt < 60_000) return readCliAgentUsage()
   usageRefreshAt = Date.now()
+  usageRefreshForced = force
   usageRefresh = (async () => {
     const claude = cliAgentExecutable("claude-code")
     const antigravity = cliAgentExecutable("antigravity-cli")
@@ -1081,6 +1123,7 @@ export async function refreshCliAgentUsage(force = false) {
     return readCliAgentUsage()
   })().finally(() => {
     usageRefresh = undefined
+    usageRefreshForced = false
   })
   return usageRefresh
 }
@@ -1147,28 +1190,26 @@ async function refreshClaudeQuota(executable: string, force = false) {
   // Reuse one fixed session id for every quota check. Without it each check
   // starts a brand-new conversation that then clutters the user's `/resume`
   // picker with untitled "/usage" entries.
-  const proc = Bun.spawn(
-    [
-      ...cliAgentBaseCommand("claude-code", executable),
-      "--print",
-      "--output-format",
-      "json",
-      "--session-id",
-      CLAUDE_QUOTA_SESSION_ID,
-      "/usage",
-    ],
-    {
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "ignore",
-    },
-  )
-  const timeout = setTimeout(() => proc.kill(), 10_000)
-  const [exitCode, value] = await Promise.all([proc.exited, new Response(proc.stdout).json().catch(() => undefined)])
-  clearTimeout(timeout)
-  if (exitCode !== 0) return
-  const quota = parseClaudeQuota(value)
-  if (!quota) return
+  // The fixed id only works as `--session-id` once. Every later check has to
+  // resume that same conversation, or Claude exits 1 with "Session ID ... is
+  // already in use" and the quota silently stops updating.
+  let value: unknown
+  let failure = "no output"
+  for (const session of [["--resume", CLAUDE_QUOTA_SESSION_ID], ["--session-id", CLAUDE_QUOTA_SESSION_ID]]) {
+    const result = await claudeQuotaProbe(executable, session)
+    if (result.ok) {
+      value = result.value
+      break
+    }
+    failure = result.detail
+  }
+  const quota = value === undefined ? undefined : parseClaudeQuota(value)
+  if (!quota) {
+    // Swallowing this is how a probe that had been failing for a day went
+    // unnoticed while the footer kept showing its last successful reading.
+    log.warn("claude quota probe failed", { detail: failure })
+    return
+  }
   usageWrite = usageWrite
     .catch(() => {})
     .then(async () => {
@@ -1176,6 +1217,24 @@ async function refreshClaudeQuota(executable: string, force = false) {
       await Bun.write(path.join(Global.Path.data, "cli-agent-usage.json"), JSON.stringify([...usage, quota], null, 2))
     })
   await usageWrite
+}
+
+/** One `claude --print /usage` attempt, reporting why it failed rather than
+ * collapsing every failure into "no quota". */
+async function claudeQuotaProbe(executable: string, session: string[]) {
+  const proc = Bun.spawn(
+    [...cliAgentBaseCommand("claude-code", executable), "--print", "--output-format", "json", ...session, "/usage"],
+    { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+  )
+  const timeout = setTimeout(() => proc.kill(), 10_000)
+  const [exitCode, value, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).json().catch(() => undefined),
+    new Response(proc.stderr).text().catch(() => ""),
+  ])
+  clearTimeout(timeout)
+  if (exitCode === 0 && value !== undefined) return { ok: true as const, value }
+  return { ok: false as const, detail: stderr.trim().slice(0, 300) || `exited with code ${exitCode}` }
 }
 
 function cliFailureMessage(providerID: CliAgentProviderID, stderr: string, exitCode: number) {

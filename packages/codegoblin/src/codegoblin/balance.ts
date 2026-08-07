@@ -83,17 +83,22 @@ export const CodeGoblinBalance = {
             if (input.cacheLive) liveCache = { expiresAt: Date.now() + 30_000, value }
             return value
           })
-    const quotas = liveQuotas(
-      input.refreshQuotas ? await refreshCliAgentUsage(input.refreshQuotas === "force") : await readCliAgentUsage(),
-      input.now ?? new Date(),
-    )
+    const recorded = input.refreshQuotas
+      ? await refreshCliAgentUsage(input.refreshQuotas === "force")
+      : await readCliAgentUsage()
+    const quotas = liveQuotas(recorded, input.now ?? new Date())
     const byProvider = new Map<CodeGoblinBalanceProvider, CodeGoblinBalanceEntry>()
     for (const entry of configured) byProvider.set(entry.provider, entry)
     for (const entry of live.balances) byProvider.set(entry.provider, entry)
     return {
       balances: [...byProvider.values()],
       quotas,
-      quotaStatuses: cliAgentQuotaStatuses(quotas),
+      // Availability describes the *provider* — whether it can report quota at
+      // all — so it reads the recorded data, not the live-window filter. A
+      // window that has just rolled over leaves a provider with nothing to
+      // display for a moment, and calling that "usage unavailable" reads as a
+      // broken connector rather than a quota reset.
+      quotaStatuses: cliAgentQuotaStatuses(recorded),
       errors: live.errors,
     }
   },

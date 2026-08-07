@@ -56,8 +56,19 @@ type Session = {
   partial: string
   lastUsed: number
   busy: boolean
-  terminalVersion: number
-  promptReadyVersion: number
+  /** Tail of the pty output, enough to see which footer state came last. */
+  terminal: string
+}
+
+/**
+ * AGY's footer says which state it is in: "esc to cancel" while a turn is
+ * running, "? for shortcuts" once the prompt is idle again. Whichever appears
+ * later in the output is the current state — comparing positions also survives
+ * a marker being split across pty writes, which a plain `includes` on a single
+ * chunk does not.
+ */
+export function antigravityIdle(terminal: string) {
+  return terminal.lastIndexOf("for shortcuts") > terminal.lastIndexOf("esc to cancel")
 }
 
 const sessions = new Map<string, Session>()
@@ -216,16 +227,14 @@ async function startSession(input: AntigravitySendInput): Promise<Session> {
     partial: "",
     lastUsed: Date.now(),
     busy: true,
-    terminalVersion: 0,
-    promptReadyVersion: 0,
+    terminal: "",
   }
   // A dead process must never linger in the map as a warm session.
   proc.onExit(() => {
     if (sessions.get(input.sessionID) === session) sessions.delete(input.sessionID)
   })
   proc.onData((data) => {
-    session.terminalVersion++
-    if (data.includes("for shortcuts")) session.promptReadyVersion = session.terminalVersion
+    session.terminal = `${session.terminal}${data}`.slice(-4096)
   })
   sessions.set(input.sessionID, session)
   ensureReaper()
@@ -306,6 +315,9 @@ export async function sendToAntigravitySession(
     }
   } else {
     session.busy = true
+    // The footer still reads idle from the previous turn; clear it so this
+    // turn cannot complete against a stale "prompt ready".
+    session.terminal = ""
     // Typing into the live prompt is what keeps the process warm.
     session.proc.write(`\x1b[200~${ptyPaste(input.prompt)}\x1b[201~`)
     await new Promise((r) => setTimeout(r, 750))
@@ -318,7 +330,6 @@ export async function sendToAntigravitySession(
   const startedAt = Date.now()
   let answer: string | undefined
   let lastRecordAt = Date.now()
-  let answerTerminalVersion = 0
   let complete = false
   try {
     while (Date.now() - startedAt < timeout) {
@@ -330,15 +341,16 @@ export async function sendToAntigravitySession(
         const activity = antigravityActivityFrom(record)
         if (activity) input.onActivity?.(activity)
         const text = antigravityAnswerFrom(record)
-        if (text) {
-          answer = text
-          answerTerminalVersion = session.terminalVersion
-        }
+        if (text) answer = text
         if (answer && record.type === "CHECKPOINT") complete = true
       }
-      if (answer && session.promptReadyVersion > answerTerminalVersion) complete = true
-      // The prompt-ready redraw or checkpoint is authoritative. The longer
-      // quiet fallback only covers terminals that do not expose either marker.
+      // An idle footer means AGY has finished this turn. Ordering matters: the
+      // terminal goes idle *before* the answer reaches the transcript we poll,
+      // so this must be a state test, not "did idle arrive after the answer" —
+      // that can never be true and always fell through to the timer below.
+      if (answer && antigravityIdle(session.terminal)) complete = true
+      // The checkpoint or idle footer is authoritative. The quiet fallback only
+      // covers terminals that expose neither.
       if (complete || (answer && Date.now() - lastRecordAt > Math.max(quiet, 8000))) break
       await new Promise((r) => setTimeout(r, 150))
     }

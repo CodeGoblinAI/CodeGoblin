@@ -437,9 +437,16 @@ export function Prompt(props: PromptProps) {
 
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
+    // Subscription bridges (the local CLI agents) are registered with zero
+    // per-token pricing because the plan pays, not the token — so a spend
+    // readout there can only ever say $0.00. The quota percentage next to it is
+    // what actually tells you what this turn cost.
+    const metered = model
+      ? Boolean(model.cost.input || model.cost.output || model.cost.cache.read || model.cost.cache.write)
+      : true
     return {
       context: pct ? `ctx ${Locale.number(tokens)} (${pct})` : `ctx ${Locale.number(tokens)}`,
-      cost: `spent ${money.format(sessionSpend())}`,
+      ...(metered && { cost: `spent ${money.format(sessionSpend())}` }),
     }
   })
 

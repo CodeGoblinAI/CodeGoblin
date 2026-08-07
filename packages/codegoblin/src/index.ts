@@ -50,6 +50,12 @@ import { ensureProcessMetadata } from "@codegoblin/core/util/opencode-process"
 import { isRecord } from "@/util/record"
 import { CodeGoblinBrand, codeGoblinCliName } from "@/codegoblin/brand"
 import { cleanupWindowsUpdate, runWindowsUpdateHelper, windowsUpdateStatePath } from "@/installation/windows-update"
+import { stripInheritedSessionMarkers } from "@/provider/cli-env"
+
+// Before anything can spawn a coding-agent CLI: drop the marker saying we are
+// running inside someone else's Claude Code session. The CLIs we launch are not
+// part of that session, and inheriting it breaks native sessions outright.
+stripInheritedSessionMarkers()
 
 const windowsUpdateState = windowsUpdateStatePath()
 if (windowsUpdateState) {

@@ -112,7 +112,7 @@ const live: Layer.Layer<
         isWorkflow,
       })
 
-      if (input.model.providerID === "claude-code") {
+      if (["claude-code", "cursor-agent"].includes(input.model.providerID)) {
         const bridge = yield* EffectBridge.make()
         prepared.params.options.requestWorkspaceTrust = bridge.bind(async (directory: string) => {
           try {
@@ -121,13 +121,17 @@ const live: Layer.Layer<
                 sessionID: SessionID.make(input.sessionID),
                 permission: "workspace_trust",
                 patterns: [directory],
-                metadata: { directory, provider: "Claude Code" },
+                metadata: {
+                  directory,
+                  provider: input.model.providerID === "claude-code" ? "Claude Code" : "Cursor Agent",
+                },
                 always: [directory],
                 ruleset: Permission.merge(input.agent.permission ?? [], input.permission ?? []),
-                // Claude only reaches this callback when its native CLI has
-                // presented a workspace-trust gate. General agent allow rules
-                // must not silently answer that separate security decision.
-                forceAsk: true,
+                // Claude only reaches this callback after its native CLI has
+                // presented a trust gate, so that decision must stay explicit.
+                // Cursor asks before launch and can reuse an exact-directory
+                // "always" rule instead of prompting on every turn.
+                forceAsk: input.model.providerID === "claude-code",
               }),
             )
             return true

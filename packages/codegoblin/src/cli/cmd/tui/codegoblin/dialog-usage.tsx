@@ -32,7 +32,10 @@ export function DialogUsage() {
   const [loading, setLoading] = createSignal(true)
   const [refreshing, setRefreshing] = createSignal(false)
   const [error, setError] = createSignal<string>()
-  const [cursor, setCursor] = createSignal(0)
+  // The selection follows the entry's key, not its position: a refresh can add,
+  // drop or reorder rows, and an index would silently end up on a different
+  // provider than the one that was highlighted.
+  const [cursorKey, setCursorKey] = createSignal<string>()
   const [openKey, setOpenKey] = createSignal<string>()
   let poll: ReturnType<typeof setTimeout> | undefined
   let disposed = false
@@ -89,7 +92,15 @@ export function DialogUsage() {
     for (const quota of value.quotas) {
       byProvider.set(quota.providerID, [...(byProvider.get(quota.providerID) ?? []), quota])
     }
-    for (const [providerID, quotas] of byProvider) {
+    // `value.quotas` arrives in the order the providers last wrote their quota
+    // file, so it flips whenever one of them refreshes. Follow the server's
+    // fixed provider order instead, so a row never moves under the cursor.
+    const rank = (providerID: string) => {
+      const index = value.quotaStatuses?.findIndex((item) => item.providerID === providerID) ?? -1
+      return index < 0 ? Number.MAX_SAFE_INTEGER : index
+    }
+    const ordered = [...byProvider].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
+    for (const [providerID, quotas] of ordered) {
       const label = value.quotaStatuses?.find((item) => item.providerID === providerID)?.label ?? providerID
       // The window closest to running out is the one that will actually stop
       // you, so that is the headline; the rest is a keypress away.
@@ -135,13 +146,20 @@ export function DialogUsage() {
   const titleWidth = createMemo(() => Math.max(0, ...entries().map((entry) => entry.title.length)))
   const detailWidth = createMemo(() => Math.max(0, ...(opened()?.details ?? []).map((item) => item.label.length)))
 
+  /** The highlighted entry, falling back to the first row once the list loads
+   * or when the previously selected row disappears. */
+  const active = createMemo(() => {
+    const list = selectable()
+    return list.find((entry) => entry.key === cursorKey()) ?? list[0]
+  })
   const move = (delta: number) => {
     const list = selectable()
     if (!list.length) return
-    setCursor((current) => (current + delta + list.length) % list.length)
+    const current = list.findIndex((entry) => entry.key === active()?.key)
+    setCursorKey(list[(Math.max(0, current) + delta + list.length) % list.length].key)
   }
   const open = () => {
-    const entry = selectable()[cursor()]
+    const entry = active()
     if (entry) setOpenKey(entry.key)
   }
 
@@ -196,21 +214,20 @@ export function DialogUsage() {
               <box gap={0}>
                 <For each={entries()}>
                   {(entry) => {
-                    const index = () => selectable().findIndex((item) => item.key === entry.key)
-                    const active = () => !entry.disabled && index() === cursor()
+                    const selected = () => !entry.disabled && active()?.key === entry.key
                     return (
                       <box
                         flexDirection="row"
                         gap={1}
                         onMouseUp={() => {
                           if (entry.disabled) return
-                          setCursor(index())
+                          setCursorKey(entry.key)
                           setOpenKey(entry.key)
                         }}
                       >
-                        <text fg={active() ? theme.primary : theme.textMuted}>{active() ? "❯" : " "}</text>
+                        <text fg={selected() ? theme.primary : theme.textMuted}>{selected() ? "❯" : " "}</text>
                         <text
-                          fg={entry.disabled ? theme.textMuted : active() ? theme.text : theme.textMuted}
+                          fg={entry.disabled ? theme.textMuted : selected() ? theme.text : theme.textMuted}
                           wrapMode="none"
                         >
                           {entry.title.padEnd(titleWidth())}
@@ -257,10 +274,16 @@ export function DialogUsage() {
 }
 
 function totalsEntry(key: string, title: string, totals: UsageSnapshot["aggregate"]): Entry {
+  // A subscription session costs nothing per token, so its spend is a constant
+  // zero — noise next to the figure that matters. Show money only when there is
+  // some. This cannot use the model's pricing the way the footer does: the
+  // snapshot has no per-session model, and the aggregate legitimately mixes
+  // metered and unmetered sessions.
+  const spend = totals.spend > 0 ? ` · ${money(totals.spend)}` : ""
   return {
     key,
     title,
-    headline: `${compact(totals.tokens.total)} tokens · ${money(totals.spend)}`,
+    headline: `${compact(totals.tokens.total)} tokens${spend}`,
     details: [
       { label: "input", value: compact(totals.tokens.input) },
       { label: "output", value: compact(totals.tokens.output) },
@@ -268,7 +291,7 @@ function totalsEntry(key: string, title: string, totals: UsageSnapshot["aggregat
       { label: "cache read", value: compact(totals.tokens.cacheRead) },
       { label: "cache write", value: compact(totals.tokens.cacheWrite) },
       { label: "total", value: compact(totals.tokens.total) },
-      { label: "spend", value: `$${totals.spend.toFixed(4)}` },
+      ...(totals.spend > 0 ? [{ label: "spend", value: `$${totals.spend.toFixed(4)}` }] : []),
     ],
   }
 }
