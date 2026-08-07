@@ -1,7 +1,7 @@
 import os from "node:os"
 import path from "node:path"
 import { existsSync } from "node:fs"
-import { cliAgentBaseCommand, cliAgentExecutable, cliAgentResumeCommand } from "@/provider/cli-agent"
+import { Database } from "bun:sqlite"
 
 export type ExternalSessionSource = "claude-code" | "codex" | "antigravity" | "cursor-agent"
 
@@ -29,32 +29,47 @@ export type ExternalSessionMessage = {
   }
 }
 
+type ExternalSessionCandidate = {
+  source: ExternalSessionSource
+  path: string
+  updated: number
+}
+
 const PREVIEW_BYTES = 128 * 1024
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024
 const MAX_DISCOVERY_FILES = 5_000
-const MAX_CLI_OUTPUT_BYTES = 8 * 1024 * 1024
-const CLI_TIMEOUT_MS = 30_000
+const MAX_CURSOR_BLOBS = 5_000
 
-export async function discoverExternalSessions(input?: { home?: string; limit?: number; sources?: ExternalSessionSource[] }) {
+export async function discoverExternalSessions(input?: {
+  home?: string
+  limit?: number
+  sources?: ExternalSessionSource[]
+}): Promise<ExternalSessionSummary[]> {
   const home = input?.home ?? os.homedir()
   const sources = input?.sources ?? ["claude-code", "codex"]
-  const candidates = await Promise.all(sources.map((source) => discoverSource(home, source)))
-  const recent = candidates
-    .flat()
+  const candidates = await Promise.all(sources.map((source) => discoverSource(home, source, input?.limit ?? 60)))
+  const recent = (candidates.flat() as Array<ExternalSessionCandidate | ExternalSessionSummary>)
     .toSorted((a, b) => b.updated - a.updated)
     .slice(0, input?.limit ?? 60)
 
   return (
     await Promise.all(
-      recent.map(async (candidate) =>
-        Bun.file(candidate.path)
+      recent.map(async (candidate) => {
+        if (isExternalSessionSummary(candidate)) return candidate
+        return Bun.file(candidate.path)
           .slice(0, PREVIEW_BYTES)
           .text()
           .then((text) => parseSummary(candidate.source, candidate.path, candidate.updated, text))
-          .catch(() => undefined),
-      ),
+          .catch(() => undefined)
+      }),
     )
   ).filter((item) => item !== undefined)
+}
+
+function isExternalSessionSummary(
+  candidate: ExternalSessionCandidate | ExternalSessionSummary,
+): candidate is ExternalSessionSummary {
+  return "id" in candidate && "title" in candidate
 }
 
 export async function loadExternalSession(session: ExternalSessionSummary): Promise<ExternalSessionTranscript> {
@@ -72,7 +87,7 @@ export async function loadExternalSession(session: ExternalSessionSummary): Prom
 
 async function collect(roots: string[], source: ExternalSessionSource) {
   const glob = new Bun.Glob("**/*.jsonl")
-  const files = [] as Array<{ source: ExternalSessionSource; path: string; updated: number }>
+  const files = [] as ExternalSessionCandidate[]
   for (const root of roots) {
     if (!existsSync(root)) continue
     for await (const relative of glob.scan({ cwd: root, absolute: false, onlyFiles: true, dot: true })) {
@@ -89,8 +104,8 @@ async function collect(roots: string[], source: ExternalSessionSource) {
   return files
 }
 
-async function discoverSource(home: string, source: ExternalSessionSource) {
-  if (source === "cursor-agent") return discoverCursorSessions()
+async function discoverSource(home: string, source: ExternalSessionSource, limit: number) {
+  if (source === "cursor-agent") return discoverCursorSessions(home, limit)
   return collect(
     source === "claude-code"
       ? [path.join(home, ".claude/projects")]
@@ -101,12 +116,46 @@ async function discoverSource(home: string, source: ExternalSessionSource) {
   )
 }
 
-async function discoverCursorSessions() {
-  const executable = cliAgentExecutable("cursor-agent")
-  if (!executable) return []
-  const result = await runCli([...cliAgentBaseCommand("cursor-agent", executable), "ls"])
-  if (!result) return []
-  return parseCursorSessionList(result)
+async function discoverCursorSessions(home: string, limit: number) {
+  const root = path.join(home, ".cursor", "chats")
+  if (!existsSync(root)) return []
+  const sessions = [] as ExternalSessionSummary[]
+  let scanned = 0
+  for await (const file of new Bun.Glob("*/*/meta.json").scan({
+    cwd: root,
+    absolute: true,
+    onlyFiles: true,
+  })) {
+    if (scanned++ >= MAX_DISCOVERY_FILES) break
+    const metadata = await Bun.file(file)
+      .json()
+      .then((value) => object(value))
+      .catch(() => undefined)
+    const id = path.basename(path.dirname(file))
+    const store = path.join(path.dirname(file), "store.db")
+    if (!metadata || metadata.hasConversation === false || !existsSync(store)) continue
+    sessions.push({
+      id: `cursor-agent:${id}`,
+      source: "cursor-agent",
+      path: store,
+      nativeSessionID: id,
+      title: `Cursor session ${id.slice(0, 8)}`,
+      directory: string(metadata.cwd),
+      updated: timestamp(metadata.updatedAtMs) ?? timestamp(metadata.createdAtMs) ?? 0,
+    })
+  }
+  return Promise.all(
+    sessions
+      .toSorted((a, b) => b.updated - a.updated)
+      .slice(0, limit)
+      .map(async (session) => {
+        const messages = await readCursorStore(session.path).catch(() => [])
+        return {
+          ...session,
+          title: truncate(titleCandidate(messages.find((message) => message.role === "user")?.text) ?? session.title),
+        }
+      }),
+  )
 }
 
 export function parseCursorSessionList(value: string): ExternalSessionSummary[] {
@@ -154,74 +203,84 @@ export function parseCursorSessionList(value: string): ExternalSessionSummary[] 
 }
 
 async function loadCursorSession(session: ExternalSessionSummary): Promise<ExternalSessionTranscript> {
-  const executable = cliAgentExecutable("cursor-agent")
-  if (!executable || !session.nativeSessionID) throw new Error("Cursor Agent CLI is required to import this session.")
-  const value = await runCli([
-    ...cliAgentResumeCommand("cursor-agent", executable, session.nativeSessionID),
-    "--print",
-    "--output-format",
-    "stream-json",
-  ])
-  if (!value) throw new Error("Cursor Agent did not return a readable transcript for this session.")
-  const messages = parseCursorTranscript(value)
+  const store = session.path.endsWith("store.db")
+    ? session.path
+    : await findCursorStore(os.homedir(), session.nativeSessionID)
+  if (!store) {
+    throw new Error(
+      "Cursor does not expose read-only transcript export, and this session's local transcript was not found.",
+    )
+  }
+  const messages = await readCursorStore(store)
   if (!messages.length) throw new Error("Cursor Agent returned no conversational messages for this session.")
   return { ...session, messages }
 }
 
-function parseCursorTranscript(value: string) {
-  return value
-    .split(/\r?\n/)
-    .flatMap((line) => {
-      const record = parseRecord(line)
-      if (!record) return []
+async function findCursorStore(home: string, sessionID?: string) {
+  if (!sessionID || !/^[0-9A-Za-z_-]+$/.test(sessionID)) return
+  const root = path.join(home, ".cursor", "chats")
+  if (!existsSync(root)) return
+  for await (const file of new Bun.Glob(`*/${sessionID}/store.db`).scan({
+    cwd: root,
+    absolute: true,
+    onlyFiles: true,
+  })) {
+    return file
+  }
+}
+
+async function readCursorStore(store: string) {
+  if (Bun.file(store).size > MAX_TRANSCRIPT_BYTES) {
+    throw new Error(`External transcript exceeds the ${MAX_TRANSCRIPT_BYTES / 1024 / 1024} MB import limit.`)
+  }
+  const database = new Database(store, { readonly: true })
+  const query = database.query("SELECT data FROM blobs ORDER BY rowid LIMIT ?")
+  const blobs = query.all(MAX_CURSOR_BLOBS + 1) as Array<{ data: Uint8Array }>
+  query.finalize()
+  database.close()
+  if (blobs.length > MAX_CURSOR_BLOBS) throw new Error("Cursor transcript exceeds the import record limit.")
+  return parseCursorTranscript(
+    blobs.flatMap((blob) => {
+      if (blob.data[0] !== 0x7b) return []
+      const record = parseRecord(new TextDecoder().decode(blob.data))
+      return record ? [record] : []
+    }),
+  )
+}
+
+function parseCursorTranscript(records: Record<string, unknown>[]) {
+  return records
+    .flatMap((record) => {
       const message = object(record.message) ?? record
       const role = string(message.role) === "user" ? "user" : string(message.role) === "assistant" ? "assistant" : undefined
       if (!role) return []
-      const text = contentText(message.content ?? message.text)
+      const raw = contentText(message.content ?? message.text)
+      const text = role === "user" ? /<user_query>\s*([\s\S]*?)\s*<\/user_query>/.exec(raw)?.[1]?.trim() ?? raw : raw
       if (!text || synthetic(text)) return []
-      return [{ role, text, time: timestamp(record.timestamp) } satisfies ExternalSessionMessage]
+      const modelID = string(object(object(message.providerOptions)?.cursor)?.modelName)
+      return [
+        {
+          role,
+          text,
+          time: timestamp(record.timestamp),
+          ...(role === "assistant" && modelID && { model: { providerID: "cursor-agent", id: modelID } }),
+        } satisfies ExternalSessionMessage,
+      ]
     })
+    .reduce<ExternalSessionMessage[]>((result, message) => {
+      const previous = result.at(-1)
+      if (previous?.role === message.role && previous.text === message.text) return result
+      result.push(message)
+      return result
+    }, [])
 }
 
-async function runCli(command: string[]) {
-  const proc = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "ignore" })
-  const timeout = setTimeout(() => proc.kill(), CLI_TIMEOUT_MS)
-  try {
-    const result = await Promise.all([proc.exited, readLimitedText(proc.stdout, MAX_CLI_OUTPUT_BYTES)])
-    if (result[0] !== 0) return
-    return result[1].trim()
-  } catch {
-    proc.kill()
-    await proc.exited.catch(() => undefined)
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-async function readLimitedText(stream: ReadableStream<Uint8Array>, limit: number) {
-  const reader = stream.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const next = await reader.read()
-    if (next.done) break
-    total += next.value.byteLength
-    if (total > limit) {
-      await reader.cancel()
-      throw new Error("CLI output exceeded the import limit.")
-    }
-    chunks.push(next.value)
-  }
-  const bytes = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return new TextDecoder().decode(bytes)
-}
-
-function parseSummary(source: ExternalSessionSource, file: string, updated: number, text: string) {
+function parseSummary(
+  source: ExternalSessionSource,
+  file: string,
+  updated: number,
+  text: string,
+): ExternalSessionSummary | undefined {
   const records = text
     .split(/\r?\n/)
     .map((line) => parseRecord(line))
@@ -444,11 +503,13 @@ function synthetic(text: string) {
     "<recommended_plugins>",
     "<skills_instructions>",
     "<system-reminder>",
+    "<system_reminder>",
     "<task-notification>",
     "<turn_aborted>",
     "<turn_cancelled>",
     "<command-name>",
     "<command-message>",
+    "<user_info>",
   ].some((prefix) => value.startsWith(prefix))
 }
 

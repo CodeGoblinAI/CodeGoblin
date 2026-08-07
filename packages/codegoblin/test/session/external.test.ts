@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { Database } from "bun:sqlite"
 import { discoverExternalSessions, loadExternalSession, parseCursorSessionList } from "../../src/session/external"
 
 describe("external sessions", () => {
@@ -227,7 +228,7 @@ describe("external sessions", () => {
     ])
   })
 
-  test("normalizes Cursor's native session list without guessing private storage paths", () => {
+  test("normalizes Cursor's native session list output", () => {
     expect(
       parseCursorSessionList(
         JSON.stringify({ id: "cursor-123", title: "Fix the bridge", cwd: "C:/repo", updated_at: "2026-07-20T12:00:00Z" }),
@@ -241,6 +242,67 @@ describe("external sessions", () => {
         title: "Fix the bridge",
         directory: "C:/repo",
         updated: Date.parse("2026-07-20T12:00:00Z"),
+      },
+    ])
+  })
+
+  test("loads Cursor's local transcript without sending a mutating resume prompt", async () => {
+    using home = await tempdir()
+    const file = path.join(home.path, ".cursor", "chats", "workspace", "cursor-123", "store.db")
+    await Bun.write(path.join(path.dirname(file), "meta.json"), "{}", { createPath: true })
+    const database = new Database(file, { create: true })
+    database.run("CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)")
+    const insert = database.prepare("INSERT INTO blobs VALUES (?, ?)")
+    insert.run(
+      "context",
+      new TextEncoder().encode(JSON.stringify({ role: "system", content: "Internal Cursor instructions" })),
+    )
+    insert.run(
+      "user",
+      new TextEncoder().encode(
+        JSON.stringify({
+          role: "user",
+          content: [
+            { type: "text", text: "<system_reminder>internal</system_reminder>" },
+            { type: "text", text: "<user_query>\nFix the bridge\n</user_query>" },
+          ],
+        }),
+      ),
+    )
+    insert.run(
+      "assistant",
+      new TextEncoder().encode(
+        JSON.stringify({
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "private reasoning" },
+            { type: "text", text: "The bridge is fixed." },
+          ],
+          providerOptions: { cursor: { modelName: "cursor-grok-4.5-high" } },
+        }),
+      ),
+    )
+    insert.finalize()
+    database.close()
+
+    const sessions = await discoverExternalSessions({ home: home.path, sources: ["cursor-agent"] })
+    expect(sessions).toMatchObject([
+      {
+        source: "cursor-agent",
+        nativeSessionID: "cursor-123",
+        title: "Fix the bridge",
+        path: file,
+      },
+    ])
+    expect(
+      (await loadExternalSession(sessions[0])).messages,
+    ).toEqual([
+      { role: "user", text: "Fix the bridge", time: undefined },
+      {
+        role: "assistant",
+        text: "The bridge is fixed.",
+        time: undefined,
+        model: { providerID: "cursor-agent", id: "cursor-grok-4.5-high" },
       },
     ])
   })
