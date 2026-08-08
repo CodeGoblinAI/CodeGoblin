@@ -1976,7 +1976,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             data-component={newSession() ? "session-new-composer" : "session-composer"}
             onSubmit={handleSubmit}
             classList={{
-              "group/prompt-input min-h-[96px] w-full rounded-xl bg-v2-background-bg-base border border-[#244a28] shadow-[var(--v2-elevation-raised)] transition-colors focus-within:border-[#3a7d3f]": true,
+              "group/prompt-input min-h-[96px] w-full rounded-xl bg-v2-background-bg-base border border-v2-border-border-base shadow-[var(--v2-elevation-raised)] transition-colors focus-within:border-v2-border-border-focus": true,
               "border-icon-info-active border-dashed": store.draggingType !== null,
               [props.class ?? ""]: !!props.class,
             }}
@@ -2080,21 +2080,21 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       <DropdownMenu.Group>
                         <DropdownMenu.GroupLabel>Bring into the cave</DropdownMenu.GroupLabel>
                         <DropdownMenu.Item onSelect={() => pick()}>
-                          <Icon name="open-file" class="text-[#9ADB35]" />
+                          <Icon name="open-file" class="text-v2-icon-icon-accent" />
                           <DropdownMenu.ItemLabel>{language.t("prompt.action.attachFile")}</DropdownMenu.ItemLabel>
                         </DropdownMenu.Item>
                         <Show when={platform.readClipboardImage}>
                           <DropdownMenu.Item onSelect={() => void attachFromClipboard()}>
-                            <Icon name="cloud-upload" class="text-[#9ADB35]" />
+                            <Icon name="cloud-upload" class="text-v2-icon-icon-accent" />
                             <DropdownMenu.ItemLabel>Paste image</DropdownMenu.ItemLabel>
                           </DropdownMenu.Item>
                         </Show>
                         <DropdownMenu.Item onSelect={openMentionPicker}>
-                          <Icon name="bubble-5" class="text-[#9ADB35]" />
+                          <Icon name="bubble-5" class="text-v2-icon-icon-accent" />
                           <DropdownMenu.ItemLabel>Mention a file or agent</DropdownMenu.ItemLabel>
                         </DropdownMenu.Item>
                         <DropdownMenu.Item onSelect={openCommandPalette}>
-                          <Icon name="terminal" class="text-[#9ADB35]" />
+                          <Icon name="terminal" class="text-v2-icon-icon-accent" />
                           <DropdownMenu.ItemLabel>Run a command</DropdownMenu.ItemLabel>
                         </DropdownMenu.Item>
                       </DropdownMenu.Group>
@@ -2134,10 +2134,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   tabIndex={store.mode === "normal" ? undefined : -1}
                   icon={stopping() ? "stop" : store.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
                   variant="primary"
-                  class="size-7 rounded-full p-[6px] text-[#06210a] shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
+                  class="size-7 rounded-full bg-v2-background-bg-accent p-[6px] text-v2-text-text-contrast shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
                   style={{
                     "background-image":
-                      "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(135deg,#9ADB35 0%,#6fae28 100%)",
+                      "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%)",
                   }}
                   aria-label={stopping() ? language.t("prompt.action.stop") : language.t("prompt.action.send")}
                 />

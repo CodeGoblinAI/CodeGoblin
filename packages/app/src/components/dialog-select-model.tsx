@@ -97,7 +97,7 @@ const ModelList: Component<{
             type="button"
             class="ml-auto shrink-0 px-0.5 leading-none transition-colors"
             classList={{
-              "text-[#9ADB35]": model.isFavorite({ modelID: i.id, providerID: i.provider.id }),
+              "text-v2-text-text-accent": model.isFavorite({ modelID: i.id, providerID: i.provider.id }),
               "text-text-faint hover:text-text-muted": !model.isFavorite({ modelID: i.id, providerID: i.provider.id }),
             }}
             aria-label={
