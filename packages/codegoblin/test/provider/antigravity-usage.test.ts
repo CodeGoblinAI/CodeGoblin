@@ -57,6 +57,22 @@ describe("antigravity /usage parsing", () => {
       { group: "gemini", label: "5h", usedPercentage: 90, resetsAt: "1h5m" },
     ])
   })
+
+  test("reads the current AGY limit-remaining headings", () => {
+    const current = `
+GEMINI MODELS
+  Weekly Limit Remaining
+    [███████████████████████████████████████████████░░░] 94.17%
+    94% remaining · Refreshes in 89h 36m
+  Five Hour Limit Remaining
+    [████████████████████████████████████████████████░░] 96.33%
+    96% remaining · Refreshes in 1h 10m
+`
+    expect(parseAntigravityUsage(current)).toEqual([
+      { group: "gemini", label: "week", usedPercentage: 6, resetsAt: "89h36m" },
+      { group: "gemini", label: "5h", usedPercentage: 4, resetsAt: "1h10m" },
+    ])
+  })
 })
 
 describe("antigravity executable discovery (portability)", () => {

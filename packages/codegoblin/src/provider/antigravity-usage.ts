@@ -33,7 +33,10 @@ const pty = lazy(() => import("#pty"))
  */
 
 const GROUP_RE = /^([A-Z][A-Z /]*MODELS)\s*$/
-const LIMIT_RE = /^(weekly|five hour|5 hour|daily|monthly)\s+limit$/i
+// AGY 1.1.11 renamed these headings from "Weekly Limit" to
+// "Weekly Limit Remaining". Accept both forms so a CLI update cannot leave a
+// previously cached quota to age out while fresh usage silently stops parsing.
+const LIMIT_RE = /^(weekly|five hour|5 hour|daily|monthly)\s+limit(?:\s+remaining)?$/i
 const REMAINING_RE = /(\d+(?:\.\d+)?)%\s*remaining/i
 const PERCENT_RE = /(\d+(?:\.\d+)?)%/
 const REFRESH_RE = /refreshes?\s+in\s+([0-9hmd ]+)/i

@@ -1127,7 +1127,9 @@ export default function Layout(props: ParentProps) {
       sharedSlash("theme", {
         id: "theme.switch",
         title: "Switch theme",
-        onSelect: () => cycleTheme(1),
+        onSelect: () => {
+          void import("@/components/dialog-select-theme").then((x) => dialog.show(() => <x.DialogSelectTheme />))
+        },
       }),
       sharedSlash("update", {
         id: "app.update",
