@@ -25,18 +25,24 @@ export const DialogUsage: Component<{ sessionID?: string; directory?: string }> 
       ...(props.sessionID ? { sessionID: props.sessionID } : {}),
     })
     if (mode === "auto" || mode === "force") {
-      await sdk
-        .fetch(`${sdk.url}/codegoblin/usage/refresh`, {
-          method: "POST",
-          headers: {
-            "x-codegoblin-action": "usage-refresh",
-            "x-codegoblin-refresh": mode,
-          },
-        })
-        .catch(() => undefined)
+      const token = snapshot()?.refreshToken
+      if (token) {
+        await sdk
+          .fetch(`${sdk.url}/codegoblin/usage/refresh`, {
+            method: "POST",
+            headers: {
+              "x-codegoblin-action": "usage-refresh",
+              "x-codegoblin-refresh": mode,
+              "x-codegoblin-refresh-token": token,
+            },
+          })
+          .catch(() => undefined)
+      }
     }
     const response = await sdk.fetch(`${sdk.url}/codegoblin/usage?${query}`).catch(() => undefined)
-    const value = response?.ok ? ((await response.json().catch(() => undefined)) as UsageSnapshot | undefined) : undefined
+    const value = response?.ok
+      ? ((await response.json().catch(() => undefined)) as UsageSnapshot | undefined)
+      : undefined
     if (disposed) return
     if (value) setSnapshot(value)
     if (!value && !snapshot()) setError("Usage is unavailable right now.")

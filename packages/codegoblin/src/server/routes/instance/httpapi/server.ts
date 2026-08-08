@@ -122,6 +122,22 @@ type CodeGoblinImagePersist = {
   plannedOutput?: string
 }
 
+const USAGE_REFRESH_TOKEN = crypto.randomUUID()
+const USAGE_REFRESH_COOLDOWN_MS = 30_000
+let usageRefreshAcceptedAt = 0
+
+function isSameOriginRequest(headers: Record<string, string | string[] | undefined>) {
+  const origin = typeof headers.origin === "string" ? headers.origin : undefined
+  const host = typeof headers.host === "string" ? headers.host : undefined
+  if (!origin) return true
+  if (!host) return false
+  try {
+    return new URL(origin).host === host
+  } catch {
+    return false
+  }
+}
+
 type CodeGoblinAudioPersist = {
   sessionID: SessionID
   userMessageID: MessageID
@@ -358,6 +374,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
             quotaStatuses: balance.quotaStatuses,
             errors: balance.errors,
             refreshing: isCliAgentUsageRefreshing(),
+            refreshToken: USAGE_REFRESH_TOKEN,
             refreshedAt: new Date().toISOString(),
           },
           { status: 200 },
@@ -366,9 +383,25 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
     )
     yield* router.add("POST", "/codegoblin/usage/refresh", (request) =>
       Effect.gen(function* () {
-        if (request.headers["x-codegoblin-action"] !== "usage-refresh") {
-          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Missing usage refresh header." }, { status: 403 })
+        if (
+          !isHostOnlyHttpRequest(request.headers) ||
+          !isSameOriginRequest(request.headers) ||
+          request.headers["x-codegoblin-action"] !== "usage-refresh" ||
+          request.headers["x-codegoblin-refresh-token"] !== USAGE_REFRESH_TOKEN
+        ) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: "Usage refresh is not authorized." },
+            { status: 403 },
+          )
         }
+        const now = Date.now()
+        if (now - usageRefreshAcceptedAt < USAGE_REFRESH_COOLDOWN_MS) {
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: "Usage was refreshed recently. Try again shortly." },
+            { status: 429 },
+          )
+        }
+        usageRefreshAcceptedAt = now
         startCliAgentUsageRefresh(request.headers["x-codegoblin-refresh"] === "force")
         return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 202 })
       }),
@@ -385,13 +418,12 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         }
         const id = typeof body?.id === "string" ? body.id : ""
         const entry = id ? Market.get(id) : undefined
-        if (!entry) return HttpServerResponse.jsonUnsafe({ ok: false, message: "Unknown market entry." }, { status: 404 })
+        if (!entry)
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Unknown market entry." }, { status: 404 })
         const env =
           body?.env && typeof body.env === "object" && !Array.isArray(body.env)
             ? (Object.fromEntries(
-                Object.entries(body.env).filter(
-                  ([key, value]) => typeof key === "string" && typeof value === "string",
-                ),
+                Object.entries(body.env).filter(([key, value]) => typeof key === "string" && typeof value === "string"),
               ) as Record<string, string>)
             : undefined
         const installed = yield* Effect.promise(async () => {
@@ -421,13 +453,17 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         }
         const id = typeof body?.id === "string" ? body.id : ""
         const entry = id ? Market.get(id) : undefined
-        if (!entry) return HttpServerResponse.jsonUnsafe({ ok: false, message: "Unknown market entry." }, { status: 404 })
+        if (!entry)
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Unknown market entry." }, { status: 404 })
         const removed = yield* Effect.promise(async () => {
           try {
             const result = await Market.removeFromAllScopes(id, route.directory)
             return { ok: true as const, ...result, name: entry.id }
           } catch (error) {
-            return { ok: false as const, message: error instanceof Error ? error.message : "Could not remove from config." }
+            return {
+              ok: false as const,
+              message: error instanceof Error ? error.message : "Could not remove from config.",
+            }
           }
         })
         if (removed.ok) {
@@ -447,10 +483,7 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         }
         const login = yield* Effect.promise(() => Market.readFirebaseLoginStatus())
         if (login.loggedIn) {
-          return HttpServerResponse.jsonUnsafe(
-            { ok: true, alreadyLoggedIn: true, email: login.email },
-            { status: 200 },
-          )
+          return HttpServerResponse.jsonUnsafe({ ok: true, alreadyLoggedIn: true, email: login.email }, { status: 200 })
         }
         const route = yield* WorkspaceRouteContext
         yield* Effect.sync(() => Market.startFirebaseLogin(route.directory))
@@ -626,7 +659,8 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
         }
 
         const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : ""
-        if (!prompt) return HttpServerResponse.jsonUnsafe({ ok: false, message: "Audio text is required." }, { status: 400 })
+        if (!prompt)
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Audio text is required." }, { status: 400 })
 
         const agent = typeof body?.agent === "string" && body.agent.trim() ? body.agent.trim() : "Agent"
         const variant = typeof body?.variant === "string" ? body.variant : undefined
@@ -652,27 +686,29 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           )
         }
 
-        const persist = typeof body?.sessionID === "string"
-          ? yield* createCodeGoblinAudioMessages({
-              session,
-              sessionStatus,
-              sessionID: SessionID.make(body.sessionID),
-              messageID: typeof body?.messageID === "string" ? MessageID.make(body.messageID) : undefined,
-              userPartID: typeof body?.userPartID === "string" ? PartID.make(body.userPartID) : undefined,
-              assistantMessageID:
-                typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
-              assistantPartID: typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
-              agent,
-              providerID: preview.provider,
-              modelID: preview.model,
-              variant,
-              routeDirectory: route.directory,
-              input: prompt,
-              plannedOutput: preview.output,
-              voice: preview.voice,
-              outputFormat: preview.outputFormat,
-            })
-          : undefined
+        const persist =
+          typeof body?.sessionID === "string"
+            ? yield* createCodeGoblinAudioMessages({
+                session,
+                sessionStatus,
+                sessionID: SessionID.make(body.sessionID),
+                messageID: typeof body?.messageID === "string" ? MessageID.make(body.messageID) : undefined,
+                userPartID: typeof body?.userPartID === "string" ? PartID.make(body.userPartID) : undefined,
+                assistantMessageID:
+                  typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
+                assistantPartID:
+                  typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
+                agent,
+                providerID: preview.provider,
+                modelID: preview.model,
+                variant,
+                routeDirectory: route.directory,
+                input: prompt,
+                plannedOutput: preview.output,
+                voice: preview.voice,
+                outputFormat: preview.outputFormat,
+              })
+            : undefined
 
         const result = yield* Effect.promise(async () => {
           try {
@@ -688,7 +724,9 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
               languageCode: typeof body?.languageCode === "string" ? body.languageCode : undefined,
               seed: typeof body?.seed === "number" ? body.seed : undefined,
               applyTextNormalization:
-                body?.textNormalization === "auto" || body?.textNormalization === "on" || body?.textNormalization === "off"
+                body?.textNormalization === "auto" ||
+                body?.textNormalization === "on" ||
+                body?.textNormalization === "off"
                   ? body.textNormalization
                   : undefined,
               applyLanguageTextNormalization:
@@ -735,7 +773,10 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
               }))
           : []
         if (!prompt && inputImages.length === 0) {
-          return HttpServerResponse.jsonUnsafe({ ok: false, message: "3D prompt or image input is required." }, { status: 400 })
+          return HttpServerResponse.jsonUnsafe(
+            { ok: false, message: "3D prompt or image input is required." },
+            { status: 400 },
+          )
         }
 
         const agent = typeof body?.agent === "string" && body.agent.trim() ? body.agent.trim() : "Agent"
@@ -763,28 +804,30 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
           )
         }
 
-        const persist = typeof body?.sessionID === "string"
-          ? yield* createCodeGoblin3DMessages({
-              session,
-              sessionStatus,
-              sessionID: SessionID.make(body.sessionID),
-              messageID: typeof body?.messageID === "string" ? MessageID.make(body.messageID) : undefined,
-              userPartID: typeof body?.userPartID === "string" ? PartID.make(body.userPartID) : undefined,
-              assistantMessageID:
-                typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
-              assistantPartID: typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
-              agent,
-              providerID: preview.provider,
-              modelID: preview.model,
-              variant,
-              routeDirectory: route.directory,
-              input: prompt || (preview.inputMode === "image" ? "Generate 3D model from attached image" : ""),
-              inputImages,
-              plannedOutput: preview.output,
-              inputMode: preview.inputMode,
-              modelVersion: preview.modelVersion,
-            })
-          : undefined
+        const persist =
+          typeof body?.sessionID === "string"
+            ? yield* createCodeGoblin3DMessages({
+                session,
+                sessionStatus,
+                sessionID: SessionID.make(body.sessionID),
+                messageID: typeof body?.messageID === "string" ? MessageID.make(body.messageID) : undefined,
+                userPartID: typeof body?.userPartID === "string" ? PartID.make(body.userPartID) : undefined,
+                assistantMessageID:
+                  typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
+                assistantPartID:
+                  typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
+                agent,
+                providerID: preview.provider,
+                modelID: preview.model,
+                variant,
+                routeDirectory: route.directory,
+                input: prompt || (preview.inputMode === "image" ? "Generate 3D model from attached image" : ""),
+                inputImages,
+                plannedOutput: preview.output,
+                inputMode: preview.inputMode,
+                modelVersion: preview.modelVersion,
+              })
+            : undefined
 
         const result = yield* Effect.promise(async () => {
           try {
@@ -832,146 +875,150 @@ const codeGoblinImageRoute = HttpRouter.use((router) =>
     )
     yield* router.add("POST", "/codegoblin/image", (request) =>
       Effect.gen(function* () {
-      const route = yield* WorkspaceRouteContext
-      const text = yield* Effect.orDie(request.text)
-      let body: any
-      try {
-        body = text ? JSON.parse(text) : {}
-      } catch {
-        return HttpServerResponse.jsonUnsafe({ ok: false, message: "Invalid JSON body." }, { status: 400 })
-      }
-
-      const inputImages: ImageInput[] = Array.isArray(body?.inputImages)
-        ? body.inputImages
-            .filter((item: any) => item && typeof item === "object")
-            .map((item: any) => ({
-              dataUrl: typeof item.dataUrl === "string" ? item.dataUrl : undefined,
-              path: typeof item.path === "string" ? item.path : undefined,
-              mime: typeof item.mime === "string" ? item.mime : undefined,
-              filename: typeof item.filename === "string" ? item.filename : undefined,
-            }))
-        : []
-      for (const imagePath of imagePathsFromBody(body)) inputImages.push({ path: imagePath })
-      const useLastImage = body?.useLastImage === true || body?.lastImage === true
-      const replay =
-        typeof body?.sessionID === "string" && typeof body?.sourceAssistantMessageID === "string"
-          ? yield* codeGoblinImageReplayInput({
-              session,
-              sessionID: SessionID.make(body.sessionID),
-              assistantMessageID: MessageID.make(body.sourceAssistantMessageID),
-            })
-          : undefined
-      if (inputImages.length === 0 && replay?.inputImages.length) inputImages.push(...replay.inputImages)
-
-      const commandInput = typeof body?.input === "string" ? body.input : replay?.input
-      const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : (replay?.prompt ?? "")
-      if (!commandInput && !prompt) {
-        return HttpServerResponse.jsonUnsafe({ ok: false, message: "Image prompt is required." }, { status: 400 })
-      }
-
-      const requestProvider = typeof body?.provider === "string" ? body.provider : replay?.providerID
-      const requestModel = typeof body?.model === "string" ? body.model : replay?.modelID
-      const agent = typeof body?.agent === "string" && body.agent.trim() ? body.agent.trim() : "Agent"
-      const variant = typeof body?.variant === "string" ? body.variant : replay?.variant
-      const parsedCommand = commandInput
-        ? CodeGoblinImageCommand.parse(commandInput.trimStart().replace(/^\/image\b/, "").trim())
-        : undefined
-      // Session-aware image continuity: when the user is editing ("make him red") and did not
-      // attach an image, reuse the most recent image generated in this chat session. This is more
-      // accurate than the global usage.json fallback because it stays scoped to the conversation.
-      const editPrompt = parsedCommand?.prompt ?? prompt
-      const wantsPreviousImage =
-        parsedCommand?.useLastImage ||
-        useLastImage ||
-        CodeGoblinImageCommand.looksLikeImageEditRequest(editPrompt)
-      if (typeof body?.sessionID === "string" && inputImages.length === 0 && wantsPreviousImage) {
-        const previous = yield* sessionLastImageOutput({
-          session,
-          sessionID: SessionID.make(body.sessionID),
-        })
-        if (previous) inputImages.push({ path: previous })
-      }
-      let preview: ReturnType<typeof CodeGoblinImageCommand.describe>
-      try {
-        preview = CodeGoblinImageCommand.describe({
-          prompt: parsedCommand?.prompt ?? prompt,
-          cwd: route.directory,
-          output: parsedCommand?.output ?? (typeof body?.output === "string" ? body.output : undefined),
-          provider: parsedCommand?.provider ?? requestProvider,
-          model: parsedCommand?.model ?? requestModel,
-          useLastImage: parsedCommand?.useLastImage || useLastImage,
-        })
-      } catch (error) {
-        return HttpServerResponse.jsonUnsafe(
-          {
-            ok: false,
-            message: error instanceof Error ? error.message : "Image output path is invalid.",
-          },
-          { status: 400 },
-        )
-      }
-      const previewProvider = preview.provider ?? requestProvider ?? "image"
-      const previewModel = preview.model ?? requestModel ?? "selected-model"
-      const persist = typeof body?.sessionID === "string"
-        ? yield* createCodeGoblinImageMessages({
-            session,
-            sessionStatus,
-            sessionID: SessionID.make(body.sessionID),
-            messageID: typeof body?.messageID === "string" ? MessageID.make(body.messageID) : undefined,
-            userPartID: typeof body?.userPartID === "string" ? PartID.make(body.userPartID) : undefined,
-            assistantMessageID:
-              typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
-            assistantPartID: typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
-            agent,
-            providerID: previewProvider,
-            modelID: previewModel,
-            variant,
-            routeDirectory: route.directory,
-            input: commandInput ?? prompt,
-            inputImages,
-            plannedOutput: preview.output,
-          })
-        : undefined
-
-      const result = yield* Effect.promise(async () => {
+        const route = yield* WorkspaceRouteContext
+        const text = yield* Effect.orDie(request.text)
+        let body: any
         try {
-          return commandInput
-            ? await CodeGoblinImageCommand.runSlash({
-                input: commandInput,
-                cwd: route.directory,
-                provider: requestProvider,
-                model: requestModel,
-                inputImages,
-                useLastImage,
-                requireImageModel: body?.requireImageModel !== false,
-              })
-            : await CodeGoblinImageCommand.generate({
-                prompt,
-                cwd: route.directory,
-                output: typeof body?.output === "string" ? body.output : undefined,
-                provider: requestProvider,
-                model: requestModel,
-                keyFile: typeof body?.keyFile === "string" ? body.keyFile : undefined,
-                inputImages,
-                useLastImage,
-                requireImageModel: body?.requireImageModel !== false,
-              })
-        } catch (error) {
-          return {
-            ok: false,
-            message: error instanceof Error ? error.message : "CodeGoblin image generation failed.",
-          }
+          body = text ? JSON.parse(text) : {}
+        } catch {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Invalid JSON body." }, { status: 400 })
         }
-      })
 
-      if (persist) {
-        yield* finishCodeGoblinImageMessages({ session, sessionStatus, persist, result })
-      }
+        const inputImages: ImageInput[] = Array.isArray(body?.inputImages)
+          ? body.inputImages
+              .filter((item: any) => item && typeof item === "object")
+              .map((item: any) => ({
+                dataUrl: typeof item.dataUrl === "string" ? item.dataUrl : undefined,
+                path: typeof item.path === "string" ? item.path : undefined,
+                mime: typeof item.mime === "string" ? item.mime : undefined,
+                filename: typeof item.filename === "string" ? item.filename : undefined,
+              }))
+          : []
+        for (const imagePath of imagePathsFromBody(body)) inputImages.push({ path: imagePath })
+        const useLastImage = body?.useLastImage === true || body?.lastImage === true
+        const replay =
+          typeof body?.sessionID === "string" && typeof body?.sourceAssistantMessageID === "string"
+            ? yield* codeGoblinImageReplayInput({
+                session,
+                sessionID: SessionID.make(body.sessionID),
+                assistantMessageID: MessageID.make(body.sourceAssistantMessageID),
+              })
+            : undefined
+        if (inputImages.length === 0 && replay?.inputImages.length) inputImages.push(...replay.inputImages)
 
-      return HttpServerResponse.jsonUnsafe(
-        persist ? { ...result, sessionID: persist.sessionID } : result,
-        { status: result.ok ? 200 : result.requiresImageModel ? 409 : 400 },
-      )
+        const commandInput = typeof body?.input === "string" ? body.input : replay?.input
+        const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : (replay?.prompt ?? "")
+        if (!commandInput && !prompt) {
+          return HttpServerResponse.jsonUnsafe({ ok: false, message: "Image prompt is required." }, { status: 400 })
+        }
+
+        const requestProvider = typeof body?.provider === "string" ? body.provider : replay?.providerID
+        const requestModel = typeof body?.model === "string" ? body.model : replay?.modelID
+        const agent = typeof body?.agent === "string" && body.agent.trim() ? body.agent.trim() : "Agent"
+        const variant = typeof body?.variant === "string" ? body.variant : replay?.variant
+        const parsedCommand = commandInput
+          ? CodeGoblinImageCommand.parse(
+              commandInput
+                .trimStart()
+                .replace(/^\/image\b/, "")
+                .trim(),
+            )
+          : undefined
+        // Session-aware image continuity: when the user is editing ("make him red") and did not
+        // attach an image, reuse the most recent image generated in this chat session. This is more
+        // accurate than the global usage.json fallback because it stays scoped to the conversation.
+        const editPrompt = parsedCommand?.prompt ?? prompt
+        const wantsPreviousImage =
+          parsedCommand?.useLastImage || useLastImage || CodeGoblinImageCommand.looksLikeImageEditRequest(editPrompt)
+        if (typeof body?.sessionID === "string" && inputImages.length === 0 && wantsPreviousImage) {
+          const previous = yield* sessionLastImageOutput({
+            session,
+            sessionID: SessionID.make(body.sessionID),
+          })
+          if (previous) inputImages.push({ path: previous })
+        }
+        let preview: ReturnType<typeof CodeGoblinImageCommand.describe>
+        try {
+          preview = CodeGoblinImageCommand.describe({
+            prompt: parsedCommand?.prompt ?? prompt,
+            cwd: route.directory,
+            output: parsedCommand?.output ?? (typeof body?.output === "string" ? body.output : undefined),
+            provider: parsedCommand?.provider ?? requestProvider,
+            model: parsedCommand?.model ?? requestModel,
+            useLastImage: parsedCommand?.useLastImage || useLastImage,
+          })
+        } catch (error) {
+          return HttpServerResponse.jsonUnsafe(
+            {
+              ok: false,
+              message: error instanceof Error ? error.message : "Image output path is invalid.",
+            },
+            { status: 400 },
+          )
+        }
+        const previewProvider = preview.provider ?? requestProvider ?? "image"
+        const previewModel = preview.model ?? requestModel ?? "selected-model"
+        const persist =
+          typeof body?.sessionID === "string"
+            ? yield* createCodeGoblinImageMessages({
+                session,
+                sessionStatus,
+                sessionID: SessionID.make(body.sessionID),
+                messageID: typeof body?.messageID === "string" ? MessageID.make(body.messageID) : undefined,
+                userPartID: typeof body?.userPartID === "string" ? PartID.make(body.userPartID) : undefined,
+                assistantMessageID:
+                  typeof body?.assistantMessageID === "string" ? MessageID.make(body.assistantMessageID) : undefined,
+                assistantPartID:
+                  typeof body?.assistantPartID === "string" ? PartID.make(body.assistantPartID) : undefined,
+                agent,
+                providerID: previewProvider,
+                modelID: previewModel,
+                variant,
+                routeDirectory: route.directory,
+                input: commandInput ?? prompt,
+                inputImages,
+                plannedOutput: preview.output,
+              })
+            : undefined
+
+        const result = yield* Effect.promise(async () => {
+          try {
+            return commandInput
+              ? await CodeGoblinImageCommand.runSlash({
+                  input: commandInput,
+                  cwd: route.directory,
+                  provider: requestProvider,
+                  model: requestModel,
+                  inputImages,
+                  useLastImage,
+                  requireImageModel: body?.requireImageModel !== false,
+                })
+              : await CodeGoblinImageCommand.generate({
+                  prompt,
+                  cwd: route.directory,
+                  output: typeof body?.output === "string" ? body.output : undefined,
+                  provider: requestProvider,
+                  model: requestModel,
+                  keyFile: typeof body?.keyFile === "string" ? body.keyFile : undefined,
+                  inputImages,
+                  useLastImage,
+                  requireImageModel: body?.requireImageModel !== false,
+                })
+          } catch (error) {
+            return {
+              ok: false,
+              message: error instanceof Error ? error.message : "CodeGoblin image generation failed.",
+            }
+          }
+        })
+
+        if (persist) {
+          yield* finishCodeGoblinImageMessages({ session, sessionStatus, persist, result })
+        }
+
+        return HttpServerResponse.jsonUnsafe(persist ? { ...result, sessionID: persist.sessionID } : result, {
+          status: result.ok ? 200 : result.requiresImageModel ? 409 : 400,
+        })
       }),
     )
   }),
@@ -1115,7 +1162,11 @@ function parseAudioVoiceSettings(value: unknown): AudioVoiceSettings | undefined
   return result
 }
 
-function sessionLastImageOutput(input: { session: Session.Interface; sessionID: SessionID; beforeMessageID?: MessageID }) {
+function sessionLastImageOutput(input: {
+  session: Session.Interface
+  sessionID: SessionID
+  beforeMessageID?: MessageID
+}) {
   return Effect.gen(function* () {
     const messages = yield* input.session
       .messages({ sessionID: input.sessionID })
@@ -1214,7 +1265,11 @@ function embeddedImageInput(root: string, image: ImageInput) {
       const mime = imageMimeType(absolute)
       if (!mime) return undefined
       const bytes = await fs.readFile(absolute)
-      return { url: `data:${mime};base64,${bytes.toString("base64")}`, mime, filename: image.filename ?? path.basename(absolute) }
+      return {
+        url: `data:${mime};base64,${bytes.toString("base64")}`,
+        mime,
+        filename: image.filename ?? path.basename(absolute),
+      }
     } catch {
       return undefined
     }
@@ -1689,11 +1744,7 @@ function createCodeGoblin3DMessages(input: {
       sessionID: input.sessionID,
     } as MessageV2.Assistant)
     const startedAt = Date.now()
-    const estimatedCredits = CodeGoblin3DCommand.estimateCredits(
-      input.providerID,
-      input.inputMode,
-      input.modelVersion,
-    )
+    const estimatedCredits = CodeGoblin3DCommand.estimateCredits(input.providerID, input.inputMode, input.modelVersion)
     const initialProgress = "Starting Tripo task…"
     yield* input.session.updatePart({
       id: assistantPartID,

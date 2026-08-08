@@ -50,6 +50,8 @@ export type UsageSnapshot = {
   errors: { provider: string; message: string }[]
   /** A slow native provider quota check is running in the background. */
   refreshing?: boolean
+  /** Process-scoped capability required to launch native quota probes. */
+  refreshToken?: string
   refreshedAt: string
 }
 

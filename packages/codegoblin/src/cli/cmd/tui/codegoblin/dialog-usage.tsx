@@ -55,22 +55,29 @@ export function DialogUsage() {
       ...(sessionID ? { sessionID } : {}),
     })
     if (mode === "auto" || mode === "force") {
-      await sdk
-        .fetch(`${sdk.url}/codegoblin/usage/refresh`, {
-          method: "POST",
-          headers: {
-            "x-codegoblin-action": "usage-refresh",
-            "x-codegoblin-refresh": mode,
-          },
-        })
-        .catch(() => undefined)
+      const token = snapshot()?.refreshToken
+      if (token) {
+        await sdk
+          .fetch(`${sdk.url}/codegoblin/usage/refresh`, {
+            method: "POST",
+            headers: {
+              "x-codegoblin-action": "usage-refresh",
+              "x-codegoblin-refresh": mode,
+              "x-codegoblin-refresh-token": token,
+            },
+          })
+          .catch(() => undefined)
+      }
     }
     const response = await sdk.fetch(`${sdk.url}/codegoblin/usage?${query}`).catch(() => undefined)
-    const value = response?.ok ? ((await response.json().catch(() => undefined)) as UsageSnapshot | undefined) : undefined
+    const value = response?.ok
+      ? ((await response.json().catch(() => undefined)) as UsageSnapshot | undefined)
+      : undefined
     if (disposed) return
     if (!value) {
       // A failed background refresh must not blank out figures already on screen.
-      if (!snapshot()) setError(response?.ok ? "Usage returned an invalid response." : "Usage is unavailable right now.")
+      if (!snapshot())
+        setError(response?.ok ? "Usage returned an invalid response." : "Usage is unavailable right now.")
     } else setSnapshot(value)
     setLoading(false)
     setRefreshing(Boolean(value?.refreshing))
@@ -123,14 +130,22 @@ export function DialogUsage() {
 
     for (const status of value.quotaStatuses ?? []) {
       if (status.available) continue
-      out.push({ key: `unavailable:${status.providerID}`, title: status.label, headline: "—", details: [], disabled: true })
+      out.push({
+        key: `unavailable:${status.providerID}`,
+        title: status.label,
+        headline: "—",
+        details: [],
+        disabled: true,
+      })
     }
 
     if (value.balances.length) {
       out.push({
         key: "balances",
         title: "API balances",
-        headline: value.balances.map((item) => `${item.amount}${item.unit === "USD" ? "" : ` ${item.unit}`}`).join(" · "),
+        headline: value.balances
+          .map((item) => `${item.amount}${item.unit === "USD" ? "" : ` ${item.unit}`}`)
+          .join(" · "),
         details: value.balances.map((item) => ({
           label: item.label,
           value: `${item.amount} ${item.unit}${item.live ? "" : " (manual)"}`,

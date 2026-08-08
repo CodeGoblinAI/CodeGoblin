@@ -7,7 +7,7 @@ import {
   refreshCliAgentUsage,
   type CliAgentQuota,
 } from "@/provider/cli-agent"
-import { compactReset } from "@/codegoblin/provider-usage"
+import { compactReset, getProviderUsageQuotas } from "@/codegoblin/provider-usage"
 
 export type CodeGoblinBalanceProvider = "hoard" | "deepseek" | "moonshot"
 
@@ -83,9 +83,28 @@ export const CodeGoblinBalance = {
             if (input.cacheLive) liveCache = { expiresAt: Date.now() + 30_000, value }
             return value
           })
-    const recorded = input.refreshQuotas
+    const persisted = input.refreshQuotas
       ? await refreshCliAgentUsage(input.refreshQuotas === "force")
       : await readCliAgentUsage()
+    const recorded = [...persisted, ...getProviderUsageQuotas()].reduce<CliAgentQuota[]>((result, quota) => {
+      const index = result.findIndex((item) => item.providerID === quota.providerID)
+      if (index < 0) return [...result, quota]
+      const current = result[index]
+      const windows = [...current.windows, ...quota.windows].reduce<typeof quota.windows>((items, window) => {
+        const existing = items.findIndex((item) => item.label === window.label)
+        if (existing < 0) return [...items, window]
+        const next = [...items]
+        next[existing] = window
+        return next
+      }, [])
+      const next = [...result]
+      next[index] = {
+        ...current,
+        checkedAt: Date.parse(quota.checkedAt) > Date.parse(current.checkedAt) ? quota.checkedAt : current.checkedAt,
+        windows,
+      }
+      return next
+    }, [])
     const quotas = liveQuotas(recorded, input.now ?? new Date())
     const byProvider = new Map<CodeGoblinBalanceProvider, CodeGoblinBalanceEntry>()
     for (const entry of configured) byProvider.set(entry.provider, entry)
@@ -250,12 +269,7 @@ async function liveBalance(
   }
 }
 
-async function fetchBalance(input: {
-  fetch: FetchLike
-  endpoint: string
-  key: string
-  timeoutMs: number
-}) {
+async function fetchBalance(input: { fetch: FetchLike; endpoint: string; key: string; timeoutMs: number }) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), input.timeoutMs)
   const result = await Promise.race([

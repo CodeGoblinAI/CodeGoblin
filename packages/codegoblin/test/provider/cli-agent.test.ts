@@ -17,6 +17,7 @@ import {
   AntigravityCliAuthPlugin,
   CursorAgentCliAuthPlugin,
   installCommand,
+  verifiedInstaller,
 } from "../../src/plugin/cli-agent"
 
 describe("local CLI agent providers", () => {
@@ -83,12 +84,16 @@ describe("local CLI agent providers", () => {
     expect(antigravity.auth?.methods).toEqual([expect.objectContaining({ type: "oauth", provider: "antigravity-cli" })])
   })
 
-  test("uses official installers for missing local CLIs", () => {
-    expect(installCommand("claude-code", "win32")).toContain("irm https://claude.ai/install.ps1 | iex")
-    expect(installCommand("cursor-agent", "win32")).toContain("irm 'https://cursor.com/install?win32=true' | iex")
-    expect(installCommand("antigravity-cli", "linux")).toContain(
-      "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-    )
+  test("uses package integrity or pinned official installers for missing local CLIs", () => {
+    expect(installCommand("claude-code", "win32")).toContain("@anthropic-ai/claude-code")
+    expect(verifiedInstaller("cursor-agent", "win32")).toMatchObject({
+      url: "https://cursor.com/install?win32=true",
+      sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    })
+    expect(verifiedInstaller("antigravity-cli", "linux")).toMatchObject({
+      url: "https://antigravity.google/cli/install.sh",
+      sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    })
   })
 
   test("recognizes Cursor's Windows launchers and versioned install locations", () => {
@@ -238,7 +243,9 @@ describe("local CLI agent providers", () => {
         JSON.stringify({ source: "MODEL", type: "PLANNER_RESPONSE", content: "done", thinking: "plan" }),
       ),
     ).toEqual({ role: "assistant", text: "done", reasoning: "plan" })
-    expect(parseCliAgentEvent("antigravity-cli", JSON.stringify({ source: "TOOL", type: "LIST_DIRECTORY" }))).toEqual({})
+    expect(parseCliAgentEvent("antigravity-cli", JSON.stringify({ source: "TOOL", type: "LIST_DIRECTORY" }))).toEqual(
+      {},
+    )
   })
 
   test("omits --output-format when the installed Antigravity cannot stream", () => {
@@ -360,7 +367,8 @@ describe("local CLI agent providers", () => {
   test("accepts Claude's current-session quota wording", () => {
     expect(
       parseClaudeQuota({
-        result: "Current session: 3% used · resets Jul 23, 4:29am (America/New_York)\nCurrent week (all models): 38% used",
+        result:
+          "Current session: 3% used · resets Jul 23, 4:29am (America/New_York)\nCurrent week (all models): 38% used",
       }),
     ).toMatchObject({
       providerID: "claude-code",

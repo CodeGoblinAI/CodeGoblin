@@ -71,7 +71,19 @@ export function antigravityIdle(terminal: string) {
   return terminal.lastIndexOf("for shortcuts") > terminal.lastIndexOf("esc to cancel")
 }
 
+export function antigravityLaunchArguments(
+  input: Pick<AntigravitySendInput, "conversationID" | "modelID" | "permissionMode">,
+) {
+  return [
+    ...(input.conversationID ? ["--conversation", input.conversationID] : []),
+    ...(input.modelID === "default" ? [] : ["--model", input.modelID]),
+    "--mode",
+    input.permissionMode === "plan" ? "plan" : "accept-edits",
+  ]
+}
+
 const sessions = new Map<string, Session>()
+let launchQueue = Promise.resolve()
 const MAX_TRANSCRIPT_READ = 8 * 1024 * 1024
 const MAX_TRANSCRIPT_PARTIAL = 8 * 1024 * 1024
 /** A warm process is only worth keeping while the chat is active. */
@@ -107,6 +119,8 @@ async function conversationForPrompt(before: Set<string>, prompt: string, home =
   const ids = await conversationIDs(home)
   const candidates = [...ids].filter((id) => !before.has(id) && NATIVE_ID.test(id)).slice(0, 100)
   const needle = normalizePrompt(prompt)
+  if (!needle) return
+  const matches: string[] = []
   for (const id of candidates) {
     const handle = await fs.open(transcriptPath(id, home), "r").catch(() => undefined)
     if (!handle) continue
@@ -116,8 +130,10 @@ async function conversationForPrompt(before: Set<string>, prompt: string, home =
       .then((result) => buffer.subarray(0, result.bytesRead).toString("utf8"))
       .catch(() => "")
     await handle.close().catch(() => {})
-    if (normalizePrompt(promptFromTranscript(value)).includes(needle)) return id
+    if (normalizePrompt(promptFromTranscript(value)) === needle) matches.push(id)
   }
+  // Ambiguity is safer than attaching another process's private transcript.
+  if (matches.length === 1) return matches[0]
 }
 
 function promptFromTranscript(value: string) {
@@ -139,10 +155,6 @@ function normalizePrompt(value: string) {
     .replace(/^["']|["']$/g, "")
     .replace(/\s+/g, " ")
     .trim()
-}
-
-export function antigravityPromptArgument(prompt: string) {
-  return `--prompt-interactive=${prompt}`
 }
 
 export function antigravityActivityFrom(record: Record<string, unknown>): string | undefined {
@@ -200,22 +212,35 @@ function ensureReaper() {
   reaper.unref?.()
 }
 
+async function serializeNewSession<T>(run: () => Promise<T>) {
+  const previous = launchQueue
+  const next = Promise.withResolvers<void>()
+  launchQueue = next.promise
+  await previous
+  try {
+    return await run()
+  } finally {
+    next.resolve()
+  }
+}
+
 async function startSession(input: AntigravitySendInput): Promise<Session> {
+  if (input.conversationID) return startSessionNow(input)
+  return serializeNewSession(() => startSessionNow(input))
+}
+
+async function startSessionNow(input: AntigravitySendInput): Promise<Session> {
   const { spawn } = await pty()
   const before = input.conversationID ? new Set<string>() : await conversationIDs()
   const transcript = input.conversationID ? transcriptPath(input.conversationID) : undefined
   const offset = transcript ? ((await fs.stat(transcript).catch(() => undefined))?.size ?? 0) : 0
-  const proc = spawn(
-    input.executable,
-    [
-      antigravityPromptArgument(input.prompt),
-      ...(input.conversationID ? ["--conversation", input.conversationID] : []),
-      ...(input.modelID === "default" ? [] : ["--model", input.modelID]),
-      "--mode",
-      input.permissionMode === "plan" ? "plan" : "accept-edits",
-    ],
-    { name: "xterm-256color", cols: 140, rows: 45, cwd: input.cwd, env: process.env as Record<string, string> },
-  )
+  const proc = spawn(input.executable, antigravityLaunchArguments(input), {
+    name: "xterm-256color",
+    cols: 140,
+    rows: 45,
+    cwd: input.cwd,
+    env: process.env as Record<string, string>,
+  })
   const session: Session = {
     proc,
     cwd: input.cwd,
@@ -238,6 +263,21 @@ async function startSession(input: AntigravitySendInput): Promise<Session> {
   })
   sessions.set(input.sessionID, session)
   ensureReaper()
+
+  // Keep the user's prompt out of argv/process listings. Wait for AGY's real
+  // interactive input before sending the same bracketed-paste sequence used
+  // by warm follow-up turns.
+  for (let i = 0; i < 120 && !antigravityIdle(session.terminal); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  if (!antigravityIdle(session.terminal)) {
+    stop(input.sessionID)
+    throw new Error("Antigravity did not become ready for input")
+  }
+  session.terminal = ""
+  session.proc.write(`\x1b[200~${ptyPaste(input.prompt)}\x1b[201~`)
+  await new Promise((resolve) => setTimeout(resolve, 750))
+  session.proc.write("\r")
 
   // A new conversation directory appears shortly after launch. Resumed
   // sessions bind directly to the remembered native transcript instead.
@@ -267,16 +307,15 @@ async function readNew(session: Session) {
     const lines = `${session.partial}${buffer.subarray(0, bytesRead).toString("utf8")}`.split(/\r?\n/)
     session.partial = lines.pop() ?? ""
     if (session.partial.length > MAX_TRANSCRIPT_PARTIAL) session.partial = ""
-    return lines
-      .flatMap((line) => {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith("{")) return []
-        try {
-          return [JSON.parse(trimmed) as Record<string, unknown>]
-        } catch {
-          return []
-        }
-      })
+    return lines.flatMap((line) => {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith("{")) return []
+      try {
+        return [JSON.parse(trimmed) as Record<string, unknown>]
+      } catch {
+        return []
+      }
+    })
   } finally {
     await handle.close().catch(() => {})
   }

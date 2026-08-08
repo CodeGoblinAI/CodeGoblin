@@ -4,6 +4,7 @@ import {
   compactReset,
   getAllProviderUsage,
   getProviderUsage,
+  getProviderUsageQuotas,
   recordProviderUsage,
 } from "../../src/codegoblin/provider-usage"
 
@@ -22,6 +23,10 @@ describe("provider usage", () => {
     expect(usage).toEqual([
       { label: "5h", pct: 78, reset: "2h14m", provider: "codex" },
       { label: "7d", pct: 11, provider: "codex" },
+    ])
+    expect(getProviderUsageQuotas().find((quota) => quota.providerID === "codex")?.windows).toEqual([
+      { label: "5h", usedPercentage: 78, resetsAt: "2h14m" },
+      { label: "7d", usedPercentage: 11 },
     ])
   })
 

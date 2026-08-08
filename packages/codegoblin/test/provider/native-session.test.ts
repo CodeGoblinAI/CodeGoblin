@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   antigravityActivityFrom,
   antigravityAnswerFrom,
-  antigravityPromptArgument,
+  antigravityLaunchArguments,
 } from "../../src/provider/antigravity-session"
 import {
   claudeActivityFrom,
@@ -18,9 +18,7 @@ import { ptyPaste } from "../../src/provider/pty-input"
 
 describe("native CLI session transcripts", () => {
   test("surfaces truthful Antigravity lifecycle activity", () => {
-    expect(antigravityActivityFrom({ type: "USER_INPUT", status: "DONE" })).toBe(
-      "Antigravity received the prompt",
-    )
+    expect(antigravityActivityFrom({ type: "USER_INPUT", status: "DONE" })).toBe("Antigravity received the prompt")
     expect(antigravityActivityFrom({ type: "CONVERSATION_HISTORY", status: "DONE" })).toBe(
       "Antigravity prepared the context",
     )
@@ -111,10 +109,11 @@ describe("native CLI session transcripts", () => {
     expect(ptyPaste("hello\x1b[201~\r/shell whoami\x00")).toBe("hello[201~\n/shell whoami")
   })
 
-  test("keeps dash-prefixed Antigravity prompts inside the prompt option", () => {
-    expect(antigravityPromptArgument("--dangerously-skip-permissions")).toBe(
-      "--prompt-interactive=--dangerously-skip-permissions",
-    )
+  test("keeps Antigravity prompts out of process arguments", () => {
+    const prompt = "private prompt --dangerously-skip-permissions"
+    const args = antigravityLaunchArguments({ modelID: "gemini", permissionMode: "agent" })
+    expect(args).toEqual(["--model", "gemini", "--mode", "accept-edits"])
+    expect(args.join(" ")).not.toContain(prompt)
   })
 
   test("deduplicates and aggregates Claude usage by API message", () => {

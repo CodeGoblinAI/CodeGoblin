@@ -60,6 +60,32 @@ export function getProviderUsage(): ProviderUsageSegment[] {
   return out
 }
 
+/** Header-captured subscription windows in the same shape as native CLI quota.
+ * This keeps Codex OAuth limits in the shared usage snapshot instead of only
+ * exposing them through the compact footer projection. */
+export function getProviderUsageQuotas(): CliAgentQuota[] {
+  const now = Date.now()
+  return [...store].flatMap(([providerID, value]) => {
+    if (now - value.at > TTL_MS) {
+      store.delete(providerID)
+      return []
+    }
+    const quotaProviderID = providerID === "claude" ? "claude-code" : providerID === "codex" ? "codex" : undefined
+    if (!quotaProviderID) return []
+    return [
+      {
+        providerID: quotaProviderID,
+        checkedAt: new Date(value.at).toISOString(),
+        windows: value.segments.map((segment) => ({
+          label: segment.label,
+          usedPercentage: segment.pct,
+          ...(segment.reset && { resetsAt: segment.reset }),
+        })),
+      },
+    ]
+  })
+}
+
 /** Display names for the CLI-bridged providers; the raw ids are too long for
  * the widget's one-line header. */
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]

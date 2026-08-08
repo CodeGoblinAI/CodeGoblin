@@ -12,6 +12,9 @@ export function SessionPermissionDock(props: {
 }) {
   const language = useLanguage()
   const workspaceTrust = () => props.request.permission === "workspace_trust"
+  const workspaceProvider = () =>
+    typeof props.request.metadata?.provider === "string" ? props.request.metadata.provider : "Local CLI"
+  const cursorWorkspaceTrust = () => workspaceTrust() && workspaceProvider() === "Cursor Agent"
   const directory = () => {
     const value = props.request.metadata?.directory
     return typeof value === "string" ? value : props.request.patterns[0]
@@ -84,8 +87,18 @@ export function SessionPermissionDock(props: {
               Cancel
             </Button>
             <Button variant="primary" size="normal" onClick={() => props.onDecide("once")} disabled={props.responding}>
-              Trust folder
+              {cursorWorkspaceTrust() ? "Trust once" : "Trust folder"}
             </Button>
+            <Show when={cursorWorkspaceTrust()}>
+              <Button
+                variant="primary"
+                size="normal"
+                onClick={() => props.onDecide("always")}
+                disabled={props.responding}
+              >
+                Always trust
+              </Button>
+            </Show>
           </div>
         </Show>
       }
@@ -94,7 +107,10 @@ export function SessionPermissionDock(props: {
         <div data-slot="permission-row">
           <span data-slot="permission-spacer" aria-hidden="true" />
           <div data-slot="permission-hint">
-            Claude Code can execute code and access files in this folder. Claude stores this approval.
+            {workspaceProvider()} can execute code and access files in this folder.{" "}
+            {cursorWorkspaceTrust()
+              ? "CodeGoblin can remember an exact-folder approval."
+              : "Claude stores this approval."}
           </div>
         </div>
       </Show>

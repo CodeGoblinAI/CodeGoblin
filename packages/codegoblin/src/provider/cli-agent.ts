@@ -23,7 +23,7 @@ const MAX_CLI_STDERR = 1024 * 1024
 export const CLI_AGENT_PROVIDERS = ["claude-code", "cursor-agent", "antigravity-cli"] as const
 export type CliAgentProviderID = (typeof CLI_AGENT_PROVIDERS)[number]
 const CLI_QUOTA_PROVIDERS = [...CLI_AGENT_PROVIDERS, "codex"] as const
-type CliQuotaProviderID = (typeof CLI_QUOTA_PROVIDERS)[number]
+export type CliQuotaProviderID = (typeof CLI_QUOTA_PROVIDERS)[number]
 
 export function isCliAgentProvider(value: string): value is CliAgentProviderID {
   return CLI_AGENT_PROVIDERS.includes(value as CliAgentProviderID)
@@ -77,7 +77,7 @@ async function limitedText(stream: ReadableStream<Uint8Array>, limit: number) {
 }
 
 export type CliAgentQuota = {
-  providerID: CliAgentProviderID
+  providerID: CliQuotaProviderID
   windows: Array<{ label: string; usedPercentage: number; resetsAt?: string }>
   checkedAt: string
 }
@@ -105,13 +105,15 @@ export function cliAgentProviderInfos(input?: Partial<Record<CliAgentProviderID,
     providerInfo(
       "claude-code",
       "Claude Code CLI",
-      (input?.["claude-code"] ?? [
-        { id: "default", name: "Claude Code default" },
-        { id: "fable", name: "Fable 5" },
-        { id: "opus", name: "Opus 4.8" },
-        { id: "sonnet", name: "Sonnet 5" },
-        { id: "haiku", name: "Haiku 4.5" },
-      ]).map((item) => model("claude-code", item.id, item.name, "claude", CLAUDE_VARIANTS)),
+      (
+        input?.["claude-code"] ?? [
+          { id: "default", name: "Claude Code default" },
+          { id: "fable", name: "Fable 5" },
+          { id: "opus", name: "Opus 4.8" },
+          { id: "sonnet", name: "Sonnet 5" },
+          { id: "haiku", name: "Haiku 4.5" },
+        ]
+      ).map((item) => model("claude-code", item.id, item.name, "claude", CLAUDE_VARIANTS)),
     ),
     providerInfo(
       "cursor-agent",
@@ -131,14 +133,12 @@ export function cliAgentProviderInfos(input?: Partial<Record<CliAgentProviderID,
 }
 
 export function discoverCliAgentProviderInfos() {
-  discoveredProviders ??= Promise.all([
-    discoverCursorModels(),
-    discoverAntigravityModels(),
-  ]).then(([cursor, antigravity]) =>
-    cliAgentProviderInfos({
-      ...(cursor.length && { "cursor-agent": cursor }),
-      ...(antigravity.length && { "antigravity-cli": antigravity }),
-    }),
+  discoveredProviders ??= Promise.all([discoverCursorModels(), discoverAntigravityModels()]).then(
+    ([cursor, antigravity]) =>
+      cliAgentProviderInfos({
+        ...(cursor.length && { "cursor-agent": cursor }),
+        ...(antigravity.length && { "antigravity-cli": antigravity }),
+      }),
   )
   return discoveredProviders
 }
@@ -198,9 +198,7 @@ export function parseAntigravityModelLines(value: string) {
 
 function displayAntigravityModel(id: string) {
   const parts = id.split("-")
-  const effort = ["low", "medium", "high", "thinking", "max"].includes(parts.at(-1) ?? "")
-    ? parts.pop()
-    : undefined
+  const effort = ["low", "medium", "high", "thinking", "max"].includes(parts.at(-1) ?? "") ? parts.pop() : undefined
   const base = parts.join(" ").replace(/(\d) (\d)$/, "$1.$2")
   const name = base
     .split(" ")
@@ -299,7 +297,8 @@ export function createCliAgentLanguageModel(
         providerID === "antigravity-cli"
           ? path.join(Global.Path.data, `antigravity-${sessionID}-${crypto.randomUUID()}.log`)
           : undefined
-      const cwd = bridge.directory || (typeof remembered === "string" ? undefined : remembered?.directory) || process.cwd()
+      const cwd =
+        bridge.directory || (typeof remembered === "string" ? undefined : remembered?.directory) || process.cwd()
       const trustWorkspace =
         providerID !== "cursor-agent"
           ? bridge.trustWorkspace
@@ -307,7 +306,9 @@ export function createCliAgentLanguageModel(
             ? true
             : await bridge.requestWorkspaceTrust?.(cwd)
       if (providerID === "cursor-agent" && trustWorkspace !== true) {
-        throw new Error(`Cursor Agent needs workspace trust for ${cwd}. Approve the trust request in CodeGoblin and retry.`)
+        throw new Error(
+          `Cursor Agent needs workspace trust for ${cwd}. Approve the trust request in CodeGoblin and retry.`,
+        )
       }
       const command = buildCliAgentCommand({
         providerID,
@@ -348,8 +349,12 @@ export function createCliAgentLanguageModel(
                     controller.enqueue({ type: "reasoning-start", id: "reasoning-0" })
                     reasoningOpen = true
                   }
-                  controller.enqueue({ type: "reasoning-delta", id: "reasoning-0", delta: `${line}
-` })
+                  controller.enqueue({
+                    type: "reasoning-delta",
+                    id: "reasoning-0",
+                    delta: `${line}
+`,
+                  })
                 },
               }).catch(() => undefined)
               if (reasoningOpen) controller.enqueue({ type: "reasoning-end", id: "reasoning-0" })
@@ -389,8 +394,7 @@ export function createCliAgentLanguageModel(
       if (providerID === "claude-code" && bridge.warmSession !== false) {
         const nativeCwd =
           bridge.directory || (typeof remembered === "string" ? undefined : remembered?.directory) || process.cwd()
-        const nativeSessionID =
-          externalSessionID ?? newSessionID ?? deterministicCliSessionID(sessionID)
+        const nativeSessionID = externalSessionID ?? newSessionID ?? deterministicCliSessionID(sessionID)
         return {
           stream: new ReadableStream<LanguageModelV3StreamPart>({
             async start(controller) {
@@ -432,8 +436,7 @@ export function createCliAgentLanguageModel(
               if (!result) {
                 controller.error(
                   new Error(
-                    failure ??
-                      "Claude Code did not answer. The native session was dropped; sending again restarts it.",
+                    failure ?? "Claude Code did not answer. The native session was dropped; sending again restarts it.",
                   ),
                 )
                 return
@@ -579,7 +582,9 @@ export function createCliAgentLanguageModel(
               if (providerID === "antigravity-cli") {
                 const cwd = bridge.directory || process.cwd()
                 void refreshAntigravityQuota(executable, cwd).catch((error) =>
-                  log.warn("antigravity quota refresh failed", { error: error instanceof Error ? error.message : error }),
+                  log.warn("antigravity quota refresh failed", {
+                    error: error instanceof Error ? error.message : error,
+                  }),
                 )
               }
             } catch (error) {
@@ -679,10 +684,7 @@ export function cliAgentExecutable(providerID: CliAgentProviderID) {
   }
 }
 
-export function claudeAgentCandidates(
-  env: NodeJS.ProcessEnv = process.env,
-  platform = process.platform,
-) {
+export function claudeAgentCandidates(env: NodeJS.ProcessEnv = process.env, platform = process.platform) {
   const home = platform === "win32" ? env.USERPROFILE : env.HOME
   if (!home) return []
   // Join with the *target* platform's rules, not the host's: `path.join` would
@@ -692,19 +694,13 @@ export function claudeAgentCandidates(
   return launchers.map((launcher) => join(home, ".local", "bin", launcher))
 }
 
-export function antigravityAgentCandidates(
-  env: NodeJS.ProcessEnv = process.env,
-  platform = process.platform,
-) {
+export function antigravityAgentCandidates(env: NodeJS.ProcessEnv = process.env, platform = process.platform) {
   // Join with the *target* platform's rules, not the host's: `path.join` would
   // emit backslashes while resolving posix candidates on a Windows dev box.
   if (platform === "win32") {
     const root = env.LOCALAPPDATA
     if (!root) return []
-    return [
-      path.win32.join(root, "agy", "bin", "agy.exe"),
-      path.win32.join(root, "agy", "bin", "agy.cmd"),
-    ]
+    return [path.win32.join(root, "agy", "bin", "agy.exe"), path.win32.join(root, "agy", "bin", "agy.cmd")]
   }
   const home = env.HOME
   if (!home) return []
@@ -716,10 +712,7 @@ export function antigravityAgentCandidates(
   ]
 }
 
-export function cursorAgentCandidates(
-  env: NodeJS.ProcessEnv = process.env,
-  platform = process.platform,
-) {
+export function cursorAgentCandidates(env: NodeJS.ProcessEnv = process.env, platform = process.platform) {
   // Windows-only by definition, so always join with Windows rules — the host
   // running this (CI on Linux, for one) is not the platform being described.
   if (platform !== "win32" || !env.LOCALAPPDATA) return []
@@ -738,11 +731,7 @@ export function cliAgentBaseCommand(providerID: CliAgentProviderID, executable: 
   return [executable]
 }
 
-export function cliAgentResumeCommand(
-  providerID: CliAgentProviderID,
-  executable: string,
-  externalSessionID: string,
-) {
+export function cliAgentResumeCommand(providerID: CliAgentProviderID, executable: string, externalSessionID: string) {
   if (providerID === "claude-code") return [executable, "--resume", externalSessionID]
   if (providerID === "cursor-agent") {
     return [...cliAgentBaseCommand(providerID, executable), "--resume", externalSessionID]
@@ -946,7 +935,12 @@ function parseAntigravityEvent(raw: Record<string, unknown>, sessionID?: string)
     if (source === "USER_EXPLICIT" || legacyType === "USER_INPUT") {
       return { sessionID, role: "user", text: stringValue(raw.content) }
     }
-    if (source !== "MODEL" && legacyType !== "ASSISTANT" && legacyType !== "RESPONSE" && legacyType !== "PLANNER_RESPONSE") {
+    if (
+      source !== "MODEL" &&
+      legacyType !== "ASSISTANT" &&
+      legacyType !== "RESPONSE" &&
+      legacyType !== "PLANNER_RESPONSE"
+    ) {
       return { sessionID }
     }
     return {
@@ -987,10 +981,7 @@ function usageFrom(value: unknown): LanguageModelV3Usage | undefined {
   const output = numberValue(value.output_tokens) ?? numberValue(value.outputTokens)
   const cacheRead = numberValue(value.cache_read_input_tokens) ?? numberValue(value.cacheReadInputTokens)
   const cacheWrite = numberValue(value.cache_creation_input_tokens) ?? numberValue(value.cacheCreationInputTokens)
-  const totalInput =
-    input === undefined
-      ? undefined
-      : input + (cacheRead ?? 0) + (cacheWrite ?? 0)
+  const totalInput = input === undefined ? undefined : input + (cacheRead ?? 0) + (cacheWrite ?? 0)
   return {
     inputTokens: {
       total: totalInput,
@@ -1059,9 +1050,10 @@ export function parseClaudeQuota(value: unknown): CliAgentQuota | undefined {
   const result = stringValue(value.result)
   if (!result) return
   const parsed = result.split(/\r?\n/).flatMap((line) => {
-    const match = /^Current (session|5[- ]hour|week \(all models\)):\s*(\d+(?:\.\d+)?)% used(?:\s*·\s*resets (.+))?/i.exec(
-      line.trim(),
-    )
+    const match =
+      /^Current (session|5[- ]hour|week \(all models\)):\s*(\d+(?:\.\d+)?)% used(?:\s*·\s*resets (.+))?/i.exec(
+        line.trim(),
+      )
     if (!match) return []
     const label = match[1].toLowerCase().startsWith("week") ? "week" : "5h"
     return [
@@ -1195,7 +1187,10 @@ async function refreshClaudeQuota(executable: string, force = false) {
   // already in use" and the quota silently stops updating.
   let value: unknown
   let failure = "no output"
-  for (const session of [["--resume", CLAUDE_QUOTA_SESSION_ID], ["--session-id", CLAUDE_QUOTA_SESSION_ID]]) {
+  for (const session of [
+    ["--resume", CLAUDE_QUOTA_SESSION_ID],
+    ["--session-id", CLAUDE_QUOTA_SESSION_ID],
+  ]) {
     const result = await claudeQuotaProbe(executable, session)
     if (result.ok) {
       value = result.value

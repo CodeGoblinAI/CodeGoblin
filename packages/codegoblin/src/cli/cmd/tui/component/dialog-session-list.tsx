@@ -278,7 +278,9 @@ export function DialogSessionList() {
       }}
       onSelect={async (option) => {
         if (option.value === "external:manage") {
-          dialog.replace(() => <DialogExternalSessionAccess onDone={() => dialog.replace(() => <DialogSessionList />)} />)
+          dialog.replace(() => (
+            <DialogExternalSessionAccess onDone={() => dialog.replace(() => <DialogSessionList />)} />
+          ))
           return
         }
         if (option.value === "external:refresh") {
@@ -462,8 +464,9 @@ function externalSourceName(source: ExternalSource) {
 function externalSourceDescription(source: ExternalSource) {
   if (source === "claude-code") return "Allow CodeGoblin to scan ~/.claude/projects only when you open /resume."
   if (source === "codex") return "Allow CodeGoblin to scan ~/.codex/sessions only when you open /resume."
-  if (source === "antigravity") return "Allow CodeGoblin to scan Antigravity's local brain transcripts only when you open /resume."
-  return "Allow CodeGoblin to ask the installed Cursor Agent CLI for its session list only when you open /resume."
+  if (source === "antigravity")
+    return "Allow CodeGoblin to scan Antigravity's local brain transcripts only when you open /resume."
+  return "Allow CodeGoblin to read Cursor's local chat database and transcript blobs only when you open /resume."
 }
 
 function quickSwitchRange(first: string, last: string) {
