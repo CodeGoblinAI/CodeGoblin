@@ -16,6 +16,45 @@ const STORAGE_KEYS = {
 } as const
 
 const THEME_STYLE_ID = "oc-theme"
+const V2_THEME_CSS = `--v2-background-bg-base: var(--background-base);
+  --v2-background-bg-deep: var(--background-stronger);
+  --v2-background-bg-layer-01: var(--background-weak);
+  --v2-background-bg-layer-02: var(--surface-raised-stronger-non-alpha);
+  --v2-background-bg-layer-03: var(--surface-strong);
+  --v2-background-bg-inverse: var(--background-strong);
+  --v2-background-bg-contrast: var(--surface-float-base);
+  --v2-background-bg-button-neutral: var(--button-secondary-base);
+  --v2-background-bg-accent: var(--surface-interactive-base);
+  --v2-text-text-base: var(--text-base);
+  --v2-text-text-muted: var(--text-weak);
+  --v2-text-text-faint: var(--text-weaker);
+  --v2-text-text-inverse: var(--text-invert-base);
+  --v2-text-text-contrast: var(--text-on-interactive-base);
+  --v2-text-text-accent: var(--text-interactive-base);
+  --v2-text-text-accent-hover: var(--text-interactive-base);
+  --v2-icon-icon-base: var(--icon-base);
+  --v2-icon-icon-muted: var(--icon-weak-base);
+  --v2-icon-icon-inverse: var(--icon-invert-base);
+  --v2-icon-icon-contrast: var(--icon-on-interactive-base);
+  --v2-icon-icon-accent: var(--icon-interactive-base);
+  --v2-icon-icon-accent-hover: var(--icon-interactive-base);
+  --v2-border-border-muted: var(--border-weaker-base);
+  --v2-border-border-base: var(--border-weak-base);
+  --v2-border-border-strong: var(--border-strong-base);
+  --v2-border-border-inverse: var(--border-strong-selected);
+  --v2-border-border-focus: var(--border-interactive-focus);
+  --v2-state-bg-success: var(--surface-success-weak);
+  --v2-state-fg-success: var(--text-on-success-weak);
+  --v2-state-border-success: var(--border-success-base);
+  --v2-state-bg-warning: var(--surface-warning-weak);
+  --v2-state-fg-warning: var(--text-on-warning-weak);
+  --v2-state-border-warning: var(--border-warning-base);
+  --v2-state-bg-danger: var(--surface-critical-weak);
+  --v2-state-fg-danger: var(--text-on-critical-weak);
+  --v2-state-border-danger: var(--border-critical-base);
+  --v2-state-bg-info: var(--surface-info-weak);
+  --v2-state-fg-info: var(--text-on-info-weak);
+  --v2-state-border-info: var(--border-info-base);`
 let files: Record<string, () => Promise<{ default: DesktopTheme }>> | undefined
 let ids: string[] | undefined
 let known: Set<string> | undefined
@@ -134,7 +173,7 @@ function applyThemeCss(theme: DesktopTheme, themeId: string, mode: "light" | "da
   const isDark = mode === "dark"
   const variant = isDark ? theme.dark : theme.light
   const tokens = resolveThemeVariant(variant, isDark)
-  const css = themeToCss(tokens)
+  const css = `${themeToCss(tokens)}\n  ${V2_THEME_CSS}`
 
   if (themeId !== "oc-2") {
     write(isDark ? STORAGE_KEYS.THEME_CSS_DARK : STORAGE_KEYS.THEME_CSS_LIGHT, css)
@@ -162,7 +201,7 @@ function cacheThemeVariants(theme: DesktopTheme, themeId: string) {
     const isDark = mode === "dark"
     const variant = isDark ? theme.dark : theme.light
     const tokens = resolveThemeVariant(variant, isDark)
-    const css = themeToCss(tokens)
+    const css = `${themeToCss(tokens)}\n  ${V2_THEME_CSS}`
     write(isDark ? STORAGE_KEYS.THEME_CSS_DARK : STORAGE_KEYS.THEME_CSS_LIGHT, css)
   }
 }

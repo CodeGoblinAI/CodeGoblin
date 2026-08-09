@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { discoverExternalSessions, loadExternalSession } from "../../src/session/external"
+import { Database } from "bun:sqlite"
+import { discoverExternalSessions, loadExternalSession, parseCursorSessionList } from "../../src/session/external"
 
 describe("external sessions", () => {
   test("discovers metadata and loads only conversational Codex text", async () => {
@@ -194,6 +195,115 @@ describe("external sessions", () => {
     ])
     expect(await discoverExternalSessions({ home: home.path, sources: ["codex"] })).toMatchObject([
       { source: "codex", title: "Codex session codex-12" },
+    ])
+  })
+
+  test("discovers Antigravity transcripts and keeps model text separate from tool records", async () => {
+    using home = await tempdir()
+    const file = path.join(
+      home.path,
+      ".gemini",
+      "antigravity-cli",
+      "brain",
+      "agy-12345678",
+      ".system_generated",
+      "logs",
+      "transcript.jsonl",
+    )
+    await write(
+      file,
+      [
+        JSON.stringify({ source: "USER_EXPLICIT", type: "USER_INPUT", content: "Inspect the project" }),
+        JSON.stringify({ source: "MODEL", type: "PLANNER_RESPONSE", content: "I’ll inspect it.", thinking: "Plan" }),
+        JSON.stringify({ source: "TOOL", type: "LIST_DIRECTORY", content: "private tool output" }),
+        JSON.stringify({ source: "MODEL", type: "PLANNER_RESPONSE", content: "The project is healthy." }),
+      ].join("\n"),
+    )
+
+    const sessions = await discoverExternalSessions({ home: home.path, sources: ["antigravity"] })
+    expect(sessions).toMatchObject([{ source: "antigravity", title: "Inspect the project" }])
+    expect((await loadExternalSession(sessions[0])).messages).toEqual([
+      { role: "user", text: "Inspect the project", time: undefined },
+      { role: "assistant", text: "I’ll inspect it.\n\nThe project is healthy.", time: undefined },
+    ])
+  })
+
+  test("normalizes Cursor's native session list output", () => {
+    expect(
+      parseCursorSessionList(
+        JSON.stringify({ id: "cursor-123", title: "Fix the bridge", cwd: "C:/repo", updated_at: "2026-07-20T12:00:00Z" }),
+      ),
+    ).toEqual([
+      {
+        id: "cursor-agent:cursor-123",
+        source: "cursor-agent",
+        path: "cursor-agent://cursor-123",
+        nativeSessionID: "cursor-123",
+        title: "Fix the bridge",
+        directory: "C:/repo",
+        updated: Date.parse("2026-07-20T12:00:00Z"),
+      },
+    ])
+  })
+
+  test("loads Cursor's local transcript without sending a mutating resume prompt", async () => {
+    using home = await tempdir()
+    const file = path.join(home.path, ".cursor", "chats", "workspace", "cursor-123", "store.db")
+    await Bun.write(path.join(path.dirname(file), "meta.json"), "{}", { createPath: true })
+    const database = new Database(file, { create: true })
+    database.run("CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)")
+    const insert = database.prepare("INSERT INTO blobs VALUES (?, ?)")
+    insert.run(
+      "context",
+      new TextEncoder().encode(JSON.stringify({ role: "system", content: "Internal Cursor instructions" })),
+    )
+    insert.run(
+      "user",
+      new TextEncoder().encode(
+        JSON.stringify({
+          role: "user",
+          content: [
+            { type: "text", text: "<system_reminder>internal</system_reminder>" },
+            { type: "text", text: "<user_query>\nFix the bridge\n</user_query>" },
+          ],
+        }),
+      ),
+    )
+    insert.run(
+      "assistant",
+      new TextEncoder().encode(
+        JSON.stringify({
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "private reasoning" },
+            { type: "text", text: "The bridge is fixed." },
+          ],
+          providerOptions: { cursor: { modelName: "cursor-grok-4.5-high" } },
+        }),
+      ),
+    )
+    insert.finalize()
+    database.close()
+
+    const sessions = await discoverExternalSessions({ home: home.path, sources: ["cursor-agent"] })
+    expect(sessions).toMatchObject([
+      {
+        source: "cursor-agent",
+        nativeSessionID: "cursor-123",
+        title: "Fix the bridge",
+        path: file,
+      },
+    ])
+    expect(
+      (await loadExternalSession(sessions[0])).messages,
+    ).toEqual([
+      { role: "user", text: "Fix the bridge", time: undefined },
+      {
+        role: "assistant",
+        text: "The bridge is fixed.",
+        time: undefined,
+        model: { providerID: "cursor-agent", id: "cursor-grok-4.5-high" },
+      },
     ])
   })
 })

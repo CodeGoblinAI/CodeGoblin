@@ -17,15 +17,28 @@ export function CodeGoblinLogoMark(props: { size?: keyof typeof sizeClass; class
     <div
       data-component="codegoblin-logo-mark"
       class={[
-        "relative grid shrink-0 place-items-center rounded-[8px] border border-[#62f56e] bg-[#030703]",
-        "shadow-[0_0_0_1px_rgba(98,245,110,0.08),0_0_24px_rgba(98,245,110,0.16)]",
+        "relative grid shrink-0 place-items-center rounded-[8px] border border-v2-border-border-focus bg-v2-background-bg-deep",
+        "shadow-[0_0_0_1px_color-mix(in_srgb,var(--v2-border-border-focus)_8%,transparent),0_0_24px_color-mix(in_srgb,var(--v2-border-border-focus)_16%,transparent)]",
         sizeClass[size()],
         props.class,
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <img src="/codegoblin-logo.png" alt="" class={`${imageClass[size()]} object-contain`} />
+      <div
+        aria-hidden="true"
+        class={`${imageClass[size()]} bg-v2-icon-icon-accent`}
+        style={{
+          "mask-image": "url(/codegoblin-logo.png)",
+          "mask-position": "center",
+          "mask-repeat": "no-repeat",
+          "mask-size": "contain",
+          "-webkit-mask-image": "url(/codegoblin-logo.png)",
+          "-webkit-mask-position": "center",
+          "-webkit-mask-repeat": "no-repeat",
+          "-webkit-mask-size": "contain",
+        }}
+      />
     </div>
   )
 }

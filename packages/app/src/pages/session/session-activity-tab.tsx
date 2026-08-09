@@ -10,9 +10,9 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 // The live "what's running" view for the right pane — current activity, the
 // implementation plan (todos), a feed of recent tool-calls, and a jump-off to
 // the diff review. Clean-base styling: neutral deep surface, Inter chrome,
-// goblin green (#9ADB35) reserved for the active/working pulse.
+// selected-theme accent reserved for the active/working pulse.
 
-const GREEN = "#9ADB35"
+const GREEN = "var(--v2-icon-icon-accent)"
 const SUCCESS = "var(--v2-state-fg-success)"
 const DANGER = "var(--v2-state-fg-danger)"
 

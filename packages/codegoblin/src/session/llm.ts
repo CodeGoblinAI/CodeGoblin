@@ -112,6 +112,35 @@ const live: Layer.Layer<
         isWorkflow,
       })
 
+      if (["claude-code", "cursor-agent"].includes(input.model.providerID)) {
+        const bridge = yield* EffectBridge.make()
+        prepared.params.options.requestWorkspaceTrust = bridge.bind(async (directory: string) => {
+          try {
+            await bridge.promise(
+              perm.ask({
+                sessionID: SessionID.make(input.sessionID),
+                permission: "workspace_trust",
+                patterns: [directory],
+                metadata: {
+                  directory,
+                  provider: input.model.providerID === "claude-code" ? "Claude Code" : "Cursor Agent",
+                },
+                always: [directory],
+                ruleset: Permission.merge(input.agent.permission ?? [], input.permission ?? []),
+                // Claude only reaches this callback after its native CLI has
+                // presented a trust gate, so that decision must stay explicit.
+                // Cursor asks before launch and can reuse an exact-directory
+                // "always" rule instead of prompting on every turn.
+                forceAsk: input.model.providerID === "claude-code",
+              }),
+            )
+            return true
+          } catch {
+            return false
+          }
+        })
+      }
+
       // Wire up toolExecutor for DWS workflow models so that tool calls
       // from the workflow service are executed via CodeGoblin's tool system
       // and results sent back over the WebSocket.

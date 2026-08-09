@@ -19,6 +19,8 @@ import { like } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
+import { sum } from "drizzle-orm"
+import { count } from "drizzle-orm"
 import { SyncEvent } from "../sync"
 import type { SQL } from "drizzle-orm"
 import { PartTable, SessionTable } from "./session.sql"
@@ -253,17 +255,17 @@ export const CreateInput = Schema.optional(
 export type CreateInput = Types.DeepMutable<Schema.Schema.Type<typeof CreateInput>>
 
 export const ImportExternalInput = Schema.Struct({
-  source: Schema.Literals(["claude-code", "codex"]),
-  title: Schema.String,
+  source: Schema.Literals(["claude-code", "codex", "antigravity", "cursor-agent"]),
+  title: Schema.String.check(Schema.isMaxLength(500)),
   model: Schema.optional(Model),
   messages: Schema.Array(
     Schema.Struct({
       role: Schema.Literals(["user", "assistant"]),
-      text: Schema.String,
+      text: Schema.String.check(Schema.isMaxLength(256 * 1024)),
       time: Schema.optional(NonNegativeInt),
       model: Schema.optional(Model),
     }),
-  ),
+  ).check(Schema.isMaxLength(128)),
 })
 export type ImportExternalInput = Types.DeepMutable<Schema.Schema.Type<typeof ImportExternalInput>>
 
@@ -693,6 +695,10 @@ export const layer: Layer.Layer<
     })
 
     const importExternal = Effect.fn("Session.importExternal")(function* (input: ImportExternalInput) {
+      const total = input.messages.reduce((sum, message) => sum + message.text.length, 0)
+      if (total > 32 * 1024 * 1024) {
+        return yield* Effect.die(new Error("External session exceeds the 32 MB import limit."))
+      }
       const ctx = yield* InstanceState.context
       const imported = yield* create({ title: input.title, model: input.model })
       const continuationModel = input.model
@@ -738,7 +744,14 @@ export const layer: Layer.Layer<
           parentID: state.parentID,
           modelID: historicalModel.modelID,
           providerID: historicalModel.providerID,
-          mode: input.source === "claude-code" ? "claude code" : "codex",
+          mode:
+            input.source === "claude-code"
+              ? "claude code"
+              : input.source === "codex"
+                ? "codex"
+                : input.source === "antigravity"
+                  ? "antigravity"
+                  : "cursor",
           agent: "build",
           path: { cwd: ctx.directory, root: ctx.worktree },
           cost: 0,
@@ -1090,6 +1103,45 @@ export function* listGlobal(input?: {
     const project = projects.get(row.project_id) ?? null
     yield { ...fromRow(row), project }
   }
+}
+
+export function usage(sessionID?: string) {
+  const totals = (id?: string) => {
+    if (id && !id.startsWith("ses")) return
+    const [row] = Database.use((db) => {
+      const query = db
+        .select({
+          count: count(SessionTable.id),
+          spend: sum(SessionTable.cost),
+          input: sum(SessionTable.tokens_input),
+          output: sum(SessionTable.tokens_output),
+          reasoning: sum(SessionTable.tokens_reasoning),
+          cacheRead: sum(SessionTable.tokens_cache_read),
+          cacheWrite: sum(SessionTable.tokens_cache_write),
+        })
+        .from(SessionTable)
+      return (id ? query.where(eq(SessionTable.id, SessionID.make(id))) : query).all()
+    })
+    if (id && Number(row?.count ?? 0) === 0) return
+    const input = Number(row?.input ?? 0)
+    const output = Number(row?.output ?? 0)
+    const reasoning = Number(row?.reasoning ?? 0)
+    const cacheRead = Number(row?.cacheRead ?? 0)
+    const cacheWrite = Number(row?.cacheWrite ?? 0)
+    return {
+      tokens: {
+        total: input + output + reasoning + cacheRead + cacheWrite,
+        input,
+        output,
+        reasoning,
+        cacheRead,
+        cacheWrite,
+      },
+      spend: Number(row?.spend ?? 0),
+    }
+  }
+  const session = sessionID ? totals(sessionID) : undefined
+  return { aggregate: totals()!, ...(session && { session }) }
 }
 
 export * as Session from "./session"

@@ -228,6 +228,17 @@ describe("ProviderTransform.options - google thinkingConfig gating", () => {
     })
   })
 
+  test("leaves Gemini 3.6 at its API default thinking level", () => {
+    const model = createGoogleModel(true, "@ai-sdk/google")
+    model.id = "google/gemini-3.6-flash"
+    model.api.id = "gemini-3.6-flash"
+    const result = ProviderTransform.options({ model, sessionID, providerOptions: {} })
+    expect(result.thinkingConfig).toEqual({ includeThoughts: true })
+    expect(ProviderTransform.temperature(model)).toBeUndefined()
+    expect(ProviderTransform.topP(model)).toBeUndefined()
+    expect(ProviderTransform.topK(model)).toBeUndefined()
+  })
+
   test("does not set thinkingConfig for vertex models without reasoning capability", () => {
     const result = ProviderTransform.options({
       model: createGoogleModel(false, "@ai-sdk/google-vertex"),
@@ -3436,6 +3447,11 @@ describe("ProviderTransform.variants", () => {
         },
         {
           apiId: "gemini-3.1-flash-lite",
+          efforts: ["minimal", "low", "medium", "high"],
+          expectedHigh: { thinkingConfig: { includeThoughts: true, thinkingLevel: "high" } },
+        },
+        {
+          apiId: "gemini-3.6-flash",
           efforts: ["minimal", "low", "medium", "high"],
           expectedHigh: { thinkingConfig: { includeThoughts: true, thinkingLevel: "high" } },
         },

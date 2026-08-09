@@ -178,9 +178,23 @@ export function Prompt(props: PromptProps) {
   const dialog = useDialog()
   const toast = useToast()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
+  // Subscription quota goes stale the moment you switch providers, since each
+  // CLI is only re-read after its own turn — so the footer asks for a refresh
+  // after every turn and on the timer below, and per-provider TTLs keep that
+  // almost always cache-resolved. The very first load is the exception: it
+  // deliberately stays cache-only, because refreshing quota means spawning the
+  // provider's CLI, and doing that during startup would contend with the first
+  // message the user sends.
+  let quotaLoads = 0
   const [balanceState, balanceActions] = createResource(
     () => project.instance.directory() || process.cwd(),
-    (cwd) => CodeGoblinBalance.resolve({ cwd }).catch(() => ({ balances: [], quotas: [], errors: [] })),
+    (cwd) =>
+      CodeGoblinBalance.resolve({ cwd, refreshQuotas: quotaLoads++ > 0 }).catch(() => ({
+        balances: [],
+        quotas: [],
+        quotaStatuses: [],
+        errors: [],
+      })),
   )
   const history = usePromptHistory()
   const stash = usePromptStash()
@@ -423,9 +437,16 @@ export function Prompt(props: PromptProps) {
 
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
+    // Subscription bridges (the local CLI agents) are registered with zero
+    // per-token pricing because the plan pays, not the token — so a spend
+    // readout there can only ever say $0.00. The quota percentage next to it is
+    // what actually tells you what this turn cost.
+    const metered = model
+      ? Boolean(model.cost.input || model.cost.output || model.cost.cache.read || model.cost.cache.write)
+      : true
     return {
       context: pct ? `ctx ${Locale.number(tokens)} (${pct})` : `ctx ${Locale.number(tokens)}`,
-      cost: `spent ${money.format(sessionSpend())}`,
+      ...(metered && { cost: `spent ${money.format(sessionSpend())}` }),
     }
   })
 
@@ -435,6 +456,7 @@ export function Prompt(props: PromptProps) {
     return CodeGoblinBalance.formatFooter({
       balances: balanceState()?.balances,
       quotas: balanceState()?.quotas,
+      quotaStatuses: balanceState()?.quotaStatuses,
       spent: sessionSpend(),
       providerID: selected?.providerID,
       modelID: selected?.modelID,
@@ -2371,7 +2393,12 @@ export function Prompt(props: PromptProps) {
                           </box>
                         </Show>
                         <Show when={tokenHoard()}>
-                          <text fg={theme.textMuted}>·</text>
+                          {/* CLI-agent turns report no tokens, so `usage()` is
+                              often empty here — the separator has to depend on
+                              something actually preceding it. */}
+                          <Show when={usage()?.context || usage()?.cost}>
+                            <text fg={theme.textMuted}>·</text>
+                          </Show>
                           <text fg={theme.textMuted} wrapMode="none">
                             {tokenHoard()}
                           </text>
@@ -2461,7 +2488,9 @@ export function Prompt(props: PromptProps) {
                     </box>
                     <box flexDirection="row" gap={1} flexShrink={0}>
                       <Show when={status().type !== "retry"}>
-                        <text fg={theme.textMuted}>goblin working</text>
+                        <text fg={theme.textMuted}>
+                          {currentProviderLabel() === "Antigravity CLI" ? "Antigravity working" : "goblin working"}
+                        </text>
                       </Show>
                       {(() => {
                         const retry = createMemo(() => {

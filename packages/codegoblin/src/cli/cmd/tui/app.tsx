@@ -22,6 +22,7 @@ import {
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { Flag } from "@codegoblin/core/flag/flag"
 import semver from "semver"
+import { slashCommandProps } from "@codegoblin/core/command/catalog"
 import { markUpdateAvailable, performInstallationUpdate, SKIPPED_VERSION_KV_KEY } from "@tui/util/installation-update"
 import { DialogProvider, useDialog } from "@tui/ui/dialog"
 import { DialogProvider as DialogProviderList } from "@tui/component/dialog-provider"
@@ -85,6 +86,19 @@ import { takeWindowsUpdateError } from "@/installation/windows-update"
 import { DialogMarket } from "./codegoblin/dialog-market"
 import { DialogGoblinHub } from "./codegoblin/dialog-goblin-hub"
 import { DialogMemory } from "./codegoblin/dialog-memory"
+import { DialogUsage } from "./codegoblin/dialog-usage"
+import { DialogEffort } from "./component/dialog-effort"
+
+function sharedSlash(name: string) {
+  const command = slashCommandProps(name)
+  return {
+    title: command.title,
+    description: command.description,
+    category: command.category,
+    slashName: command.name,
+    slashAliases: command.aliases,
+  }
+}
 
 const appBindingCommands = [
   "command.palette.show",
@@ -107,10 +121,12 @@ const appBindingCommands = [
   "agent.cycle",
   "agent.cycle.reverse",
   "variant.cycle",
+  "effort.select",
   "provider.connect",
   "console.org.switch",
   "opencode.status",
   "codegoblin.hub",
+  "codegoblin.usage",
   "codegoblin.memory",
   "theme.switch",
   "theme.switch_mode",
@@ -486,10 +502,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "app.update",
-        title: "Check for updates",
-        category: "App",
-        slashName: "update",
-        slashAliases: ["upgrade", "version"],
+        ...sharedSlash("update"),
         run: async () => {
           // Stays visible for the whole worst-case check (method detection is
           // capped at 10s server-side) so the command never looks stalled.
@@ -540,22 +553,16 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "session.list",
-        title: "Resume session",
-        category: "Session",
         suggested: sync.data.session.length > 0,
-        slashName: "resume",
-        slashAliases: ["sessions", "continue"],
+        ...sharedSlash("resume"),
         run: () => {
           dialog.replace(() => <DialogSessionList />)
         },
       },
       {
         name: "session.new",
-        title: "Clear and start a new session",
         suggested: route.data.type === "session",
-        category: "Session",
-        slashName: "clear",
-        slashAliases: ["new", "reset"],
+        ...sharedSlash("clear"),
         run: () => {
           route.navigate({
             type: "home",
@@ -588,11 +595,8 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       })),
       {
         name: "model.list",
-        title: "Switch model",
         suggested: true,
-        category: "Agent",
-        slashName: "model",
-        slashAliases: ["models"],
+        ...sharedSlash("model"),
         run: () => {
           dialog.replace(() => <DialogModel />)
         },
@@ -617,20 +621,14 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "agent.list",
-        title: "Switch mode",
-        category: "Agent",
-        slashName: "mode",
-        slashAliases: ["agents"],
+        ...sharedSlash("mode"),
         run: () => {
           dialog.replace(() => <DialogAgent />)
         },
       },
       {
         name: "mcp.list",
-        title: "Toggle MCPs",
-        category: "Agent",
-        slashName: "mcp",
-        slashAliases: ["mcps"],
+        ...sharedSlash("mcp"),
         run: () => {
           dialog.replace(() => <DialogMcp />)
         },
@@ -651,12 +649,17 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         // break that lookup. Behavior is now "open the picker" (was blind-cycle);
         // the old separate "variant.list" picker command is folded in here.
         name: "variant.cycle",
-        title: "Switch model variant",
-        category: "Agent",
         hidden: local.model.variant.list().length === 0,
-        slashName: "variants",
+        ...sharedSlash("variants"),
         run: () => {
           dialog.replace(() => <DialogVariant />)
+        },
+      },
+      {
+        name: "effort.select",
+        ...sharedSlash("effort"),
+        run: () => {
+          dialog.replace(() => <DialogEffort />)
         },
       },
       {
@@ -670,9 +673,8 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "provider.connect",
-        title: "Connect a model",
         suggested: !connected(),
-        slashName: "connect",
+        ...sharedSlash("connect"),
         run: () => {
           dialog.replace(() => <DialogProviderList />)
         },
@@ -680,9 +682,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "provider.logout",
-        title: "Remove saved provider credentials",
-        slashName: "logout",
-        slashAliases: ["disconnect", "remove-key"],
+        ...sharedSlash("logout"),
         run: () => {
           sdk.client.auth
             .list({ throwOnError: true })
@@ -737,8 +737,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         : []),
       {
         name: "opencode.status",
-        title: "View status",
-        slashName: "status",
+        ...sharedSlash("status"),
         run: () => {
           dialog.replace(() => <DialogStatus />)
         },
@@ -749,18 +748,21 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         // balance/usage, and about — all live inside this one dialog now instead of
         // each having its own top-level slash command.
         name: "codegoblin.hub",
-        title: "Settings",
-        slashName: "settings",
+        ...sharedSlash("settings"),
         run: () => {
           dialog.replace(() => <DialogGoblinHub />)
         },
-        category: "CodeGoblin",
+      },
+      {
+        name: "codegoblin.usage",
+        ...sharedSlash("usage"),
+        run: () => {
+          dialog.replace(() => <DialogUsage />)
+        },
       },
       {
         name: "codegoblin.memory",
-        title: "CodeGoblin memory",
-        slashName: "memory",
-        slashAliases: ["memories"],
+        ...sharedSlash("memory"),
         run: () => {
           dialog.replace(() => <DialogMemory />)
         },
@@ -768,9 +770,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "codegoblin.market",
-        title: "CodeGoblin market",
-        slashName: "plugins",
-        slashAliases: ["market", "mcp-market", "skills-market"],
+        ...sharedSlash("plugins"),
         run: () => {
           dialog.replace(() => <DialogMarket />)
         },
@@ -778,9 +778,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "theme.switch",
-        title: "Switch TUI theme",
-        slashName: "theme",
-        slashAliases: ["themes"],
+        ...sharedSlash("theme"),
         run: () => {
           dialog.replace(() => <DialogThemeList />)
         },
@@ -807,9 +805,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       {
         name: "help.show",
-        title: "Keyboard shortcuts",
-        slashName: "help",
-        slashAliases: ["shortcuts", "keys"],
+        ...sharedSlash("help"),
         run: () => {
           dialog.replace(() => <DialogHelp />)
         },

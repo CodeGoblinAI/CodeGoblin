@@ -212,7 +212,7 @@ function HomeDesign() {
               </div>
               <button
                 type="button"
-                class="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#62f56e] text-[#071107] transition-colors hover:bg-[#7fff8a] disabled:opacity-40"
+                class="flex size-8 shrink-0 items-center justify-center rounded-full bg-v2-background-bg-accent text-v2-text-text-contrast transition-colors hover:brightness-110 disabled:opacity-40"
                 onClick={() => startChat(state.prompt || undefined)}
                 aria-label={language.t("command.session.new")}
               >

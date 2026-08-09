@@ -23,7 +23,7 @@ import { discoverExternalSessions, loadExternalSession, type ExternalSessionSumm
 import { DialogConfirm } from "@tui/ui/dialog-confirm"
 
 const EXTERNAL_SESSION_SOURCES_KEY = "external_session_sources"
-const externalSources = ["claude-code", "codex"] as const
+const externalSources = ["claude-code", "codex", "antigravity", "cursor-agent"] as const
 type ExternalSource = (typeof externalSources)[number]
 
 export function DialogSessionList() {
@@ -55,7 +55,7 @@ export function DialogSessionList() {
     const saved = kv.get(EXTERNAL_SESSION_SOURCES_KEY, []) as string[]
     return externalSources.filter((source) => saved.includes(source))
   })
-  const [externalSessions] = createResource(enabledExternalSources, (sources) =>
+  const [externalSessions, { refetch: refreshExternal }] = createResource(enabledExternalSources, (sources) =>
     sources.length ? discoverExternalSessions({ sources }).catch(() => []) : [],
   )
   const externalByID = createMemo(
@@ -237,7 +237,7 @@ export function DialogSessionList() {
       .map((session) => ({
         title: importing() === session.id ? `Importing ${session.title}...` : session.title,
         value: session.id,
-        category: session.source === "claude-code" ? "Claude Code" : "Codex",
+        category: externalSourceName(session.source),
         footer: Locale.time(session.updated),
       }))
 
@@ -251,6 +251,12 @@ export function DialogSessionList() {
           ? `Enabled: ${enabledExternalSources().map(externalSourceName).join(", ")}`
           : "Disabled by default. Choose which local transcript folders CodeGoblin may scan.",
         value: "external:manage",
+        category: "Import",
+      },
+      {
+        title: "Refresh external sessions",
+        description: "Re-scan the enabled local transcript folders now.",
+        value: "external:refresh",
         category: "Import",
       },
     ]
@@ -272,7 +278,14 @@ export function DialogSessionList() {
       }}
       onSelect={async (option) => {
         if (option.value === "external:manage") {
-          dialog.replace(() => <DialogExternalSessionAccess onDone={() => dialog.replace(() => <DialogSessionList />)} />)
+          dialog.replace(() => (
+            <DialogExternalSessionAccess onDone={() => dialog.replace(() => <DialogSessionList />)} />
+          ))
+          return
+        }
+        if (option.value === "external:refresh") {
+          await refreshExternal()
+          toast.show({ message: "External sessions refreshed", variant: "info" })
           return
         }
         const external = externalByID().get(option.value)
@@ -373,7 +386,7 @@ export function DialogSessionList() {
     const result = await sdk.client.session
       .importExternal({
         source: transcript.source,
-        title: `${transcript.source === "claude-code" ? "Claude Code" : "Codex"} · ${transcript.title}`,
+        title: `${externalSourceName(transcript.source)} · ${transcript.title}`,
         model: selected
           ? {
               providerID: selected.providerID,
@@ -442,13 +455,18 @@ function DialogExternalSessionAccess(props: { onDone: () => void }) {
 }
 
 function externalSourceName(source: ExternalSource) {
-  return source === "claude-code" ? "Claude Code" : "Codex"
+  if (source === "claude-code") return "Claude Code"
+  if (source === "codex") return "Codex"
+  if (source === "antigravity") return "Antigravity"
+  return "Cursor"
 }
 
 function externalSourceDescription(source: ExternalSource) {
-  return source === "claude-code"
-    ? "Allow CodeGoblin to scan ~/.claude/projects only when you open /resume."
-    : "Allow CodeGoblin to scan ~/.codex/sessions only when you open /resume."
+  if (source === "claude-code") return "Allow CodeGoblin to scan ~/.claude/projects only when you open /resume."
+  if (source === "codex") return "Allow CodeGoblin to scan ~/.codex/sessions only when you open /resume."
+  if (source === "antigravity")
+    return "Allow CodeGoblin to scan Antigravity's local brain transcripts only when you open /resume."
+  return "Allow CodeGoblin to read Cursor's local chat database and transcript blobs only when you open /resume."
 }
 
 function quickSwitchRange(first: string, last: string) {

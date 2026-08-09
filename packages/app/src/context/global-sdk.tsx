@@ -3,7 +3,7 @@ import { createSimpleContext } from "@codegoblin/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { batch, onCleanup, onMount } from "solid-js"
-import { createSdkForServer } from "@/utils/server"
+import { createFetchForServer, createSdkForServer } from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
 import { useServer } from "./server"
@@ -252,6 +252,11 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
           ...opts,
         })
       },
+      fetch(request: RequestInfo | URL, init?: RequestInit) {
+        const s = server.current
+        if (!s) throw new Error(language.t("error.globalSDK.serverNotAvailable"))
+        return createFetchForServer({ server: s.http, fetch: platform.fetch })(request, init)
+      },
       createDirSyncContext: (directory: string) => {
         onCleanup(() => {
           dirSdkContextRefCounts.set(directory, (dirSdkContextRefCounts.get(directory) ?? 0) - 1)
@@ -301,6 +306,11 @@ function createDirSdkContext(directory: string) {
     event: emitter,
     get url() {
       return globalSDK.url
+    },
+    fetch(request: RequestInfo | URL, init?: RequestInit) {
+      const headers = new Headers(init?.headers)
+      headers.set("x-opencode-directory", directory)
+      return globalSDK.fetch(request, { ...init, headers })
     },
     createClient(opts: Parameters<typeof globalSDK.createClient>[0]) {
       return globalSDK.createClient(opts)

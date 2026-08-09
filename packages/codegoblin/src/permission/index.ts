@@ -123,6 +123,7 @@ export const AskInput = Schema.Struct({
   ...Request.fields,
   id: Schema.optional(PermissionID),
   ruleset: Ruleset,
+  forceAsk: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "PermissionAskInput" })
 export type AskInput = Schema.Schema.Type<typeof AskInput>
 
@@ -183,7 +184,7 @@ export const layer = Layer.effect(
 
     const ask = Effect.fn("Permission.ask")(function* (input: AskInput) {
       const { approved, pending } = yield* InstanceState.get(state)
-      const { ruleset, ...request } = input
+      const { ruleset, forceAsk, ...request } = input
       let needsAsk = false
 
       for (const pattern of request.denyOnly ?? []) {
@@ -203,7 +204,7 @@ export const layer = Layer.effect(
             ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
           })
         }
-        if (rule.action === "allow") continue
+        if (rule.action === "allow" && !forceAsk) continue
         needsAsk = true
       }
 

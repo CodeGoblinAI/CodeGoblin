@@ -20,7 +20,12 @@ import { RuntimeFlags } from "../../src/effect/runtime-flags"
 import { ServerAuth } from "../../src/server/auth"
 import { authorizationRouterMiddleware } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
-import { serveEmbeddedUIEffect, serveLocalDistUIEffect, serveUIEffect, resetUIResolutionCacheForTests } from "../../src/server/shared/ui"
+import {
+  serveEmbeddedUIEffect,
+  serveLocalDistUIEffect,
+  serveUIEffect,
+  resetUIResolutionCacheForTests,
+} from "../../src/server/shared/ui"
 import { testEffect } from "../lib/effect"
 
 void Log.init({ print: false })
@@ -265,19 +270,15 @@ describe("HttpApi UI fallback", () => {
   it.live("serves a local app dist build when embedded UI is disabled", () =>
     Effect.gen(function* () {
       const fs = yield* AppFileSystem.Service
-      const response = yield* serveLocalDistUIEffect(
-        "/",
-        "/tmp/codegoblin-app-dist",
-        {
-          ...fs,
-          existsSafe: (file) =>
-            Effect.succeed(file === "/tmp/codegoblin-app-dist/index.html" || file.endsWith("index.html")),
-          readFile: (file) =>
-            file.endsWith("index.html")
-              ? Effect.succeed(new TextEncoder().encode("<html>CodeGoblin</html>"))
-              : Effect.die(`unexpected local UI path: ${file}`),
-        },
-      ).pipe(Effect.map(HttpServerResponse.toWeb))
+      const response = yield* serveLocalDistUIEffect("/", "/tmp/codegoblin-app-dist", {
+        ...fs,
+        existsSafe: (file) =>
+          Effect.succeed(file === "/tmp/codegoblin-app-dist/index.html" || file.endsWith("index.html")),
+        readFile: (file) =>
+          file.endsWith("index.html")
+            ? Effect.succeed(new TextEncoder().encode("<html>CodeGoblin</html>"))
+            : Effect.die(`unexpected local UI path: ${file}`),
+      }).pipe(Effect.map(HttpServerResponse.toWeb))
 
       expect(response.status).toBe(200)
       expect(response.headers.get("content-type")).toContain("text/html")
@@ -523,6 +524,57 @@ describe("HttpApi UI fallback", () => {
 
       expect(response.status).toBe(204)
       expect(response.headers.get("access-control-allow-origin")).toBe("http://localhost:3000")
+    }),
+  )
+
+  it.live("serves usage data for a workspace without a session", () =>
+    Effect.gen(function* () {
+      const response = yield* app().request("/codegoblin/usage", {
+        headers: { "x-opencode-directory": process.cwd() },
+      })
+
+      const value = (yield* responseText(response)) as string
+      expect(response.status).toBe(200)
+      const usage = JSON.parse(value)
+      expect(usage).toHaveProperty("aggregate")
+      expect(usage).toHaveProperty("balances")
+      expect(usage).toHaveProperty("quotas")
+      expect(usage).toHaveProperty("refreshing")
+      expect(usage).toHaveProperty("refreshToken")
+      expect(usage).toHaveProperty("refreshedAt")
+    }),
+  )
+
+  it.live("requires a non-simple action header for forced usage refresh", () =>
+    Effect.gen(function* () {
+      const response = yield* app().request("/codegoblin/usage/refresh", {
+        method: "POST",
+        headers: { "x-opencode-directory": process.cwd() },
+      })
+
+      expect(response.status).toBe(403)
+    }),
+  )
+
+  it.live("rejects a usage refresh capability from a different browser origin", () =>
+    Effect.gen(function* () {
+      const server = app()
+      const usageResponse = yield* server.request("/codegoblin/usage", {
+        headers: { host: "localhost:4096", "x-opencode-directory": process.cwd() },
+      })
+      const usage = JSON.parse((yield* responseText(usageResponse)) as string)
+      const response = yield* server.request("/codegoblin/usage/refresh", {
+        method: "POST",
+        headers: {
+          host: "localhost:4096",
+          origin: "http://localhost:3000",
+          "x-opencode-directory": process.cwd(),
+          "x-codegoblin-action": "usage-refresh",
+          "x-codegoblin-refresh-token": usage.refreshToken,
+        },
+      })
+
+      expect(response.status).toBe(403)
     }),
   )
 })
