@@ -500,7 +500,7 @@ describe("HttpApi UI fallback", () => {
   // should bypass auth.
   it.live("serves the PWA manifest without auth even when a server password is set", () =>
     Effect.gen(function* () {
-      for (const path of ["/site.webmanifest", "/favicon-v3.svg", "/favicon.svg"]) {
+      for (const path of ["/site.webmanifest", "/codegoblin-logo.png", "/favicon-v3.svg", "/favicon.svg"]) {
         const response = yield* uiApp({
           password: "secret",
           username: "opencode",
