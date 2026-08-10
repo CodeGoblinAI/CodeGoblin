@@ -1957,6 +1957,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       {(promptReady(), null)}
       <PromptPopover
         popover={store.popover}
+        placement={newSession() ? "below" : "above"}
         setSlashPopoverRef={(el) => (slashPopoverRef = el)}
         atFlat={atFlat()}
         atActive={atActive() ?? undefined}
