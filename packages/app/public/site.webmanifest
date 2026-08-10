@@ -3,9 +3,9 @@
   "short_name": "CodeGoblin",
   "icons": [
     {
-      "src": "/codegoblin-logo.png",
+      "src": "/favicon-v4.svg",
       "sizes": "512x512",
-      "type": "image/png",
+      "type": "image/svg+xml",
       "purpose": "any maskable"
     }
   ],
