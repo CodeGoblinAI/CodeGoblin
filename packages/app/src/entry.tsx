@@ -165,6 +165,9 @@ if (root instanceof HTMLElement) {
       ...auth,
     },
   }
+  // The static index loader is painted before this module loads. Remove it before
+  // Solid mounts so the Suspense fallback cannot coexist with a duplicate loader.
+  root.replaceChildren()
   render(
     () => (
       <PlatformProvider value={platform}>
