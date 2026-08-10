@@ -15,9 +15,12 @@ import { createPathHelpers } from "./file/path"
 
 const AVATAR_COLOR_KEYS = ["pink", "mint", "orange", "purple", "cyan", "lime"] as const
 const DEFAULT_SIDEBAR_WIDTH = 344
+const DEFAULT_NEW_SIDEBAR_WIDTH = 220
 const DEFAULT_FILE_TREE_WIDTH = 200
 const DEFAULT_SESSION_WIDTH = 600
 const DEFAULT_TERMINAL_HEIGHT = 280
+
+export const clampNewSidebarWidth = (width: number, max: number) => Math.min(max, Math.max(200, width))
 export type AvatarColorKey = (typeof AVATAR_COLOR_KEYS)[number]
 
 export function getAvatarColors(key?: string) {
@@ -236,6 +239,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           width: DEFAULT_SIDEBAR_WIDTH,
           workspaces: {} as Record<string, boolean>,
           workspacesDefault: false,
+        },
+        newSidebar: {
+          opened: true,
+          width: DEFAULT_NEW_SIDEBAR_WIDTH,
         },
         terminal: {
           height: DEFAULT_TERMINAL_HEIGHT,
@@ -602,6 +609,38 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         toggleWorkspaces(directory: string) {
           const current = store.sidebar.workspaces[directory] ?? store.sidebar.workspacesDefault ?? false
           setStore("sidebar", "workspaces", directory, !current)
+        },
+      },
+      newSidebar: {
+        opened: createMemo(() => store.newSidebar?.opened ?? true),
+        open() {
+          if (!store.newSidebar) {
+            setStore("newSidebar", { opened: true, width: DEFAULT_NEW_SIDEBAR_WIDTH })
+            return
+          }
+          setStore("newSidebar", "opened", true)
+        },
+        close() {
+          if (!store.newSidebar) {
+            setStore("newSidebar", { opened: false, width: DEFAULT_NEW_SIDEBAR_WIDTH })
+            return
+          }
+          setStore("newSidebar", "opened", false)
+        },
+        toggle() {
+          if (!store.newSidebar) {
+            setStore("newSidebar", { opened: false, width: DEFAULT_NEW_SIDEBAR_WIDTH })
+            return
+          }
+          setStore("newSidebar", "opened", (value) => !value)
+        },
+        width: createMemo(() => store.newSidebar?.width ?? DEFAULT_NEW_SIDEBAR_WIDTH),
+        resize(width: number) {
+          if (!store.newSidebar) {
+            setStore("newSidebar", { opened: true, width })
+            return
+          }
+          setStore("newSidebar", "width", width)
         },
       },
       terminal: {

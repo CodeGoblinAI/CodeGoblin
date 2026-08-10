@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { createRoot, createSignal } from "solid-js"
-import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./layout"
+import { clampNewSidebarWidth, createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./layout"
+
+describe("clampNewSidebarWidth", () => {
+  test("keeps the sidebar inside the usable viewport range", () => {
+    expect(clampNewSidebarWidth(120, 520)).toBe(200)
+    expect(clampNewSidebarWidth(320, 280)).toBe(280)
+    expect(clampNewSidebarWidth(240, 520)).toBe(240)
+  })
+})
 
 describe("layout session-key helpers", () => {
   test("couples touch and scroll seed in order", () => {

@@ -5,7 +5,9 @@
   &::after {
     content: "";
     position: absolute;
-    opacity: 0;
+    background: var(--border-interactive-base);
+    border-radius: 999px;
+    opacity: 0.24;
     transition: opacity 0.15s ease-in-out;
   }
 
