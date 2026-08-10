@@ -199,7 +199,7 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean }>) {
     <Suspense
       fallback={
         <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base">
-          <CodeGoblinLogoMark size="lg" class="opacity-70 animate-pulse" />
+          <CodeGoblinLogoMark size="lg" class="opacity-70" />
         </div>
       }
     >

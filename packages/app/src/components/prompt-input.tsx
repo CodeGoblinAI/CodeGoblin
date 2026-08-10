@@ -1953,7 +1953,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const USE_V2_INPUT = true // redesign shipped in 0.2.x — no longer channel-gated
 
   return (
-    <div class="relative size-full flex flex-col gap-0">
+    <div
+      class="relative flex flex-col gap-0"
+      classList={{
+        "size-full": !newSession(),
+        "w-full": newSession(),
+      }}
+    >
       {(promptReady(), null)}
       <PromptPopover
         popover={store.popover}

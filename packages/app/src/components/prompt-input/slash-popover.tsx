@@ -42,12 +42,12 @@ export const PromptPopover: Component<PromptPopoverProps> = (props) => {
         ref={(el) => {
           if (props.popover === "slash") props.setSlashPopoverRef(el)
         }}
-        class="absolute inset-x-0 max-h-[min(20rem,calc(100dvh-8rem))] min-h-10
+        class="max-h-[min(20rem,calc(100dvh-8rem))] min-h-10
                  overflow-auto no-scrollbar flex flex-col p-2 rounded-[12px]
                  bg-surface-raised-stronger-non-alpha shadow-[var(--shadow-lg-border-base)]"
         classList={{
-          "-top-2 -translate-y-full origin-bottom-left": props.placement === "above",
-          "top-full mt-2 origin-top-left": props.placement === "below",
+          "absolute inset-x-0 -top-2 -translate-y-full origin-bottom-left": props.placement === "above",
+          "relative order-2 mt-2 origin-top-left": props.placement === "below",
         }}
         onMouseDown={(e) => e.preventDefault()}
       >
