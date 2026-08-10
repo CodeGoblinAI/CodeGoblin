@@ -66,12 +66,17 @@ render(() => {
       >
         <Font />
         <div class="flex flex-col items-center gap-11">
-          <img
-            src="./codegoblin-logo.png"
-            alt=""
-            aria-hidden="true"
-            style={{ width: "80px", height: "80px", "object-fit": "contain", opacity: "0.7" }}
-          />
+          <div
+            class="size-20 animate-pulse rounded-[8px] border border-white/20 bg-[#030703] shadow-[0_0_0_1px_rgba(154,219,53,0.08),0_0_24px_rgba(154,219,53,0.16)]"
+            style={{ display: "grid", "place-items": "center" }}
+          >
+            <img
+              src="./codegoblin-logo.png"
+              alt=""
+              aria-hidden="true"
+              style={{ width: "56px", height: "56px", "object-fit": "contain", opacity: "0.85" }}
+            />
+          </div>
           <div class="w-60 flex flex-col items-center gap-4" aria-live="polite">
             <span class="w-full overflow-hidden text-center text-ellipsis whitespace-nowrap text-text-strong text-14-normal">
               {status()}

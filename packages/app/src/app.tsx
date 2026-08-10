@@ -202,12 +202,7 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean }>) {
           class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base"
           style={{ "background-color": "#000", "color-scheme": "dark" }}
         >
-          <img
-            src="/codegoblin-logo.png"
-            alt=""
-            aria-hidden="true"
-            style={{ width: "80px", height: "80px", "object-fit": "contain", opacity: "0.7" }}
-          />
+          <CodeGoblinLogoMark size="lg" class="opacity-70 animate-pulse" />
         </div>
       }
     >
