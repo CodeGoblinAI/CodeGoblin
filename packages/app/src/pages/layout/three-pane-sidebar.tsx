@@ -256,7 +256,9 @@ export function ThreePaneSidebar(props: {
     })
   }
 
-  const maxNewSidebarWidth = () => (typeof window === "undefined" ? 520 : Math.max(320, window.innerWidth * 0.4))
+  const maxNewSidebarWidth = () =>
+    typeof window === "undefined" ? 520 : Math.min(window.innerWidth, Math.max(320, window.innerWidth * 0.4))
+  const minNewSidebarWidth = () => Math.min(200, maxNewSidebarWidth())
   const newSidebarWidth = () => clampNewSidebarWidth(layout.newSidebar.width(), maxNewSidebarWidth())
 
   return (
@@ -463,9 +465,9 @@ export function ThreePaneSidebar(props: {
         <ResizeHandle
           direction="horizontal"
           size={newSidebarWidth()}
-          min={200}
+          min={minNewSidebarWidth()}
           max={maxNewSidebarWidth()}
-          collapseThreshold={210}
+          collapseThreshold={Math.min(210, maxNewSidebarWidth())}
           onResize={(width) => layout.newSidebar.resize(width)}
           onCollapse={() => layout.newSidebar.close()}
         />
