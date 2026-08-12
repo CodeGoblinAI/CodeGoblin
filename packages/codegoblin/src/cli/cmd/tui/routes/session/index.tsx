@@ -24,7 +24,6 @@ import { SplitBorder } from "@tui/component/border"
 import { Spinner } from "@tui/component/spinner"
 import { generateSubtleSyntax, selectedForeground, useTheme } from "@tui/context/theme"
 import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, RGBA } from "@opentui/core"
-import stringWidth from "string-width"
 import { Prompt, type PromptRef } from "@tui/component/prompt"
 import type {
   AssistantMessage,
@@ -89,7 +88,7 @@ import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
 import { DialogRetryAction } from "../../component/dialog-retry-action"
 import { SessionRetry } from "@/session/retry"
-import { wrappedTextHeight } from "../../util/text-layout"
+import { messageBubbleWidth, wrappedTextHeight } from "../../util/text-layout"
 import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 import { PathFormatterProvider, usePathFormatter } from "../../context/path-format"
@@ -1340,15 +1339,9 @@ function UserMessage(props: {
   const color = createMemo(() => local.agent.color(props.message.agent))
   const queuedFg = createMemo(() => selectedForeground(theme, color()))
   const metadataVisible = createMemo(() => queued() || ctx.showTimestamps())
+  const timestamp = createMemo(() => Locale.todayTimeOrDateTime(props.message.time.created))
   const bubbleWidth = createMemo(() => {
-    const natural =
-      Math.max(
-        ...text()
-          .split("\n")
-          .map((line) => stringWidth(line)),
-        1,
-      ) + 5
-    return Math.min(80, Math.max(1, ctx.width), natural)
+    return messageBubbleWidth(text(), queued() ? " QUEUED " : ctx.showTimestamps() ? timestamp() : undefined, ctx.width)
   })
   const textWidth = createMemo(() => Math.max(1, bubbleWidth() - 5))
 
@@ -1412,9 +1405,7 @@ function UserMessage(props: {
                 fallback={
                   <Show when={ctx.showTimestamps()}>
                     <text fg={theme.textMuted}>
-                      <span style={{ fg: theme.textMuted }}>
-                        {Locale.todayTimeOrDateTime(props.message.time.created)}
-                      </span>
+                      <span style={{ fg: theme.textMuted }}>{timestamp()}</span>
                     </text>
                   </Show>
                 }

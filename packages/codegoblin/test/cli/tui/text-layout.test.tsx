@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { wrappedTextHeight } from "../../../src/cli/cmd/tui/util/text-layout"
+import { messageBubbleWidth, wrappedTextHeight } from "../../../src/cli/cmd/tui/util/text-layout"
 
 describe("wrappedTextHeight", () => {
   test("counts explicit and word-wrapped lines", () => {
@@ -51,5 +51,17 @@ describe("wrappedTextHeight", () => {
     } finally {
       app.renderer.destroy()
     }
+  })
+})
+
+describe("messageBubbleWidth", () => {
+  test("keeps metadata on one line for short messages", () => {
+    expect(messageBubbleWidth("hi", "9:39 AM", 120)).toBe(12)
+    expect(messageBubbleWidth("hi", " QUEUED ", 120)).toBe(13)
+  })
+
+  test("does not shrink below the message width or terminal limit", () => {
+    expect(messageBubbleWidth("a longer prompt", "9:39 AM", 120)).toBe(20)
+    expect(messageBubbleWidth("a very long prompt", "9:39 AM", 10)).toBe(10)
   })
 })

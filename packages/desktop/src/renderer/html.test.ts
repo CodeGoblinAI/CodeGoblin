@@ -38,6 +38,14 @@ describe("electron renderer html", () => {
         const content = await html(name)
         expect(content).not.toContain('rel="manifest"')
       })
+
+      test("uses the branded favicon and a dark first-paint fallback", async () => {
+        const content = await html(name)
+        expect(content).toContain('href="./favicon-v4.svg"')
+        expect(content).toContain('style="background-color: #000; color-scheme: dark"')
+        expect(content).toContain('content="#000000"')
+        if (name === "loading.html") expect(content).toContain('style="background-color: #000"')
+      })
     })
   }
 })

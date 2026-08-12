@@ -38,8 +38,8 @@ export function NewSessionDesignView(props: { worktree: string; children: JSX.El
   }
 
   return (
-    <div data-component="session-new-design" data-cg-session class="size-full overflow-auto">
-      <div class="mx-auto flex w-full max-w-[680px] flex-col px-6 pt-[16vh]">
+    <div data-component="session-new-design" data-cg-session class="size-full min-h-0 overflow-auto">
+      <div class="mx-auto flex min-h-full w-full max-w-[680px] flex-col px-6 py-[clamp(4rem,12vh,9rem)]">
         <h1 class="mb-4 text-center text-[22px] font-semibold text-v2-text-text-base">What should we work on?</h1>
         {props.children}
         <div class="mt-2 flex h-7 items-center gap-2 pl-1">

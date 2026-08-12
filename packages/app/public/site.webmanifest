@@ -3,10 +3,10 @@
   "short_name": "CodeGoblin",
   "icons": [
     {
-      "src": "/favicon-v3.svg",
-      "sizes": "any",
+      "src": "/favicon-v4.svg",
+      "sizes": "512x512",
       "type": "image/svg+xml",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
   ],
   "theme_color": "#000000",

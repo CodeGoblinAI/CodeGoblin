@@ -2,7 +2,6 @@ import { MetaProvider } from "@solidjs/meta"
 import { render } from "solid-js/web"
 import "@codegoblin/app/index.css"
 import { Font } from "@codegoblin/ui/font"
-import { Splash } from "@codegoblin/ui/logo"
 import { Progress } from "@codegoblin/ui/progress"
 import "./styles.css"
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
@@ -61,10 +60,23 @@ render(() => {
 
   return (
     <MetaProvider>
-      <div class="w-screen h-screen bg-background-base flex items-center justify-center">
+      <div
+        class="w-screen h-screen bg-background-base flex items-center justify-center"
+        style={{ "background-color": "#000", "color-scheme": "dark" }}
+      >
         <Font />
         <div class="flex flex-col items-center gap-11">
-          <Splash class="w-20 h-25 opacity-15" />
+          <div
+            class="size-20 animate-pulse rounded-[8px] border border-white/20 bg-[#030703] shadow-[0_0_0_1px_rgba(154,219,53,0.08),0_0_24px_rgba(154,219,53,0.16)]"
+            style={{ display: "grid", "place-items": "center" }}
+          >
+            <img
+              src="./codegoblin-logo.png"
+              alt=""
+              aria-hidden="true"
+              style={{ width: "56px", height: "56px", "object-fit": "contain", opacity: "0.85" }}
+            />
+          </div>
           <div class="w-60 flex flex-col items-center gap-4" aria-live="polite">
             <span class="w-full overflow-hidden text-center text-ellipsis whitespace-nowrap text-text-strong text-14-normal">
               {status()}

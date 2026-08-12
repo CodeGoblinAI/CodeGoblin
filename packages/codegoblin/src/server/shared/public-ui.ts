@@ -3,6 +3,8 @@
 // the manifest icons even when a server password is configured.
 export const PUBLIC_UI_PATHS = new Set<string>([
   "/site.webmanifest",
+  "/codegoblin-logo.png",
+  "/favicon-v4.svg",
   "/favicon-v3.svg",
   "/favicon.svg",
 ])

@@ -198,8 +198,24 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean }>) {
   return (
     <Suspense
       fallback={
-        <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base">
-          <CodeGoblinLogoMark size="lg" class="opacity-70 animate-pulse" />
+        <div
+          class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base"
+          style={{ "background-color": "#000", "color-scheme": "dark" }}
+        >
+          <div
+            class="relative grid size-20 shrink-0 animate-pulse place-items-center rounded-[8px] border border-v2-border-border-focus bg-v2-background-bg-deep opacity-70"
+            style={{
+              "box-shadow":
+                "0 0 0 1px color-mix(in srgb, var(--v2-border-border-focus) 8%, transparent), 0 0 24px color-mix(in srgb, var(--v2-border-border-focus) 16%, transparent)",
+            }}
+          >
+            <img
+              src="/codegoblin-logo.png"
+              alt=""
+              aria-hidden="true"
+              style={{ width: "56px", height: "56px", "object-fit": "contain" }}
+            />
+          </div>
         </div>
       }
     >

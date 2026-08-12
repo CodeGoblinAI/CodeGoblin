@@ -5,6 +5,13 @@ export function wrappedTextHeight(value: string, columns: number) {
   return value.split("\n").reduce((height, line) => height + wrappedLineHeight(line, width), 0)
 }
 
+export function messageBubbleWidth(text: string, metadata: string | undefined, maxWidth: number) {
+  const messageWidth = Math.max(...text.split("\n").map((line) => stringWidth(line)), 1)
+  const metadataWidth = metadata ? stringWidth(metadata) : 0
+  const natural = Math.max(messageWidth, metadataWidth) + 5
+  return Math.min(80, Math.max(1, maxWidth), natural)
+}
+
 function wrappedLineHeight(value: string, width: number) {
   const words = value.trim().split(/\s+/).filter(Boolean)
   if (!words.length) return 1

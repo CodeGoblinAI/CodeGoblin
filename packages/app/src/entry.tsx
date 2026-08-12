@@ -70,7 +70,7 @@ const notify: Platform["notify"] = async (title, description, href) => {
 
   const notification = new Notification(title, {
     body: description ?? "",
-    icon: "/favicon-v3.svg",
+    icon: "/codegoblin-logo.png",
   })
 
   notification.onclick = () => {
@@ -165,6 +165,9 @@ if (root instanceof HTMLElement) {
       ...auth,
     },
   }
+  // The static index loader is painted before this module loads. Remove it before
+  // Solid mounts so the Suspense fallback cannot coexist with a duplicate loader.
+  root.replaceChildren()
   render(
     () => (
       <PlatformProvider value={platform}>
