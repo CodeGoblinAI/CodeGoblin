@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   buildCliAgentCommand,
+  cliAgentModel,
   cliAgentProviderInfos,
   cursorAgentCandidates,
   claudeAgentCandidates,
@@ -53,12 +54,27 @@ describe("local CLI agent providers", () => {
 
   test("pretty-prints Antigravity model IDs while preserving exact IDs", () => {
     expect(
-      parseAntigravityModelLines("gemini-3.5-flash-medium\nclaude-opus-4-6-thinking\ngpt-oss-120b-medium"),
+      parseAntigravityModelLines(
+        "gemini-3.5-flash-medium\tGemini 3.5 Flash (Medium)\nclaude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)\ngpt-oss-120b-medium\tGPT-OSS 120B (Medium)\nFetching available models...",
+      ),
     ).toEqual([
       { id: "gemini-3.5-flash-medium", name: "Gemini 3.5 Flash (Medium)" },
       { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
-      { id: "gpt-oss-120b-medium", name: "GPT OSS 120B (Medium)" },
+      { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" },
     ])
+  })
+
+  test("creates exact local CLI model metadata before discovery finishes", () => {
+    expect(cliAgentModel("antigravity-cli", "gemini-3.6-flash-low")).toMatchObject({
+      id: "gemini-3.6-flash-low",
+      name: "Gemini 3.6 Flash (Low)",
+      family: "antigravity",
+    })
+    expect(cliAgentModel("cursor-agent", "cursor-grok-4.5-high")).toMatchObject({
+      id: "cursor-grok-4.5-high",
+      name: "cursor-grok-4.5-high",
+      family: "cursor",
+    })
   })
 
   test("connects local CLIs through provider auth methods instead of API-key prompts", async () => {
@@ -152,6 +168,18 @@ describe("local CLI agent providers", () => {
     expect(command).toContain("--name")
     expect(command).toContain("CodeGoblin test chat")
     expect(command).not.toContain("--resume")
+  })
+
+  test("adds supported Claude isolation flags before the structured print transport", () => {
+    const command = buildCliAgentCommand({
+      providerID: "claude-code",
+      executable: "claude",
+      modelID: "haiku",
+      sessionID: "ses_example",
+      permissionMode: "plan",
+      isolationFlags: ["--safe-mode"],
+    })
+    expect(command.slice(0, 3)).toEqual(["claude", "--safe-mode", "--print"])
   })
 
   test("does not rename an existing Claude session when resuming it", () => {
@@ -423,7 +451,7 @@ describe("local CLI agent providers", () => {
         "antigravity-cli",
         JSON.stringify({ event: "init", conversation_id: "agy-1", init: { model: "gemini-3.6-flash-low" } }),
       ),
-    ).toEqual({ sessionID: "agy-1" })
+    ).toEqual({ sessionID: "agy-1", reasoning: "Antigravity started the session\n" })
 
     // A tool step reports the real tool, once, when it starts.
     expect(
