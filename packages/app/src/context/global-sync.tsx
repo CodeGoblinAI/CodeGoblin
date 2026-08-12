@@ -348,6 +348,8 @@ function createGlobalSync() {
           if (recent) return
           bootstrap.refetch()
         },
+        refreshProviders: () =>
+          queryClient.invalidateQueries({ predicate: (query) => query.queryKey[1] === "providers" }),
         setGlobalProject: setProjects,
       })
       if (event.type === "server.connected" || event.type === "global.disposed") {

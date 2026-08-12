@@ -18,7 +18,6 @@ import type { State, VcsCache } from "./types"
 import { cmp, normalizeAgentList, normalizeProviderList } from "./utils"
 import { formatServerError } from "@/utils/server-errors"
 import { QueryClient, queryOptions } from "@tanstack/solid-query"
-import { loadMcpQuery } from "../global-sync"
 import { NormalizedProviderListResponse } from "@codegoblin/ui/context"
 
 type GlobalStore = {
@@ -304,7 +303,6 @@ export async function bootstrapDirectory(input: {
           }),
         ),
       () => Promise.resolve(input.loadSessions(input.directory)),
-      () => input.queryClient.fetchQuery(loadMcpQuery(input.directory, input.sdk)),
       () =>
         input.queryClient.fetchQuery(loadProvidersQuery(input.directory, input.sdk)).catch((err) => {
           const project = getFilename(input.directory)

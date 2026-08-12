@@ -1,3 +1,5 @@
+import fs from "fs/promises"
+import os from "os"
 import path from "path"
 import { Global } from "@codegoblin/core/global"
 import * as Log from "@codegoblin/core/util/log"
@@ -12,18 +14,26 @@ import type {
 import { ModelID, ProviderID } from "./schema"
 import type { Info, Model } from "./provider"
 import { antigravityQuotaFrom, captureAntigravityUsage } from "./antigravity-usage"
-import { sendToAntigravitySession } from "./antigravity-session"
-import { sendToClaudeSession } from "./claude-session"
+import { Process } from "@/util/process"
+import { BusEvent } from "@/bus/bus-event"
+import { GlobalBus } from "@/bus/global"
+import { Flock } from "@codegoblin/core/util/flock"
+import { Option, Schema } from "effect"
 
 const log = Log.create({ service: "cli-agent" })
 const MAX_CLI_LINE = 8 * 1024 * 1024
 const MAX_CLI_RESPONSE = 16 * 1024 * 1024
 const MAX_CLI_STDERR = 1024 * 1024
+const MAX_CLI_TURN_MS = 10 * 60 * 1000
+const CLI_DISCOVERY_TTL_MS = 6 * 60 * 60 * 1000
+const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 
 export const CLI_AGENT_PROVIDERS = ["claude-code", "cursor-agent", "antigravity-cli"] as const
 export type CliAgentProviderID = (typeof CLI_AGENT_PROVIDERS)[number]
 const CLI_QUOTA_PROVIDERS = [...CLI_AGENT_PROVIDERS, "codex"] as const
 export type CliQuotaProviderID = (typeof CLI_QUOTA_PROVIDERS)[number]
+
+export const CliAgentModelsUpdated = BusEvent.define("provider.cli.models.updated", Schema.Struct({}))
 
 export function isCliAgentProvider(value: string): value is CliAgentProviderID {
   return CLI_AGENT_PROVIDERS.includes(value as CliAgentProviderID)
@@ -38,7 +48,7 @@ type BridgeOptions = {
   executable?: string
   requestWorkspaceTrust?: (directory: string) => Promise<boolean>
   trustWorkspace?: boolean
-  /** Antigravity only: set false to force the slow one-shot path. */
+  /** Kept for saved-config compatibility. Supported structured transports are always used. */
   warmSession?: boolean
 }
 
@@ -91,8 +101,9 @@ const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 const CLAUDE_VARIANTS = Object.fromEntries(CLAUDE_EFFORTS.map((effort) => [effort, { effort }]))
 
 type DiscoveredModel = { id: string; name: string }
+type DiscoveryCache = Partial<Record<CliAgentProviderID, DiscoveredModel[]>>
 
-let discoveredProviders: Promise<Info[]> | undefined
+let discoveryRefresh: Promise<void> | undefined
 
 let sessionWrite = Promise.resolve()
 let usageWrite = Promise.resolve()
@@ -132,15 +143,121 @@ export function cliAgentProviderInfos(input?: Partial<Record<CliAgentProviderID,
   ]
 }
 
-export function discoverCliAgentProviderInfos() {
-  discoveredProviders ??= Promise.all([discoverCursorModels(), discoverAntigravityModels()]).then(
-    ([cursor, antigravity]) =>
-      cliAgentProviderInfos({
-        ...(cursor.length && { "cursor-agent": cursor }),
-        ...(antigravity.length && { "antigravity-cli": antigravity }),
-      }),
+export function mergeCliAgentProviderModels(
+  current: Info,
+  discovered: Info,
+  configured?: {
+    blacklist?: string[]
+    whitelist?: string[]
+    models?: Record<string, { name?: string }>
+  },
+) {
+  const models = Object.fromEntries(
+    Object.entries(discovered.models).map(([modelID, model]) => [
+      modelID,
+      current.models[modelID]
+        ? {
+            ...model,
+            ...current.models[modelID],
+            name: configured?.models?.[modelID]?.name ?? model.name,
+          }
+        : model,
+    ]),
   )
-  return discoveredProviders
+  return {
+    ...current,
+    models: Object.fromEntries(
+      Object.entries({ ...current.models, ...models }).filter(
+        ([modelID]) =>
+          !configured?.blacklist?.includes(modelID) &&
+          (!configured?.whitelist || configured.whitelist.includes(modelID)),
+      ),
+    ),
+  }
+}
+
+export async function discoverCliAgentProviderInfos() {
+  const [cached, fresh] = await Promise.all([readDiscoveryCache(), discoveryCacheFresh()])
+  if ((!cached || !fresh) && !discoveryRefresh) {
+    discoveryRefresh = refreshDiscoveryCache()
+      .then((changed) => {
+        if (!changed) return
+        GlobalBus.emit("event", {
+          directory: "global",
+          payload: { type: CliAgentModelsUpdated.type, properties: {} },
+        })
+      })
+      .catch((error) =>
+        log.warn("CLI model discovery refresh failed", { error: error instanceof Error ? error.message : error }),
+      )
+      .finally(() => {
+        discoveryRefresh = undefined
+      })
+  }
+  // Discovery is intentionally off the startup path. Do not memoize this
+  // result: once the background refresh writes the cache, the next provider
+  // list request must see the newly installed CLI models without a restart.
+  return cliAgentProviderInfos(cached)
+}
+
+async function discoveryCacheFresh() {
+  const info = await fs.stat(path.join(Global.Path.data, "cli-agent-models.json")).catch(() => undefined)
+  return Boolean(info && Date.now() - info.mtimeMs < CLI_DISCOVERY_TTL_MS)
+}
+
+async function readDiscoveryCache(): Promise<DiscoveryCache | undefined> {
+  const file = Bun.file(path.join(Global.Path.data, "cli-agent-models.json"))
+  if (!(await file.exists())) return
+  const value = await file.json().catch(() => undefined)
+  if (!isRecord(value)) return
+  const entries = CLI_AGENT_PROVIDERS.flatMap((providerID) => {
+    const models = value[providerID]
+    if (!Array.isArray(models)) return []
+    const valid = models.flatMap((item) => {
+      if (!isRecord(item)) return []
+      const id = stringValue(item.id)
+      const name = stringValue(item.name)
+      if (!id) return []
+      if (providerID === "antigravity-cli") {
+        const parsed = antigravityModel(id, name)
+        return parsed ? [parsed] : []
+      }
+      return id && name ? [{ id, name }] : []
+    })
+    return valid.length ? ([[providerID, valid]] as const) : []
+  })
+  return Object.fromEntries(entries)
+}
+
+export function mergeCliAgentDiscoveryCache(current: DiscoveryCache, discovered: DiscoveryCache) {
+  const cache = { ...current, ...discovered }
+  return {
+    cache,
+    changed: JSON.stringify(current) !== JSON.stringify(cache),
+  }
+}
+
+async function refreshDiscoveryCache() {
+  const [cursor, antigravity] = await Promise.all([discoverCursorModels(), discoverAntigravityModels()])
+  const discovered = {
+    ...(cursor.length && { "cursor-agent": cursor }),
+    ...(antigravity.length && { "antigravity-cli": antigravity }),
+  }
+  const file = path.join(Global.Path.data, "cli-agent-models.json")
+  return Flock.withLock(file, async () => {
+    // Discovery can take tens of seconds. Another CodeGoblin process may have
+    // refreshed the file while the probes ran, so only merge against state read
+    // after acquiring the cross-process lock.
+    const merged = mergeCliAgentDiscoveryCache((await readDiscoveryCache()) ?? {}, discovered)
+    const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(temporary, JSON.stringify(merged.cache, null, 2))
+    await fs.rename(temporary, file).catch(async (error) => {
+      await fs.rm(temporary, { force: true }).catch(() => {})
+      throw error
+    })
+    return merged.changed
+  })
 }
 
 async function discoverCursorModels() {
@@ -157,7 +274,11 @@ async function discoverAntigravityModels() {
   // `agy models` measured ~13s on a warm machine, so a 15s budget loses the
   // race often enough that the provider silently falls back to a placeholder
   // id that then fails to resolve. Give it real headroom.
-  const result = await runDiscovery([...cliAgentBaseCommand("antigravity-cli", executable), "models"], 45_000)
+  const result = await runDiscovery(
+    [...cliAgentBaseCommand("antigravity-cli", executable), "models"],
+    45_000,
+    await antigravityEnvironment(),
+  )
   if (!result) return []
   return parseAntigravityModelLines(result)
 }
@@ -192,8 +313,17 @@ export function parseAntigravityModelLines(value: string) {
     .replace(/\x1b\[[0-9;]*m/g, "")
     .split(/\r?\n/)
     .map((line) => line.trim().replace(/^[>*●•-]\s*/, ""))
-    .filter((line) => line && !/^(available )?models?:?$/i.test(line) && !/^tip:/i.test(line))
-    .map((id) => ({ id, name: displayAntigravityModel(id) }))
+    .flatMap((line) => {
+      if (!line || /^(available )?models?:?$/i.test(line) || /^(tip:|fetching available models)/i.test(line)) return []
+      const parsed = antigravityModel(line)
+      return parsed ? [parsed] : []
+    })
+}
+
+function antigravityModel(value: string, fallbackName?: string) {
+  const [id, reportedName] = value.split(/\t+/, 2).map((part) => part.trim())
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(id)) return
+  return { id, name: reportedName || fallbackName || displayAntigravityModel(id) }
 }
 
 function displayAntigravityModel(id: string) {
@@ -226,12 +356,79 @@ export function antigravitySupportsStreamJson(executable: string) {
   return antigravityStreamSupport
 }
 
-async function runDiscovery(command: string[], timeoutMs = 15_000) {
-  const proc = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "ignore" })
-  const timeout = setTimeout(() => proc.kill(), timeoutMs)
-  const [exitCode, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()])
+let claudeIsolationSupport: Promise<string[]> | undefined
+async function claudeIsolationFlags(executable: string) {
+  claudeIsolationSupport ??= (async () => {
+    const help = await runDiscovery([executable, "--help"], 20_000)
+    if (/--safe-mode/.test(help ?? "")) return ["--safe-mode"]
+    throw new Error(
+      "Claude Code cannot be isolated safely. Update Claude Code to a version that supports --safe-mode and retry.",
+    )
+  })().catch((error) => {
+    claudeIsolationSupport = undefined
+    throw error
+  })
+  return claudeIsolationSupport
+}
+
+let antigravityEnvironmentPromise: Promise<NodeJS.ProcessEnv> | undefined
+function antigravityEnvironment() {
+  antigravityEnvironmentPromise ??= createAntigravityEnvironment()
+  return antigravityEnvironmentPromise
+}
+
+async function createAntigravityEnvironment() {
+  // AGY loads every global MCP server from ~/.gemini/config before handling a
+  // print request. Give the bridge an empty config home so a chat turn cannot
+  // open terminal windows or pay for unrelated MCP startup. Native conversation
+  // and brain directories remain linked so known session IDs are still directly
+  // resumable by AGY without copying or editing its database files.
+  const home = path.join(Global.Path.data, "cli-agent-home", "antigravity")
+  const app = path.join(home, ".gemini", "antigravity-cli")
+  await Promise.all([
+    fs.mkdir(path.join(home, ".gemini", "config"), { recursive: true }),
+    fs.mkdir(app, { recursive: true }),
+  ])
+  const native = path.join(os.homedir(), ".gemini", "antigravity-cli")
+  await Promise.all(
+    ["conversations", "brain"].map(async (name) => {
+      const target = path.join(native, name)
+      await fs.mkdir(target, { recursive: true })
+      const link = path.join(app, name)
+      if (await fs.lstat(link).catch(() => undefined)) return
+      await fs.symlink(target, link, process.platform === "win32" ? "junction" : "dir").catch((error) =>
+        log.warn("failed to link Antigravity session storage", {
+          name,
+          error: error instanceof Error ? error.message : error,
+        }),
+      )
+    }),
+  )
+  return {
+    ...process.env,
+    HOME: home,
+    ...(process.platform === "win32" && { USERPROFILE: home }),
+  }
+}
+
+async function runDiscovery(command: string[], timeoutMs = 15_000, env: NodeJS.ProcessEnv = process.env) {
+  const proc = Bun.spawn(command, {
+    env,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "ignore",
+    windowsHide: process.platform === "win32",
+  })
+  const timeout = setTimeout(() => stopCliAgentProcess(proc), timeoutMs)
+  const [exitCode, stdout] = await Promise.all([
+    proc.exited,
+    limitedText(proc.stdout, MAX_CLI_STDERR).catch((error) => {
+      stopCliAgentProcess(proc)
+      return error instanceof Error ? error : new Error(String(error))
+    }),
+  ])
   clearTimeout(timeout)
-  if (exitCode !== 0) return
+  if (exitCode !== 0 || stdout instanceof Error) return
   return stdout.trim()
 }
 
@@ -324,156 +521,23 @@ export function createCliAgentLanguageModel(
         title: bridge.title,
         trustWorkspace,
         streamJson: providerID === "antigravity-cli" ? await antigravitySupportsStreamJson(executable) : undefined,
+        isolationFlags: providerID === "claude-code" ? await claudeIsolationFlags(executable) : undefined,
       })
-      // Antigravity charges ~20s of setup per `--print` run. A warm interactive
-      // session answers in about a second, so use one when we can and fall back
-      // to the one-shot below if it cannot be established.
-      if (providerID === "antigravity-cli" && bridge.warmSession !== false) {
-        const warmCwd = bridge.directory || process.cwd()
-        return {
-          stream: new ReadableStream<LanguageModelV3StreamPart>({
-            async start(controller) {
-              controller.enqueue({ type: "stream-start", warnings: [] })
-              let reasoningOpen = false
-              const result = await sendToAntigravitySession({
-                sessionID,
-                conversationID: externalSessionID,
-                executable,
-                cwd: warmCwd,
-                modelID,
-                permissionMode: bridge.permissionMode ?? "agent",
-                prompt,
-                signal: input.abortSignal ?? undefined,
-                onActivity: (line) => {
-                  if (!reasoningOpen) {
-                    controller.enqueue({ type: "reasoning-start", id: "reasoning-0" })
-                    reasoningOpen = true
-                  }
-                  controller.enqueue({
-                    type: "reasoning-delta",
-                    id: "reasoning-0",
-                    delta: `${line}
-`,
-                  })
-                },
-              }).catch(() => undefined)
-              if (reasoningOpen) controller.enqueue({ type: "reasoning-end", id: "reasoning-0" })
-              if (!result) {
-                controller.error(
-                  new Error(
-                    "Antigravity did not answer. The warm session was dropped; sending again starts a fresh one.",
-                  ),
-                )
-                return
-              }
-              controller.enqueue({ type: "text-start", id: "text-0" })
-              controller.enqueue({ type: "text-delta", id: "text-0", delta: result.text })
-              controller.enqueue({ type: "text-end", id: "text-0" })
-              if (result.conversationID) {
-                await rememberSession(providerID, sessionID, result.conversationID, warmCwd, result.text)
-              }
-              controller.enqueue({
-                type: "finish",
-                usage: EMPTY_USAGE,
-                finishReason: { unified: "stop", raw: "cli-complete" },
-                providerMetadata: {
-                  [providerID]: { sessionID: result.conversationID ?? null, transport: "local-cli-warm" },
-                },
-              })
-              controller.close()
-              const cwd = warmCwd
-              void refreshAntigravityQuota(executable, cwd).catch(() => {})
-            },
-          }),
-          request: { body: { transport: "local-cli-warm", providerID, modelID } },
-        }
-      }
-      // Claude's --print transport writes SDK-style sessions that do not show
-      // up in the native /resume picker. Keep a real interactive Claude process
-      // behind CodeGoblin and read its structured native transcript instead.
-      if (providerID === "claude-code" && bridge.warmSession !== false) {
-        const nativeCwd =
-          bridge.directory || (typeof remembered === "string" ? undefined : remembered?.directory) || process.cwd()
-        const nativeSessionID = externalSessionID ?? newSessionID ?? deterministicCliSessionID(sessionID)
-        return {
-          stream: new ReadableStream<LanguageModelV3StreamPart>({
-            async start(controller) {
-              controller.enqueue({ type: "stream-start", warnings: [] })
-              let reasoningOpen = false
-              let failure: string | undefined
-              const result = await sendToClaudeSession({
-                sessionID,
-                externalSessionID: nativeSessionID,
-                resume: Boolean(externalSessionID),
-                executable,
-                cwd: nativeCwd,
-                modelID,
-                permissionMode: bridge.permissionMode ?? "agent",
-                effort: bridge.effort,
-                title: bridge.title,
-                prompt,
-                requestWorkspaceTrust: bridge.requestWorkspaceTrust,
-                signal: input.abortSignal ?? undefined,
-                onActivity: (line) => {
-                  if (!reasoningOpen) {
-                    controller.enqueue({ type: "reasoning-start", id: "reasoning-0" })
-                    reasoningOpen = true
-                  }
-                  controller.enqueue({ type: "reasoning-delta", id: "reasoning-0", delta: `${line}\n` })
-                },
-                onThinking: (delta) => {
-                  if (!reasoningOpen) {
-                    controller.enqueue({ type: "reasoning-start", id: "reasoning-0" })
-                    reasoningOpen = true
-                  }
-                  controller.enqueue({ type: "reasoning-delta", id: "reasoning-0", delta })
-                },
-              }).catch((error) => {
-                failure = error instanceof Error ? error.message : undefined
-                return undefined
-              })
-              if (reasoningOpen) controller.enqueue({ type: "reasoning-end", id: "reasoning-0" })
-              if (!result) {
-                controller.error(
-                  new Error(
-                    failure ?? "Claude Code did not answer. The native session was dropped; sending again restarts it.",
-                  ),
-                )
-                return
-              }
-              controller.enqueue({ type: "text-start", id: "text-0" })
-              controller.enqueue({ type: "text-delta", id: "text-0", delta: result.text })
-              controller.enqueue({ type: "text-end", id: "text-0" })
-              await rememberSession(providerID, sessionID, result.externalSessionID, nativeCwd, result.text)
-              controller.enqueue({
-                type: "finish",
-                usage: usageFrom(result.usage) ?? EMPTY_USAGE,
-                finishReason: { unified: "stop", raw: "cli-complete" },
-                providerMetadata: {
-                  [providerID]: { sessionID: result.externalSessionID, transport: "local-cli-native" },
-                },
-              })
-              controller.close()
-              void refreshClaudeQuota(executable).catch(() => {})
-            },
-          }),
-          request: { body: { transport: "local-cli-native", providerID, modelID } },
-        }
-      }
-
       const proc = Bun.spawn(command, {
         cwd,
-        env: process.env,
+        env: providerID === "antigravity-cli" ? await antigravityEnvironment() : process.env,
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
+        windowsHide: process.platform === "win32",
       })
       if (providerID !== "antigravity-cli") {
         proc.stdin.write(prompt)
       }
       proc.stdin.end()
 
-      const abort = () => proc.kill()
+      const abort = () => stopCliAgentProcess(proc)
+      const timeout = setTimeout(() => stopCliAgentProcess(proc), MAX_CLI_TURN_MS)
       input.abortSignal?.addEventListener("abort", abort, { once: true })
 
       return {
@@ -481,7 +545,7 @@ export function createCliAgentLanguageModel(
           async start(controller) {
             controller.enqueue({ type: "stream-start", warnings: [] })
             const stderrPromise = limitedText(proc.stderr, MAX_CLI_STDERR).catch((error) => {
-              proc.kill()
+              stopCliAgentProcess(proc)
               return error instanceof Error ? error.message : "CLI stderr exceeded the safety limit"
             })
             let buffer = ""
@@ -501,7 +565,7 @@ export function createCliAgentLanguageModel(
               emittedText = true
               responseText += delta
               if (responseText.length > MAX_CLI_RESPONSE) {
-                proc.kill()
+                stopCliAgentProcess(proc)
                 throw new Error("CLI response exceeded the safety limit")
               }
             }
@@ -535,7 +599,7 @@ export function createCliAgentLanguageModel(
                 if (next.done) break
                 buffer += decoder.decode(next.value, { stream: true })
                 if (buffer.length > MAX_CLI_LINE) {
-                  proc.kill()
+                  stopCliAgentProcess(proc)
                   throw new Error("CLI stream record exceeded the safety limit")
                 }
                 const lines = buffer.split(/\r?\n/)
@@ -578,18 +642,11 @@ export function createCliAgentLanguageModel(
                 },
               })
               controller.close()
-              if (providerID === "claude-code") void refreshClaudeQuota(executable).catch(() => {})
-              if (providerID === "antigravity-cli") {
-                const cwd = bridge.directory || process.cwd()
-                void refreshAntigravityQuota(executable, cwd).catch((error) =>
-                  log.warn("antigravity quota refresh failed", {
-                    error: error instanceof Error ? error.message : error,
-                  }),
-                )
-              }
             } catch (error) {
+              stopCliAgentProcess(proc)
               controller.error(error)
             } finally {
+              clearTimeout(timeout)
               if (logFile)
                 await Bun.file(logFile)
                   .delete()
@@ -598,7 +655,7 @@ export function createCliAgentLanguageModel(
             }
           },
           cancel() {
-            proc.kill()
+            stopCliAgentProcess(proc)
           },
         }),
         request: { body: { transport: "local-cli", providerID, modelID } },
@@ -648,6 +705,23 @@ function model(
     release_date: "",
     variants,
   }
+}
+
+export function cliAgentModel(providerID: CliAgentProviderID, modelID: string) {
+  if (providerID === "antigravity-cli") {
+    return model(providerID, modelID, displayAntigravityModel(modelID), "antigravity")
+  }
+  if (providerID === "cursor-agent") {
+    return model(providerID, modelID, modelID === "auto" ? "Auto (Cursor default)" : modelID, "cursor")
+  }
+  const name = {
+    default: "Claude Code default",
+    fable: "Fable 5",
+    opus: "Opus 4.8",
+    sonnet: "Sonnet 5",
+    haiku: "Haiku 4.5",
+  }[modelID]
+  return model(providerID, modelID, name ?? modelID, "claude", CLAUDE_VARIANTS)
 }
 
 export function cliAgentExecutable(providerID: CliAgentProviderID) {
@@ -754,11 +828,17 @@ export function buildCliAgentCommand(input: {
   trustWorkspace?: boolean
   /** AGY only: request the typed NDJSON stream (1.1.8+). */
   streamJson?: boolean
+  /** Claude only: supported flags that disable inherited hooks/plugins/MCPs. */
+  isolationFlags?: string[]
 }) {
   if (input.providerID === "claude-code") {
     const external = input.externalSessionID ?? input.newSessionID ?? deterministicCliSessionID(input.sessionID)
     return [
       input.executable,
+      ...(input.isolationFlags ?? []),
+      // Claude persists --print sessions unless --no-session-persistence is
+      // supplied. The explicit UUID below is therefore resumable in Claude's
+      // native CLI without keeping a hidden interactive process alive.
       "--print",
       "--input-format",
       "text",
@@ -777,6 +857,9 @@ export function buildCliAgentCommand(input: {
   if (input.providerID === "antigravity-cli") {
     return [
       ...cliAgentBaseCommand(input.providerID, input.executable),
+      // AGY 1.1.12 requires the prompt as this flag's value. It does not read
+      // the prompt from stdin (a bare --print consumes the following flag as
+      // its prompt), so do not log or persist this command array.
       ...(input.prompt !== undefined ? [`--print=${input.prompt}`] : ["--print"]),
       // AGY 1.1.8+ streams typed NDJSON events as it works. Without this the
       // CLI stays silent until the whole run finishes, which is why a turn
@@ -886,7 +969,10 @@ function parseAntigravityEvent(raw: Record<string, unknown>, sessionID?: string)
   const event = stringValue(raw.event)
 
   if (event === "init") {
-    return { sessionID: stringValue(raw.conversation_id) ?? sessionID }
+    return {
+      sessionID: stringValue(raw.conversation_id) ?? sessionID,
+      reasoning: "Antigravity started the session\n",
+    }
   }
 
   if (event === "step_update") {
@@ -1143,7 +1229,7 @@ export function cliAgentQuotaStatuses(quotas: readonly CliAgentQuota[]): CliAgen
 }
 
 /** AGY exposes quota only behind an interactive slash command that costs ~25s
- * to reach, so refresh it sparingly rather than after every turn. */
+ * to reach, so refresh it only from the explicit usage flow. */
 const ANTIGRAVITY_QUOTA_TTL_MS = 30 * 60 * 1000
 
 /** Quota already re-read recently enough that asking the CLI again would only
@@ -1157,7 +1243,9 @@ async function isFresh(providerID: CliAgentProviderID, ttlMs: number) {
 
 async function refreshAntigravityQuota(executable: string, cwd: string, force = false) {
   if (!force && (await isFresh("antigravity-cli", ANTIGRAVITY_QUOTA_TTL_MS))) return
-  const panel = await captureAntigravityUsage({ executable, cwd }).catch(() => undefined)
+  const panel = await captureAntigravityUsage({ executable, cwd, env: await antigravityEnvironment() }).catch(
+    () => undefined,
+  )
   if (!panel) return
   const quota = antigravityQuotaFrom(panel)
   if (!quota) return
@@ -1219,17 +1307,51 @@ async function refreshClaudeQuota(executable: string, force = false) {
 async function claudeQuotaProbe(executable: string, session: string[]) {
   const proc = Bun.spawn(
     [...cliAgentBaseCommand("claude-code", executable), "--print", "--output-format", "json", ...session, "/usage"],
-    { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+    {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      windowsHide: process.platform === "win32",
+    },
   )
-  const timeout = setTimeout(() => proc.kill(), 10_000)
-  const [exitCode, value, stderr] = await Promise.all([
+  const timeout = setTimeout(() => stopCliAgentProcess(proc), 10_000)
+  const [exitCode, stdout, stderr] = await Promise.all([
     proc.exited,
-    new Response(proc.stdout).json().catch(() => undefined),
-    new Response(proc.stderr).text().catch(() => ""),
+    limitedText(proc.stdout, MAX_CLI_STDERR).catch((error) => {
+      stopCliAgentProcess(proc)
+      return error instanceof Error ? error : new Error(String(error))
+    }),
+    limitedText(proc.stderr, MAX_CLI_STDERR).catch((error) => {
+      stopCliAgentProcess(proc)
+      return error instanceof Error ? error : new Error(String(error))
+    }),
   ])
   clearTimeout(timeout)
+  if (stdout instanceof Error) return { ok: false as const, detail: stdout.message }
+  if (stderr instanceof Error) return { ok: false as const, detail: stderr.message }
+  const value = Option.getOrUndefined(decodeJson(stdout))
   if (exitCode === 0 && value !== undefined) return { ok: true as const, value }
   return { ok: false as const, detail: stderr.trim().slice(0, 300) || `exited with code ${exitCode}` }
+}
+
+function stopCliAgentProcess(proc: { pid: number; exitCode?: number | null; kill(): void }) {
+  // Never target a PID after Bun has observed the owned process exit. Besides
+  // being unnecessary, a stale PID could already have been reused by Windows.
+  if (proc.exitCode !== undefined && proc.exitCode !== null) return
+  if (process.platform !== "win32") {
+    proc.kill()
+    return
+  }
+  void Bun.spawn([Process.windowsSystem32("taskkill.exe"), "/pid", String(proc.pid), "/T", "/F"], {
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "ignore",
+    windowsHide: true,
+  })
+    .exited.then((code) => {
+      if (code !== 0) proc.kill()
+    })
+    .catch(() => proc.kill())
 }
 
 function cliFailureMessage(providerID: CliAgentProviderID, stderr: string, exitCode: number) {

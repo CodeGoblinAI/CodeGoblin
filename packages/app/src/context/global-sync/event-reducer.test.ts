@@ -131,6 +131,21 @@ describe("applyGlobalEvent", () => {
 
     expect(refreshCount).toBe(1)
   })
+
+  test("refreshes provider queries when CLI discovery completes", () => {
+    let providerRefreshCount = 0
+    applyGlobalEvent({
+      event: { type: "provider.cli.models.updated" },
+      project: [],
+      refresh() {},
+      refreshProviders() {
+        providerRefreshCount += 1
+      },
+      setGlobalProject() {},
+    })
+
+    expect(providerRefreshCount).toBe(1)
+  })
 })
 
 describe("applyDirectoryEvent", () => {

@@ -50,6 +50,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   promptOps: TaskPromptOps
 }) {
   using _ = log.time("resolveTools")
+  if (!input.model.capabilities.toolcall) return { tools: {}, available: 0, loaded: 0, schemaChars: 0 }
+
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
   const plugin = yield* Plugin.Service

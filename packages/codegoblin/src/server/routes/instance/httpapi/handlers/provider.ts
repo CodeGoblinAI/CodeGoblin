@@ -9,7 +9,7 @@ import {
   augment3DModelCatalog,
   augmentMuseSparkModelCatalog,
 } from "@/codegoblin/provider"
-import { discoverCliAgentProviderInfos } from "@/provider/cli-agent"
+import { discoverCliAgentProviderInfos, mergeCliAgentProviderModels } from "@/provider/cli-agent"
 import { mapValues } from "remeda"
 import { Effect, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -59,10 +59,19 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
         augmentAudioModelCatalog(available)
       }
       augment3DModelCatalog(available)
-      for (const item of yield* Effect.promise(discoverCliAgentProviderInfos)) {
+      const cliAgentProviders = yield* Effect.promise(discoverCliAgentProviderInfos)
+      for (const item of cliAgentProviders) {
         if ((enabled ? enabled.has(item.id) : true) && !disabled.has(item.id)) available[item.id] = item
       }
       const providers = Object.assign(available, connected)
+      // Connected providers are initialized once per workspace. Keep their
+      // auth/options, but let the latest CLI discovery cache supply models so
+      // a completed background refresh is visible on the next list request.
+      for (const item of cliAgentProviders) {
+        const current = providers[item.id]
+        if (!current) continue
+        providers[item.id] = mergeCliAgentProviderModels(current, item, config.provider?.[item.id])
+      }
       augmentMuseSparkModelCatalog(providers)
       return {
         all: Object.values(providers).map(Provider.toPublicInfo),

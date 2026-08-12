@@ -132,6 +132,26 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
     event.subscribe((event, { workspace }) => {
       switch (event.type) {
+        case "provider.cli.models.updated": {
+          const workspace = project.workspace.current()
+          void Promise.all([
+            sdk.client.config.providers({ workspace }, { throwOnError: true }),
+            sdk.client.provider.list({ workspace }, { throwOnError: true }),
+          ])
+            .then(([providers, providerList]) => {
+              batch(() => {
+                setStore("provider", reconcile(providers.data!.providers))
+                setStore("provider_default", reconcile(providers.data!.default))
+                setStore("provider_next", reconcile(providerList.data!))
+              })
+            })
+            .catch((error) => {
+              Log.Default.warn("tui CLI model refresh failed", {
+                error: error instanceof Error ? error.message : String(error),
+              })
+            })
+          break
+        }
         case "server.instance.disposed":
           void bootstrap()
           break
@@ -449,10 +469,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             consoleStatePromise.then((consoleState) => setStore("console_state", reconcile(consoleState))),
             sdk.client.command.list({ workspace }).then((x) => setStore("command", reconcile(x.data ?? []))),
             sdk.client.lsp.status({ workspace }).then((x) => setStore("lsp", reconcile(x.data ?? []))),
-            sdk.client.mcp.status({ workspace }).then((x) => setStore("mcp", reconcile(x.data ?? {}))),
-            sdk.client.experimental.resource
-              .list({ workspace })
-              .then((x) => setStore("mcp_resource", reconcile(x.data ?? {}))),
             sdk.client.formatter.status({ workspace }).then((x) => setStore("formatter", reconcile(x.data ?? []))),
             sdk.client.session.status({ workspace }).then((x) => {
               setStore("session_status", reconcile(x.data ?? {}))
@@ -462,6 +478,18 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             project.workspace.sync(),
           ]).then(() => {
             setStore("status", "complete")
+          })
+          // MCP processes can take tens of seconds to install or authenticate. Keep their
+          // startup asynchronous so unrelated servers never hold the entire TUI loading state.
+          void Promise.all([
+            sdk.client.mcp.status({ workspace }).then((x) => setStore("mcp", reconcile(x.data ?? {}))),
+            sdk.client.experimental.resource
+              .list({ workspace })
+              .then((x) => setStore("mcp_resource", reconcile(x.data ?? {}))),
+          ]).catch((error) => {
+            Log.Default.warn("tui mcp bootstrap failed", {
+              error: error instanceof Error ? error.message : String(error),
+            })
           })
         })
         .catch(async (e) => {

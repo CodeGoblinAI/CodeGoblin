@@ -9,7 +9,8 @@ import type { State, VcsCache } from "./types"
 const provider = { all: new Map(), connected: [], default: {} } satisfies NormalizedProviderListResponse
 
 describe("bootstrapDirectory", () => {
-  test("marks a loading directory partial during bootstrap and complete after success", async () => {
+  test("marks a loading directory complete without waiting for MCP startup", async () => {
+    let mcpStatusCalls = 0
     const [store, setStore] = createStore<State>({
       status: "loading",
       agent: [],
@@ -58,7 +59,12 @@ describe("bootstrapDirectory", () => {
         command: { list: async () => ({ data: [] }) },
         permission: { list: async () => ({ data: [] }) },
         question: { list: async () => ({ data: [] }) },
-        mcp: { status: async () => ({ data: {} }) },
+        mcp: {
+          status: () => {
+            mcpStatusCalls++
+            return new Promise(() => {})
+          },
+        },
         provider: { list: async () => ({ data: { all: [], connected: [], default: {} } }) },
       } as unknown as OpencodeClient,
       store,
@@ -74,5 +80,6 @@ describe("bootstrapDirectory", () => {
     await new Promise((resolve) => setTimeout(resolve, 80))
 
     expect(store.status).toBe("complete")
+    expect(mcpStatusCalls).toBe(0)
   })
 })

@@ -39,6 +39,7 @@ import {
 } from "@/codegoblin/provider"
 import {
   CLI_AGENT_PROVIDERS,
+  cliAgentModel,
   createCliAgentLanguageModel,
   discoverCliAgentProviderInfos,
   isCliAgentProvider,
@@ -1781,6 +1782,17 @@ export const layer = Layer.effect(
 
       const info = provider.models[modelID]
       if (!info) {
+        if (isCliAgentProvider(providerID)) {
+          const cfg = yield* config.get()
+          const configured = cfg.provider?.[providerID]
+          const blocked = configured?.blacklist?.includes(modelID)
+          const excluded = configured?.whitelist && !configured.whitelist.includes(modelID)
+          if (!blocked && !excluded) {
+            const dynamic = cliAgentModel(providerID, modelID)
+            provider.models[modelID] = dynamic
+            return dynamic
+          }
+        }
         const current = modelSuggestions(provider, modelID, runtimeFlags.enableExperimentalModels)
         const suggestions = current.length
           ? current

@@ -178,18 +178,13 @@ export function Prompt(props: PromptProps) {
   const dialog = useDialog()
   const toast = useToast()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
-  // Subscription quota goes stale the moment you switch providers, since each
-  // CLI is only re-read after its own turn — so the footer asks for a refresh
-  // after every turn and on the timer below, and per-provider TTLs keep that
-  // almost always cache-resolved. The very first load is the exception: it
-  // deliberately stays cache-only, because refreshing quota means spawning the
-  // provider's CLI, and doing that during startup would contend with the first
-  // message the user sends.
-  let quotaLoads = 0
+  // Footer renders are cache-only. A quota refresh can launch an interactive
+  // vendor CLI for tens of seconds, so it belongs behind the explicit usage
+  // refresh action rather than a timer that runs while CodeGoblin is idle.
   const [balanceState, balanceActions] = createResource(
     () => project.instance.directory() || process.cwd(),
     (cwd) =>
-      CodeGoblinBalance.resolve({ cwd, refreshQuotas: quotaLoads++ > 0 }).catch(() => ({
+      CodeGoblinBalance.resolve({ cwd }).catch(() => ({
         balances: [],
         quotas: [],
         quotaStatuses: [],

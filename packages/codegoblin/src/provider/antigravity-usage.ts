@@ -141,6 +141,7 @@ export function antigravityQuotaFrom(raw: string): CliAgentQuota | undefined {
 export async function captureAntigravityUsage(input: {
   executable: string
   cwd: string
+  env?: NodeJS.ProcessEnv
   timeoutMs?: number
 }): Promise<string | undefined> {
   const timeout = input.timeoutMs ?? 90_000
@@ -176,7 +177,7 @@ export async function captureAntigravityUsage(input: {
         cols: 140,
         rows: 45,
         cwd: input.cwd,
-        env: process.env as Record<string, string>,
+        env: (input.env ?? process.env) as Record<string, string>,
       })
     } catch {
       finish(undefined)

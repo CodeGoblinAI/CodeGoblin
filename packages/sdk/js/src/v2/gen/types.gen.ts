@@ -14,6 +14,7 @@ export type Event =
   | EventServerInstanceDisposed
   | EventFileEdited
   | EventFileWatcherUpdated
+  | EventProviderCliModelsUpdated
   | EventLspClientDiagnostics
   | EventLspUpdated
   | EventMessagePartDelta
@@ -816,6 +817,7 @@ export type GlobalEvent = {
     | EventServerInstanceDisposed
     | EventFileEdited
     | EventFileWatcherUpdated
+    | EventProviderCliModelsUpdated
     | EventLspClientDiagnostics
     | EventLspUpdated
     | EventMessagePartDelta
@@ -2574,6 +2576,14 @@ export type EventFileWatcherUpdated = {
   properties: {
     file: string
     event: "add" | "change" | "unlink"
+  }
+}
+
+export type EventProviderCliModelsUpdated = {
+  id: string
+  type: "provider.cli.models.updated"
+  properties: {
+    [key: string]: unknown
   }
 }
 

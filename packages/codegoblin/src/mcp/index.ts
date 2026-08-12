@@ -32,6 +32,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@codegoblin/core/cross-spawn-spawner"
 import { which } from "@/util/which"
+import { Process } from "@/util/process"
 import { augmentNotionEnvironment } from "./notion-env"
 
 const log = Log.create({ service: "mcp" })
@@ -83,6 +84,14 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("MCP
 }) {}
 
 type MCPClient = Client
+
+async function closeMcpClient(client: MCPClient) {
+  const pid = client.transport instanceof StdioClientTransport ? client.transport.pid : null
+  if (process.platform === "win32" && typeof pid === "number") {
+    await Process.run([Process.windowsSystem32("taskkill.exe"), "/pid", String(pid), "/T", "/F"], { nothrow: true })
+  }
+  await client.close()
+}
 
 const StatusConnected = Schema.Struct({ status: Schema.Literal("connected") }).annotate({
   identifier: "MCPStatusConnected",
@@ -486,7 +495,7 @@ export const layer = Layer.effect(
 
       const listed = yield* defs(key, mcpClient, mcp.timeout)
       if (!listed) {
-        yield* Effect.tryPromise(() => mcpClient.close()).pipe(Effect.ignore)
+        yield* Effect.tryPromise(() => closeMcpClient(mcpClient)).pipe(Effect.ignore)
         return { status: { status: "failed", error: "Failed to get tools" } } satisfies CreateResult
       }
 
@@ -586,7 +595,7 @@ export const layer = Layer.effect(
                       } catch {}
                     }
                   }
-                  yield* Effect.tryPromise(() => client.close()).pipe(Effect.ignore)
+                  yield* Effect.tryPromise(() => closeMcpClient(client)).pipe(Effect.ignore)
                 }),
               { concurrency: "unbounded" },
             )
@@ -602,7 +611,7 @@ export const layer = Layer.effect(
       const client = s.clients[name]
       delete s.defs[name]
       if (!client) return Effect.void
-      return Effect.tryPromise(() => client.close()).pipe(Effect.ignore)
+      return Effect.tryPromise(() => closeMcpClient(client)).pipe(Effect.ignore)
     }
 
     const storeClient = Effect.fnUntraced(function* (

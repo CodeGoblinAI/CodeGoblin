@@ -9,6 +9,12 @@ function node(script: string) {
 }
 
 describe("util.process", () => {
+  test("resolves Windows system tools outside the current directory and PATH", () => {
+    const executable = Process.windowsSystem32("taskkill.exe")
+    expect(path.win32.isAbsolute(executable)).toBe(true)
+    expect(executable.toLowerCase()).toEndWith("\\system32\\taskkill.exe")
+  })
+
   test("captures stdout and stderr", async () => {
     const out = await Process.run(node('process.stdout.write("out");process.stderr.write("err")'))
     expect(out.code).toBe(0)
