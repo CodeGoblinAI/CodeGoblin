@@ -14,6 +14,11 @@ import type {
 import { ModelID, ProviderID } from "./schema"
 import type { Info, Model } from "./provider"
 import { antigravityQuotaFrom, captureAntigravityUsage } from "./antigravity-usage"
+import { Process } from "@/util/process"
+import { BusEvent } from "@/bus/bus-event"
+import { GlobalBus } from "@/bus/global"
+import { Flock } from "@codegoblin/core/util/flock"
+import { Option, Schema } from "effect"
 
 const log = Log.create({ service: "cli-agent" })
 const MAX_CLI_LINE = 8 * 1024 * 1024
@@ -21,11 +26,14 @@ const MAX_CLI_RESPONSE = 16 * 1024 * 1024
 const MAX_CLI_STDERR = 1024 * 1024
 const MAX_CLI_TURN_MS = 10 * 60 * 1000
 const CLI_DISCOVERY_TTL_MS = 6 * 60 * 60 * 1000
+const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 
 export const CLI_AGENT_PROVIDERS = ["claude-code", "cursor-agent", "antigravity-cli"] as const
 export type CliAgentProviderID = (typeof CLI_AGENT_PROVIDERS)[number]
 const CLI_QUOTA_PROVIDERS = [...CLI_AGENT_PROVIDERS, "codex"] as const
 export type CliQuotaProviderID = (typeof CLI_QUOTA_PROVIDERS)[number]
+
+export const CliAgentModelsUpdated = BusEvent.define("provider.cli.models.updated", Schema.Struct({}))
 
 export function isCliAgentProvider(value: string): value is CliAgentProviderID {
   return CLI_AGENT_PROVIDERS.includes(value as CliAgentProviderID)
@@ -95,7 +103,7 @@ const CLAUDE_VARIANTS = Object.fromEntries(CLAUDE_EFFORTS.map((effort) => [effor
 type DiscoveredModel = { id: string; name: string }
 type DiscoveryCache = Partial<Record<CliAgentProviderID, DiscoveredModel[]>>
 
-let discoveredProviders: Promise<Info[]> | undefined
+let discoveryRefresh: Promise<void> | undefined
 
 let sessionWrite = Promise.resolve()
 let usageWrite = Promise.resolve()
@@ -135,17 +143,61 @@ export function cliAgentProviderInfos(input?: Partial<Record<CliAgentProviderID,
   ]
 }
 
-export function discoverCliAgentProviderInfos() {
-  discoveredProviders ??= (async () => {
-    const cached = await readDiscoveryCache()
-    if (!cached || !(await discoveryCacheFresh())) {
-      void refreshDiscoveryCache().catch((error) =>
+export function mergeCliAgentProviderModels(
+  current: Info,
+  discovered: Info,
+  configured?: {
+    blacklist?: string[]
+    whitelist?: string[]
+    models?: Record<string, { name?: string }>
+  },
+) {
+  const models = Object.fromEntries(
+    Object.entries(discovered.models).map(([modelID, model]) => [
+      modelID,
+      current.models[modelID]
+        ? {
+            ...model,
+            ...current.models[modelID],
+            name: configured?.models?.[modelID]?.name ?? model.name,
+          }
+        : model,
+    ]),
+  )
+  return {
+    ...current,
+    models: Object.fromEntries(
+      Object.entries({ ...current.models, ...models }).filter(
+        ([modelID]) =>
+          !configured?.blacklist?.includes(modelID) &&
+          (!configured?.whitelist || configured.whitelist.includes(modelID)),
+      ),
+    ),
+  }
+}
+
+export async function discoverCliAgentProviderInfos() {
+  const [cached, fresh] = await Promise.all([readDiscoveryCache(), discoveryCacheFresh()])
+  if ((!cached || !fresh) && !discoveryRefresh) {
+    discoveryRefresh = refreshDiscoveryCache()
+      .then((changed) => {
+        if (!changed) return
+        GlobalBus.emit("event", {
+          directory: "global",
+          payload: { type: CliAgentModelsUpdated.type, properties: {} },
+        })
+      })
+      .catch((error) =>
         log.warn("CLI model discovery refresh failed", { error: error instanceof Error ? error.message : error }),
       )
-    }
-    return cliAgentProviderInfos(cached)
-  })()
-  return discoveredProviders
+      .finally(() => {
+        discoveryRefresh = undefined
+      })
+  }
+  // Discovery is intentionally off the startup path. Do not memoize this
+  // result: once the background refresh writes the cache, the next provider
+  // list request must see the newly installed CLI models without a restart.
+  return cliAgentProviderInfos(cached)
 }
 
 async function discoveryCacheFresh() {
@@ -174,20 +226,38 @@ async function readDiscoveryCache(): Promise<DiscoveryCache | undefined> {
     })
     return valid.length ? ([[providerID, valid]] as const) : []
   })
-  if (!entries.length) return
   return Object.fromEntries(entries)
 }
 
-async function refreshDiscoveryCache(): Promise<DiscoveryCache> {
+export function mergeCliAgentDiscoveryCache(current: DiscoveryCache, discovered: DiscoveryCache) {
+  const cache = { ...current, ...discovered }
+  return {
+    cache,
+    changed: JSON.stringify(current) !== JSON.stringify(cache),
+  }
+}
+
+async function refreshDiscoveryCache() {
   const [cursor, antigravity] = await Promise.all([discoverCursorModels(), discoverAntigravityModels()])
   const discovered = {
     ...(cursor.length && { "cursor-agent": cursor }),
     ...(antigravity.length && { "antigravity-cli": antigravity }),
   }
-  if (Object.keys(discovered).length) {
-    await Bun.write(path.join(Global.Path.data, "cli-agent-models.json"), JSON.stringify(discovered, null, 2))
-  }
-  return discovered
+  const file = path.join(Global.Path.data, "cli-agent-models.json")
+  return Flock.withLock(file, async () => {
+    // Discovery can take tens of seconds. Another CodeGoblin process may have
+    // refreshed the file while the probes ran, so only merge against state read
+    // after acquiring the cross-process lock.
+    const merged = mergeCliAgentDiscoveryCache((await readDiscoveryCache()) ?? {}, discovered)
+    const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(temporary, JSON.stringify(merged.cache, null, 2))
+    await fs.rename(temporary, file).catch(async (error) => {
+      await fs.rm(temporary, { force: true }).catch(() => {})
+      throw error
+    })
+    return merged.changed
+  })
 }
 
 async function discoverCursorModels() {
@@ -291,11 +361,13 @@ async function claudeIsolationFlags(executable: string) {
   claudeIsolationSupport ??= (async () => {
     const help = await runDiscovery([executable, "--help"], 20_000)
     if (/--safe-mode/.test(help ?? "")) return ["--safe-mode"]
-    if (/--strict-mcp-config/.test(help ?? "") && /--mcp-config/.test(help ?? "")) {
-      return ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']
-    }
-    return []
-  })().catch(() => [])
+    throw new Error(
+      "Claude Code cannot be isolated safely. Update Claude Code to a version that supports --safe-mode and retry.",
+    )
+  })().catch((error) => {
+    claudeIsolationSupport = undefined
+    throw error
+  })
   return claudeIsolationSupport
 }
 
@@ -348,9 +420,15 @@ async function runDiscovery(command: string[], timeoutMs = 15_000, env: NodeJS.P
     windowsHide: process.platform === "win32",
   })
   const timeout = setTimeout(() => stopCliAgentProcess(proc), timeoutMs)
-  const [exitCode, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()])
+  const [exitCode, stdout] = await Promise.all([
+    proc.exited,
+    limitedText(proc.stdout, MAX_CLI_STDERR).catch((error) => {
+      stopCliAgentProcess(proc)
+      return error instanceof Error ? error : new Error(String(error))
+    }),
+  ])
   clearTimeout(timeout)
-  if (exitCode !== 0) return
+  if (exitCode !== 0 || stdout instanceof Error) return
   return stdout.trim()
 }
 
@@ -467,7 +545,7 @@ export function createCliAgentLanguageModel(
           async start(controller) {
             controller.enqueue({ type: "stream-start", warnings: [] })
             const stderrPromise = limitedText(proc.stderr, MAX_CLI_STDERR).catch((error) => {
-              proc.kill()
+              stopCliAgentProcess(proc)
               return error instanceof Error ? error.message : "CLI stderr exceeded the safety limit"
             })
             let buffer = ""
@@ -487,7 +565,7 @@ export function createCliAgentLanguageModel(
               emittedText = true
               responseText += delta
               if (responseText.length > MAX_CLI_RESPONSE) {
-                proc.kill()
+                stopCliAgentProcess(proc)
                 throw new Error("CLI response exceeded the safety limit")
               }
             }
@@ -521,7 +599,7 @@ export function createCliAgentLanguageModel(
                 if (next.done) break
                 buffer += decoder.decode(next.value, { stream: true })
                 if (buffer.length > MAX_CLI_LINE) {
-                  proc.kill()
+                  stopCliAgentProcess(proc)
                   throw new Error("CLI stream record exceeded the safety limit")
                 }
                 const lines = buffer.split(/\r?\n/)
@@ -565,6 +643,7 @@ export function createCliAgentLanguageModel(
               })
               controller.close()
             } catch (error) {
+              stopCliAgentProcess(proc)
               controller.error(error)
             } finally {
               clearTimeout(timeout)
@@ -757,6 +836,9 @@ export function buildCliAgentCommand(input: {
     return [
       input.executable,
       ...(input.isolationFlags ?? []),
+      // Claude persists --print sessions unless --no-session-persistence is
+      // supplied. The explicit UUID below is therefore resumable in Claude's
+      // native CLI without keeping a hidden interactive process alive.
       "--print",
       "--input-format",
       "text",
@@ -775,6 +857,9 @@ export function buildCliAgentCommand(input: {
   if (input.providerID === "antigravity-cli") {
     return [
       ...cliAgentBaseCommand(input.providerID, input.executable),
+      // AGY 1.1.12 requires the prompt as this flag's value. It does not read
+      // the prompt from stdin (a bare --print consumes the following flag as
+      // its prompt), so do not log or persist this command array.
       ...(input.prompt !== undefined ? [`--print=${input.prompt}`] : ["--print"]),
       // AGY 1.1.8+ streams typed NDJSON events as it works. Without this the
       // CLI stays silent until the whole run finishes, which is why a turn
@@ -1230,22 +1315,34 @@ async function claudeQuotaProbe(executable: string, session: string[]) {
     },
   )
   const timeout = setTimeout(() => stopCliAgentProcess(proc), 10_000)
-  const [exitCode, value, stderr] = await Promise.all([
+  const [exitCode, stdout, stderr] = await Promise.all([
     proc.exited,
-    new Response(proc.stdout).json().catch(() => undefined),
-    new Response(proc.stderr).text().catch(() => ""),
+    limitedText(proc.stdout, MAX_CLI_STDERR).catch((error) => {
+      stopCliAgentProcess(proc)
+      return error instanceof Error ? error : new Error(String(error))
+    }),
+    limitedText(proc.stderr, MAX_CLI_STDERR).catch((error) => {
+      stopCliAgentProcess(proc)
+      return error instanceof Error ? error : new Error(String(error))
+    }),
   ])
   clearTimeout(timeout)
+  if (stdout instanceof Error) return { ok: false as const, detail: stdout.message }
+  if (stderr instanceof Error) return { ok: false as const, detail: stderr.message }
+  const value = Option.getOrUndefined(decodeJson(stdout))
   if (exitCode === 0 && value !== undefined) return { ok: true as const, value }
   return { ok: false as const, detail: stderr.trim().slice(0, 300) || `exited with code ${exitCode}` }
 }
 
-function stopCliAgentProcess(proc: { pid: number; kill(): void }) {
+function stopCliAgentProcess(proc: { pid: number; exitCode?: number | null; kill(): void }) {
+  // Never target a PID after Bun has observed the owned process exit. Besides
+  // being unnecessary, a stale PID could already have been reused by Windows.
+  if (proc.exitCode !== undefined && proc.exitCode !== null) return
   if (process.platform !== "win32") {
     proc.kill()
     return
   }
-  void Bun.spawn(["taskkill", "/pid", String(proc.pid), "/T", "/F"], {
+  void Bun.spawn([Process.windowsSystem32("taskkill.exe"), "/pid", String(proc.pid), "/T", "/F"], {
     stdin: "ignore",
     stdout: "ignore",
     stderr: "ignore",

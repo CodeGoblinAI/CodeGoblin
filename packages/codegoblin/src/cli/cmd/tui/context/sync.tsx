@@ -132,6 +132,26 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
     event.subscribe((event, { workspace }) => {
       switch (event.type) {
+        case "provider.cli.models.updated": {
+          const workspace = project.workspace.current()
+          void Promise.all([
+            sdk.client.config.providers({ workspace }, { throwOnError: true }),
+            sdk.client.provider.list({ workspace }, { throwOnError: true }),
+          ])
+            .then(([providers, providerList]) => {
+              batch(() => {
+                setStore("provider", reconcile(providers.data!.providers))
+                setStore("provider_default", reconcile(providers.data!.default))
+                setStore("provider_next", reconcile(providerList.data!))
+              })
+            })
+            .catch((error) => {
+              Log.Default.warn("tui CLI model refresh failed", {
+                error: error instanceof Error ? error.message : String(error),
+              })
+            })
+          break
+        }
         case "server.instance.disposed":
           void bootstrap()
           break

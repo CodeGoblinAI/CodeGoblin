@@ -3,6 +3,8 @@ import {
   buildCliAgentCommand,
   cliAgentModel,
   cliAgentProviderInfos,
+  mergeCliAgentProviderModels,
+  mergeCliAgentDiscoveryCache,
   cursorAgentCandidates,
   claudeAgentCandidates,
   cliAgentResumeCommand,
@@ -74,6 +76,47 @@ describe("local CLI agent providers", () => {
       id: "cursor-grok-4.5-high",
       name: "cursor-grok-4.5-high",
       family: "cursor",
+    })
+  })
+
+  test("merges refreshed CLI models without mutating configured metadata", () => {
+    const current = cliAgentProviderInfos({
+      "cursor-agent": [
+        { id: "auto", name: "Old Auto" },
+        { id: "custom", name: "Configured model" },
+      ],
+    })[1]
+    current.models.auto.options = { customOption: true }
+    const refreshed = cliAgentProviderInfos({
+      "cursor-agent": [
+        { id: "auto", name: "Auto (Cursor default)" },
+        { id: "new", name: "New model" },
+      ],
+    })[1]
+
+    const merged = mergeCliAgentProviderModels(current, refreshed, {
+      models: { auto: { name: "My Auto" } },
+    })
+
+    expect(Object.keys(merged.models)).toEqual(["auto", "custom", "new"])
+    expect(merged.models.auto.name).toBe("My Auto")
+    expect(merged.models.auto.options).toEqual({ customOption: true })
+    expect(current.models.auto.name).toBe("Old Auto")
+  })
+
+  test("merges discovery results into the latest cache and detects real model changes", () => {
+    const current = { "cursor-agent": [{ id: "auto", name: "Auto (Cursor default)" }] }
+    expect(mergeCliAgentDiscoveryCache(current, {})).toEqual({ cache: current, changed: false })
+    expect(
+      mergeCliAgentDiscoveryCache(current, {
+        "antigravity-cli": [{ id: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)" }],
+      }),
+    ).toEqual({
+      cache: {
+        ...current,
+        "antigravity-cli": [{ id: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)" }],
+      },
+      changed: true,
     })
   })
 

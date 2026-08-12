@@ -1,6 +1,7 @@
 import { type ChildProcess } from "child_process"
 import launch from "cross-spawn"
 import { buffer } from "node:stream/consumers"
+import path from "node:path"
 import { errorMessage } from "./error"
 
 export type Stdio = "inherit" | "pipe" | "ignore"
@@ -30,6 +31,10 @@ export interface Result {
 
 export interface TextResult extends Result {
   text: string
+}
+
+export function windowsSystem32(executable: string) {
+  return path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", executable)
 }
 
 export class RunFailedError extends Error {
@@ -153,7 +158,7 @@ export async function stop(proc: ChildProcess) {
     return
   }
 
-  const out = await run(["taskkill", "/pid", String(proc.pid), "/T", "/F"], {
+  const out = await run([windowsSystem32("taskkill.exe"), "/pid", String(proc.pid), "/T", "/F"], {
     nothrow: true,
   })
 

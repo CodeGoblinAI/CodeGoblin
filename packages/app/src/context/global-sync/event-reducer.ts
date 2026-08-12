@@ -23,7 +23,12 @@ export function applyGlobalEvent(input: {
   project: Project[]
   setGlobalProject: (next: Project[] | ((draft: Project[]) => Project[])) => void
   refresh: () => void
+  refreshProviders?: () => void
 }) {
+  if (input.event.type === "provider.cli.models.updated") {
+    input.refreshProviders?.()
+    return
+  }
   if (input.event.type === "global.disposed" || input.event.type === "server.connected") {
     input.refresh()
     return

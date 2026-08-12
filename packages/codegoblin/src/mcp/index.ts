@@ -88,7 +88,7 @@ type MCPClient = Client
 async function closeMcpClient(client: MCPClient) {
   const pid = client.transport instanceof StdioClientTransport ? client.transport.pid : null
   if (process.platform === "win32" && typeof pid === "number") {
-    await Process.run(["taskkill", "/pid", String(pid), "/T", "/F"], { nothrow: true })
+    await Process.run([Process.windowsSystem32("taskkill.exe"), "/pid", String(pid), "/T", "/F"], { nothrow: true })
   }
   await client.close()
 }
