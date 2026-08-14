@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   sync:
@@ -20,14 +21,44 @@ jobs:
       - name: Sync models catalog snapshot
         run: bun ./packages/codegoblin/script/sync-models-catalog.ts
 
-      - name: Commit updated catalog when changed
+      # `dev` is a protected branch, so the old `git push` here was rejected
+      # with GH006 every week and the catalog silently stopped refreshing.
+      # Route the change through a PR instead, reusing one rolling branch so
+      # repeat runs update a single PR rather than opening one per week.
+      - name: Open a PR when the catalog changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if git diff --quiet packages/codegoblin/models/api.json; then
             echo "No catalog changes."
             exit 0
           fi
+
+          branch="automation/models-catalog-refresh"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
           git add packages/codegoblin/models/api.json
           git commit -m "chore(codegoblin): refresh models catalog snapshot"
-          git push
+          # Automation solely owns this branch, so replacing it is safe.
+          # --no-verify skips the local pre-push typecheck hook, which cannot
+          # be affected by a data-only JSON snapshot.
+          git push --force --no-verify origin "$branch"
+
+          existing="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            echo "Updated existing PR #$existing."
+            exit 0
+          fi
+
+          printf '%s\n' \
+            'Automated refresh of `packages/codegoblin/models/api.json` from models.dev.' \
+            '' \
+            'Merging this makes any new models available to existing installs without cutting a release (clients read the catalog from `dev` with a 5-minute cache).' \
+            > /tmp/catalog-pr-body.md
+
+          gh pr create \
+            --base dev \
+            --head "$branch" \
+            --title "chore(codegoblin): refresh models catalog snapshot" \
+            --body-file /tmp/catalog-pr-body.md
