@@ -410,6 +410,10 @@ async function sendStructuredTurn(
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      // Without this every bridged turn flashes a console window on Windows.
+      // The sibling probes in provider/cli-agent.ts already set it; this spawn
+      // was the one that got missed.
+      windowsHide: process.platform === "win32",
     },
   )
   proc.stdin.write(input.prompt)
