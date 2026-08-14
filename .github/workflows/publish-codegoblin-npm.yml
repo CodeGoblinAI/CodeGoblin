@@ -24,10 +24,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # build.ts --single picks its target by the RUNNER's process.arch, so
+          # an arm64 matrix entry on an x64 runner silently builds x64 and the
+          # arm64 platform package never publishes. That is why
+          # codegoblin-linux-arm64 / codegoblin-windows-arm64 stalled at 0.2.3
+          # while darwin-arm64 kept shipping — macos-latest is already arm64.
+          # Each arch must run on a runner of that same arch.
           - os: ubuntu-latest
             platform: linux
             arch: x64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             platform: linux
             arch: arm64
           - os: macos-latest
@@ -36,7 +42,7 @@ jobs:
           - os: windows-latest
             platform: win32
             arch: x64
-          - os: windows-latest
+          - os: windows-11-arm
             platform: win32
             arch: arm64
     runs-on: ${{ matrix.os }}
@@ -64,6 +70,22 @@ jobs:
             EMBED_FLAG="--skip-embed-web-ui"
           fi
           bun ./packages/codegoblin/script/build.ts --single --skip-install $EMBED_FLAG
+
+      # build.ts is arch-implicit, so a runner/matrix mismatch used to pass
+      # silently and just drop a platform package from the release. Assert the
+      # expected directory exists so that failure is loud instead.
+      - name: Verify the expected platform package was built
+        shell: bash
+        run: |
+          os_dir="${{ matrix.platform }}"
+          if [ "$os_dir" = "win32" ]; then os_dir="windows"; fi
+          expected="codegoblin-${os_dir}-${{ matrix.arch }}"
+          if [ ! -d "packages/codegoblin/dist/$expected" ]; then
+            echo "::error::Expected packages/codegoblin/dist/$expected but the build produced:"
+            ls -1 packages/codegoblin/dist/ || true
+            exit 1
+          fi
+          echo "Built $expected"
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
