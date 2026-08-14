@@ -204,6 +204,7 @@ async function run(command: string[]) {
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
+    windowsHide: process.platform === "win32",
   })
   const timeout = setTimeout(() => proc.kill(), COMMAND_TIMEOUT_MS)
   timeout.unref?.()

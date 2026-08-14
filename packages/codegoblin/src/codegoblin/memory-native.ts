@@ -132,7 +132,12 @@ async function runNative(request: unknown): Promise<any | undefined> {
   const bin = resolveNativeBin()
   if (!bin) return undefined
   try {
-    const proc = Bun.spawn([bin], { stdin: "pipe", stdout: "pipe", stderr: "ignore" })
+    const proc = Bun.spawn([bin], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "ignore",
+      windowsHide: process.platform === "win32",
+    })
     proc.stdin.write(JSON.stringify(request))
     await proc.stdin.end()
     const output = await new Response(proc.stdout).text()
