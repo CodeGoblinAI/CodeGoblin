@@ -598,6 +598,21 @@ export default function Layout(props: ParentProps) {
     await layout.ready.promise
     if (!untrack(() => state.autoselect)) return
 
+    // This component is mounted at the ROUTER ROOT (AppShellProviders), outside
+    // the `/:dir` Route, so `params` here does not reliably describe the URL the
+    // user actually loaded. On a cold load of `/<dir>/session/<id>` — a hard
+    // reload, or opening a session link directly — autoselect stayed armed and
+    // this resource navigated the user off their session onto a fresh composer.
+    // Client-side navigation hid it, because the resource only runs once.
+    //
+    // Read the real path rather than inferring it: if the URL already points at
+    // anything more specific than the root, there is nothing to autoselect.
+    const path = untrack(() => location.pathname)
+    if (path && path !== "/") {
+      setState("autoselect", false)
+      return
+    }
+
     // Open the project into a FRESH new-session composer (a place to put a
     // prompt) rather than resuming its last conversation.
     const openComposer = (directory: string | undefined) => {
