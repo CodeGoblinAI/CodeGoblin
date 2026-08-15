@@ -144,25 +144,45 @@ function model(id: keyof typeof CodeGoblinProvider.models): Model {
   }
 }
 
-export function codeGoblinProviderInfo(): Info {
+/**
+ * True when the hosted CodeGoblin gateway has actually been pointed somewhere.
+ *
+ * The gateway models below are a scaffold for a service that is not built yet;
+ * their default baseURL is a loopback port that nothing listens on. Listing them
+ * unconditionally meant a user could pick "CodeGoblin Mock Model" (or the
+ * DeepSeek / image / audio gateway entries) from the normal model picker and get
+ * a turn that never returns, because every request hit a closed port.
+ */
+export function hasCodeGoblinGateway(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.CODEGOBLIN_API_KEY || env.CODEGOBLIN_GATEWAY_KEY || env.CODEGOBLIN_GATEWAY_URL)
+}
+
+export function codeGoblinProviderInfo(env: NodeJS.ProcessEnv = process.env): Info {
+  // The provider entry itself is always registered: locally-served GGUF models
+  // from `codegoblin runtime` attach to this same provider id and must keep
+  // working with no gateway configured. Only the hosted models are gated.
+  const models: Info["models"] = hasCodeGoblinGateway(env)
+    ? {
+        "deepseek-chat": model("deepseek-chat"),
+        "goblin-mock": model("goblin-mock"),
+        "goblin-image-mock": model("goblin-image-mock"),
+        "qwen-image-pro": model("qwen-image-pro"),
+        "qwen-image-edit": model("qwen-image-edit"),
+        "elevenlabs-tts": model("elevenlabs-tts"),
+        "elevenlabs-music": model("elevenlabs-music"),
+      }
+    : {}
+
   return {
     id: CodeGoblinProvider.id,
     name: CodeGoblinProvider.name,
     source: "custom",
     env: [...CodeGoblinProvider.env],
     options: {
-      baseURL: process.env.CODEGOBLIN_GATEWAY_URL || CodeGoblinProvider.baseURL,
+      baseURL: env.CODEGOBLIN_GATEWAY_URL || CodeGoblinProvider.baseURL,
       name: "codegoblin",
     },
-    models: {
-      "deepseek-chat": model("deepseek-chat"),
-      "goblin-mock": model("goblin-mock"),
-      "goblin-image-mock": model("goblin-image-mock"),
-      "qwen-image-pro": model("qwen-image-pro"),
-      "qwen-image-edit": model("qwen-image-edit"),
-      "elevenlabs-tts": model("elevenlabs-tts"),
-      "elevenlabs-music": model("elevenlabs-music"),
-    },
+    models,
   }
 }
 

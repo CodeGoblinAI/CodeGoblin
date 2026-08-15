@@ -1949,6 +1949,15 @@ export const defaultLayer = Layer.suspend(() =>
   ),
 )
 
+// Preferred fallback models, ordered OLDEST -> NEWEST. The comparator below
+// sorts this index DESCENDING on purpose: later entries are the newer models, so
+// the newest known-good model wins, and anything unlisted (index -1) sorts last.
+// `provider.sort prioritizes preferred models` in test/provider/provider.test.ts
+// pins that intent — claude-sonnet-4 is expected to outrank gpt-5.
+//
+// Consequence worth knowing: the default model is `sort(models)[0]`, so a fresh
+// install with no configured model and no recents opens on whichever entry here
+// is newest among the user's available models.
 const priority = ["gpt-5", "claude-sonnet-4", "big-pickle", "gemini-3-pro"]
 export function sort<T extends { id: string }>(models: T[]) {
   return sortBy(
