@@ -4,8 +4,13 @@ import { Provider } from "@/provider/provider"
 import type { Info } from "@/provider/provider"
 
 describe("CodeGoblin provider catalog", () => {
+  // These assert the SHAPE of the hosted gateway models, which are only listed
+  // once a gateway is configured — otherwise they would be selectable models
+  // pointing at a closed port. Configure one so the definitions stay covered.
+  const withGateway = { CODEGOBLIN_GATEWAY_KEY: "test" } as NodeJS.ProcessEnv
+
   test("exposes Qwen image aliases for model selection", () => {
-    const provider = codeGoblinProviderInfo()
+    const provider = codeGoblinProviderInfo(withGateway)
 
     expect(provider.models["qwen-image-pro"]?.capabilities.output.image).toBe(true)
     expect(provider.models["qwen-image-pro"]?.api.id).toBe("wan2.7-image-pro")
@@ -13,11 +18,18 @@ describe("CodeGoblin provider catalog", () => {
   })
 
   test("exposes ElevenLabs audio models for testing", () => {
-    const provider = codeGoblinProviderInfo()
+    const provider = codeGoblinProviderInfo(withGateway)
 
     expect(provider.models["elevenlabs-tts"]?.capabilities.output.audio).toBe(true)
     expect(provider.models["elevenlabs-music"]?.capabilities.output.audio).toBe(true)
     expect(provider.models["elevenlabs-tts"]?.capabilities.output.text).toBe(false)
+  })
+
+  test("hides the hosted gateway models when no gateway is configured", () => {
+    // Regression: "CodeGoblin Mock Model" and friends were selectable in the
+    // normal picker and every turn hung, because the default baseURL is a
+    // loopback port nothing listens on.
+    expect(Object.keys(codeGoblinProviderInfo({} as NodeJS.ProcessEnv).models)).toEqual([])
   })
 
   test("adds ElevenLabs to supplemental catalogs for connect menus", () => {
