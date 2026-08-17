@@ -119,32 +119,34 @@ export async function runWindowsUpdateHelper(
       .catch(() => undefined)
   }
 
-  const executable = (await exists(state.installedPath)) ? state.installedPath : state.helperPath
-  const env = { ...process.env }
-  delete env[HELPER_ENV]
-  delete env[CLEANUP_ENV]
-  delete env[ERROR_ENV]
-  env[CLEANUP_ENV] = state.directory
-  if (failure) env[ERROR_ENV] = failure
-  const child = spawn(executable, state.restartArgs, {
-    cwd: state.cwd,
-    detached: true,
-    stdio: "ignore",
-    windowsHide: false,
-    env,
-  })
-  await waitForSpawn(child).then(
-    () => child.unref(),
-    async () => {
-      await fs
-        .writeFile(
-          path.join(state.directory, "result.json"),
-          JSON.stringify({ success: false, error: "The update completed, but CodeGoblin could not restart." }),
-          { mode: 0o600 },
-        )
-        .catch(() => undefined)
-    },
-  )
+  // Deliberately no relaunch.
+  //
+  // This used to spawn the updated executable with `detached: true` and
+  // `stdio: "ignore"`, then unref it. That cannot work for an interactive TUI:
+  // with no stdio it can neither render nor read input, and being detached from
+  // an already-detached helper left it parentless the moment the helper exited.
+  // The result was an invisible, input-less, orphaned process on every update —
+  // which read to users as "the update uninstalled CodeGoblin" (no TUI came
+  // back), leaked a process per update, and left those orphans running their
+  // background provider probes indefinitely.
+  //
+  // The helper has no console of its own to hand down, so there is nothing
+  // honest to inherit. Finish the update, clean up, and let the user start
+  // CodeGoblin again; `upgrade.ts` tells them so.
+  await removeUpdateDirectory(state.directory)
+  if (failure) throw new Error(failure)
+}
+
+/** The helper owns its temp directory now that nothing inherits it. */
+async function removeUpdateDirectory(directory: string) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const removed = await fs
+      .rm(directory, { recursive: true, force: true })
+      .then(() => true)
+      .catch(() => false)
+    if (removed) return
+    await Bun.sleep(100)
+  }
 }
 
 export async function cleanupWindowsUpdate() {

@@ -4,6 +4,7 @@ import * as prompts from "@clack/prompts"
 import { Installation } from "../../installation"
 import { InstallationVersion } from "@codegoblin/core/installation/version"
 import { needsWindowsUpdateHandoff } from "@/installation/windows-update"
+import { codeGoblinCliName } from "@/codegoblin/brand"
 
 export const UpgradeCommand = {
   command: "update [target]",
@@ -65,6 +66,14 @@ export const UpgradeCommand = {
       return
     }
     spinner.stop(handoff ? "Update prepared" : "Update complete")
-    prompts.outro(handoff ? "CodeGoblin will restart when the update is complete" : "Done")
+    // On the Windows handoff path the replacement finishes in a detached helper
+    // after this process exits, so there is a short window where the `cg` and
+    // `codegoblin` shims do not exist yet. Say so — the old copy promised a
+    // restart that never came, and users reasonably read that as an uninstall.
+    prompts.outro(
+      handoff
+        ? `Finishing in the background. Run \`${codeGoblinCliName()}\` again in a few seconds.`
+        : "Done",
+    )
   },
 }
