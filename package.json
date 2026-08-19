@@ -1,0 +1,23 @@
+{
+  "name": "codegoblin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first AI coding agent with image, 3D and voice generation.",
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.84.2",
+    "@earendil-works/pi-agent-core": "^0.84.2",
+    "@earendil-works/pi-tui": "^0.84.2",
+    "@earendil-works/pi-server": "^0.84.2",
+    "drizzle-orm": "^0.44.7",
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "@types/node": "^22.10.2"
+  }
+}
