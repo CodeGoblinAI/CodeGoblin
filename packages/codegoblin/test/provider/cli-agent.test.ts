@@ -13,6 +13,7 @@ import {
   parseCliAgentEvent,
   parseAntigravityModelLines,
   parseCursorModelLines,
+  projectAntigravitySettings,
 } from "../../src/provider/cli-agent"
 import { withoutRetiredAnthropicOauth } from "../../src/auth"
 import {
@@ -24,6 +25,36 @@ import {
 } from "../../src/plugin/cli-agent"
 
 describe("local CLI agent providers", () => {
+  test("projects only permission-related Antigravity settings into the isolated home", () => {
+    expect(
+      projectAntigravitySettings({
+        model: "gemini-3.7-flash",
+        runningLightSpeed: true,
+        toolPermission: "always-proceed",
+        allowNonWorkspaceAccess: true,
+        enableTerminalSandbox: false,
+        trustedWorkspaces: ["C:\\work", 42],
+        permissions: {
+          allow: ["read_file", "command(git status)", 42],
+          ask: ["command(*)"],
+          deny: ["command(rm *)"],
+          ignored: ["secret"],
+        },
+        mcpServers: { private: { command: "secret" } },
+      }),
+    ).toEqual({
+      toolPermission: "always-proceed",
+      allowNonWorkspaceAccess: true,
+      enableTerminalSandbox: false,
+      trustedWorkspaces: ["C:\\work"],
+      permissions: {
+        allow: ["read_file", "command(git status)"],
+        ask: ["command(*)"],
+        deny: ["command(rm *)"],
+      },
+    })
+  })
+
   test("advertises Claude Code and Cursor Agent as local providers", () => {
     const providers = cliAgentProviderInfos()
     expect(providers.map((provider) => String(provider.id))).toEqual(["claude-code", "cursor-agent", "antigravity-cli"])
@@ -523,6 +554,21 @@ describe("local CLI agent providers", () => {
       ),
     ).toEqual({ sessionID: "agy-1" })
 
+    expect(
+      parseCliAgentEvent(
+        "antigravity-cli",
+        JSON.stringify({
+          event: "step_update",
+          step_update: {
+            conversation_id: "agy-1",
+            state: "ERROR",
+            step_type: "tool",
+            tool_info: { name: "run_command", error: { message: "Permission denied" } },
+          },
+        }),
+      ),
+    ).toEqual({ sessionID: "agy-1", error: "Antigravity run command failed: Permission denied" })
+
     // Bookkeeping steps carry nothing user-facing.
     for (const step_type of ["checkpoint", "user_input", "unknown"]) {
       expect(
@@ -568,5 +614,15 @@ describe("local CLI agent providers", () => {
         JSON.stringify({ event: "result", result: { conversation_id: "agy-1", status: "FAILED" } }),
       )?.error,
     ).toContain("failed")
+
+    expect(
+      parseCliAgentEvent(
+        "antigravity-cli",
+        JSON.stringify({
+          event: "result",
+          result: { conversation_id: "agy-1", status: "ERROR", error: "Workspace approval required" },
+        }),
+      )?.error,
+    ).toBe("Antigravity run error: Workspace approval required")
   })
 })

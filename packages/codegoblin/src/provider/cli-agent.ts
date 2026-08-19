@@ -372,9 +372,11 @@ async function claudeIsolationFlags(executable: string) {
 }
 
 let antigravityEnvironmentPromise: Promise<NodeJS.ProcessEnv> | undefined
-function antigravityEnvironment() {
+async function antigravityEnvironment() {
   antigravityEnvironmentPromise ??= createAntigravityEnvironment()
-  return antigravityEnvironmentPromise
+  const env = await antigravityEnvironmentPromise
+  await syncAntigravitySettings()
+  return env
 }
 
 async function createAntigravityEnvironment() {
@@ -409,6 +411,55 @@ async function createAntigravityEnvironment() {
     HOME: home,
     ...(process.platform === "win32" && { USERPROFILE: home }),
   }
+}
+
+let antigravitySettingsSync = Promise.resolve()
+function syncAntigravitySettings() {
+  const next = antigravitySettingsSync.then(async () => {
+    const native = Bun.file(path.join(os.homedir(), ".gemini", "antigravity-cli", "settings.json"))
+    const parsed = (await native.exists()) ? Option.getOrUndefined(decodeJson(await native.text())) : undefined
+    await Bun.write(
+      path.join(Global.Path.data, "cli-agent-home", "antigravity", ".gemini", "antigravity-cli", "settings.json"),
+      JSON.stringify(projectAntigravitySettings(parsed), null, 2),
+    )
+  })
+  antigravitySettingsSync = next.catch(() => {})
+  return next
+}
+
+/**
+ * Carry only AGY's permission boundary into the isolated bridge home. Model,
+ * MCP, hook, memory, and instruction settings intentionally remain isolated.
+ */
+export function projectAntigravitySettings(value: unknown) {
+  if (!isRecord(value)) return {}
+  const result: Record<string, unknown> = {}
+  if (typeof value.toolPermission === "string" && value.toolPermission.length <= 128) {
+    result.toolPermission = value.toolPermission
+  }
+  if (typeof value.allowNonWorkspaceAccess === "boolean") {
+    result.allowNonWorkspaceAccess = value.allowNonWorkspaceAccess
+  }
+  if (typeof value.enableTerminalSandbox === "boolean") {
+    result.enableTerminalSandbox = value.enableTerminalSandbox
+  }
+  if (Array.isArray(value.trustedWorkspaces)) {
+    result.trustedWorkspaces = value.trustedWorkspaces.filter(
+      (item): item is string => typeof item === "string" && item.length <= 32_768,
+    )
+  }
+  if (isRecord(value.permissions)) {
+    const source = value.permissions
+    const permissions = Object.fromEntries(
+      ["allow", "ask", "deny"].flatMap((key) => {
+        const rules = source[key]
+        if (!Array.isArray(rules)) return []
+        return [[key, rules.filter((item): item is string => typeof item === "string" && item.length <= 4096)]]
+      }),
+    )
+    if (Object.keys(permissions).length) result.permissions = permissions
+  }
+  return result
 }
 
 async function runDiscovery(command: string[], timeoutMs = 15_000, env: NodeJS.ProcessEnv = process.env) {
@@ -611,6 +662,11 @@ export function createCliAgentLanguageModel(
               const exitCode = await proc.exited
               const stderr = (await stderrPromise).trim()
               if (exitCode !== 0) throw new Error(cliFailureMessage(providerID, stderr, exitCode))
+              if (providerID === "antigravity-cli" && !emittedText) {
+                throw new Error(
+                  `Antigravity CLI completed without an assistant response. Check its tool permissions or run 'agy' directly for details.${stderr ? `\n\n${stderr}` : ""}`,
+                )
+              }
               if (!discoveredSessionID && providerID === "antigravity-cli" && logFile) {
                 const log = await Bun.file(logFile)
                   .slice(0, MAX_CLI_STDERR)
@@ -982,10 +1038,17 @@ function parseAntigravityEvent(raw: Record<string, unknown>, sessionID?: string)
     const state = stringValue(step.state)
 
     if (stepType === "tool") {
-      // Announce once, when the tool starts; the DONE echo would duplicate it.
-      if (state !== "ACTIVE") return { sessionID: id }
       const info = isRecord(step.tool_info) ? step.tool_info : undefined
       const name = stringValue(info?.name) ?? stringValue(step.tool_name)
+      if (state === "ERROR" || state === "FAILED") {
+        const detail = antigravityError(info?.error) ?? antigravityError(step.error)
+        return {
+          sessionID: id,
+          error: `Antigravity ${name?.replace(/_/g, " ") ?? "tool"} failed${detail ? `: ${detail}` : ""}`,
+        }
+      }
+      // Announce once, when the tool starts; the DONE echo would duplicate it.
+      if (state !== "ACTIVE") return { sessionID: id }
       return { sessionID: id, reasoning: name ? `${name.replace(/_/g, " ")}\n` : undefined }
     }
 
@@ -1007,7 +1070,11 @@ function parseAntigravityEvent(raw: Record<string, unknown>, sessionID?: string)
     const id = stringValue(result.conversation_id) ?? sessionID
     const status = stringValue(result.status)
     if (status && status.toUpperCase() !== "SUCCESS") {
-      return { sessionID: id, error: `Antigravity run ${status.toLowerCase()}` }
+      const detail = antigravityError(result.error) ?? antigravityError(result.message)
+      return {
+        sessionID: id,
+        error: `Antigravity run ${status.toLowerCase()}${detail ? `: ${detail}` : ""}`,
+      }
     }
     return { sessionID: id, result: stringValue(result.response), usage: antigravityUsage(result.usage) }
   }
@@ -1038,6 +1105,14 @@ function parseAntigravityEvent(raw: Record<string, unknown>, sessionID?: string)
   }
 
   return undefined
+}
+
+function antigravityError(value: unknown) {
+  if (typeof value === "string") return value.trim() || undefined
+  if (!isRecord(value)) return
+  return [value.message, value.error, value.detail, value.details]
+    .map((item) => (typeof item === "string" ? item.trim() : undefined))
+    .find(Boolean)
 }
 
 function antigravityUsage(value: unknown): LanguageModelV3Usage | undefined {
