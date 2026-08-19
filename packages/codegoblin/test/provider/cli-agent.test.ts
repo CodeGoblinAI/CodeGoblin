@@ -14,8 +14,10 @@ import {
   parseAntigravityModelLines,
   parseCursorModelLines,
   projectAntigravitySettings,
+  writeAntigravitySettings,
 } from "../../src/provider/cli-agent"
 import { withoutRetiredAnthropicOauth } from "../../src/auth"
+import { tmpdir } from "../fixture/fixture"
 import {
   AnthropicCliAuthPlugin,
   AntigravityCliAuthPlugin,
@@ -53,6 +55,15 @@ describe("local CLI agent providers", () => {
         deny: ["command(rm *)"],
       },
     })
+  })
+
+  test("replaces projected Antigravity settings atomically and skips unchanged writes", async () => {
+    await using tmp = await tmpdir()
+    const file = `${tmp.path}/nested/settings.json`
+    expect(await writeAntigravitySettings(file, { toolPermission: "always-proceed", model: "ignored" })).toBe(true)
+    expect(await Bun.file(file).json()).toEqual({ toolPermission: "always-proceed" })
+    expect(await writeAntigravitySettings(file, { toolPermission: "always-proceed", model: "changed" })).toBe(false)
+    expect((await Array.fromAsync(new Bun.Glob("settings.json.*.tmp").scan(`${tmp.path}/nested`))).length).toBe(0)
   })
 
   test("advertises Claude Code and Cursor Agent as local providers", () => {
@@ -567,7 +578,7 @@ describe("local CLI agent providers", () => {
           },
         }),
       ),
-    ).toEqual({ sessionID: "agy-1", error: "Antigravity run command failed: Permission denied" })
+    ).toEqual({ sessionID: "agy-1", reasoning: "Antigravity run command failed: Permission denied\n" })
 
     // Bookkeeping steps carry nothing user-facing.
     for (const step_type of ["checkpoint", "user_input", "unknown"]) {

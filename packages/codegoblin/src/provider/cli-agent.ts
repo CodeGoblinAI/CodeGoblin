@@ -418,13 +418,31 @@ function syncAntigravitySettings() {
   const next = antigravitySettingsSync.then(async () => {
     const native = Bun.file(path.join(os.homedir(), ".gemini", "antigravity-cli", "settings.json"))
     const parsed = (await native.exists()) ? Option.getOrUndefined(decodeJson(await native.text())) : undefined
-    await Bun.write(
+    await writeAntigravitySettings(
       path.join(Global.Path.data, "cli-agent-home", "antigravity", ".gemini", "antigravity-cli", "settings.json"),
-      JSON.stringify(projectAntigravitySettings(parsed), null, 2),
+      parsed,
     )
   })
   antigravitySettingsSync = next.catch(() => {})
   return next
+}
+
+export function writeAntigravitySettings(file: string, value: unknown) {
+  const content = JSON.stringify(projectAntigravitySettings(value), null, 2)
+  return Flock.withLock(file, async () => {
+    const current = await Bun.file(file)
+      .text()
+      .catch(() => undefined)
+    if (current === content) return false
+    const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(temporary, content)
+    await fs.rename(temporary, file).catch(async (error) => {
+      await fs.rm(temporary, { force: true }).catch(() => {})
+      throw error
+    })
+    return true
+  })
 }
 
 /**
@@ -1044,7 +1062,7 @@ function parseAntigravityEvent(raw: Record<string, unknown>, sessionID?: string)
         const detail = antigravityError(info?.error) ?? antigravityError(step.error)
         return {
           sessionID: id,
-          error: `Antigravity ${name?.replace(/_/g, " ") ?? "tool"} failed${detail ? `: ${detail}` : ""}`,
+          reasoning: `Antigravity ${name?.replace(/_/g, " ") ?? "tool"} failed${detail ? `: ${detail}` : ""}\n`,
         }
       }
       // Announce once, when the tool starts; the DONE echo would duplicate it.
