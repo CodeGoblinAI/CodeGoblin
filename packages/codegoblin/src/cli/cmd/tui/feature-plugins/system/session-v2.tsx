@@ -5,7 +5,7 @@ import { SplitBorder } from "@tui/component/border"
 import { Spinner } from "@tui/component/spinner"
 import { useTheme } from "@tui/context/theme"
 import { useLocal } from "@tui/context/local"
-import { reasoningTitle, useThinkingMode } from "@tui/context/thinking"
+import { liveReasoningLabel, reasoningTitle, useThinkingMode } from "@tui/context/thinking"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { TextAttributes, type BoxRenderable, type SyntaxStyle } from "@opentui/core"
 import { useBindings } from "../../keymap"
@@ -28,7 +28,7 @@ import type {
   ToolFileContent,
   ToolTextContent,
 } from "@codegoblin/sdk/v2"
-import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js"
 import { collapseToolOutput } from "../../util/collapse-tool-output"
 
 const id = "internal:session-v2-debug"
@@ -324,6 +324,8 @@ function AssistantMessage(props: {
                 part={part as SessionMessageAssistantReasoning}
                 subtleSyntax={props.subtleSyntax}
                 completedAt={() => props.message.time.completed}
+                providerID={props.message.model.providerID}
+                startedAt={props.start ?? props.message.time.created}
               />
             </Match>
             <Match when={part.type === "tool"}>
@@ -389,6 +391,8 @@ function AssistantReasoning(props: {
   part: SessionMessageAssistantReasoning
   subtleSyntax: SyntaxStyle
   completedAt: () => number | undefined
+  providerID: string
+  startedAt: number
 }) {
   const { theme } = useTheme()
   const thinking = useThinkingMode()
@@ -399,6 +403,13 @@ function AssistantReasoning(props: {
   // in the v2 SDK); we settle on parent-message completion instead.
   const isDone = createMemo(() => props.completedAt() !== undefined)
   const title = createMemo(() => reasoningTitle(content()))
+  const [now, setNow] = createSignal(Date.now())
+  createEffect(() => {
+    if (isDone()) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    onCleanup(() => clearInterval(timer))
+  })
+  const liveDuration = createMemo(() => Locale.duration(Math.max(0, now() - props.startedAt)))
 
   const toggle = () => {
     if (!inMinimal()) return
@@ -428,7 +439,7 @@ function AssistantReasoning(props: {
         </Match>
         <Match when={true}>
           <box paddingLeft={3} marginTop={1} flexShrink={0} onMouseUp={toggle}>
-            <Spinner color={theme.textMuted}>{title() ? "Thinking: " + title() : "Thinking"}</Spinner>
+            <Spinner color={theme.textMuted}>{liveReasoningLabel(props.providerID, title(), liveDuration())}</Spinner>
           </box>
         </Match>
       </Switch>

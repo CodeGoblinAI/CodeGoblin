@@ -87,6 +87,7 @@ import { useTuiConfig } from "../../context/tui-config"
 import { CodeGoblinImageCommand } from "@/codegoblin/image-command"
 import { CodeGoblin3DCommand } from "@/codegoblin/model3d-command"
 import { CodeGoblinBalance } from "@/codegoblin/balance"
+import { liveReasoningLabel } from "@tui/context/thinking"
 
 export type PromptProps = {
   sessionID?: string
@@ -243,6 +244,17 @@ export function Prompt(props: PromptProps) {
   const [cursorVersion, setCursorVersion] = createSignal(0)
   const currentProviderLabel = createMemo(() => local.model.parsed().provider)
   const hasRightContent = createMemo(() => Boolean(props.right))
+  const [workingSeconds, setWorkingSeconds] = createSignal(0)
+
+  createEffect(() => {
+    if (status().type === "idle" || status().type === "retry") {
+      setWorkingSeconds(0)
+      return
+    }
+    const startedAt = Date.now()
+    const timer = setInterval(() => setWorkingSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000)
+    onCleanup(() => clearInterval(timer))
+  })
 
   function selectWorkspace(selection: WorkspaceSelection | undefined) {
     setWorkspaceSelection(selection)
@@ -2484,7 +2496,9 @@ export function Prompt(props: PromptProps) {
                     <box flexDirection="row" gap={1} flexShrink={0}>
                       <Show when={status().type !== "retry"}>
                         <text fg={theme.textMuted}>
-                          {currentProviderLabel() === "Antigravity CLI" ? "Antigravity working" : "goblin working"}
+                          {currentProviderLabel() === "Antigravity CLI"
+                            ? liveReasoningLabel(currentProviderLabel(), null, formatDuration(workingSeconds()))
+                            : "goblin working"}
                         </text>
                       </Show>
                       {(() => {
