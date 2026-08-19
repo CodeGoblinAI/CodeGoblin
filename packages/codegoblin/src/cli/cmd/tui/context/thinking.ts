@@ -15,6 +15,16 @@ export function reasoningTitle(text: string): string | null {
   return match ? match[1].trim() : null
 }
 
+export function liveReasoningLabel(providerID: string, title: string | null, duration: string) {
+  const label =
+    providerID === "antigravity-cli" || providerID === "Antigravity CLI"
+      ? "Antigravity working"
+      : title
+        ? `Thinking: ${title}`
+        : "Thinking"
+  return duration ? `${label} · ${duration}` : label
+}
+
 export function isThinkingMode(value: unknown): value is ThinkingMode {
   return typeof value === "string" && (MODES as readonly string[]).includes(value)
 }

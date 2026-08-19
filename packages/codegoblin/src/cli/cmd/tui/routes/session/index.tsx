@@ -82,7 +82,13 @@ import * as Model from "../../util/model"
 import { formatTranscript } from "../../util/transcript"
 import { UI } from "@/cli/ui.ts"
 import { useTuiConfig } from "../../context/tui-config"
-import { nextThinkingMode, reasoningTitle, useThinkingMode, type ThinkingMode } from "../../context/thinking"
+import {
+  liveReasoningLabel,
+  nextThinkingMode,
+  reasoningTitle,
+  useThinkingMode,
+  type ThinkingMode,
+} from "../../context/thinking"
 import { getScrollAcceleration } from "../../util/scroll"
 import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
@@ -1641,6 +1647,13 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
     const end = props.part.time.end
     return end === undefined ? 0 : Math.max(0, end - props.part.time.start)
   })
+  const [now, setNow] = createSignal(Date.now())
+  createEffect(() => {
+    if (isDone()) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    onCleanup(() => clearInterval(timer))
+  })
+  const liveDuration = createMemo(() => Locale.duration(Math.max(0, now() - props.part.time.start)))
   // OpenAI / Copilot / opencode-via-OpenAI emit `**Title**\n\n<body>` summary
   // blocks. Surface the title both while streaming and after settling so the
   // collapsed line carries real signal, not just a duration.
@@ -1679,7 +1692,9 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
         </Match>
         <Match when={true}>
           <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0} onMouseUp={toggle}>
-            <Spinner color={theme.textMuted}>{title() ? "Thinking: " + title() : "Thinking"}</Spinner>
+            <Spinner color={theme.textMuted}>
+              {liveReasoningLabel(props.message.providerID, title(), liveDuration())}
+            </Spinner>
           </box>
         </Match>
       </Switch>
