@@ -44,6 +44,14 @@ import {
   discoverCliAgentProviderInfos,
   isCliAgentProvider,
 } from "./cli-agent"
+import {
+  cacheNativeModelIDs,
+  cachedNativeModelIDs,
+  discoverNativeModelIDs,
+  mergeNativeModels,
+  supportsNativeModelDiscovery,
+  unavailableNativeModelIDs,
+} from "./model-discovery"
 
 const log = Log.create({ service: "provider" })
 
@@ -1072,6 +1080,7 @@ export type Error = ModelNotFoundError | InitError | NoProvidersError | NoModels
 
 export interface Interface {
   readonly list: () => Effect.Effect<Record<ProviderID, Info>>
+  readonly refreshModels: (force?: boolean) => Effect.Effect<void>
   readonly getProvider: (providerID: ProviderID) => Effect.Effect<Info>
   readonly getModel: (providerID: ProviderID, modelID: ModelID) => Effect.Effect<Model, ModelNotFoundError>
   readonly getLanguage: (model: Model) => Effect.Effect<LanguageModelV3, ModelNotFoundError>
@@ -1090,6 +1099,8 @@ interface State {
   sdk: Map<string, BundledSDK>
   modelLoaders: Record<string, CustomModelLoader>
   varsLoaders: Record<string, CustomVarsLoader>
+  nativeModelRefresh?: Promise<void>
+  nativeModelsRefreshedAt?: number
 }
 
 export class Service extends Context.Service<Service, Interface>()("@codegoblin/Provider") {}
@@ -1606,6 +1617,50 @@ export const layer = Layer.effect(
       }),
     )
 
+    const refreshModels = Effect.fn("Provider.refreshModels")(function* (force = false) {
+      const s = yield* InstanceState.get(state)
+      if (!force && s.nativeModelsRefreshedAt && Date.now() - s.nativeModelsRefreshedAt < 5 * 60_000) return
+      if (s.nativeModelRefresh) return yield* Effect.promise(() => s.nativeModelRefresh!)
+
+      const cfg = yield* config.get()
+      s.nativeModelRefresh = Promise.all(
+        Object.values(s.providers).map(async (provider) => {
+          if (!supportsNativeModelDiscovery(provider.id)) return
+          try {
+            const cached = force ? undefined : await cachedNativeModelIDs(provider)
+            const discovered = cached ?? (await discoverNativeModelIDs(provider))
+            if (!discovered) return
+            const unavailable = new Set(await unavailableNativeModelIDs(provider))
+            const providerConfig = cfg.provider?.[provider.id]
+            const allowed = discovered.filter(
+              (id) =>
+                !unavailable.has(id) &&
+                !providerConfig?.blacklist?.includes(id) &&
+                (!providerConfig?.whitelist || providerConfig.whitelist.includes(id)),
+            )
+            const configured = Object.keys(providerConfig?.models ?? {}).filter(
+              (id) =>
+                !providerConfig?.blacklist?.includes(id) &&
+                (!providerConfig?.whitelist || providerConfig.whitelist.includes(id)),
+            )
+            provider.models = mergeNativeModels(provider, allowed, configured)
+            if (!cached) await cacheNativeModelIDs(provider, discovered)
+            log.info("native model discovery refreshed", {
+              providerID: provider.id,
+              models: allowed.length,
+              cached: !!cached,
+            })
+          } catch (error) {
+            log.warn("native model discovery failed; keeping last-known models", { providerID: provider.id, error })
+          }
+        }),
+      ).then(() => {
+        s.nativeModelsRefreshedAt = Date.now()
+        s.nativeModelRefresh = undefined
+      })
+      yield* Effect.promise(() => s.nativeModelRefresh!)
+    })
+
     const list = Effect.fn("Provider.list")(() => InstanceState.use(state, (s) => s.providers))
 
     async function resolveSDK(model: Model, s: State, envs: Record<string, string | undefined>) {
@@ -1933,7 +1988,16 @@ export const layer = Layer.effect(
       }
     })
 
-    return Service.of({ list, getProvider, getModel, getLanguage, closest, getSmallModel, defaultModel })
+    return Service.of({
+      list,
+      refreshModels,
+      getProvider,
+      getModel,
+      getLanguage,
+      closest,
+      getSmallModel,
+      defaultModel,
+    })
   }),
 )
 

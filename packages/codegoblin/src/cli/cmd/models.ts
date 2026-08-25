@@ -21,16 +21,19 @@ export const ModelsCommand = effectCmd({
         type: "boolean",
       })
       .option("refresh", {
-        describe: "refresh the models cache from models.dev",
+        describe: "refresh provider-native model lists and models.dev metadata",
         type: "boolean",
       }),
   handler: Effect.fn("Cli.models")(function* (args) {
     if (args.refresh) {
       yield* ModelsDev.Service.use((s) => s.refresh(true))
-      UI.println(UI.Style.TEXT_SUCCESS_BOLD + "Models cache refreshed" + UI.Style.TEXT_NORMAL)
     }
 
     const provider = yield* Provider.Service
+    yield* provider.refreshModels(args.refresh)
+    if (args.refresh) {
+      UI.println(UI.Style.TEXT_SUCCESS_BOLD + "Models cache refreshed" + UI.Style.TEXT_NORMAL)
+    }
     const providers = yield* provider.list()
 
     const print = (providerID: ProviderID, verbose?: boolean) => {
