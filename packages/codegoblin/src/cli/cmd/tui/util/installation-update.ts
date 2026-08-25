@@ -56,12 +56,7 @@ export async function performInstallationUpdate(input: {
   const { version, dialog, kv, sdk, toast, exit, confirm = true } = input
 
   if (confirm) {
-    const choice = await DialogConfirm.show(
-      dialog,
-      "Update Available",
-      `Install CodeGoblin v${version} now?`,
-      "skip",
-    )
+    const choice = await DialogConfirm.show(dialog, "Update Available", `Install CodeGoblin v${version} now?`, "skip")
 
     if (choice === false) {
       kv.set(SKIPPED_VERSION_KV_KEY, version)
@@ -95,7 +90,7 @@ export async function performInstallationUpdate(input: {
   if (willUseWindowsUpdateHandoff()) {
     toast.show({
       variant: "success",
-      message: `Update prepared. Restarting CodeGoblin...`,
+      message: `Update prepared. Finishing in the background; cg may be unavailable for a few seconds.`,
       duration: 3000,
     })
     exit()

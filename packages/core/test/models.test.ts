@@ -16,14 +16,21 @@ import path from "path"
 // the suite — never leak the mutation to subsequent test files in the same
 // bun process.
 const ORIGINAL_MODELS_PATH = Flag.CODEGOBLIN_MODELS_PATH
+const ORIGINAL_MODELS_URL = Flag.CODEGOBLIN_MODELS_URL
 const ORIGINAL_DISABLE_FETCH = Flag.CODEGOBLIN_DISABLE_MODELS_FETCH
+const ORIGINAL_CATALOG_URL = process.env.CODEGOBLIN_MODELS_CATALOG_URL
 beforeAll(() => {
   Flag.CODEGOBLIN_MODELS_PATH = undefined
+  Flag.CODEGOBLIN_MODELS_URL = undefined
   Flag.CODEGOBLIN_DISABLE_MODELS_FETCH = true
+  delete process.env.CODEGOBLIN_MODELS_CATALOG_URL
 })
 afterAll(() => {
   Flag.CODEGOBLIN_MODELS_PATH = ORIGINAL_MODELS_PATH
+  Flag.CODEGOBLIN_MODELS_URL = ORIGINAL_MODELS_URL
   Flag.CODEGOBLIN_DISABLE_MODELS_FETCH = ORIGINAL_DISABLE_FETCH
+  if (ORIGINAL_CATALOG_URL) process.env.CODEGOBLIN_MODELS_CATALOG_URL = ORIGINAL_CATALOG_URL
+  else delete process.env.CODEGOBLIN_MODELS_CATALOG_URL
 })
 
 const cacheFile = path.join(Global.Path.cache, "models.json")
@@ -206,7 +213,7 @@ describe("ModelsDev Service", () => {
       expect(result.after).toEqual(fixture2)
       const final = yield* Ref.get(state)
       expect(final.calls.length).toBe(1)
-      expect(final.calls[0].url).toContain("/api.json")
+      expect(final.calls[0].url).toBe("https://models.dev/api.json")
       expect(final.calls[0].userAgent).toContain("/cli")
     }),
   )

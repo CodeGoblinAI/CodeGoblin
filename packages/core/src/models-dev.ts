@@ -19,12 +19,7 @@ const MODELS_FALLBACK_SOURCE = "https://models.dev"
 function defaultModelsSource() {
   const configured = Flag.CODEGOBLIN_MODELS_URL
   if (configured) return configured
-  if (process.env.CODEGOBLIN === "1") {
-    return (
-      process.env.CODEGOBLIN_MODELS_CATALOG_URL ||
-      "https://raw.githubusercontent.com/CodeGoblinAI/CodeGoblin/dev/packages/codegoblin/models"
-    )
-  }
+  if (process.env.CODEGOBLIN_MODELS_CATALOG_URL) return process.env.CODEGOBLIN_MODELS_CATALOG_URL
   return "https://models.dev"
 }
 
@@ -188,8 +183,7 @@ export const layer = Layer.effect(
 
     const fetchApi = Effect.fn("ModelsDev.fetchApi")(function* () {
       if (source === MODELS_FALLBACK_SOURCE) return yield* fetchFrom(source)
-      // The CodeGoblin default catalog is repo-hosted; fall back to models.dev so a fresh
-      // install still gets providers when that URL is unreachable (private repo, offline, CDN).
+      // Explicit catalog mirrors may be unavailable; models.dev remains the canonical fallback.
       return yield* fetchFrom(source).pipe(
         Effect.catch((cause) =>
           Effect.logWarning(`models catalog source ${source} failed; falling back to ${MODELS_FALLBACK_SOURCE}`).pipe(
