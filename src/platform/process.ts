@@ -12,3 +12,6 @@ export function spawn(command: string[], opts: SpawnOptions = {}) {
   const [exe, ...args] = command
   return nodeSpawn(exe!, args, { windowsHide: true, ...opts })
 }
+
+/** Namespace form, matching how the domain code imports it. */
+export const Process = { spawn }
