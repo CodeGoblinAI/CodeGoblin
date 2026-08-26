@@ -24,6 +24,10 @@ const sources: Record<string, Source> = {
   mistral: { url: "https://api.mistral.ai/v1/models", auth: "bearer" },
   moonshotai: { url: "https://api.moonshot.ai/v1/models", auth: "bearer" },
   deepseek: { url: "https://api.deepseek.com/models", auth: "bearer" },
+  zai: { url: "https://api.z.ai/api/paas/v4/models", auth: "bearer" },
+  "zai-coding-plan": { url: "https://api.z.ai/api/coding/paas/v4/models", auth: "bearer" },
+  zhipuai: { url: "https://open.bigmodel.cn/api/paas/v4/models", auth: "bearer" },
+  "zhipuai-coding-plan": { url: "https://open.bigmodel.cn/api/paas/v4/models", auth: "bearer" },
   groq: { url: "https://api.groq.com/openai/v1/models", auth: "bearer" },
   togetherai: { url: "https://api.together.xyz/v1/models", auth: "bearer" },
   cerebras: { url: "https://api.cerebras.ai/v1/models", auth: "bearer" },
@@ -42,6 +46,7 @@ type Cache = {
 }
 
 type HealthCache = Record<string, number>
+type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
 export function supportsNativeModelDiscovery(providerID: string) {
   return providerID in sources
@@ -78,7 +83,10 @@ export function isNativeModelUnavailableError(input: unknown) {
   )
 }
 
-export async function discoverNativeModelIDs(provider: Info, fetcher = fetch) {
+export async function discoverNativeModelIDs(
+  provider: Info,
+  fetcher: Fetcher = (input, init) => globalThis.fetch(input, init),
+) {
   const source = sources[provider.id]
   if (!source) return
 

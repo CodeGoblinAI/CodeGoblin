@@ -230,13 +230,22 @@ export const layer = Layer.effect(
     const get = (): Effect.Effect<Record<string, Provider>> => cachedGet
 
     const refresh = Effect.fn("ModelsDev.refresh")(function* (force = false) {
-      if (!force && (yield* fresh())) return
+      if (!force && (yield* fresh())) {
+        // Another process may have refreshed the shared cache since this
+        // service populated its in-memory snapshot. Re-read the fresh file so
+        // provider/model lists can see those changes without a restart.
+        yield* invalidate
+        return
+      }
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Flock.effect(lockKey)
           // Re-check under the lock: another process may have refreshed between
           // our outer check and lock acquisition.
-          if (!force && (yield* fresh())) return
+          if (!force && (yield* fresh())) {
+            yield* invalidate
+            return
+          }
           yield* fetchAndWrite()
           yield* invalidate
           yield* events.publish(Event.Refreshed, {})

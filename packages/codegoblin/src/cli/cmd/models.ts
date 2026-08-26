@@ -2,7 +2,6 @@ import { EOL } from "os"
 import { Effect } from "effect"
 import { Provider } from "@/provider/provider"
 import { ProviderID } from "../../provider/schema"
-import { ModelsDev } from "@codegoblin/core/models-dev"
 import { effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
 
@@ -25,10 +24,6 @@ export const ModelsCommand = effectCmd({
         type: "boolean",
       }),
   handler: Effect.fn("Cli.models")(function* (args) {
-    if (args.refresh) {
-      yield* ModelsDev.Service.use((s) => s.refresh(true))
-    }
-
     const provider = yield* Provider.Service
     yield* provider.refreshModels(args.refresh)
     if (args.refresh) {

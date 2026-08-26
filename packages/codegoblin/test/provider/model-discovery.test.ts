@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { isNativeModelUnavailableError, mergeNativeModels, parseNativeModelIDs } from "@/provider/model-discovery"
+import {
+  discoverNativeModelIDs,
+  isNativeModelUnavailableError,
+  mergeNativeModels,
+  parseNativeModelIDs,
+  supportsNativeModelDiscovery,
+} from "@/provider/model-discovery"
 import { Provider } from "@/provider/provider"
+import { ProviderID } from "@/provider/schema"
 
 const provider = Provider.fromModelsDevProvider({
   id: "opencode",
@@ -46,6 +53,28 @@ const provider = Provider.fromModelsDevProvider({
 })
 
 describe("provider-native model discovery", () => {
+  test("discovers Z.AI models through its authenticated OpenAI-compatible endpoint", async () => {
+    const zai = structuredClone(provider)
+    zai.id = ProviderID.make("zai")
+    zai.options.apiKey = "zai-test-key"
+    const requests: Request[] = []
+
+    const ids = await discoverNativeModelIDs(zai, async (input, init) => {
+      requests.push(new Request(input, init))
+      return new Response(JSON.stringify({ data: [{ id: "glm-5.3" }, { id: "glm-5.3-flash" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    })
+
+    expect(supportsNativeModelDiscovery("zai")).toBeTrue()
+    expect(supportsNativeModelDiscovery("zai-coding-plan")).toBeTrue()
+    expect(supportsNativeModelDiscovery("zhipuai")).toBeTrue()
+    expect(ids).toEqual(["glm-5.3", "glm-5.3-flash"])
+    expect(requests[0]?.url).toBe("https://api.z.ai/api/paas/v4/models")
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer zai-test-key")
+  })
+
   test("parses OpenAI-compatible and Google model lists", () => {
     expect(parseNativeModelIDs({ data: [{ id: "chat-model" }, { id: "text-embedding-3-small" }] })).toEqual([
       "chat-model",

@@ -1,6 +1,7 @@
 import os from "os"
 import fuzzysort from "fuzzysort"
 import { Config } from "@/config/config"
+import type { Info as ProviderConfigInfo } from "@/config/provider"
 import { mapValues, mergeDeep, omit, pickBy, sortBy } from "remeda"
 import { NoSuchModelError, type Provider as SDK } from "ai"
 import * as Log from "@codegoblin/core/util/log"
@@ -1101,6 +1102,7 @@ interface State {
   varsLoaders: Record<string, CustomVarsLoader>
   nativeModelRefresh?: Promise<void>
   nativeModelsRefreshedAt?: number
+  modelCatalogRefreshedAt?: number
 }
 
 export class Service extends Context.Service<Service, Interface>()("@codegoblin/Provider") {}
@@ -1223,6 +1225,54 @@ export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
     options: {},
     models,
   }
+}
+
+type ProviderRefreshConfig = Pick<ProviderConfigInfo, "blacklist" | "models" | "whitelist">
+
+function isRefreshModelAllowed(
+  providerID: ProviderID,
+  modelID: string,
+  model: Model,
+  configProvider: ProviderRefreshConfig | undefined,
+  enableExperimentalModels: boolean,
+) {
+  if (
+    (modelID === "gpt-5-chat-latest" &&
+      (providerID === ProviderID.openai ||
+        providerID === ProviderID.githubCopilot ||
+        providerID === ProviderID.openrouter)) ||
+    (providerID === ProviderID.openrouter && modelID === "openai/gpt-5-chat")
+  )
+    return false
+  if (model.status === "alpha" && !enableExperimentalModels) return false
+  if (model.status === "deprecated") return false
+  if (configProvider?.blacklist?.includes(modelID)) return false
+  if (configProvider?.whitelist && !configProvider.whitelist.includes(modelID)) return false
+  return true
+}
+
+export function mergeRefreshedProviderModels(
+  provider: Info,
+  previousCatalog: Info | undefined,
+  refreshedCatalog: Info,
+  configProvider: ProviderRefreshConfig | undefined,
+  enableExperimentalModels: boolean,
+) {
+  const configured = new Set(Object.keys(configProvider?.models ?? {}))
+  const refreshed = Object.fromEntries(
+    Object.entries(refreshedCatalog.models)
+      .filter(([modelID, model]) =>
+        isRefreshModelAllowed(refreshedCatalog.id, modelID, model, configProvider, enableExperimentalModels),
+      )
+      .map(([modelID, model]) => {
+        const current = provider.models[modelID]
+        return [modelID, configured.has(modelID) && current ? (mergeDeep(model, current) as Model) : model]
+      }),
+  )
+  const preserved = Object.fromEntries(
+    Object.entries(provider.models).filter(([modelID]) => configured.has(modelID) || !previousCatalog?.models[modelID]),
+  )
+  return { ...refreshed, ...preserved }
 }
 
 function suggestionModelIDs(provider: Info | undefined, enableExperimentalModels: boolean) {
@@ -1566,23 +1616,10 @@ export const layer = Layer.effect(
 
           for (const [modelID, model] of Object.entries(provider.models)) {
             model.api.id = model.api.id ?? model.id ?? modelID
-            if (
-              // These chat aliases are invalid for the special handling in the
-              // built-in providers below, but custom providers may support them.
-              (modelID === "gpt-5-chat-latest" &&
-                (providerID === ProviderID.openai ||
-                  providerID === ProviderID.githubCopilot ||
-                  providerID === ProviderID.openrouter)) ||
-              (providerID === ProviderID.openrouter && modelID === "openai/gpt-5-chat")
-            )
+            if (!isRefreshModelAllowed(providerID, modelID, model, configProvider, runtimeFlags.enableExperimentalModels)) {
               delete provider.models[modelID]
-            if (model.status === "alpha" && !runtimeFlags.enableExperimentalModels) delete provider.models[modelID]
-            if (model.status === "deprecated") delete provider.models[modelID]
-            if (
-              (configProvider?.blacklist && configProvider.blacklist.includes(modelID)) ||
-              (configProvider?.whitelist && !configProvider.whitelist.includes(modelID))
-            )
-              delete provider.models[modelID]
+              continue
+            }
 
             if (!model.variants || Object.keys(model.variants).length === 0) {
               model.variants = mapValues(ProviderTransform.variants(model), (v) => v)
@@ -1619,10 +1656,38 @@ export const layer = Layer.effect(
 
     const refreshModels = Effect.fn("Provider.refreshModels")(function* (force = false) {
       const s = yield* InstanceState.get(state)
-      if (!force && s.nativeModelsRefreshedAt && Date.now() - s.nativeModelsRefreshedAt < 5 * 60_000) return
-      if (s.nativeModelRefresh) return yield* Effect.promise(() => s.nativeModelRefresh!)
+      const now = Date.now()
+      const catalogStale =
+        force || !s.modelCatalogRefreshedAt || now - s.modelCatalogRefreshedAt >= 5 * 60_000
+      const nativeStale =
+        force || !s.nativeModelsRefreshedAt || now - s.nativeModelsRefreshedAt >= 5 * 60_000
+      if (!catalogStale && !nativeStale) return
 
       const cfg = yield* config.get()
+      if (catalogStale) {
+        yield* modelsDevSvc.refresh(force)
+        const modelsDev = yield* modelsDevSvc.get()
+        for (const [id, refreshedRaw] of Object.entries(modelsDev)) {
+          const providerID = ProviderID.make(id)
+          const refreshed = fromModelsDevProvider(refreshedRaw)
+          const previous = s.catalog[providerID]
+          s.catalog[providerID] = refreshed
+          const current = s.providers[providerID]
+          if (!current) continue
+          current.models = mergeRefreshedProviderModels(
+            current,
+            previous,
+            refreshed,
+            cfg.provider?.[providerID],
+            runtimeFlags.enableExperimentalModels,
+          )
+        }
+        s.modelCatalogRefreshedAt = Date.now()
+      }
+
+      if (!nativeStale) return
+      if (s.nativeModelRefresh) return yield* Effect.promise(() => s.nativeModelRefresh!)
+
       s.nativeModelRefresh = Promise.all(
         Object.values(s.providers).map(async (provider) => {
           if (!supportsNativeModelDiscovery(provider.id)) return
