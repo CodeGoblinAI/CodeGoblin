@@ -39,6 +39,8 @@ const sources: Record<string, Source> = {
 const unsupported = /(embedding|moderation|whisper|transcri|text-to-speech|\btts\b|dall-e|realtime)/i
 const ttl = 5 * 60_000
 const unavailableTtl = 60 * 60_000
+const maxModels = 5_000
+const maxResponseChars = 2_000_000
 
 type Cache = {
   updatedAt: number
@@ -62,7 +64,7 @@ export async function cachedNativeModelIDs(provider: Info) {
 }
 
 export async function cacheNativeModelIDs(provider: Info, ids: string[]) {
-  await Bun.write(cachePath(provider), JSON.stringify({ updatedAt: Date.now(), ids } satisfies Cache))
+  await Bun.write(cachePath(provider), JSON.stringify({ updatedAt: Date.now(), ids: ids.slice(0, maxModels) } satisfies Cache))
 }
 
 export async function unavailableNativeModelIDs(provider: Info) {
@@ -75,6 +77,7 @@ export async function markNativeModelUnavailable(provider: Info, modelID: string
 
 export function isNativeModelUnavailableError(input: unknown) {
   const text = errorText(input, new WeakSet())
+  if (/\b(?:408|425|429|500|502|503|504)\b|rate.?limit|temporar|timeout|timed out|overload/i.test(text)) return false
   return (
     /model (?:is )?unavailable/i.test(text) ||
     /model[_ -]?not[_ -]?found/i.test(text) ||
@@ -108,7 +111,15 @@ export async function discoverNativeModelIDs(
   })
   if (!response.ok) throw new Error(`${provider.id} model discovery returned HTTP ${response.status}`)
 
-  const body = (await response.json()) as unknown
+  const length = Number(response.headers.get("content-length"))
+  if (Number.isFinite(length) && length > maxResponseChars) {
+    throw new Error(`${provider.id} model discovery response exceeded ${maxResponseChars} bytes`)
+  }
+  const text = await response.text()
+  if (text.length > maxResponseChars) {
+    throw new Error(`${provider.id} model discovery response exceeded ${maxResponseChars} characters`)
+  }
+  const body = JSON.parse(text) as unknown
   const ids = parseNativeModelIDs(body, source.format)
   if (!ids.length) throw new Error(`${provider.id} model discovery returned no usable models`)
   return ids
@@ -142,7 +153,7 @@ export function parseNativeModelIDs(body: unknown, format?: Source["format"]) {
         return [id]
       }),
     ),
-  ).sort()
+  ).sort().slice(0, maxModels)
 }
 
 export function mergeNativeModels(provider: Info, liveIDs: string[], configuredIDs: string[] = []) {

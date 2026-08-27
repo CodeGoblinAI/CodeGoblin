@@ -110,5 +110,11 @@ describe("provider-native model discovery", () => {
     expect(isNativeModelUnavailableError({ responseBody: '{"error":{"code":"model_not_found"}}' })).toBeTrue()
     expect(isNativeModelUnavailableError(new Error("Server is overloaded"))).toBeFalse()
     expect(isNativeModelUnavailableError(new Error("Request timed out"))).toBeFalse()
+    expect(isNativeModelUnavailableError(new Error("503: Model is temporarily unavailable"))).toBeFalse()
+    expect(isNativeModelUnavailableError(new Error("429 model unavailable due to rate limit"))).toBeFalse()
+  })
+
+  test("bounds provider-controlled model lists", () => {
+    expect(parseNativeModelIDs({ data: Array.from({ length: 5_100 }, (_, index) => ({ id: `model-${index}` })) })).toHaveLength(5_000)
   })
 })

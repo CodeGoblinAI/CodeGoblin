@@ -20,6 +20,9 @@ function defaultModelsSource() {
   const configured = Flag.CODEGOBLIN_MODELS_URL
   if (configured) return configured
   if (process.env.CODEGOBLIN_MODELS_CATALOG_URL) return process.env.CODEGOBLIN_MODELS_CATALOG_URL
+  if (process.env.CODEGOBLIN === "1") {
+    return "https://raw.githubusercontent.com/CodeGoblinAI/CodeGoblin/dev/packages/codegoblin/models"
+  }
   return "https://models.dev"
 }
 

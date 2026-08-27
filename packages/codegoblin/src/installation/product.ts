@@ -32,7 +32,10 @@ export const Product = {
   installScriptUrlWindows:
     env("INSTALL_SCRIPT_URL_WINDOWS") || `https://raw.githubusercontent.com/${githubRepo}/dev/script/install.ps1`,
   /** Default remote models catalog base (append /api.json). Override with CODEGOBLIN_MODELS_URL. */
-  modelsCatalogUrl: envOr("MODELS_CATALOG_URL", "https://models.dev"),
+  modelsCatalogUrl: envOr(
+    "MODELS_CATALOG_URL",
+    "https://raw.githubusercontent.com/CodeGoblinAI/CodeGoblin/dev/packages/codegoblin/models",
+  ),
   brewFormulae: [envOr("BREW_FORMULA", "codegoblin"), "anomalyco/tap/opencode", "opencode"],
   scoopPackage: envOr("SCOOP_PACKAGE", "codegoblin"),
   legacyScoopPackage: "opencode",
