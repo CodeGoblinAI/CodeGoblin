@@ -11,7 +11,7 @@ import { ansi, theme, dim } from "./ansi"
 import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { PROVIDERS, DEFAULT_PROVIDER } from "../core/providers"
 import { apiKey } from "../core/auth"
-import { streamChat, type Message } from "../core/chat"
+import { runAgent, type Message } from "../core/agent"
 
 const argv = process.argv.slice(2)
 const providerId = argv[argv.indexOf("--provider") + 1] ?? DEFAULT_PROVIDER
@@ -19,7 +19,18 @@ const provider = PROVIDERS[providerId] ?? PROVIDERS[DEFAULT_PROVIDER]!
 const key = apiKey(provider.id)
 
 const out = process.stdout
-const messages: Message[] = []
+const messages: Message[] = [
+  {
+    role: "system",
+    content:
+      "You are CodeGoblin, a coding agent. You have tools to read, list and write files " +
+      "in the user's working directory. Prefer reading before editing. Be concise.",
+  },
+]
+
+/** What the user sees, kept separate from what the model sees. */
+type Entry = { kind: "user" | "agent" | "tool"; text: string }
+const transcript: Entry[] = []
 let input = ""
 let streaming = false
 let status = key ? "" : `no key for ${provider.label} — set ${provider.id.toUpperCase()}_API_KEY`
@@ -47,7 +58,7 @@ function render() {
   const width = Math.max(20, cols - 6)
   const lines: string[] = []
 
-  if (messages.length === 0) {
+  if (transcript.length === 0) {
     const wide = cols >= WORDMARK_WIDTH + 4
     const art = wide ? WORDMARK : [COMPACT]
     const gutter = (cols - (wide ? WORDMARK_WIDTH : COMPACT.length)) / 2
@@ -56,11 +67,16 @@ function render() {
     lines.push("")
     lines.push(theme.gold + centre("your local AI goblin for code, images and agents", (cols - 47) / 2) + ansi.reset)
   } else {
-    for (const message of messages) {
-      const isUser = message.role === "user"
+    for (const entry of transcript) {
+      if (entry.kind === "tool") {
+        lines.push(theme.muted + "  ⚙ " + entry.text + ansi.reset)
+        lines.push("")
+        continue
+      }
+      const isUser = entry.kind === "user"
       const accent = isUser ? theme.gold : theme.goblin
       lines.push(accent + "  " + (isUser ? "you" : provider.label.toLowerCase()) + ansi.reset)
-      for (const line of wrap(message.content, width)) {
+      for (const line of wrap(entry.text, width)) {
         lines.push(accent + "  │ " + ansi.reset + theme.text + line + ansi.reset)
       }
       lines.push("")
@@ -99,19 +115,35 @@ async function send() {
 
   input = ""
   messages.push({ role: "user", content: text })
-  messages.push({ role: "assistant", content: "" })
+  transcript.push({ kind: "user", text })
   streaming = true
   status = ""
   render()
 
-  const reply = messages[messages.length - 1]!
+  let current: Entry | undefined
   try {
-    for await (const delta of streamChat({ provider, apiKey: key, messages: messages.slice(0, -1) })) {
-      reply.content += delta
+    for await (const event of runAgent({ provider, apiKey: key, messages, root: process.cwd() })) {
+      if (event.type === "text") {
+        if (!current || current.kind !== "agent") {
+          current = { kind: "agent", text: "" }
+          transcript.push(current)
+        }
+        current.text += event.delta
+      }
+      if (event.type === "tool_start") {
+        current = undefined
+        transcript.push({ kind: "tool", text: `${event.name} ${event.args.slice(0, 60)}` })
+      }
+      if (event.type === "tool_end") {
+        const last = transcript[transcript.length - 1]
+        if (last?.kind === "tool") {
+          const firstLine = event.result.split(String.fromCharCode(10))[0] ?? ""
+          last.text += `  →  ${firstLine.slice(0, 50)}`
+        }
+      }
       render()
     }
   } catch (error) {
-    reply.content = ""
     status = error instanceof Error ? error.message.slice(0, 120) : "request failed"
   } finally {
     streaming = false
