@@ -39,6 +39,23 @@ Verified against Pi's public type surface:
 | Audio / 3D generation | none | in `src/domain`, already here |
 | Provider catalog | ~9 providers | 185 providers / 6,583 models |
 
+## Build order — why the CLI comes first
+
+A UI renders a conversation, so there has to be a conversation first. Building
+a TUI before the agent runs means building a renderer for something that does
+not exist. The order is therefore:
+
+1. **One-shot prompt** (`src/cli/prompt.ts`) - send a prompt, stream the reply.
+   Done; typechecks clean. Proves the provider layer works end to end.
+2. **Tool calling** - via `pi-agent-core`, so it can read and edit files. This
+   is the point where it becomes a coding agent rather than a chat client.
+3. **Sessions** - persistence, so conversations survive.
+4. **TUI** - now there is something worth rendering.
+5. **Web UI** - reuses the same server surface.
+
+The image, 3D and voice code already ported attaches as commands once step 1
+has somewhere to hang them.
+
 ## Order of work
 
 1. **Platform shims** — done: `paths`, `log`, `version`, `process`.
