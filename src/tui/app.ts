@@ -8,6 +8,7 @@
  * (DEEPSEEK_API_KEY, ZAI_API_KEY, ...) or the existing CodeGoblin auth.json.
  */
 import { ansi, theme, dim } from "./ansi"
+import { parseKeys } from "./keys"
 import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { PROVIDERS, DEFAULT_PROVIDER } from "../core/providers"
 import { apiKey } from "../core/auth"
@@ -34,6 +35,10 @@ const messages: Message[] = [
 type Entry = { kind: "user" | "agent" | "tool"; text: string }
 const transcript: Entry[] = []
 let input = ""
+let cursor = 0
+const history: string[] = []
+let historyIndex = -1
+let scroll = 0
 let streaming = false
 let session = sessions.create(provider.id)
 let status = key ? "" : `no key for ${provider.label} — set ${provider.id.toUpperCase()}_API_KEY`
@@ -97,20 +102,26 @@ function render() {
   // Keep the newest content visible.
   const composerHeight = 4
   const room = Math.max(1, rows - composerHeight - 1)
-  const body = lines.length > room ? lines.slice(lines.length - room) : lines
+  // scroll counts lines back from the newest.
+  const maxScroll = Math.max(0, lines.length - room)
+  scroll = Math.min(scroll, maxScroll)
+  const cut = lines.length - room - scroll
+  const body = lines.length > room ? lines.slice(Math.max(0, cut), Math.max(0, cut) + room) : lines
   while (body.length < room) body.push("")
 
   const inner = Math.max(10, cols - 4)
   const shown = streaming
     ? `${dim}goblin is thinking… esc to quit${ansi.reset}`
-    : input || `${dim}ask the goblin anything…${ansi.reset}`
+    : input
+      ? input.slice(0, cursor) + "█" + input.slice(cursor)
+      : `${dim}ask the goblin anything…${ansi.reset}`
 
   body.push(theme.border + "  " + "─".repeat(inner) + ansi.reset)
   body.push(theme.goblin + "  │ " + ansi.reset + theme.text + shown + ansi.reset)
   body.push(theme.border + "  " + "─".repeat(inner) + ansi.reset)
 
   const left = status || `${provider.label} · ${provider.model}`
-  const right = "ctrl+c quit"
+  const right = scroll > 0 ? `scrolled ${scroll}  ·  pgdn` : "ctrl+c quit"
   // Pad from the plain text; the coloured string is longer than it looks.
   const plain = "  " + left
   const padded = plain.padEnd(Math.max(plain.length + 1, cols - right.length - 2))
@@ -157,6 +168,7 @@ async function send() {
   messages.push({ role: "user", content: text })
   transcript.push({ kind: "user", text })
   streaming = true
+  scroll = 0
   status = ""
   render()
 
@@ -205,19 +217,113 @@ out.on("resize", render)
 process.stdin.setRawMode?.(true)
 process.stdin.resume()
 process.stdin.on("data", (chunk) => {
-  // A chunk is not a keypress. Fast typing and paste deliver several
-  // characters at once, so walk them rather than comparing the whole string.
-  const text = chunk.toString()
   let dirty = false
 
-  for (const char of text) {
-    const code = char.charCodeAt(0)
-    if (code === 3) return shutdown()                    // ctrl+c
-    if (code === 27 && !streaming) return shutdown()     // esc
-    if (streaming) continue
-    if (code === 13 || code === 10) { void send(); return } // enter
-    if (code === 127 || code === 8) { input = input.slice(0, -1); dirty = true; continue }
-    if (code >= 32 && code <= 126) { input += char; dirty = true }
+  for (const key of parseKeys(chunk.toString())) {
+    if (key.type === "ctrl" && key.value === "c") return shutdown()
+
+    if (streaming) {
+      // Only interruption is meaningful mid-turn.
+      if (key.type === "escape") return shutdown()
+      continue
+    }
+
+    switch (key.type) {
+      case "escape":
+        return shutdown()
+
+      case "enter": {
+        const text = input.trim()
+        if (text) {
+          history.push(text)
+          historyIndex = -1
+        }
+        cursor = 0
+        void send()
+        return
+      }
+
+      case "backspace":
+        if (cursor > 0) {
+          input = input.slice(0, cursor - 1) + input.slice(cursor)
+          cursor--
+          dirty = true
+        }
+        break
+
+      case "delete":
+        if (cursor < input.length) {
+          input = input.slice(0, cursor) + input.slice(cursor + 1)
+          dirty = true
+        }
+        break
+
+      case "left":
+        if (cursor > 0) { cursor--; dirty = true }
+        break
+
+      case "right":
+        if (cursor < input.length) { cursor++; dirty = true }
+        break
+
+      case "home":
+        cursor = 0
+        dirty = true
+        break
+
+      case "end":
+        cursor = input.length
+        dirty = true
+        break
+
+      // Up and down walk the prompt history, the way a shell does.
+      case "up":
+        if (history.length) {
+          historyIndex = historyIndex < 0 ? history.length - 1 : Math.max(0, historyIndex - 1)
+          input = history[historyIndex] ?? ""
+          cursor = input.length
+          dirty = true
+        }
+        break
+
+      case "down":
+        if (historyIndex >= 0) {
+          historyIndex++
+          if (historyIndex >= history.length) { historyIndex = -1; input = "" }
+          else input = history[historyIndex] ?? ""
+          cursor = input.length
+          dirty = true
+        }
+        break
+
+      case "pageup":
+        scroll += 5
+        dirty = true
+        break
+
+      case "pagedown":
+        scroll = Math.max(0, scroll - 5)
+        dirty = true
+        break
+
+      case "ctrl":
+        if (key.value === "u") { input = ""; cursor = 0; dirty = true }
+        if (key.value === "a") { cursor = 0; dirty = true }
+        if (key.value === "e") { cursor = input.length; dirty = true }
+        if (key.value === "w") {
+          const upto = input.slice(0, cursor).replace(/s*S+s*$/, "")
+          input = upto + input.slice(cursor)
+          cursor = upto.length
+          dirty = true
+        }
+        break
+
+      case "char":
+        input = input.slice(0, cursor) + key.value + input.slice(cursor)
+        cursor++
+        dirty = true
+        break
+    }
   }
 
   if (dirty) render()

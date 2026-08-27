@@ -1,0 +1,97 @@
+/**
+ * Terminal key parsing.
+ *
+ * Terminals send escape sequences, not keys: Up is ESC [ A, three bytes. Code
+ * that compares against a bare ESC therefore treats every arrow press as
+ * Escape - which is why pressing Up used to quit the app.
+ *
+ * A chunk can also carry several keys at once (fast typing, paste), so this
+ * returns a list rather than a single key.
+ */
+export type Key =
+  | { type: "char"; value: string }
+  | { type: "enter" }
+  | { type: "backspace" }
+  | { type: "delete" }
+  | { type: "up" }
+  | { type: "down" }
+  | { type: "left" }
+  | { type: "right" }
+  | { type: "home" }
+  | { type: "end" }
+  | { type: "pageup" }
+  | { type: "pagedown" }
+  | { type: "escape" }
+  | { type: "ctrl"; value: string }
+
+const CSI: Record<string, Key["type"]> = {
+  A: "up",
+  B: "down",
+  C: "right",
+  D: "left",
+  H: "home",
+  F: "end",
+}
+
+const TILDE: Record<string, Key["type"]> = {
+  "1": "home",
+  "3": "delete",
+  "4": "end",
+  "5": "pageup",
+  "6": "pagedown",
+  "7": "home",
+  "8": "end",
+}
+
+export function parseKeys(input: string): Key[] {
+  const keys: Key[] = []
+  let i = 0
+
+  while (i < input.length) {
+    const char = input[i]!
+    const code = char.charCodeAt(0)
+
+    // Escape sequence, or a bare Escape if nothing follows it.
+    if (code === 27) {
+      const next = input[i + 1]
+      if (next !== "[" && next !== "O") {
+        keys.push({ type: "escape" })
+        i += 1
+        continue
+      }
+
+      // CSI: ESC [ ... final-byte
+      let j = i + 2
+      let params = ""
+      while (j < input.length && !/[A-Za-z~]/.test(input[j]!)) {
+        params += input[j]
+        j++
+      }
+      const final = input[j]
+
+      if (final === "~") {
+        const type = TILDE[params.split(";")[0] ?? ""]
+        if (type) keys.push({ type } as Key)
+      } else if (final && CSI[final]) {
+        keys.push({ type: CSI[final]! } as Key)
+      }
+      i = (final ? j + 1 : j)
+      continue
+    }
+
+    if (code === 13 || code === 10) { keys.push({ type: "enter" }); i++; continue }
+    if (code === 127 || code === 8) { keys.push({ type: "backspace" }); i++; continue }
+
+    // Control characters, reported by the letter they are typed with.
+    if (code < 32) {
+      keys.push({ type: "ctrl", value: String.fromCharCode(code + 96) })
+      i++
+      continue
+    }
+
+    keys.push({ type: "char", value: char })
+    i++
+  }
+
+  return keys
+}
