@@ -1,4 +1,4 @@
-import { PROVIDERS } from "./providers"
+import { PROVIDERS, allSelections, resolveSelection } from "./providers"
 
 /**
  * Slash commands.
@@ -47,12 +47,12 @@ export function runCommand(text: string): CommandResult {
       return { kind: "sessions" }
     case "/model": {
       if (!argument) {
-        const available = Object.values(PROVIDERS)
-          .map((provider) => `${provider.id.padEnd(12)}${provider.label} · ${provider.model}`)
+        const available = allSelections()
+          .map((s) => `${(s.provider.id + "/" + s.model.id).padEnd(28)}${s.provider.label} ${s.model.label}`)
           .join(String.fromCharCode(10))
         return { kind: "message", text: `usage: /model <id>${String.fromCharCode(10)}${available}` }
       }
-      if (!PROVIDERS[argument]) return { kind: "message", text: `unknown provider: ${argument}` }
+      if (!resolveSelection(argument)) return { kind: "message", text: `unknown model: ${argument}  (try /model)` }
       return { kind: "provider", id: argument }
     }
     default:

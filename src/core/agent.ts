@@ -12,6 +12,7 @@ export type Message = {
 
 export type AgentEvent =
   | { type: "text"; delta: string }
+  | { type: "thinking"; delta: string }
   | { type: "tool_start"; name: string; args: string }
   | { type: "tool_end"; name: string; result: string }
   | { type: "turn_end" }
@@ -28,6 +29,7 @@ export type AgentEvent =
  */
 export async function* runAgent(input: {
   provider: Provider
+  modelId: string
   apiKey: string
   messages: Message[]
   root: string
@@ -41,7 +43,7 @@ export async function* runAgent(input: {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
       body: JSON.stringify({
-        model: input.provider.model,
+        model: input.modelId,
         messages: input.messages,
         tools: TOOL_SCHEMA,
         stream: true,
@@ -80,6 +82,14 @@ export async function* runAgent(input: {
         }
 
         const delta = chunk?.choices?.[0]?.delta
+
+        // Reasoning models stream their thinking on a separate field. The
+        // name is not standardised, so accept the variants seen in the wild.
+        const thought = delta?.reasoning_content ?? delta?.reasoning ?? delta?.thinking
+        if (typeof thought === "string" && thought) {
+          yield { type: "thinking", delta: thought }
+        }
+
         if (typeof delta?.content === "string" && delta.content) {
           text += delta.content
           yield { type: "text", delta: delta.content }

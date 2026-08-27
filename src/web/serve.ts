@@ -9,7 +9,7 @@
 import { file } from "bun"
 import { fileURLToPath } from "node:url"
 import { runAgent, type Message } from "../core/agent"
-import { resolveProvider, PROVIDERS } from "../core/providers"
+import { resolveSelection, allSelections, defaultSelection } from "../core/providers"
 import { apiKey } from "../core/auth"
 import * as sessions from "../core/sessions"
 
@@ -59,11 +59,11 @@ async function handle(request: Request): Promise<Response> {
 
   if (url.pathname === "/api/providers") {
     return json({
-      providers: Object.values(PROVIDERS).map((provider) => ({
-        id: provider.id,
-        label: provider.label,
-        model: provider.model,
-        ready: Boolean(apiKey(provider.id)),
+      providers: allSelections().map((s) => ({
+        id: s.provider.id + "/" + s.model.id,
+        label: s.provider.label + " " + s.model.label,
+        reasoning: Boolean(s.model.reasoning),
+        ready: Boolean(apiKey(s.provider.id)),
       })),
     })
   }
@@ -83,7 +83,8 @@ async function handle(request: Request): Promise<Response> {
     const text = (body.text ?? "").trim()
     if (!text) return json({ error: "empty prompt" }, 400)
 
-    const provider = resolveProvider(body.provider)
+    const selection = resolveSelection(body.provider) ?? defaultSelection()
+    const { provider, model } = selection
     const key = apiKey(provider.id)
     if (!key) return json({ error: `No API key for ${provider.label}.` }, 400)
 
@@ -113,6 +114,7 @@ async function handle(request: Request): Promise<Response> {
         try {
           for await (const event of runAgent({
             provider,
+            modelId: model.id,
             apiKey: key,
             messages: session.messages as Message[],
             root,

@@ -1,64 +1,70 @@
 /**
  * CodeGoblin TUI.
  *
- *   bun run tui                  # DeepSeek by default
- *   bun run tui -- --provider zai
+ *   bun run tui
+ *   bun run tui -- --model zai/glm-5.3
  *
- * Raw ANSI, no framework. Keys come from the environment
- * (DEEPSEEK_API_KEY, ZAI_API_KEY, ...) or the existing CodeGoblin auth.json.
+ * Raw ANSI, no framework.
  */
 import { ansi, theme, dim } from "./ansi"
-import { parseKeys } from "./keys"
 import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
-import { PROVIDERS, DEFAULT_PROVIDER } from "../core/providers"
+import { parseKeys } from "./keys"
+import { renderMarkdown } from "./markdown"
+import { paletteFor, renderPalette, type PaletteItem } from "./palette"
+import { defaultSelection, resolveSelection, type Selection } from "../core/providers"
 import { apiKey } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
 import { isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
 
 const argv = process.argv.slice(2)
-const providerId = argv[argv.indexOf("--provider") + 1] ?? DEFAULT_PROVIDER
-let provider = PROVIDERS[providerId] ?? PROVIDERS[DEFAULT_PROVIDER]!
-let key = apiKey(provider.id)
+const flag = (name: string) => {
+  const index = argv.indexOf(name)
+  return index === -1 ? undefined : argv[index + 1]
+}
+
+let selection: Selection = resolveSelection(flag("--model") ?? flag("--provider")) ?? defaultSelection()
+let key = apiKey(selection.provider.id)
 
 const out = process.stdout
-const messages: Message[] = [
-  {
-    role: "system",
-    content:
-      "You are CodeGoblin, a coding agent. You have tools to read, list and write files " +
-      "in the user's working directory. Prefer reading before editing. Be concise.",
-  },
-]
+const SYSTEM: Message = {
+  role: "system",
+  content:
+    "You are CodeGoblin, a coding agent. You have tools to read, list, write and edit files " +
+    "in the working directory. Prefer reading before editing. Be concise.",
+}
 
-/** What the user sees, kept separate from what the model sees. */
-type Entry = { kind: "user" | "agent" | "tool"; text: string }
-const transcript: Entry[] = []
+let messages: Message[] = [SYSTEM]
+type Entry = { kind: "user" | "agent" | "tool" | "thinking"; text: string }
+let transcript: Entry[] = []
+let session = sessions.create(selection.provider.id)
+
 let input = ""
 let cursor = 0
+let scroll = 0
 const history: string[] = []
 let historyIndex = -1
-let scroll = 0
 let streaming = false
-let session = sessions.create(provider.id)
-let status = key ? "" : `no key for ${provider.label} — set ${provider.id.toUpperCase()}_API_KEY`
+let status = key ? "" : "no key for " + selection.provider.label
+
+let palette: PaletteItem[] | undefined
+let paletteIndex = 0
+
+let caretOn = true
+const blink = setInterval(() => {
+  if (streaming) return
+  caretOn = !caretOn
+  render()
+}, 530)
+blink.unref?.()
 
 const size = () => ({ cols: out.columns ?? 80, rows: out.rows ?? 24 })
 const centre = (text: string, width: number) => " ".repeat(Math.max(0, Math.floor(width))) + text
 
-/** Wrap on word boundaries so the transcript stays readable at any width. */
-function wrap(text: string, width: number): string[] {
-  const result: string[] = []
-  for (const paragraph of text.split("\n")) {
-    if (!paragraph) { result.push(""); continue }
-    let line = ""
-    for (const word of paragraph.split(" ")) {
-      if (line && (line + " " + word).length > width) { result.push(line); line = word }
-      else line = line ? line + " " + word : word
-    }
-    if (line) result.push(line)
-  }
-  return result
+function refreshPalette() {
+  palette = paletteFor(input)
+  if (!palette) paletteIndex = 0
+  else paletteIndex = Math.min(paletteIndex, palette.length - 1)
 }
 
 function render() {
@@ -77,102 +83,122 @@ function render() {
   } else {
     for (const entry of transcript) {
       if (entry.kind === "tool") {
-        // Tool output can be several lines; push each so the height count
-        // stays honest and the status line is not pushed off screen.
-        const toolLines = entry.text.split(String.fromCharCode(10))
-        for (const [index, toolLine] of toolLines.entries()) {
-          const prefix = index === 0 ? "  ⚙ " : "    "
-          for (const piece of wrap(toolLine, width)) {
-            lines.push(theme.muted + prefix + piece + ansi.reset)
-          }
+        for (const [i, line] of entry.text.split(String.fromCharCode(10)).entries()) {
+          lines.push(theme.muted + (i === 0 ? "  x " : "    ") + line.slice(0, width) + ansi.reset)
+        }
+        lines.push("")
+        continue
+      }
+      if (entry.kind === "thinking") {
+        lines.push(dim + "  thinking" + ansi.reset)
+        for (const line of entry.text.split(String.fromCharCode(10)).slice(-6)) {
+          lines.push(dim + "  | " + line.slice(0, width) + ansi.reset)
         }
         lines.push("")
         continue
       }
       const isUser = entry.kind === "user"
       const accent = isUser ? theme.gold : theme.goblin
-      lines.push(accent + "  " + (isUser ? "you" : provider.label.toLowerCase()) + ansi.reset)
-      for (const line of wrap(entry.text, width)) {
-        lines.push(accent + "  │ " + ansi.reset + theme.text + line + ansi.reset)
-      }
+      lines.push(accent + "  " + (isUser ? "you" : selection.provider.label.toLowerCase()) + ansi.reset)
+      const rendered = isUser
+        ? entry.text.split(String.fromCharCode(10)).map((l) => theme.text + l + ansi.reset)
+        : renderMarkdown(entry.text, width)
+      for (const line of rendered) lines.push(accent + "  | " + ansi.reset + line)
       lines.push("")
     }
   }
 
-  // Keep the newest content visible.
-  const composerHeight = 4
+  const paletteLines = palette && !streaming ? renderPalette(palette, paletteIndex, cols) : []
+  const composerHeight = 4 + paletteLines.length
   const room = Math.max(1, rows - composerHeight - 1)
-  // scroll counts lines back from the newest.
+
   const maxScroll = Math.max(0, lines.length - room)
   scroll = Math.min(scroll, maxScroll)
   const cut = lines.length - room - scroll
   const body = lines.length > room ? lines.slice(Math.max(0, cut), Math.max(0, cut) + room) : lines
   while (body.length < room) body.push("")
 
+  for (const line of paletteLines) body.push(line)
+
   const inner = Math.max(10, cols - 4)
-  // The input is a viewport, not the whole string: a long prompt scrolls
-  // sideways rather than overflowing the box and breaking the layout.
   const visibleInput = Math.max(10, inner - 4)
+  const caret = caretOn ? "\u2588" : " "
   let shown: string
   if (streaming) {
-    shown = `${dim}goblin is thinking… esc to quit${ansi.reset}`
+    shown = dim + "goblin is working... esc to stop" + ansi.reset
   } else if (!input) {
-    shown = `${dim}ask the goblin anything…${ansi.reset}`
+    shown = theme.text + caret + ansi.reset + dim + "ask the goblin anything..." + ansi.reset
   } else {
     const from = Math.max(0, cursor - visibleInput + 1)
     const slice = input.slice(from, from + visibleInput)
     const at = cursor - from
     shown =
-      (from > 0 ? theme.muted + "…" + ansi.reset : "") +
-      theme.text +
-      slice.slice(0, at) +
-      "█" +
-      slice.slice(at) +
-      ansi.reset +
-      (from + visibleInput < input.length ? theme.muted + "…" + ansi.reset : "")
+      (from > 0 ? theme.muted + "..." + ansi.reset : "") +
+      theme.text + slice.slice(0, at) + caret + slice.slice(at) + ansi.reset +
+      (from + visibleInput < input.length ? theme.muted + "..." + ansi.reset : "")
   }
 
-  body.push(theme.border + "  " + "─".repeat(inner) + ansi.reset)
-  body.push(theme.goblin + "  │ " + ansi.reset + theme.text + shown + ansi.reset)
-  body.push(theme.border + "  " + "─".repeat(inner) + ansi.reset)
+  body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
+  body.push(theme.goblin + "  | " + ansi.reset + shown)
+  body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
 
-  const left = status || `${provider.label} · ${provider.model}`
-  const right = scroll > 0 ? `scrolled ${scroll}  ·  pgdn` : "ctrl+c quit"
-  // Pad from the plain text; the coloured string is longer than it looks.
+  const left = status || selection.provider.label + " . " + selection.model.id
+  const right = scroll > 0 ? "scrolled " + scroll : palette ? "tab complete . up/down pick" : "/ commands . ctrl+c quit"
   const plain = "  " + left
   const padded = plain.padEnd(Math.max(plain.length + 1, cols - right.length - 2))
   body.push(dim + padded + ansi.reset + theme.muted + right + ansi.reset)
 
-  out.write(ansi.clear + body.join("\n"))
+  const clamped = body.map((line) => {
+    const visible = line.replace(new RegExp(String.fromCharCode(27) + "\[[0-9;]*m", "g"), "")
+    if (visible.length <= cols) return line
+    let count = 0
+    let result = ""
+    for (let i = 0; i < line.length; i++) {
+      if (line.charCodeAt(i) === 27) {
+        const end = line.indexOf("m", i)
+        if (end !== -1) { result += line.slice(i, end + 1); i = end; continue }
+      }
+      if (count >= cols - 1) break
+      result += line[i]
+      count++
+    }
+    return result + ansi.reset
+  })
+
+  out.write(ansi.clear + clamped.join(String.fromCharCode(10)))
 }
 
 async function send() {
   const text = input.trim()
   if (!text || streaming) return
-  if (!key) { status = `no key for ${provider.label}`; render(); return }
 
   if (isCommand(text)) {
     input = ""
+    cursor = 0
+    palette = undefined
     const result = runCommand(text)
     if (result.kind === "quit") return shutdown()
     if (result.kind === "clear") {
-      transcript.length = 0
-      messages.length = 1
-      session = sessions.create(provider.id)
+      transcript = []
+      messages = [SYSTEM]
+      session = sessions.create(selection.provider.id)
       status = "new conversation"
     }
     if (result.kind === "message") transcript.push({ kind: "tool", text: result.text })
     if (result.kind === "provider") {
-      provider = PROVIDERS[result.id]!
-      key = apiKey(provider.id)
-      status = `switched to ${provider.label}`
+      const next = resolveSelection(result.id)
+      if (next) {
+        selection = next
+        key = apiKey(selection.provider.id)
+        status = selection.provider.label + " " + selection.model.label
+      }
     }
     if (result.kind === "sessions") {
       const saved = await sessions.list(10)
       transcript.push({
         kind: "tool",
         text: saved.length
-          ? saved.map((entry) => `${entry.id}  ${entry.title}`).join(String.fromCharCode(10))
+          ? saved.map((entry) => entry.id + "  " + entry.title).join(String.fromCharCode(10))
           : "no saved sessions yet",
       })
     }
@@ -180,17 +206,36 @@ async function send() {
     return
   }
 
+  if (!key) { status = "no key for " + selection.provider.label; render(); return }
+
   input = ""
+  cursor = 0
+  palette = undefined
+  scroll = 0
+  history.push(text)
+  historyIndex = -1
   messages.push({ role: "user", content: text })
   transcript.push({ kind: "user", text })
   streaming = true
-  scroll = 0
   status = ""
   render()
 
   let current: Entry | undefined
   try {
-    for await (const event of runAgent({ provider, apiKey: key, messages, root: process.cwd() })) {
+    for await (const event of runAgent({
+      provider: selection.provider,
+      modelId: selection.model.id,
+      apiKey: key,
+      messages,
+      root: process.cwd(),
+    })) {
+      if (event.type === "thinking") {
+        if (!current || current.kind !== "thinking") {
+          current = { kind: "thinking", text: "" }
+          transcript.push(current)
+        }
+        current.text += event.delta
+      }
       if (event.type === "text") {
         if (!current || current.kind !== "agent") {
           current = { kind: "agent", text: "" }
@@ -200,13 +245,13 @@ async function send() {
       }
       if (event.type === "tool_start") {
         current = undefined
-        transcript.push({ kind: "tool", text: `${event.name} ${event.args.slice(0, 60)}` })
+        transcript.push({ kind: "tool", text: event.name + " " + event.args.slice(0, 60) })
       }
       if (event.type === "tool_end") {
         const last = transcript[transcript.length - 1]
-        if (last?.kind === "tool") {
+        if (last && last.kind === "tool") {
           const firstLine = event.result.split(String.fromCharCode(10))[0] ?? ""
-          last.text += `  →  ${firstLine.slice(0, 50)}`
+          last.text += "  ->  " + firstLine.slice(0, 50)
         }
       }
       render()
@@ -235,64 +280,41 @@ process.stdin.resume()
 process.stdin.on("data", (chunk) => {
   let dirty = false
 
-  for (const key of parseKeys(chunk.toString())) {
-    if (key.type === "ctrl" && key.value === "c") return shutdown()
+  for (const pressed of parseKeys(chunk.toString())) {
+    if (pressed.type === "ctrl" && pressed.value === "c") return shutdown()
 
     if (streaming) {
-      // Only interruption is meaningful mid-turn.
-      if (key.type === "escape") return shutdown()
+      if (pressed.type === "escape") return shutdown()
       continue
     }
 
-    switch (key.type) {
-      case "escape":
-        return shutdown()
-
-      case "enter": {
-        const text = input.trim()
-        if (text) {
-          history.push(text)
-          historyIndex = -1
-        }
-        cursor = 0
-        void send()
-        return
-      }
-
-      case "backspace":
-        if (cursor > 0) {
-          input = input.slice(0, cursor - 1) + input.slice(cursor)
-          cursor--
-          dirty = true
-        }
-        break
-
-      case "delete":
-        if (cursor < input.length) {
-          input = input.slice(0, cursor) + input.slice(cursor + 1)
-          dirty = true
-        }
-        break
-
-      case "left":
-        if (cursor > 0) { cursor--; dirty = true }
-        break
-
-      case "right":
-        if (cursor < input.length) { cursor++; dirty = true }
-        break
-
-      case "home":
-        cursor = 0
-        dirty = true
-        break
-
-      case "end":
+    // While the palette is open it owns up, down, tab and escape.
+    if (palette) {
+      if (pressed.type === "up") { paletteIndex = Math.max(0, paletteIndex - 1); dirty = true; continue }
+      if (pressed.type === "down") { paletteIndex = Math.min(palette.length - 1, paletteIndex + 1); dirty = true; continue }
+      if (pressed.type === "escape") { palette = undefined; render(); continue }
+      if (pressed.type === "ctrl" && pressed.value === "i") {
+        input = palette[paletteIndex]!.value + " "
         cursor = input.length
+        refreshPalette()
         dirty = true
-        break
+        continue
+      }
+    }
 
-      // Up and down walk the prompt history, the way a shell does.
+    switch (pressed.type) {
+      case "escape": return shutdown()
+      case "enter": void send(); return
+      case "backspace":
+        if (cursor > 0) { input = input.slice(0, cursor - 1) + input.slice(cursor); cursor--; dirty = true }
+        break
+      case "delete":
+        if (cursor < input.length) { input = input.slice(0, cursor) + input.slice(cursor + 1); dirty = true }
+        break
+      case "left": if (cursor > 0) { cursor--; dirty = true } break
+      case "right": if (cursor < input.length) { cursor++; dirty = true } break
+      case "home": cursor = 0; dirty = true; break
+      case "end": cursor = input.length; dirty = true; break
       case "up":
         if (history.length) {
           historyIndex = historyIndex < 0 ? history.length - 1 : Math.max(0, historyIndex - 1)
@@ -301,7 +323,6 @@ process.stdin.on("data", (chunk) => {
           dirty = true
         }
         break
-
       case "down":
         if (historyIndex >= 0) {
           historyIndex++
@@ -311,38 +332,22 @@ process.stdin.on("data", (chunk) => {
           dirty = true
         }
         break
-
-      case "pageup":
-        scroll += 5
-        dirty = true
-        break
-
-      case "pagedown":
-        scroll = Math.max(0, scroll - 5)
-        dirty = true
-        break
-
+      case "pageup": scroll += 5; dirty = true; break
+      case "pagedown": scroll = Math.max(0, scroll - 5); dirty = true; break
       case "ctrl":
-        if (key.value === "u") { input = ""; cursor = 0; dirty = true }
-        if (key.value === "a") { cursor = 0; dirty = true }
-        if (key.value === "e") { cursor = input.length; dirty = true }
-        if (key.value === "w") {
-          const upto = input.slice(0, cursor).replace(/s*S+s*$/, "")
-          input = upto + input.slice(cursor)
-          cursor = upto.length
-          dirty = true
-        }
+        if (pressed.value === "u") { input = ""; cursor = 0; dirty = true }
+        if (pressed.value === "a") { cursor = 0; dirty = true }
+        if (pressed.value === "e") { cursor = input.length; dirty = true }
         break
-
       case "char":
-        input = input.slice(0, cursor) + key.value + input.slice(cursor)
+        input = input.slice(0, cursor) + pressed.value + input.slice(cursor)
         cursor++
         dirty = true
         break
     }
   }
 
-  if (dirty) render()
+  if (dirty) { refreshPalette(); caretOn = true; render() }
 })
 
 process.on("SIGINT", shutdown)

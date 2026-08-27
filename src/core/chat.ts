@@ -13,6 +13,7 @@ export type Message = { role: Role; content: string }
  */
 export async function* streamChat(input: {
   provider: Provider
+  modelId: string
   apiKey: string
   messages: Message[]
   signal?: AbortSignal
@@ -24,7 +25,7 @@ export async function* streamChat(input: {
       authorization: `Bearer ${input.apiKey}`,
     },
     body: JSON.stringify({
-      model: input.provider.model,
+      model: input.modelId,
       messages: input.messages,
       stream: true,
     }),
