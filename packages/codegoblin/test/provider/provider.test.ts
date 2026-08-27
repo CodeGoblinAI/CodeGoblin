@@ -12,7 +12,7 @@ import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { Env } from "../../src/env"
 import { Plugin } from "../../src/plugin/index"
-import { Provider } from "@/provider/provider"
+import { mergeRefreshedProviderModels, Provider } from "@/provider/provider"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Filesystem } from "@/util/filesystem"
@@ -1301,6 +1301,71 @@ test("models.dev normalization fills required response fields", () => {
   expect(model.capabilities.attachment).toBe(false)
   expect(model.capabilities.toolcall).toBe(true)
   expect(model.release_date).toBe("")
+})
+
+test("models.dev catalog exposes current Z.AI GLM 5.3 models", async () => {
+  const catalog = (await Bun.file(new URL("../../models/api.json", import.meta.url)).json()) as Record<
+    string,
+    ModelsDev.Provider
+  >
+  const provider = Provider.fromModelsDevProvider(catalog.zai)
+
+  expect(provider.models["glm-5.3"]).toBeDefined()
+  expect(provider.models["glm-5.3-flash"]).toBeDefined()
+  expect(provider.models["glm-5.3"].api.url).toBe("https://api.z.ai/api/paas/v4")
+  expect(provider.models["glm-5.3-flash"].api.url).toBe("https://api.z.ai/api/paas/v4")
+})
+
+test("catalog refresh adds new models and removes stale catalog models", () => {
+  const model = (id: string) => ({
+    id,
+    name: id,
+    release_date: "2026-08-26",
+    attachment: false,
+    reasoning: true,
+    temperature: false,
+    tool_call: true,
+    limit: { context: 128_000, output: 8_192 },
+    modalities: { input: ["text"], output: ["text"] },
+  })
+  const previousCatalog = Provider.fromModelsDevProvider({
+    id: "zai",
+    name: "Z.AI",
+    env: ["ZHIPU_API_KEY"],
+    api: "https://api.z.ai/api/paas/v4",
+    npm: "@ai-sdk/openai-compatible",
+    models: {
+      "glm-5.2": model("glm-5.2"),
+      "removed-model": model("removed-model"),
+    },
+  } as unknown as ModelsDev.Provider)
+  const activeProvider = structuredClone(previousCatalog)
+  activeProvider.source = "api"
+  activeProvider.models["custom-model"] = {
+    ...structuredClone(activeProvider.models["glm-5.2"]),
+    id: ModelID.make("custom-model"),
+    name: "Custom model",
+    api: { ...activeProvider.models["glm-5.2"].api, id: "custom-model" },
+  }
+  const refreshedCatalog = Provider.fromModelsDevProvider({
+    id: "zai",
+    name: "Z.AI",
+    env: ["ZHIPU_API_KEY"],
+    api: "https://api.z.ai/api/paas/v4",
+    npm: "@ai-sdk/openai-compatible",
+    models: {
+      "glm-5.2": model("glm-5.2"),
+      "glm-5.3": model("glm-5.3"),
+      "glm-5.3-flash": model("glm-5.3-flash"),
+    },
+  } as unknown as ModelsDev.Provider)
+
+  const models = mergeRefreshedProviderModels(activeProvider, previousCatalog, refreshedCatalog, undefined, false)
+
+  expect(models["glm-5.3"]).toBeDefined()
+  expect(models["glm-5.3-flash"]).toBeDefined()
+  expect(models["removed-model"]).toBeUndefined()
+  expect(models["custom-model"]).toBeDefined()
 })
 
 it.instance("model variants are generated for reasoning models", () =>

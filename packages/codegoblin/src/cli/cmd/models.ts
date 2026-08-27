@@ -2,7 +2,6 @@ import { EOL } from "os"
 import { Effect } from "effect"
 import { Provider } from "@/provider/provider"
 import { ProviderID } from "../../provider/schema"
-import { ModelsDev } from "@codegoblin/core/models-dev"
 import { effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
 
@@ -21,16 +20,15 @@ export const ModelsCommand = effectCmd({
         type: "boolean",
       })
       .option("refresh", {
-        describe: "refresh the models cache from models.dev",
+        describe: "refresh provider-native model lists and models.dev metadata",
         type: "boolean",
       }),
   handler: Effect.fn("Cli.models")(function* (args) {
+    const provider = yield* Provider.Service
+    yield* provider.refreshModels(args.refresh)
     if (args.refresh) {
-      yield* ModelsDev.Service.use((s) => s.refresh(true))
       UI.println(UI.Style.TEXT_SUCCESS_BOLD + "Models cache refreshed" + UI.Style.TEXT_NORMAL)
     }
-
-    const provider = yield* Provider.Service
     const providers = yield* provider.list()
 
     const print = (providerID: ProviderID, verbose?: boolean) => {

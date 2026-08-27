@@ -26,6 +26,7 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { isNativeModelUnavailableError, markNativeModelUnavailable } from "@/provider/model-discovery"
 
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
@@ -303,6 +304,12 @@ const live: Layer.Layer<
             l.error("stream error", {
               error,
             })
+            if (isNativeModelUnavailableError(error)) {
+              delete item.models[input.model.id]
+              void markNativeModelUnavailable(item, input.model.api.id).catch((cause) =>
+                l.warn("failed to persist unavailable model health", { cause }),
+              )
+            }
           },
           async experimental_repairToolCall(failed) {
             const lower = failed.toolCall.toolName.toLowerCase()

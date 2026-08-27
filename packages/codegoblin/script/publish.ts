@@ -5,6 +5,7 @@ import path from "path"
 import pkg from "../package.json"
 import { Script } from "@codegoblin/script"
 import { fileURLToPath } from "url"
+import { npmWrapper } from "./npm-wrapper"
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
 process.chdir(dir)
@@ -94,7 +95,11 @@ async function createNativePackage(sourceName: string, version: string) {
     await fs.promises.rm(sourceBinaryPath, { force: true })
   }
 
-  const nativeSidecar = path.join(targetDir, "bin", "codegoblin-native" + (packageJson.os?.[0] === "win32" ? ".exe" : ""))
+  const nativeSidecar = path.join(
+    targetDir,
+    "bin",
+    "codegoblin-native" + (packageJson.os?.[0] === "win32" ? ".exe" : ""),
+  )
   if (fs.existsSync(nativeSidecar)) {
     await fs.promises.chmod(nativeSidecar, 0o755)
   }
@@ -112,52 +117,6 @@ async function createNativePackage(sourceName: string, version: string) {
   })
 
   return [targetName, version] as const
-}
-
-function wrapper(command: string) {
-  return `#!/usr/bin/env node
-import childProcess from "child_process"
-import fs from "fs"
-import path from "path"
-import { fileURLToPath } from "url"
-
-const binDir = path.dirname(fileURLToPath(import.meta.url))
-const native = path.join(binDir, "${product.command}.exe")
-
-if (!fs.existsSync(native)) {
-  console.error("Error: ${product.name}'s native binary was not installed.")
-  console.error("")
-  console.error("This can happen when installing with --ignore-scripts or with a package manager")
-  console.error("that does not run postinstall scripts by default.")
-  console.error("")
-  console.error("To fix this, run:")
-  console.error("  cd node_modules/${publishedPackageName()} && node postinstall.mjs")
-  process.exit(1)
-}
-
-const child = childProcess.spawn(native, process.argv.slice(2), {
-  stdio: "inherit",
-  env: {
-    ...process.env,
-    CODEGOBLIN: "1",
-    CODEGOBLIN_CLI_NAME: "${command}",
-    OPENCODE: "1",
-  },
-})
-
-child.on("error", (error) => {
-  console.error(error.message)
-  process.exit(1)
-})
-
-child.on("exit", (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal)
-    return
-  }
-  process.exit(typeof code === "number" ? code : 0)
-})
-`
 }
 
 function readme(version: string) {
@@ -194,8 +153,22 @@ async function createInstallerPackage(nativePackages: Record<string, string>, ve
   await Bun.file(path.join(packageDir, "README.md")).write(readme(version))
   const commandWrapper = path.join(packageDir, "bin", `${product.command}.mjs`)
   const shortCommandWrapper = path.join(packageDir, "bin", `${product.shortCommand}.mjs`)
-  await Bun.file(commandWrapper).write(wrapper(product.command))
-  await Bun.file(shortCommandWrapper).write(wrapper(product.shortCommand))
+  await Bun.file(commandWrapper).write(
+    npmWrapper({
+      command: product.command,
+      nativeCommand: product.command,
+      productName: product.name,
+      packageName: publishedPackageName(),
+    }),
+  )
+  await Bun.file(shortCommandWrapper).write(
+    npmWrapper({
+      command: product.shortCommand,
+      nativeCommand: product.command,
+      productName: product.name,
+      packageName: publishedPackageName(),
+    }),
+  )
   await fs.promises.chmod(commandWrapper, 0o755)
   await fs.promises.chmod(shortCommandWrapper, 0o755)
 
