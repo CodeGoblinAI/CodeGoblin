@@ -18,11 +18,44 @@ import * as sessions from "../core/sessions"
 const page = fileURLToPath(new URL("./index.html", import.meta.url))
 const root = process.cwd()
 
+/**
+ * This server hands a model read and write access to the working directory,
+ * so it is deliberately hard to reach:
+ *
+ * - bound to loopback, not 0.0.0.0, so nothing on the LAN can drive it
+ * - same-origin only. Without this, any web page you happen to visit could
+ *   POST to localhost and make the agent read your files and return the
+ *   contents to the page.
+ */
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
+
+function sameOrigin(request: Request, url: URL): boolean {
+  const host = request.headers.get("host") ?? ""
+  // Strip the port without a regex; an escaped d is easy to lose in tooling
+  // and silently turns this check into deny-everything.
+  const hostname = host.includes(":") && !host.startsWith("[") ? host.slice(0, host.lastIndexOf(":")) : host
+  if (!LOOPBACK.has(hostname)) return false
+
+  const origin = request.headers.get("origin")
+  if (origin) {
+    try {
+      if (new URL(origin).host !== host) return false
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 
 async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url)
+
+  if (url.pathname.startsWith("/api/") && !sameOrigin(request, url)) {
+    return json({ error: "refused: local same-origin requests only" }, 403)
+  }
 
   if (url.pathname === "/api/providers") {
     return json({
@@ -101,6 +134,12 @@ async function handle(request: Request): Promise<Response> {
     })
   }
 
+  if (url.pathname === "/app.js") {
+    return new Response(file(fileURLToPath(new URL("./app.js", import.meta.url))), {
+      headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" },
+    })
+  }
+
   return new Response(file(page), {
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
   })
@@ -109,7 +148,7 @@ async function handle(request: Request): Promise<Response> {
 let server
 for (const port of [4400, 4401, 4402, 4403, 0]) {
   try {
-    server = Bun.serve({ port, fetch: handle })
+    server = Bun.serve({ port, hostname: "127.0.0.1", fetch: handle })
     break
   } catch (error) {
     const inUse = error instanceof Error && /in use|EADDRINUSE/i.test(error.message)
@@ -123,4 +162,4 @@ if (!server) {
   process.exit(1)
 }
 
-console.log(`CodeGoblin web -> http://localhost:${server.port}`)
+console.log(`CodeGoblin web -> http://localhost:${server.port}  (loopback only)`)

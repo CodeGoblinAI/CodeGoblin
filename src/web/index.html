@@ -3,209 +3,91 @@
 <title>CodeGoblin</title>
 <style>
   :root {
-    --bg: #0f1113; --panel: #16181c; --line: #24272c;
-    --text: #dcdcdc; --muted: #7a7f87; --goblin: #9adb35; --gold: #d4b06a;
+    --bg: #0f1113; --panel: #16181c; --panel2: #1b1e23; --line: #24272c;
+    --text: #dcdcdc; --muted: #7a7f87; --goblin: #9adb35; --gold: #d4b06a; --red: #cc5566;
     --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; height: 100vh; display: flex; background: var(--bg); color: var(--text); font-family: var(--font); }
+  body { margin: 0; height: 100vh; display: flex; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; }
 
-  /* Left: sessions + projects */
-  aside { width: 220px; flex-shrink: 0; border-right: 1px solid var(--line); display: flex; flex-direction: column; }
-  .brand { padding: 14px 16px; font-weight: 600; letter-spacing: .3px; color: var(--goblin); }
+  aside { width: 230px; flex-shrink: 0; border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+  .brand { padding: 15px 16px; font-weight: 600; color: var(--goblin); letter-spacing: .2px; }
   .group { padding: 14px 16px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
-  .row { padding: 7px 16px; font-size: 13px; color: var(--muted); cursor: default; }
-  .row:hover { background: #1b1e23; color: var(--text); }
+  .row { padding: 7px 16px; font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 2px solid transparent; }
+  .row:hover { background: var(--panel2); color: var(--text); }
+  .row.active { color: var(--text); border-left-color: var(--goblin); background: var(--panel); }
+  #new-session { color: var(--goblin); }
   aside footer { margin-top: auto; padding: 12px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 
-  /* Middle: the conversation */
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .empty { flex: 1; display: grid; place-content: center; text-align: center; gap: 10px; }
-  .empty h1 { margin: 0; font-size: 22px; font-weight: 500; }
-  .empty p { margin: 0; color: var(--muted); font-size: 13px; }
-  .composer { border-top: 1px solid var(--line); padding: 14px 18px; }
-  .box { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-  .box:focus-within { border-color: #3a7d3f; }
-  .box input { flex: 1; background: none; border: 0; outline: 0; color: var(--text); font: inherit; font-size: 14px; }
-  .send { width: 30px; height: 30px; border: 0; border-radius: 999px; background: linear-gradient(#9adb35, #6fae28); color: #06210a; font-size: 15px; cursor: pointer; }
-  .meta { display: flex; gap: 14px; padding: 8px 2px 0; font-size: 12px; color: var(--muted); }
+  .thread { flex: 1; overflow-y: auto; padding: 24px 26px; display: flex; flex-direction: column; gap: 16px; scroll-behavior: smooth; }
+  .empty-hint { margin: auto; text-align: center; color: var(--muted); }
+  .empty-hint h1 { margin: 0 0 6px; font-size: 21px; font-weight: 500; color: var(--text); }
+  .empty-hint p { margin: 0; font-size: 13px; }
 
-  /* Right: activity */
-  section.activity { width: 300px; flex-shrink: 0; border-left: 1px solid var(--line); padding: 14px 16px; }
-  .pill { display: inline-block; font-size: 11px; color: var(--gold); border: 1px solid #3a3320; border-radius: 999px; padding: 2px 9px; }
-
-  /* transcript */
-  .thread { flex: 1; overflow-y: auto; padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; }
   .turn { display: flex; gap: 12px; }
-  .turn .who { width: 62px; flex-shrink: 0; font-size: 12px; color: var(--muted); padding-top: 2px; }
-  .turn .body { flex: 1; min-width: 0; font-size: 14px; line-height: 1.6; border-left: 2px solid transparent; padding-left: 12px; }
+  .turn .who { width: 56px; flex-shrink: 0; font-size: 12px; color: var(--muted); padding-top: 2px; }
+  .turn .body { flex: 1; min-width: 0; line-height: 1.65; border-left: 2px solid transparent; padding-left: 13px; overflow-wrap: anywhere; }
   .turn.user .body { border-left-color: var(--gold); }
   .turn.agent .body { border-left-color: var(--goblin); }
-  .turn .body p { margin: 0 0 8px; }
-  .tool { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; margin: 4px 6px 4px 0; }
-  .tool .ok { color: var(--goblin); }
-  code { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
-  .act-item { display: flex; gap: 8px; font-size: 12.5px; padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--muted); }
-  .act-item .ok { color: var(--goblin); }
+  .body p { margin: 0 0 9px; } .body p:last-child { margin-bottom: 0; }
+  .body h3, .body h4 { margin: 12px 0 6px; font-size: 14px; }
+  .body ul { margin: 6px 0; padding-left: 20px; } .body li { margin: 3px 0; }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 12.5px; }
+  pre.code { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 11px 13px; overflow-x: auto; margin: 9px 0; }
+  pre.code code { background: none; border: 0; padding: 0; font-size: 12.5px; line-height: 1.5; }
+
+  .tool { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 7px 11px; margin-left: 68px; font-family: var(--mono); }
+  .tool .tname { color: var(--text); }
+  .tool .targs { opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool.done .spin { color: var(--goblin); } .tool.failed .spin { color: var(--red); }
+  .tool.running .spin { width: 9px; height: 9px; border: 1.5px solid var(--line); border-top-color: var(--goblin); border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .composer { border-top: 1px solid var(--line); padding: 14px 20px 12px; }
+  .box { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; transition: border-color .15s; }
+  .box:focus-within { border-color: #3a7d3f; }
+  .box input { flex: 1; background: none; border: 0; outline: 0; color: var(--text); font: inherit; }
+  .send { width: 30px; height: 30px; border: 0; border-radius: 999px; background: linear-gradient(#9adb35, #6fae28); color: #06210a; font-size: 15px; cursor: pointer; flex-shrink: 0; }
+  .send:disabled { opacity: .3; cursor: default; }
+  .stop { border: 1px solid var(--line); background: var(--panel2); color: var(--muted); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
+  .meta { display: flex; align-items: center; gap: 12px; padding: 9px 3px 0; font-size: 12px; color: var(--muted); }
+  select { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 3px 7px; font: inherit; font-size: 12px; }
+
+  section.activity { width: 290px; flex-shrink: 0; border-left: 1px solid var(--line); padding: 15px 16px; }
+  .pill { display: inline-block; font-size: 11px; color: var(--gold); border: 1px solid #3a3320; border-radius: 999px; padding: 2px 10px; }
 </style>
 
 <aside>
   <div class="brand">CodeGoblin</div>
-  <div class="group">Today</div>
+  <div class="group">Sessions</div>
   <div class="row" id="new-session">+ New session</div>
   <div id="session-list"></div>
-  <div class="group">Project hoard</div>
+  <div class="group">Project</div>
   <div class="row">cg-next</div>
   <footer>Settings · Help</footer>
 </aside>
 
 <main>
-  
   <div class="thread" id="thread"></div>
   <div class="composer">
     <div class="box">
-      <input id="input" placeholder="Ask the goblin…  / for commands, @ for context" />
+      <input id="input" placeholder="Ask the goblin…  / for commands, @ for context" autocomplete="off" />
+      <button class="stop" id="stop" hidden>Stop</button>
       <button class="send" id="send" title="Send">↑</button>
     </div>
-    <div class="meta"><span>main</span><select id="provider"></select><span id="hint"></span></div>
+    <div class="meta">
+      <span>main</span>
+      <select id="provider"></select>
+      <span id="hint"></span>
+    </div>
   </div>
 </main>
 
 <section class="activity">
   <span class="pill">Activity</span>
-  <div style="margin-top:12px">
-    <div class="act-item"><span class="ok">✓</span><span>read src/tui/app.ts</span></div>
-    <div class="act-item"><span class="ok">✓</span><span>edit src/tui/app.ts</span></div>
-    <div class="act-item"><span>◷</span><span>reading src/core/providers.ts</span></div>
-  </div>
-  <p style="color:var(--muted);font-size:12px;margin-top:14px">1 file changed · +6 −1</p>
+  <p style="color:var(--muted);font-size:12.5px;margin-top:12px">Tool calls appear in the conversation as they run.</p>
 </section>
 
-<style>
-  select { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px; font: inherit; font-size: 12px; }
-  .empty-hint { color: var(--muted); font-size: 13px; text-align: center; margin-top: 18vh; }
-</style>
-<script>
-const thread = document.getElementById("thread")
-const input = document.getElementById("input")
-const send = document.getElementById("send")
-const providerSelect = document.getElementById("provider")
-const hint = document.getElementById("hint")
-const sessionList = document.getElementById("session-list")
-let sessionId = null
-let busy = false
-
-const empty = () => { thread.innerHTML = '<div class="empty-hint">What should we work on?</div>' }
-empty()
-
-function turn(kind, text) {
-  const wrap = document.createElement("div")
-  wrap.className = "turn " + (kind === "user" ? "user" : "agent")
-  wrap.innerHTML = '<div class="who">' + (kind === "user" ? "you" : "goblin") + '</div><div class="body"></div>'
-  wrap.querySelector(".body").textContent = text
-  thread.appendChild(wrap)
-  thread.scrollTop = thread.scrollHeight
-  return wrap.querySelector(".body")
-}
-
-function toolChip(name, args) {
-  const chip = document.createElement("span")
-  chip.className = "tool"
-  chip.innerHTML = '<span class="ok">⚙</span>'
-  chip.append(" " + name + " " + (args || "").slice(0, 50))
-  thread.appendChild(chip)
-  thread.scrollTop = thread.scrollHeight
-  return chip
-}
-
-async function refreshSessions() {
-  const data = await fetch("/api/sessions").then(r => r.json()).catch(() => ({ sessions: [] }))
-  sessionList.innerHTML = ""
-  for (const s of data.sessions) {
-    const row = document.createElement("div")
-    row.className = "row"
-    row.textContent = s.title
-    row.onclick = () => openSession(s.id)
-    sessionList.appendChild(row)
-  }
-}
-
-async function openSession(id) {
-  const data = await fetch("/api/session?id=" + encodeURIComponent(id)).then(r => r.json()).catch(() => null)
-  if (!data || !data.session) return
-  sessionId = id
-  thread.innerHTML = ""
-  for (const m of data.session.messages) {
-    if (m.role === "user") turn("user", m.content)
-    else if (m.role === "assistant" && m.content) turn("agent", m.content)
-  }
-}
-
-async function submit() {
-  const text = input.value.trim()
-  if (!text || busy) return
-  busy = true
-  input.value = ""
-  if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
-  turn("user", text)
-
-  let body = null
-  const response = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text, sessionId, provider: providerSelect.value }),
-  })
-
-  if (!response.ok || !response.body) {
-    const err = await response.json().catch(() => ({}))
-    turn("agent", err.error || "request failed")
-    busy = false
-    return
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ""
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split(String.fromCharCode(10, 10))
-    buffer = parts.pop() || ""
-    for (const part of parts) {
-      const line = part.trim()
-      if (!line.startsWith("data:")) continue
-      let event
-      try { event = JSON.parse(line.slice(5).trim()) } catch { continue }
-
-      if (event.type === "session") sessionId = event.id
-      if (event.type === "text") {
-        if (!body) body = turn("agent", "")
-        body.textContent += event.delta
-        thread.scrollTop = thread.scrollHeight
-      }
-      if (event.type === "tool_start") { body = null; toolChip(event.name, event.args) }
-      if (event.type === "error") turn("agent", event.message)
-      if (event.type === "saved") refreshSessions()
-    }
-  }
-  busy = false
-}
-
-send.onclick = submit
-input.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit() } }
-document.getElementById("new-session").onclick = () => { sessionId = null; empty() }
-
-fetch("/api/providers").then(r => r.json()).then(data => {
-  for (const p of data.providers) {
-    const option = document.createElement("option")
-    option.value = p.id
-    option.textContent = p.label + " · " + p.model + (p.ready ? "" : " (no key)")
-    providerSelect.appendChild(option)
-  }
-  hint.textContent = data.providers.some(p => p.ready) ? "" : "no API keys found"
-})
-refreshSessions()
-</script>
-
+<script src="/app.js"></script>

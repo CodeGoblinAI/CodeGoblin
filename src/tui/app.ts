@@ -110,11 +110,27 @@ function render() {
   while (body.length < room) body.push("")
 
   const inner = Math.max(10, cols - 4)
-  const shown = streaming
-    ? `${dim}goblin is thinking… esc to quit${ansi.reset}`
-    : input
-      ? input.slice(0, cursor) + "█" + input.slice(cursor)
-      : `${dim}ask the goblin anything…${ansi.reset}`
+  // The input is a viewport, not the whole string: a long prompt scrolls
+  // sideways rather than overflowing the box and breaking the layout.
+  const visibleInput = Math.max(10, inner - 4)
+  let shown: string
+  if (streaming) {
+    shown = `${dim}goblin is thinking… esc to quit${ansi.reset}`
+  } else if (!input) {
+    shown = `${dim}ask the goblin anything…${ansi.reset}`
+  } else {
+    const from = Math.max(0, cursor - visibleInput + 1)
+    const slice = input.slice(from, from + visibleInput)
+    const at = cursor - from
+    shown =
+      (from > 0 ? theme.muted + "…" + ansi.reset : "") +
+      theme.text +
+      slice.slice(0, at) +
+      "█" +
+      slice.slice(at) +
+      ansi.reset +
+      (from + visibleInput < input.length ? theme.muted + "…" + ansi.reset : "")
+  }
 
   body.push(theme.border + "  " + "─".repeat(inner) + ansi.reset)
   body.push(theme.goblin + "  │ " + ansi.reset + theme.text + shown + ansi.reset)

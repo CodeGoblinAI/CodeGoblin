@@ -64,3 +64,29 @@ describe("edit_file", () => {
     expect(result.startsWith("error:")).toBe(true)
   })
 })
+
+describe("protected paths", () => {
+  const root = process.cwd()
+
+  // A model asked to "fix the repo" can reach for .git; these are never
+  // what was actually wanted, and the damage is hard to undo.
+  test("refuses to write inside .git", async () => {
+    const result = await runTool("write_file", { path: ".git/config", content: "x" }, root)
+    expect(result).toContain("protected")
+  })
+
+  test("refuses to write inside node_modules", async () => {
+    const result = await runTool("write_file", { path: "node_modules/evil.js", content: "x" }, root)
+    expect(result).toContain("protected")
+  })
+
+  test("refuses to rewrite lockfiles", async () => {
+    const result = await runTool("write_file", { path: "package-lock.json", content: "{}" }, root)
+    expect(result).toContain("lockfile")
+  })
+
+  test("still allows ordinary writes", async () => {
+    const result = await runTool("write_file", { path: "test-ok.txt", content: "fine" }, root)
+    expect(result).toContain("wrote")
+  })
+})

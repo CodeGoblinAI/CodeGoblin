@@ -26,6 +26,27 @@ function resolveInside(root: string, target: string): string {
   return absolute
 }
 
+/**
+ * Paths a tool must never write to. Reading them is fine; a model rewriting
+ * .git internals or a lockfile is a bad day, and it is never what was asked.
+ */
+const PROTECTED_SEGMENTS = new Set([".git", "node_modules"])
+const PROTECTED_FILES = new Set(["bun.lock", "bun.lockb", "package-lock.json"])
+
+function assertWritable(relative: string) {
+  // Normalise separators without a regex: on Windows path.relative returns
+  // backslashes, and an escaped character class is easy to get wrong.
+  const BACKSLASH = String.fromCharCode(92)
+  const segments = relative.split(BACKSLASH).join("/").split("/").filter(Boolean)
+  if (segments.some((segment) => PROTECTED_SEGMENTS.has(segment))) {
+    throw new Error(`refusing to write inside a protected directory: ${relative}`)
+  }
+  const name = segments[segments.length - 1] ?? ""
+  if (PROTECTED_FILES.has(name)) {
+    throw new Error(`refusing to write to a lockfile: ${relative}`)
+  }
+}
+
 const clip = (text: string) =>
   text.length > MAX_OUTPUT ? text.slice(0, MAX_OUTPUT) + `\n… truncated at ${MAX_OUTPUT} characters` : text
 
@@ -71,6 +92,7 @@ export const TOOLS: Tool[] = [
     },
     run: async (args, root) => {
       const target = resolveInside(root, args.path)
+      assertWritable(path.relative(root, target))
       await fs.mkdir(path.dirname(target), { recursive: true })
       await fs.writeFile(target, args.content, "utf8")
       const lines = String(args.content).split("\n").length
@@ -93,6 +115,7 @@ export const TOOLS: Tool[] = [
     },
     run: async (args, root) => {
       const target = resolveInside(root, args.path)
+      assertWritable(path.relative(root, target))
       const before = await fs.readFile(target, "utf8")
       const occurrences = before.split(args.old_string).length - 1
 
