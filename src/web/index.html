@@ -52,7 +52,8 @@
 <aside>
   <div class="brand">CodeGoblin</div>
   <div class="group">Today</div>
-  <div class="row">New session</div>
+  <div class="row" id="new-session">+ New session</div>
+  <div id="session-list"></div>
   <div class="group">Project hoard</div>
   <div class="row">cg-next</div>
   <footer>Settings · Help</footer>
@@ -60,35 +61,13 @@
 
 <main>
   
-  <div class="thread">
-    <div class="turn user">
-      <div class="who">you</div>
-      <div class="body"><p>add a --provider flag to the tui</p></div>
-    </div>
-    <div class="turn agent">
-      <div class="who">goblin</div>
-      <div class="body">
-        <p>Reading the entry point to see how arguments are handled.</p>
-        <span class="tool"><span class="ok">✓</span> read <code>src/tui/app.ts</code></span>
-        <span class="tool"><span class="ok">✓</span> edit <code>src/tui/app.ts</code> <span style="color:var(--goblin)">+6</span> <span style="color:#c56">-1</span></span>
-        <p>Added the flag; it falls back to DeepSeek when unset.</p>
-      </div>
-    </div>
-    <div class="turn user">
-      <div class="who">you</div>
-      <div class="body"><p>now make it remember the last one</p></div>
-    </div>
-    <div class="turn agent">
-      <div class="who">goblin</div>
-      <div class="body"><p>Working on it…</p></div>
-    </div>
-  </div>
+  <div class="thread" id="thread"></div>
   <div class="composer">
     <div class="box">
-      <input placeholder="Ask the goblin…  / for commands, @ for context" />
-      <button class="send" title="Send">↑</button>
+      <input id="input" placeholder="Ask the goblin…  / for commands, @ for context" />
+      <button class="send" id="send" title="Send">↑</button>
     </div>
-    <div class="meta"><span>main</span><span>no model selected</span></div>
+    <div class="meta"><span>main</span><select id="provider"></select><span id="hint"></span></div>
   </div>
 </main>
 
@@ -101,3 +80,132 @@
   </div>
   <p style="color:var(--muted);font-size:12px;margin-top:14px">1 file changed · +6 −1</p>
 </section>
+
+<style>
+  select { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px; font: inherit; font-size: 12px; }
+  .empty-hint { color: var(--muted); font-size: 13px; text-align: center; margin-top: 18vh; }
+</style>
+<script>
+const thread = document.getElementById("thread")
+const input = document.getElementById("input")
+const send = document.getElementById("send")
+const providerSelect = document.getElementById("provider")
+const hint = document.getElementById("hint")
+const sessionList = document.getElementById("session-list")
+let sessionId = null
+let busy = false
+
+const empty = () => { thread.innerHTML = '<div class="empty-hint">What should we work on?</div>' }
+empty()
+
+function turn(kind, text) {
+  const wrap = document.createElement("div")
+  wrap.className = "turn " + (kind === "user" ? "user" : "agent")
+  wrap.innerHTML = '<div class="who">' + (kind === "user" ? "you" : "goblin") + '</div><div class="body"></div>'
+  wrap.querySelector(".body").textContent = text
+  thread.appendChild(wrap)
+  thread.scrollTop = thread.scrollHeight
+  return wrap.querySelector(".body")
+}
+
+function toolChip(name, args) {
+  const chip = document.createElement("span")
+  chip.className = "tool"
+  chip.innerHTML = '<span class="ok">⚙</span>'
+  chip.append(" " + name + " " + (args || "").slice(0, 50))
+  thread.appendChild(chip)
+  thread.scrollTop = thread.scrollHeight
+  return chip
+}
+
+async function refreshSessions() {
+  const data = await fetch("/api/sessions").then(r => r.json()).catch(() => ({ sessions: [] }))
+  sessionList.innerHTML = ""
+  for (const s of data.sessions) {
+    const row = document.createElement("div")
+    row.className = "row"
+    row.textContent = s.title
+    row.onclick = () => openSession(s.id)
+    sessionList.appendChild(row)
+  }
+}
+
+async function openSession(id) {
+  const data = await fetch("/api/session?id=" + encodeURIComponent(id)).then(r => r.json()).catch(() => null)
+  if (!data || !data.session) return
+  sessionId = id
+  thread.innerHTML = ""
+  for (const m of data.session.messages) {
+    if (m.role === "user") turn("user", m.content)
+    else if (m.role === "assistant" && m.content) turn("agent", m.content)
+  }
+}
+
+async function submit() {
+  const text = input.value.trim()
+  if (!text || busy) return
+  busy = true
+  input.value = ""
+  if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
+  turn("user", text)
+
+  let body = null
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text, sessionId, provider: providerSelect.value }),
+  })
+
+  if (!response.ok || !response.body) {
+    const err = await response.json().catch(() => ({}))
+    turn("agent", err.error || "request failed")
+    busy = false
+    return
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split(String.fromCharCode(10, 10))
+    buffer = parts.pop() || ""
+    for (const part of parts) {
+      const line = part.trim()
+      if (!line.startsWith("data:")) continue
+      let event
+      try { event = JSON.parse(line.slice(5).trim()) } catch { continue }
+
+      if (event.type === "session") sessionId = event.id
+      if (event.type === "text") {
+        if (!body) body = turn("agent", "")
+        body.textContent += event.delta
+        thread.scrollTop = thread.scrollHeight
+      }
+      if (event.type === "tool_start") { body = null; toolChip(event.name, event.args) }
+      if (event.type === "error") turn("agent", event.message)
+      if (event.type === "saved") refreshSessions()
+    }
+  }
+  busy = false
+}
+
+send.onclick = submit
+input.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit() } }
+document.getElementById("new-session").onclick = () => { sessionId = null; empty() }
+
+fetch("/api/providers").then(r => r.json()).then(data => {
+  for (const p of data.providers) {
+    const option = document.createElement("option")
+    option.value = p.id
+    option.textContent = p.label + " · " + p.model + (p.ready ? "" : " (no key)")
+    providerSelect.appendChild(option)
+  }
+  hint.textContent = data.providers.some(p => p.ready) ? "" : "no API keys found"
+})
+refreshSessions()
+</script>
+

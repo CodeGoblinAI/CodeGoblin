@@ -12,11 +12,13 @@ import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { PROVIDERS, DEFAULT_PROVIDER } from "../core/providers"
 import { apiKey } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
+import { isCommand, runCommand } from "../core/commands"
+import * as sessions from "../core/sessions"
 
 const argv = process.argv.slice(2)
 const providerId = argv[argv.indexOf("--provider") + 1] ?? DEFAULT_PROVIDER
-const provider = PROVIDERS[providerId] ?? PROVIDERS[DEFAULT_PROVIDER]!
-const key = apiKey(provider.id)
+let provider = PROVIDERS[providerId] ?? PROVIDERS[DEFAULT_PROVIDER]!
+let key = apiKey(provider.id)
 
 const out = process.stdout
 const messages: Message[] = [
@@ -33,6 +35,7 @@ type Entry = { kind: "user" | "agent" | "tool"; text: string }
 const transcript: Entry[] = []
 let input = ""
 let streaming = false
+let session = sessions.create(provider.id)
 let status = key ? "" : `no key for ${provider.label} — set ${provider.id.toUpperCase()}_API_KEY`
 
 const size = () => ({ cols: out.columns ?? 80, rows: out.rows ?? 24 })
@@ -69,7 +72,15 @@ function render() {
   } else {
     for (const entry of transcript) {
       if (entry.kind === "tool") {
-        lines.push(theme.muted + "  ⚙ " + entry.text + ansi.reset)
+        // Tool output can be several lines; push each so the height count
+        // stays honest and the status line is not pushed off screen.
+        const toolLines = entry.text.split(String.fromCharCode(10))
+        for (const [index, toolLine] of toolLines.entries()) {
+          const prefix = index === 0 ? "  ⚙ " : "    "
+          for (const piece of wrap(toolLine, width)) {
+            lines.push(theme.muted + prefix + piece + ansi.reset)
+          }
+        }
         lines.push("")
         continue
       }
@@ -113,6 +124,35 @@ async function send() {
   if (!text || streaming) return
   if (!key) { status = `no key for ${provider.label}`; render(); return }
 
+  if (isCommand(text)) {
+    input = ""
+    const result = runCommand(text)
+    if (result.kind === "quit") return shutdown()
+    if (result.kind === "clear") {
+      transcript.length = 0
+      messages.length = 1
+      session = sessions.create(provider.id)
+      status = "new conversation"
+    }
+    if (result.kind === "message") transcript.push({ kind: "tool", text: result.text })
+    if (result.kind === "provider") {
+      provider = PROVIDERS[result.id]!
+      key = apiKey(provider.id)
+      status = `switched to ${provider.label}`
+    }
+    if (result.kind === "sessions") {
+      const saved = await sessions.list(10)
+      transcript.push({
+        kind: "tool",
+        text: saved.length
+          ? saved.map((entry) => `${entry.id}  ${entry.title}`).join(String.fromCharCode(10))
+          : "no saved sessions yet",
+      })
+    }
+    render()
+    return
+  }
+
   input = ""
   messages.push({ role: "user", content: text })
   transcript.push({ kind: "user", text })
@@ -147,6 +187,8 @@ async function send() {
     status = error instanceof Error ? error.message.slice(0, 120) : "request failed"
   } finally {
     streaming = false
+    session.messages = messages
+    void sessions.save(session).catch(() => {})
     render()
   }
 }

@@ -33,3 +33,34 @@ describe("tool sandbox", () => {
     expect(result).not.toContain("node_modules")
   })
 })
+
+describe("edit_file", () => {
+  const root = process.cwd()
+  const scratch = "test-scratch.txt"
+
+  test("replaces a unique string and reports a diff", async () => {
+    await runTool("write_file", { path: scratch, content: "alpha\nbeta\ngamma\n" }, root)
+    const result = await runTool("edit_file", { path: scratch, old_string: "beta", new_string: "BETA" }, root)
+    expect(result).toContain("+1 -1")
+    expect(result).toContain("- beta")
+    expect(result).toContain("+ BETA")
+    const after = await runTool("read_file", { path: scratch }, root)
+    expect(after).toContain("BETA")
+  })
+
+  test("refuses when the string is missing", async () => {
+    const result = await runTool("edit_file", { path: scratch, old_string: "nowhere", new_string: "x" }, root)
+    expect(result).toContain("not found")
+  })
+
+  test("refuses when the string is ambiguous", async () => {
+    await runTool("write_file", { path: scratch, content: "dup\ndup\n" }, root)
+    const result = await runTool("edit_file", { path: scratch, old_string: "dup", new_string: "x" }, root)
+    expect(result).toContain("appears 2 times")
+  })
+
+  test("cannot edit outside the working directory", async () => {
+    const result = await runTool("edit_file", { path: "../escape.txt", old_string: "a", new_string: "b" }, root)
+    expect(result.startsWith("error:")).toBe(true)
+  })
+})

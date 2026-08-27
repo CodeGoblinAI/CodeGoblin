@@ -77,7 +77,63 @@ export const TOOLS: Tool[] = [
       return `wrote ${path.relative(root, target)} (${lines} lines)`
     },
   },
+  {
+    name: "edit_file",
+    description:
+      "Replace an exact string in a file. Prefer this over write_file: it changes only what you name, " +
+      "and fails loudly if the text is missing or ambiguous instead of silently rewriting the file.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        old_string: { type: "string", description: "Exact text to replace. Must appear exactly once." },
+        new_string: { type: "string", description: "Replacement text." },
+      },
+      required: ["path", "old_string", "new_string"],
+    },
+    run: async (args, root) => {
+      const target = resolveInside(root, args.path)
+      const before = await fs.readFile(target, "utf8")
+      const occurrences = before.split(args.old_string).length - 1
+
+      // Refuse rather than guess. A silent wrong edit is worse than an error.
+      if (occurrences === 0) return "error: old_string not found in " + args.path
+      if (occurrences > 1) {
+        return "error: old_string appears " + occurrences + " times in " + args.path + "; include more context to make it unique"
+      }
+
+      const after = before.replace(args.old_string, args.new_string)
+      await fs.writeFile(target, after, "utf8")
+      return diff(before, after, path.relative(root, target))
+    },
+  },
 ]
+
+/**
+ * A unified-ish diff, enough to see what changed without a dependency.
+ * Walks from both ends to find the changed span, which is all a line-level
+ * edit needs.
+ */
+function diff(before: string, after: string, label: string): string {
+  const a = before.split(String.fromCharCode(10))
+  const b = after.split(String.fromCharCode(10))
+
+  let head = 0
+  while (head < a.length && head < b.length && a[head] === b[head]) head++
+
+  let tail = 0
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++
+
+  const removed = a.slice(head, a.length - tail)
+  const added = b.slice(head, b.length - tail)
+  const lines = [label + "  +" + added.length + " -" + removed.length, "@@ line " + (head + 1) + " @@"]
+
+  for (const line of removed.slice(0, 20)) lines.push("- " + line)
+  for (const line of added.slice(0, 20)) lines.push("+ " + line)
+  if (removed.length > 20 || added.length > 20) lines.push("… diff truncated")
+
+  return lines.join(String.fromCharCode(10))
+}
 
 export const TOOL_SCHEMA = TOOLS.map((tool) => ({
   type: "function",
