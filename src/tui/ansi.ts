@@ -1,9 +1,10 @@
 /**
  * Terminal control, written directly rather than pulled from a framework.
  *
- * This is the whole surface a TUI actually needs to start: move the cursor,
- * clear, colour, and switch to the alternate screen. Everything visual is
- * built on these.
+ * Colours are CodeGoblin's own charcoal theme, taken from the theme
+ * definition in the existing app so both look like the same product:
+ * neutral greys, green reserved for identity and active state, gold for
+ * accents.
  */
 const ESC = "\x1b["
 
@@ -17,15 +18,41 @@ export const ansi = {
   reset: `${ESC}0m`,
 }
 
-/** 24-bit colour. Every modern terminal supports it; 256-colour fallback is not worth the branch yet. */
+/** 24-bit colour. Every modern terminal supports it. */
 export const rgb = (r: number, g: number, b: number) => `${ESC}38;2;${r};${g};${b}m`
-export const dim = `${ESC}2m`
 export const bold = `${ESC}1m`
+export const dim = `${ESC}2m`
+
+const hex = (value: string) =>
+  rgb(
+    parseInt(value.slice(1, 3), 16),
+    parseInt(value.slice(3, 5), 16),
+    parseInt(value.slice(5, 7), 16),
+  )
+
+export const palette = {
+  step1: "#16181c",
+  step2: "#1a1d22",
+  step3: "#22262c",
+  step5: "#333842",
+  step7: "#4b515d",
+  step11: "#9aa1ab",
+  step12: "#e8eaed",
+  green: "#62f56e",
+  greenBright: "#92ff9b",
+  gold: "#d4b06a",
+  red: "#ff6f7d",
+  orange: "#ffb84d",
+}
 
 export const theme = {
-  goblin: rgb(154, 219, 53),
-  gold: rgb(212, 176, 106),
-  text: rgb(220, 220, 220),
-  muted: rgb(120, 120, 120),
-  border: rgb(60, 70, 60),
+  goblin: hex(palette.green),
+  goblinBright: hex(palette.greenBright),
+  gold: hex(palette.gold),
+  text: hex(palette.step12),
+  muted: hex(palette.step11),
+  border: hex(palette.step5),
+  borderStrong: hex(palette.step7),
+  error: hex(palette.red),
+  warning: hex(palette.orange),
 }

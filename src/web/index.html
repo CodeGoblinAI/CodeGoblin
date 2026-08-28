@@ -3,8 +3,16 @@
 <title>CodeGoblin</title>
 <style>
   :root {
-    --bg: #0f1113; --panel: #16181c; --panel2: #1b1e23; --line: #24272c;
-    --text: #dcdcdc; --muted: #7a7f87; --goblin: #9adb35; --gold: #d4b06a; --red: #cc5566;
+    /* CodeGoblin charcoal theme, taken from the app theme definition so both
+       surfaces look like the same product. Neutral greys; green is reserved
+       for identity and active state, gold for accents. */
+    --step1: #16181c; --step2: #1a1d22; --step3: #22262c; --step5: #333842; --step7: #4b515d;
+    --step11: #9aa1ab; --step12: #e8eaed;
+    --bg: var(--step1); --panel: var(--step2); --panel2: var(--step3);
+    --line: var(--step5); --line-strong: var(--step7);
+    --text: var(--step12); --muted: var(--step11);
+    --goblin: #62f56e; --goblin-bright: #92ff9b; --gold: #d4b06a;
+    --red: #ff6f7d; --orange: #ffb84d;
     --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
     --mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
   }
@@ -47,9 +55,9 @@
 
   .composer { border-top: 1px solid var(--line); padding: 14px 20px 12px; }
   .box { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; transition: border-color .15s; }
-  .box:focus-within { border-color: #3a7d3f; }
+  .box:focus-within { border-color: var(--goblin); }
   .box input { flex: 1; background: none; border: 0; outline: 0; color: var(--text); font: inherit; }
-  .send { width: 30px; height: 30px; border: 0; border-radius: 999px; background: linear-gradient(#9adb35, #6fae28); color: #06210a; font-size: 15px; cursor: pointer; flex-shrink: 0; }
+  .send { width: 30px; height: 30px; border: 0; border-radius: 999px; background: linear-gradient(var(--goblin-bright), var(--goblin)); color: #06210a; font-size: 15px; cursor: pointer; flex-shrink: 0; }
   .send:disabled { opacity: .3; cursor: default; }
   .stop { border: 1px solid var(--line); background: var(--panel2); color: var(--muted); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
   .meta { display: flex; align-items: center; gap: 12px; padding: 9px 3px 0; font-size: 12px; color: var(--muted); }

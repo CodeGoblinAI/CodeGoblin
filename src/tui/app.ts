@@ -284,7 +284,7 @@ process.stdin.on("data", (chunk) => {
     if (pressed.type === "ctrl" && pressed.value === "c") return shutdown()
 
     if (streaming) {
-      if (pressed.type === "escape") return shutdown()
+      // Nothing to do mid-turn; quitting is ctrl+c only.
       continue
     }
 
@@ -293,6 +293,18 @@ process.stdin.on("data", (chunk) => {
       if (pressed.type === "up") { paletteIndex = Math.max(0, paletteIndex - 1); dirty = true; continue }
       if (pressed.type === "down") { paletteIndex = Math.min(palette.length - 1, paletteIndex + 1); dirty = true; continue }
       if (pressed.type === "escape") { palette = undefined; render(); continue }
+      if (pressed.type === "enter") {
+        const chosen = palette[paletteIndex]!.value
+        // Enter on an item already in the input means "yes, that one" - send
+        // it. Otherwise fill it in first, so a choice is always confirmed.
+        if (input.trim() === chosen) { palette = undefined; void send(); return }
+        const needsArgument = chosen === "/model"
+        input = needsArgument ? chosen + " " : chosen
+        cursor = input.length
+        refreshPalette()
+        render()
+        continue
+      }
       if (pressed.type === "ctrl" && pressed.value === "i") {
         input = palette[paletteIndex]!.value + " "
         cursor = input.length
@@ -303,7 +315,10 @@ process.stdin.on("data", (chunk) => {
     }
 
     switch (pressed.type) {
-      case "escape": return shutdown()
+      // Escape clears the line; it never exits. Quitting is ctrl+c.
+      case "escape":
+        if (input) { input = ""; cursor = 0; dirty = true }
+        break
       case "enter": void send(); return
       case "backspace":
         if (cursor > 0) { input = input.slice(0, cursor - 1) + input.slice(cursor); cursor--; dirty = true }
