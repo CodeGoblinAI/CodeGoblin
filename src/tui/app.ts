@@ -17,6 +17,7 @@ import { apiKey } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
 import { isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
+import { Permissions, type Decision } from "../core/permission"
 
 const argv = process.argv.slice(2)
 const flag = (name: string) => {
@@ -47,6 +48,15 @@ const history: string[] = []
 let historyIndex = -1
 let streaming = false
 let status = key ? "" : "no key for " + selection.provider.label
+
+let pending: { tool: string; detail: string; resolve: (d: Decision) => void } | undefined
+const permissions = new Permissions(
+  (tool, detail) =>
+    new Promise<Decision>((resolve) => {
+      pending = { tool, detail, resolve }
+      render()
+    }),
+)
 
 let palette: PaletteItem[] | undefined
 let paletteIndex = 0
@@ -126,7 +136,12 @@ function render() {
   const visibleInput = Math.max(10, inner - 4)
   const caret = caretOn ? "\u2588" : " "
   let shown: string
-  if (streaming) {
+  if (pending) {
+    shown =
+      theme.gold + "allow " + pending.tool + "? " + ansi.reset +
+      theme.text + pending.detail.slice(0, Math.max(10, visibleInput - 24)) + ansi.reset +
+      theme.muted + "  [y/n]" + ansi.reset
+  } else if (streaming) {
     shown = dim + "goblin is working... esc to stop" + ansi.reset
   } else if (!input) {
     shown = theme.text + caret + ansi.reset + dim + "ask the goblin anything..." + ansi.reset
@@ -177,6 +192,7 @@ async function send() {
       transcript = []
       messages = [SYSTEM]
       session = sessions.create(selection.provider.id)
+      permissions.reset()
       status = "new conversation"
     }
     if (result.kind === "message") transcript.push({ kind: "tool", text: result.text })
@@ -223,6 +239,7 @@ async function send() {
       apiKey: key,
       messages,
       root: process.cwd(),
+      permissions,
     })) {
       if (event.type === "thinking") {
         if (!current || current.kind !== "thinking") {
@@ -241,6 +258,10 @@ async function send() {
       if (event.type === "tool_start") {
         current = undefined
         transcript.push({ kind: "tool", text: event.name + " " + event.args.slice(0, 60) })
+      }
+      if (event.type === "tool_denied") {
+        const last = transcript[transcript.length - 1]
+        if (last && last.kind === "tool") last.text += "  (refused)"
       }
       if (event.type === "tool_end") {
         const last = transcript[transcript.length - 1]
@@ -277,6 +298,18 @@ process.stdin.on("data", (chunk) => {
 
   for (const pressed of parseKeys(chunk.toString())) {
     if (pressed.type === "ctrl" && pressed.value === "c") return shutdown()
+
+    if (pending) {
+      if (pressed.type === "char" && /^[yn]$/i.test(pressed.value)) {
+        const answer = pressed.value.toLowerCase() === "y" ? "allow" : "deny"
+        const ask = pending
+        pending = undefined
+        ask.resolve(answer)
+        render()
+      }
+      // Anything else is ignored: a stray key must not answer for the user.
+      continue
+    }
 
     if (streaming) {
       // Nothing to do mid-turn; quitting is ctrl+c only.

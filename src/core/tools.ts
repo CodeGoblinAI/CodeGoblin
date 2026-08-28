@@ -17,7 +17,10 @@ export type Tool = {
 
 const MAX_OUTPUT = 24_000
 
-function resolveInside(root: string, target: string): string {
+/** Shared with search, so both refuse the same paths. */
+export const SKIP_DIRS = new Set(["node_modules", ".git", "dist", ".next", "build", "coverage"])
+
+export function resolveInside(root: string, target: string): string {
   const absolute = path.resolve(root, target)
   const relative = path.relative(root, absolute)
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
@@ -47,7 +50,7 @@ function assertWritable(relative: string) {
   }
 }
 
-const clip = (text: string) =>
+export const clip = (text: string) =>
   text.length > MAX_OUTPUT ? text.slice(0, MAX_OUTPUT) + `\n… truncated at ${MAX_OUTPUT} characters` : text
 
 export const TOOLS: Tool[] = [
@@ -157,14 +160,118 @@ function diff(before: string, after: string, label: string): string {
 
   return lines.join(String.fromCharCode(10))
 }
+/**
+ * Shell, search and the rest of the tool surface.
+ *
+ * Kept together with the file tools so every tool shares one sandbox check
+ * and one output cap.
+ */
+export const EXTRA_TOOLS: Tool[] = [
+  {
+    name: "shell",
+    description:
+      "Run a shell command in the working directory and return its combined output and exit code. " +
+      "Use this for tests, builds, git, and anything the file tools cannot do.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "The command to run." },
+        timeout_ms: { type: "number", description: "Optional timeout, default 30000." },
+      },
+      required: ["command"],
+    },
+    run: async (args, root) => runShell(String(args.command ?? ""), root, Number(args.timeout_ms) || 30_000),
+  },
+  {
+    name: "grep",
+    description:
+      "Search file contents by regular expression. Returns file:line: match. " +
+      "Prefer this over reading directories to find where something lives.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Regular expression, case-insensitive." },
+        include: { type: "string", description: "Optional glob to limit files, e.g. src/**/*.ts" },
+      },
+      required: ["query"],
+    },
+    run: async (args, root) => {
+      const { grepFiles } = await import("./search")
+      const { matches, truncated } = await grepFiles(root, String(args.query ?? ""), args.include)
+      if (!matches.length) return "no matches"
+      return clip(matches.join(NEWLINE) + (truncated ? NEWLINE + "... more matches not shown" : ""))
+    },
+  },
+  {
+    name: "glob",
+    description: "Find files by name pattern, newest first. Supports * and ** and ?.",
+    parameters: {
+      type: "object",
+      properties: { pattern: { type: "string", description: "e.g. src/**/*.ts" } },
+      required: ["pattern"],
+    },
+    run: async (args, root) => {
+      const { globFiles } = await import("./search")
+      const files = await globFiles(root, String(args.pattern ?? "*"))
+      return files.length ? clip(files.join(NEWLINE)) : "no files matched"
+    },
+  },
+]
 
-export const TOOL_SCHEMA = TOOLS.map((tool) => ({
+const NEWLINE = String.fromCharCode(10)
+
+/**
+ * Run a command, bounded.
+ *
+ * stdout and stderr are merged because a model reading output does not care
+ * which stream a line came from, and losing stderr hides the actual error.
+ * windowsHide comes from platform/process: a spawn without it opens a console
+ * window on Windows, which is invisible on CI and Unix and cost real
+ * debugging time in the previous codebase.
+ */
+async function runShell(command: string, root: string, timeoutMs: number): Promise<string> {
+  if (!command.trim()) return "error: empty command"
+
+  const { spawn } = await import("../platform/process")
+  const isWindows = process.platform === "win32"
+  const argv = isWindows ? ["cmd.exe", "/d", "/s", "/c", command] : ["/bin/sh", "-c", command]
+
+  return new Promise<string>((resolve) => {
+    const child = spawn(argv, { cwd: root, stdio: ["ignore", "pipe", "pipe"] })
+    let output = ""
+    let settled = false
+
+    const finish = (text: string) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { child.kill() } catch {}
+      resolve(clip(text))
+    }
+
+    const timer = setTimeout(() => finish(output + NEWLINE + `... killed after ${timeoutMs}ms`), timeoutMs)
+
+    child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString() })
+    child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString() })
+    child.once("error", (error: Error) => finish("error: " + error.message))
+    child.once("close", (code: number | null) => {
+      const trailer = code === 0 ? "" : NEWLINE + `exit code ${code ?? "unknown"}`
+      finish((output.trim() || "(no output)") + trailer)
+    })
+  })
+}
+
+
+
+export const ALL_TOOLS: Tool[] = [...TOOLS, ...EXTRA_TOOLS]
+
+export const TOOL_SCHEMA = ALL_TOOLS.map((tool) => ({
   type: "function",
   function: { name: tool.name, description: tool.description, parameters: tool.parameters },
 }))
 
 export async function runTool(name: string, args: unknown, root: string): Promise<string> {
-  const tool = TOOLS.find((candidate) => candidate.name === name)
+  const tool = ALL_TOOLS.find((candidate) => candidate.name === name)
   if (!tool) return `unknown tool: ${name}`
   try {
     return await tool.run(args, root)

@@ -12,11 +12,37 @@ import { runAgent, type Message } from "../core/agent"
 import { resolveSelection, allSelections, defaultSelection } from "../core/providers"
 import { apiKey } from "../core/auth"
 import * as sessions from "../core/sessions"
+import { Permissions, type Decision } from "../core/permission"
 
 // fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..."
 // with a leading slash, which fails to open.
 const page = fileURLToPath(new URL("./index.html", import.meta.url))
 const root = process.cwd()
+
+/**
+ * Consent, per browser session.
+ *
+ * The browser answers over a second request rather than the stream, because
+ * the stream is one-way. A pending question is held here until it is
+ * answered or the turn is abandoned.
+ */
+const pendingDecisions = new Map<string, (decision: Decision) => void>()
+const permissionsBySession = new Map<string, Permissions>()
+
+function permissionsFor(sessionId: string, send: (event: unknown) => void): Permissions {
+  const existing = permissionsBySession.get(sessionId)
+  if (existing) return existing
+  const created = new Permissions(
+    (tool, detail) =>
+      new Promise<Decision>((resolve) => {
+        const id = sessionId + ":" + tool
+        pendingDecisions.set(id, resolve)
+        send({ type: "permission", id, tool, detail })
+      }),
+  )
+  permissionsBySession.set(sessionId, created)
+  return created
+}
 
 /**
  * This server hands a model read and write access to the working directory,
@@ -89,6 +115,15 @@ async function handle(request: Request): Promise<Response> {
     return json({ ok })
   }
 
+  if (url.pathname === "/api/permission" && request.method === "POST") {
+    const body = (await request.json()) as { id?: string; decision?: Decision }
+    const resolve = pendingDecisions.get(body.id ?? "")
+    if (!resolve) return json({ ok: false, error: "no pending request" }, 404)
+    pendingDecisions.delete(body.id!)
+    resolve(body.decision === "allow" ? "allow" : "deny")
+    return json({ ok: true })
+  }
+
   if (url.pathname === "/api/chat" && request.method === "POST") {
     const body = (await request.json()) as { text?: string; sessionId?: string; provider?: string }
     const text = (body.text ?? "").trim()
@@ -121,6 +156,15 @@ async function handle(request: Request): Promise<Response> {
 
 `))
 
+        const encoderPing = new TextEncoder()
+        const heartbeat = setInterval(() => {
+          try {
+            controller.enqueue(encoderPing.encode(": keepalive" + String.fromCharCode(10, 10)))
+          } catch {
+            clearInterval(heartbeat)
+          }
+        }, 5000)
+
         send({ type: "session", id: session.id })
         try {
           for await (const event of runAgent({
@@ -129,6 +173,7 @@ async function handle(request: Request): Promise<Response> {
             apiKey: key,
             messages: session.messages as Message[],
             root,
+            permissions: permissionsFor(session.id, send),
           })) {
             send(event)
           }
@@ -137,6 +182,7 @@ async function handle(request: Request): Promise<Response> {
         } catch (error) {
           send({ type: "error", message: error instanceof Error ? error.message : "request failed" })
         } finally {
+          clearInterval(heartbeat)
           controller.close()
         }
       },
@@ -161,7 +207,7 @@ async function handle(request: Request): Promise<Response> {
 let server
 for (const port of [4400, 4401, 4402, 4403, 0]) {
   try {
-    server = Bun.serve({ port, hostname: "127.0.0.1", fetch: handle })
+    server = Bun.serve({ port, hostname: "127.0.0.1", idleTimeout: 255, fetch: handle })
     break
   } catch (error) {
     const inUse = error instanceof Error && /in use|EADDRINUSE/i.test(error.message)

@@ -69,6 +69,35 @@ function toolChip(name, args) {
   return chip
 }
 
+/**
+ * Asks before a tool that changes things runs. Rendered inline in the
+ * thread so the request sits next to the work that caused it.
+ */
+function permissionPrompt(event) {
+  const box = document.createElement("div")
+  box.className = "permission"
+  box.innerHTML =
+    "<div class=\"ptext\">Allow <strong></strong>?<span class=\"pdetail\"></span></div>" +
+    "<div class=\"pactions\"><button class=\"pallow\">Allow</button><button class=\"pdeny\">Deny</button></div>"
+  box.querySelector("strong").textContent = event.tool
+  box.querySelector(".pdetail").textContent = (event.detail || "").slice(0, 120)
+
+  const answer = async (decision) => {
+    box.querySelector(".pactions").innerHTML =
+      "<span class=\"presolved\">" + (decision === "allow" ? "allowed" : "denied") + "</span>"
+    await fetch("/api/permission", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: event.id, decision }),
+    })
+  }
+  box.querySelector(".pallow").onclick = () => answer("allow")
+  box.querySelector(".pdeny").onclick = () => answer("deny")
+
+  thread.appendChild(box)
+  scrollDown()
+}
+
 function setBusy(state) {
   busy = state
   sendBtn.disabled = state || !input.value.trim()
@@ -237,6 +266,11 @@ async function submit() {
           if (stick) scrollDown()
         }
         if (event.type === "tool_start") { body = null; toolChip(event.name, event.args) }
+        if (event.type === "permission") { body = null; permissionPrompt(event) }
+        if (event.type === "tool_denied") {
+          const chip = [...thread.querySelectorAll(".tool.running")].pop()
+          if (chip) { chip.classList.remove("running"); chip.classList.add("failed"); chip.querySelector(".spin").textContent = "✗" }
+        }
         if (event.type === "tool_end") {
           const chip = thread.querySelector(".tool.running:last-of-type") || [...thread.querySelectorAll(".tool.running")].pop()
           if (chip) {

@@ -1,5 +1,6 @@
 import type { Provider } from "./providers"
 import { TOOL_SCHEMA, runTool } from "./tools"
+import type { Permissions } from "./permission"
 
 export type Role = "user" | "assistant" | "system" | "tool"
 export type ToolCall = { id: string; name: string; args: string }
@@ -15,6 +16,7 @@ export type AgentEvent =
   | { type: "thinking"; delta: string }
   | { type: "tool_start"; name: string; args: string }
   | { type: "tool_end"; name: string; result: string }
+  | { type: "tool_denied"; name: string }
   | { type: "turn_end" }
 
 /**
@@ -33,6 +35,7 @@ export async function* runAgent(input: {
   apiKey: string
   messages: Message[]
   root: string
+  permissions?: Permissions
   maxTurns?: number
   signal?: AbortSignal
 }): AsyncGenerator<AgentEvent, void, unknown> {
@@ -131,6 +134,18 @@ export async function* runAgent(input: {
       } catch {
         // Leave args empty; the tool reports the failure itself.
       }
+
+      // Consent happens here rather than inside the tool, so every surface
+      // gets the same prompt and the model still receives a normal tool
+      // result when it is refused.
+      if (input.permissions && !(await input.permissions.check(call.name, call.args))) {
+        const refusal = "refused by the user"
+        input.messages.push({ role: "tool", tool_call_id: call.id, content: refusal })
+        yield { type: "tool_denied", name: call.name }
+        yield { type: "tool_end", name: call.name, result: refusal }
+        continue
+      }
+
       const result = await runTool(call.name, args, input.root)
       input.messages.push({ role: "tool", tool_call_id: call.id, content: result })
       yield { type: "tool_end", name: call.name, result }
