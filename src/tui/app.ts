@@ -343,15 +343,28 @@ process.stdin.on("data", (chunk) => {
       if (pressed.type === "escape") { palette = undefined; render(); continue }
       if (pressed.type === "enter") {
         const chosen = palette[paletteIndex]!.value
-        // Enter on an item already in the input means "yes, that one" - send
-        // it. Otherwise fill it in first, so a choice is always confirmed.
-        if (input.trim() === chosen) { palette = undefined; void send(); return }
-        const needsArgument = chosen === "/model"
-        input = needsArgument ? chosen + " " : chosen
+
+        // A bare command that takes an argument expands rather than runs:
+        // typing /model and pressing enter should offer the models, not print
+        // help. An item containing a space is already a complete choice, so it
+        // must not expand again - that was why picking a model did nothing.
+        const isBareCommand = !chosen.includes(" ")
+        const expanded = isBareCommand ? paletteFor(chosen + " ") : undefined
+        if (expanded) {
+          input = chosen + " "
+          cursor = input.length
+          refreshPalette()
+          render()
+          continue
+        }
+
+        // Anything else is a complete choice - picking it from a list is the
+        // confirmation, so run it rather than asking again.
+        input = chosen
         cursor = input.length
-        refreshPalette()
-        render()
-        continue
+        palette = undefined
+        void send()
+        return
       }
       if (pressed.type === "ctrl" && pressed.value === "i") {
         input = palette[paletteIndex]!.value + " "
@@ -369,10 +382,10 @@ process.stdin.on("data", (chunk) => {
         break
       case "enter": void send(); return
       case "backspace":
-        if (cursor > 0) { input = input.slice(0, cursor - 1) + input.slice(cursor); cursor--; dirty = true }
+        if (cursor > 0) { input = input.slice(0, cursor - 1) + input.slice(cursor); cursor--; dirty = true; refreshPalette() }
         break
       case "delete":
-        if (cursor < input.length) { input = input.slice(0, cursor) + input.slice(cursor + 1); dirty = true }
+        if (cursor < input.length) { input = input.slice(0, cursor) + input.slice(cursor + 1); dirty = true; refreshPalette() }
         break
       case "left": if (cursor > 0) { cursor--; dirty = true } break
       case "right": if (cursor < input.length) { cursor++; dirty = true } break
@@ -398,7 +411,7 @@ process.stdin.on("data", (chunk) => {
       case "pageup": scroll += 5; dirty = true; break
       case "pagedown": scroll = Math.max(0, scroll - 5); dirty = true; break
       case "ctrl":
-        if (pressed.value === "u") { input = ""; cursor = 0; dirty = true }
+        if (pressed.value === "u") { input = ""; cursor = 0; dirty = true; refreshPalette() }
         if (pressed.value === "a") { cursor = 0; dirty = true }
         if (pressed.value === "e") { cursor = input.length; dirty = true }
         break
@@ -406,6 +419,7 @@ process.stdin.on("data", (chunk) => {
         input = input.slice(0, cursor) + pressed.value + input.slice(cursor)
         cursor++
         dirty = true
+        refreshPalette()
         break
     }
   }
