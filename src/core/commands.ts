@@ -12,6 +12,7 @@ export type CommandResult =
   | { kind: "quit" }
   | { kind: "provider"; id: string }
   | { kind: "sessions" }
+  | { kind: "compact" }
   | { kind: "none" }
 
 export const COMMANDS = [
@@ -19,6 +20,7 @@ export const COMMANDS = [
   { name: "/new", description: "start a fresh conversation" },
   { name: "/model", description: "switch provider: /model zai" },
   { name: "/sessions", description: "list saved sessions" },
+  { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/quit", description: "exit" },
 ]
 
@@ -45,6 +47,8 @@ export function runCommand(text: string): CommandResult {
       return { kind: "quit" }
     case "/sessions":
       return { kind: "sessions" }
+    case "/compact":
+      return { kind: "compact" }
     case "/model": {
       if (!argument) {
         const available = allSelections()

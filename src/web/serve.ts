@@ -173,6 +173,7 @@ async function handle(request: Request): Promise<Response> {
             apiKey: key,
             messages: session.messages as Message[],
             root,
+            contextWindow: model.contextWindow,
             permissions: permissionsFor(session.id, send),
           })) {
             send(event)

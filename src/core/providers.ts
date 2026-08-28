@@ -9,7 +9,13 @@
  * `reasoning` marks models that stream a thinking channel, so the UI can show
  * it separately from the answer.
  */
-export type Model = { id: string; label: string; reasoning?: boolean }
+export type Model = {
+  id: string
+  label: string
+  reasoning?: boolean
+  /** Context window in tokens; drives when a conversation is compacted. */
+  contextWindow: number
+}
 
 export type Provider = {
   id: string
@@ -24,9 +30,9 @@ export const PROVIDERS: Record<string, Provider> = {
     label: "DeepSeek",
     baseUrl: "https://api.deepseek.com/chat/completions",
     models: [
-      { id: "deepseek-v4-flash", label: "V4 Flash" },
-      { id: "deepseek-v4-pro", label: "V4 Pro", reasoning: true },
-      { id: "deepseek-v4-flash-vision-exp", label: "V4 Flash Vision" },
+      { id: "deepseek-v4-flash", label: "V4 Flash", contextWindow: 128000 },
+      { id: "deepseek-v4-pro", label: "V4 Pro", reasoning: true, contextWindow: 128000 },
+      { id: "deepseek-v4-flash-vision-exp", label: "V4 Flash Vision", contextWindow: 128000 },
     ],
   },
   zai: {
@@ -34,14 +40,14 @@ export const PROVIDERS: Record<string, Provider> = {
     label: "GLM",
     baseUrl: "https://api.z.ai/api/paas/v4/chat/completions",
     models: [
-      { id: "glm-5.3-flash", label: "5.3 Flash" },
-      { id: "glm-5.3", label: "5.3", reasoning: true },
-      { id: "glm-5.2", label: "5.2", reasoning: true },
-      { id: "glm-5.1", label: "5.1" },
-      { id: "glm-5", label: "5" },
-      { id: "glm-5-turbo", label: "5 Turbo" },
-      { id: "glm-4.7", label: "4.7" },
-      { id: "glm-4.6", label: "4.6" },
+      { id: "glm-5.3-flash", label: "5.3 Flash", contextWindow: 128000 },
+      { id: "glm-5.3", label: "5.3", reasoning: true, contextWindow: 200000 },
+      { id: "glm-5.2", label: "5.2", reasoning: true, contextWindow: 128000 },
+      { id: "glm-5.1", label: "5.1", contextWindow: 128000 },
+      { id: "glm-5", label: "5", contextWindow: 128000 },
+      { id: "glm-5-turbo", label: "5 Turbo", contextWindow: 128000 },
+      { id: "glm-4.7", label: "4.7", contextWindow: 128000 },
+      { id: "glm-4.6", label: "4.6", contextWindow: 128000 },
     ],
   },
   moonshotai: {
@@ -49,11 +55,11 @@ export const PROVIDERS: Record<string, Provider> = {
     label: "Kimi",
     baseUrl: "https://api.moonshot.ai/v1/chat/completions",
     models: [
-      { id: "kimi-k3", label: "K3" },
-      { id: "kimi-k2.7-code", label: "K2.7 Code" },
-      { id: "kimi-k2.7-code-highspeed", label: "K2.7 Code Highspeed" },
-      { id: "kimi-k2.6", label: "K2.6" },
-      { id: "kimi-k2.5", label: "K2.5" },
+      { id: "kimi-k3", label: "K3", contextWindow: 256000 },
+      { id: "kimi-k2.7-code", label: "K2.7 Code", contextWindow: 256000 },
+      { id: "kimi-k2.7-code-highspeed", label: "K2.7 Code Highspeed", contextWindow: 256000 },
+      { id: "kimi-k2.6", label: "K2.6", contextWindow: 128000 },
+      { id: "kimi-k2.5", label: "K2.5", contextWindow: 128000 },
     ],
   },
 }

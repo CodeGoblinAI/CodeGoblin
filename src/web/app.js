@@ -279,6 +279,14 @@ async function submit() {
             chip.querySelector(".spin").textContent = event.result.startsWith("error:") ? "\u2717" : "\u2713"
           }
         }
+        if (event.type === "compacted") {
+          const note = document.createElement("div")
+          note.className = "tool done"
+          note.innerHTML = "<span class=\"spin\">✓</span><span class=\"tname\">compacted</span>"
+          note.append(" " + event.before + " → " + event.after + " messages")
+          thread.appendChild(note)
+          scrollDown()
+        }
         if (event.type === "error") turn("agent", "**Error:** " + event.message)
         if (event.type === "saved") refreshSessions()
       }

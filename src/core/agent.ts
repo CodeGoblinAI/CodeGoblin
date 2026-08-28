@@ -1,6 +1,7 @@
 import type { Provider } from "./providers"
 import { TOOL_SCHEMA, runTool } from "./tools"
 import type { Permissions } from "./permission"
+import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT } from "./context"
 
 export type Role = "user" | "assistant" | "system" | "tool"
 export type ToolCall = { id: string; name: string; args: string }
@@ -17,6 +18,7 @@ export type AgentEvent =
   | { type: "tool_start"; name: string; args: string }
   | { type: "tool_end"; name: string; result: string }
   | { type: "tool_denied"; name: string }
+  | { type: "compacted"; before: number; after: number }
   | { type: "turn_end" }
 
 /**
@@ -35,11 +37,24 @@ export async function* runAgent(input: {
   apiKey: string
   messages: Message[]
   root: string
+  contextWindow?: number
   permissions?: Permissions
   maxTurns?: number
   signal?: AbortSignal
 }): AsyncGenerator<AgentEvent, void, unknown> {
   const maxTurns = input.maxTurns ?? 8
+
+  // Compact before the first request rather than after a failure: the
+  // provider rejects an oversized conversation outright.
+  if (input.contextWindow && shouldCompact(input.messages, input.contextWindow)) {
+    const before = input.messages.length
+    const plan = planCompaction(input.messages, input.contextWindow)
+    if (plan.summarise.length) {
+      const summary = await summarise(input, plan.summarise)
+      input.messages.splice(0, input.messages.length, ...applyCompaction(plan.system, summary, plan.keep))
+      yield { type: "compacted", before, after: input.messages.length }
+    }
+  }
 
   for (let turn = 0; turn < maxTurns; turn++) {
     const response = await fetch(input.provider.baseUrl, {
@@ -153,4 +168,36 @@ export async function* runAgent(input: {
   }
 
   yield { type: "turn_end" }
+}
+
+
+/**
+ * One non-streaming call to summarise the older half of a conversation.
+ * Failure is not fatal: a crude fallback beats losing the turn.
+ */
+async function summarise(
+  input: { provider: Provider; modelId: string; apiKey: string },
+  messages: Message[],
+): Promise<string> {
+  try {
+    const response = await fetch(input.provider.baseUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
+      body: JSON.stringify({
+        model: input.modelId,
+        messages: [...messages, { role: "user", content: SUMMARY_PROMPT }],
+        stream: false,
+      }),
+    })
+    if (!response.ok) throw new Error(String(response.status))
+    const body = (await response.json()) as any
+    const text = body?.choices?.[0]?.message?.content
+    if (typeof text === "string" && text.trim()) return text.trim()
+    throw new Error("empty summary")
+  } catch {
+    return messages
+      .filter((message) => message.role === "user")
+      .map((message) => "- " + message.content.slice(0, 160))
+      .join(String.fromCharCode(10))
+  }
 }

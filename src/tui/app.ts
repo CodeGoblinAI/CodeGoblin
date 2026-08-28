@@ -17,6 +17,7 @@ import { apiKey } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
 import { isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
+import { usage, shouldCompact, planCompaction, applyCompaction } from "../core/context"
 import { Permissions, type Decision } from "../core/permission"
 
 const argv = process.argv.slice(2)
@@ -142,7 +143,7 @@ function render() {
       theme.text + pending.detail.slice(0, Math.max(10, visibleInput - 24)) + ansi.reset +
       theme.muted + "  [y/n]" + ansi.reset
   } else if (streaming) {
-    shown = dim + "goblin is working... esc to stop" + ansi.reset
+    shown = dim + "goblin is working... ctrl+c to quit" + ansi.reset
   } else if (!input) {
     shown = theme.text + caret + ansi.reset + dim + "ask the goblin anything..." + ansi.reset
   } else {
@@ -165,7 +166,9 @@ function render() {
   body.push(theme.goblin + "  | " + ansi.reset + shown)
   body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
 
-  const left = status || selection.provider.label + " . " + selection.model.id
+  const context = usage(messages, selection.model.contextWindow)
+  const left =
+    status || selection.provider.label + " . " + selection.model.id + "  " + context.percent + "% ctx"
   const right = scroll > 0 ? "scrolled " + scroll : palette ? "tab complete . up/down pick" : "/ commands . ctrl+c quit"
   const plain = "  " + left
   const padded = padToWidth(plain, Math.max(displayWidth(plain) + 1, cols - displayWidth(right) - 2))
@@ -204,6 +207,19 @@ async function send() {
         status = selection.provider.label + " " + selection.model.label
       }
     }
+    if (result.kind === "compact") {
+      const window = selection.model.contextWindow
+      const plan = planCompaction(messages, window)
+      if (!plan.summarise.length) status = "nothing to compact yet"
+      else {
+        const summary = plan.summarise
+          .filter((m) => m.role === "user")
+          .map((m) => "- " + m.content.slice(0, 160))
+          .join(String.fromCharCode(10))
+        messages = applyCompaction(plan.system, summary, plan.keep)
+        status = "compacted to " + messages.length + " messages"
+      }
+    }
     if (result.kind === "sessions") {
       const saved = await sessions.list(10)
       transcript.push({
@@ -239,6 +255,7 @@ async function send() {
       apiKey: key,
       messages,
       root: process.cwd(),
+      contextWindow: selection.model.contextWindow,
       permissions,
     })) {
       if (event.type === "thinking") {
@@ -258,6 +275,9 @@ async function send() {
       if (event.type === "tool_start") {
         current = undefined
         transcript.push({ kind: "tool", text: event.name + " " + event.args.slice(0, 60) })
+      }
+      if (event.type === "compacted") {
+        transcript.push({ kind: "tool", text: "compacted context: " + event.before + " -> " + event.after + " messages" })
       }
       if (event.type === "tool_denied") {
         const last = transcript[transcript.length - 1]
