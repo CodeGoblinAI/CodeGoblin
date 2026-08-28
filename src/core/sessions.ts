@@ -65,6 +65,23 @@ export async function list(limit = 30): Promise<Session[]> {
   }
 }
 
+export async function remove(id: string): Promise<boolean> {
+  try {
+    await fs.unlink(file(id))
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function rename(id: string, title: string): Promise<boolean> {
+  const session = await load(id)
+  if (!session) return false
+  session.title = title.slice(0, 80)
+  await fs.writeFile(file(id), JSON.stringify(session, null, 2), "utf8")
+  return true
+}
+
 export function create(provider: string): Session {
   return {
     id: newSessionId(),

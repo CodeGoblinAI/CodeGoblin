@@ -1,4 +1,5 @@
 import { theme, dim, bold, ansi } from "./ansi"
+import { displayWidth } from "./width"
 
 /**
  * Markdown for a terminal.
@@ -69,7 +70,7 @@ function wrapWords(text: string, width: number): string[] {
   const lines: string[] = []
   let line = ""
   for (const word of text.split(" ")) {
-    if (line && (line + " " + word).length > width) { lines.push(line); line = word }
+    if (line && displayWidth(line + " " + word) > width) { lines.push(line); line = word }
     else line = line ? line + " " + word : word
   }
   if (line) lines.push(line)

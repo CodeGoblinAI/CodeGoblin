@@ -9,6 +9,7 @@
 import { ansi, theme, dim } from "./ansi"
 import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { parseKeys } from "./keys"
+import { displayWidth, truncateToWidth, padToWidth } from "./width"
 import { renderMarkdown } from "./markdown"
 import { paletteFor, renderPalette, type PaletteItem } from "./palette"
 import { defaultSelection, resolveSelection, type Selection } from "../core/providers"
@@ -59,6 +60,7 @@ const blink = setInterval(() => {
 blink.unref?.()
 
 const size = () => ({ cols: out.columns ?? 80, rows: out.rows ?? 24 })
+const charWidthOf = (char: string) => displayWidth(char)
 const centre = (text: string, width: number) => " ".repeat(Math.max(0, Math.floor(width))) + text
 
 function refreshPalette() {
@@ -129,8 +131,14 @@ function render() {
   } else if (!input) {
     shown = theme.text + caret + ansi.reset + dim + "ask the goblin anything..." + ansi.reset
   } else {
-    const from = Math.max(0, cursor - visibleInput + 1)
-    const slice = input.slice(from, from + visibleInput)
+    // Walk back from the cursor until the slice fills the visible width.
+    let from = cursor
+    let used = 0
+    while (from > 0 && used + charWidthOf(input[from - 1]!) <= visibleInput - 1) {
+      from--
+      used += charWidthOf(input[from]!)
+    }
+    const slice = truncateToWidth(input.slice(from), visibleInput)
     const at = cursor - from
     shown =
       (from > 0 ? theme.muted + "..." + ansi.reset : "") +
@@ -145,25 +153,12 @@ function render() {
   const left = status || selection.provider.label + " . " + selection.model.id
   const right = scroll > 0 ? "scrolled " + scroll : palette ? "tab complete . up/down pick" : "/ commands . ctrl+c quit"
   const plain = "  " + left
-  const padded = plain.padEnd(Math.max(plain.length + 1, cols - right.length - 2))
+  const padded = padToWidth(plain, Math.max(displayWidth(plain) + 1, cols - displayWidth(right) - 2))
   body.push(dim + padded + ansi.reset + theme.muted + right + ansi.reset)
 
-  const clamped = body.map((line) => {
-    const visible = line.replace(new RegExp(String.fromCharCode(27) + "\[[0-9;]*m", "g"), "")
-    if (visible.length <= cols) return line
-    let count = 0
-    let result = ""
-    for (let i = 0; i < line.length; i++) {
-      if (line.charCodeAt(i) === 27) {
-        const end = line.indexOf("m", i)
-        if (end !== -1) { result += line.slice(i, end + 1); i = end; continue }
-      }
-      if (count >= cols - 1) break
-      result += line[i]
-      count++
-    }
-    return result + ansi.reset
-  })
+  // Clamp on display width: CJK and emoji are two columns, so a line that
+  // looks short by .length can still overflow and wrap.
+  const clamped = body.map((line) => (displayWidth(line) <= cols ? line : truncateToWidth(line, cols - 1) + ansi.reset))
 
   out.write(ansi.clear + clamped.join(String.fromCharCode(10)))
 }

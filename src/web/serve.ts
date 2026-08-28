@@ -78,6 +78,17 @@ async function handle(request: Request): Promise<Response> {
     return session ? json({ session }) : json({ error: "not found" }, 404)
   }
 
+  if (url.pathname === "/api/session" && request.method === "DELETE") {
+    const ok = await sessions.remove(url.searchParams.get("id") ?? "")
+    return json({ ok })
+  }
+
+  if (url.pathname === "/api/session" && request.method === "PATCH") {
+    const body = (await request.json()) as { id?: string; title?: string }
+    const ok = await sessions.rename(body.id ?? "", (body.title ?? "").trim() || "Untitled")
+    return json({ ok })
+  }
+
   if (url.pathname === "/api/chat" && request.method === "POST") {
     const body = (await request.json()) as { text?: string; sessionId?: string; provider?: string }
     const text = (body.text ?? "").trim()

@@ -76,18 +76,92 @@ function setBusy(state) {
   input.placeholder = state ? "goblin is working…" : "Ask the goblin…  / for commands, @ for context"
 }
 
+function relativeTime(ms) {
+  const seconds = Math.round((Date.now() - ms) / 1000)
+  if (seconds < 60) return "just now"
+  if (seconds < 3600) return Math.round(seconds / 60) + "m"
+  if (seconds < 86400) return Math.round(seconds / 3600) + "h"
+  return Math.round(seconds / 86400) + "d"
+}
+
+/** Today / Yesterday / Older, so a long list stays scannable. */
+function groupOf(ms) {
+  const day = 86400000
+  const startOfToday = new Date().setHours(0, 0, 0, 0)
+  if (ms >= startOfToday) return "Today"
+  if (ms >= startOfToday - day) return "Yesterday"
+  return "Older"
+}
+
 async function refreshSessions() {
   const data = await fetch("/api/sessions").then((r) => r.json()).catch(() => ({ sessions: [] }))
   sessionList.innerHTML = ""
+
+  let lastGroup = null
   for (const s of data.sessions) {
+    const group = groupOf(s.updated)
+    if (group !== lastGroup) {
+      const header = document.createElement("div")
+      header.className = "group"
+      header.textContent = group
+      sessionList.appendChild(header)
+      lastGroup = group
+    }
+
     const row = document.createElement("div")
-    row.className = "row" + (s.id === sessionId ? " active" : "")
+    row.className = "row session" + (s.id === sessionId ? " active" : "")
+
     const label = document.createElement("span")
     label.className = "label"
     label.textContent = s.title
-    row.appendChild(label)
+    label.title = s.title
+
+    const when = document.createElement("span")
+    when.className = "when"
+    when.textContent = relativeTime(s.updated)
+
+    const actions = document.createElement("span")
+    actions.className = "actions"
+
+    const renameBtn = document.createElement("button")
+    renameBtn.className = "icon"
+    renameBtn.title = "Rename"
+    renameBtn.textContent = "✎"
+    renameBtn.onclick = async (e) => {
+      e.stopPropagation()
+      const next = prompt("Rename session", s.title)
+      if (next === null) return
+      await fetch("/api/session", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: s.id, title: next }),
+      })
+      refreshSessions()
+    }
+
+    const deleteBtn = document.createElement("button")
+    deleteBtn.className = "icon danger"
+    deleteBtn.title = "Delete"
+    deleteBtn.textContent = "×"
+    deleteBtn.onclick = async (e) => {
+      e.stopPropagation()
+      if (!confirm("Delete \"" + s.title + "\"?")) return
+      await fetch("/api/session?id=" + encodeURIComponent(s.id), { method: "DELETE" })
+      if (s.id === sessionId) { sessionId = null; emptyState() }
+      refreshSessions()
+    }
+
+    actions.append(renameBtn, deleteBtn)
+    row.append(label, when, actions)
     row.onclick = () => openSession(s.id)
     sessionList.appendChild(row)
+  }
+
+  if (!data.sessions.length) {
+    const none = document.createElement("div")
+    none.className = "row muted"
+    none.textContent = "No sessions yet"
+    sessionList.appendChild(none)
   }
 }
 
