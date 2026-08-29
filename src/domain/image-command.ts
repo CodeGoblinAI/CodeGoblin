@@ -85,10 +85,16 @@ export const CodeGoblinImageCommand = {
         message: 'Usage: /image "prompt" --output codegoblin-output/images/name.png',
       }
     }
+    // The spread has to come FIRST. parseImageArgs returns every key, with
+    // undefined where no flag was given, so spreading it afterwards put
+    // undefined back over the resolved provider and model - which meant the
+    // selected model never reached generation and only an explicit
+    // --provider flag ever worked. That is why picking an image model
+    // appeared to do nothing at all.
     return generateImage({
+      ...parsed,
       provider: parsed.provider ?? input.provider,
       model: parsed.model ?? input.model,
-      ...parsed,
       inputImages: parsed.inputImages?.length ? parsed.inputImages : input.inputImages,
       useLastImage: parsed.useLastImage || input.useLastImage,
       cwd: input.cwd,

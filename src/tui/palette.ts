@@ -50,7 +50,7 @@ export function setFileCache(files: string[]) {
 
 /** Basename matches first, then the shortest path: what gets typed is usually a filename. */
 function rankFiles(query: string): string[] {
-  if (!query) return fileCache.slice(0, 8)
+  if (!query) return fileCache.slice(0, LIST_LIMIT)
   const needle = query.toLowerCase()
   const scored: { file: string; score: number }[] = []
   for (const file of fileCache) {
@@ -61,11 +61,24 @@ function rankFiles(query: string): string[] {
   }
   return scored
     .sort((a, b) => a.score - b.score || a.file.length - b.file.length)
-    .slice(0, 8)
+    .slice(0, LIST_LIMIT)
     .map((entry) => entry.file)
 }
 
+/**
+ * The popup contents, or nothing.
+ *
+ * Never an empty array. An empty array is truthy, so every `if (palette)`
+ * guard let it through and the first tab or enter read palette[index] off a
+ * list with no rows - which is how a filter that matched nothing crashed the
+ * app instead of simply closing the popup.
+ */
 export function paletteFor(input: string, cursor = input.length): PaletteItem[] | undefined {
+  const found = paletteMatches(input, cursor)
+  return found && found.length ? found : undefined
+}
+
+function paletteMatches(input: string, cursor: number): PaletteItem[] | undefined {
   // @ opens the file picker wherever the caret happens to be; / only ever
   // starts a command, so it is only meaningful at the beginning of the line.
   const mention = findMention(input, cursor)
@@ -99,7 +112,7 @@ export function paletteFor(input: string, cursor = input.length): PaletteItem[] 
           item.value.toLowerCase().includes(query) ||
           item.hint.toLowerCase().includes(query),
       )
-      .slice(0, 8)
+      .slice(0, LIST_LIMIT)
   }
 
   // "/connect " lists providers to connect, because the alternative is knowing
@@ -111,7 +124,7 @@ export function paletteFor(input: string, cursor = input.length): PaletteItem[] 
       hint: `${entry.label}  ${connectedIds.has(entry.id) ? "connected" : entry.about}`,
     }))
       .filter((item) => !query || item.value.toLowerCase().includes(query) || item.hint.toLowerCase().includes(query))
-      .slice(0, 9)
+      .slice(0, LIST_LIMIT)
   }
 
   // "/resume " lists saved conversations the same way "/model " lists models,
@@ -125,7 +138,7 @@ export function paletteFor(input: string, cursor = input.length): PaletteItem[] 
     return sessionCache
       .map((entry) => ({ value: resumeCommand + " " + entry.id, hint: entry.title }))
       .filter((item) => !query || item.hint.toLowerCase().includes(query) || item.value.includes(query))
-      .slice(0, 8)
+      .slice(0, LIST_LIMIT)
   }
 
   const query = input.toLowerCase()
@@ -135,6 +148,17 @@ export function paletteFor(input: string, cursor = input.length): PaletteItem[] 
   }))
   return matches.length ? matches : undefined
 }
+
+/**
+ * How many matches are kept, and how many are on screen at once.
+ *
+ * These used to be one number, which is why the model list showed only text
+ * models: sixteen of those come first, the list was cut at eight, and the
+ * image, voice and 3D sections were unreachable unless you already knew to
+ * type their name. The list is long now, and the window scrolls through it.
+ */
+const LIST_LIMIT = 60
+const VISIBLE_ROWS = 9
 
 export function renderPalette(items: PaletteItem[], selected: number, width: number): string[] {
   // Size to content, not to the terminal: a two-word command list should not
@@ -152,7 +176,13 @@ export function renderPalette(items: PaletteItem[], selected: number, width: num
   const rule = "─".repeat(inner)
   const lines = [theme.border + "  ╭" + rule + "╮" + ansi.reset]
 
-  for (const [index, item] of items.entries()) {
+  // Keep the selected row on screen, and prefer a full window so the list
+  // does not shrink as the selection nears the end.
+  const start = Math.max(0, Math.min(selected - Math.floor(VISIBLE_ROWS / 2), items.length - VISIBLE_ROWS))
+  const shown = items.slice(start, start + VISIBLE_ROWS)
+
+  for (const [offset, item] of shown.entries()) {
+    const index = start + offset
     const active = index === selected
     const marker = active ? theme.goblin + "❯ " + ansi.reset : "  "
     const value = padToWidth(truncateToWidth(item.value, valueColumn), valueColumn)
@@ -162,6 +192,10 @@ export function renderPalette(items: PaletteItem[], selected: number, width: num
     lines.push(theme.border + "  │" + ansi.reset + body + theme.border + "│" + ansi.reset)
   }
 
+  if (items.length > VISIBLE_ROWS) {
+    const position = padToWidth(`  ${selected + 1} of ${items.length}`, inner)
+    lines.push(theme.border + "  │" + ansi.reset + dim + position + ansi.reset + theme.border + "│" + ansi.reset)
+  }
   lines.push(theme.border + "  ╰" + rule + "╯" + ansi.reset)
   return lines
 }

@@ -65,11 +65,13 @@ export const CodeGoblin3DCommand = {
         message: 'Usage: /model3d "prompt" --output codegoblin-output/models/name.glb',
       }
     }
+    // Spread first, for the same reason as image-command: a later spread
+    // overwrites the resolved provider/model with the parser's undefined.
     return generateModel3D({
+      ...parsed,
       provider: parsed.provider ?? input.provider,
       model: parsed.model ?? input.model,
       modelVersion: parsed.modelVersion ?? input.modelVersion,
-      ...parsed,
       prompt: parsed.prompt ?? "",
       inputImages: parsed.inputImages?.length ? parsed.inputImages : input.inputImages,
       cwd: input.cwd,

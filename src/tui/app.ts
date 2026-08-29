@@ -738,7 +738,10 @@ process.stdin.on("data", (chunk) => {
       if (pressed.type === "down") { paletteIndex = Math.min(palette.length - 1, paletteIndex + 1); dirty = true; continue }
       if (pressed.type === "escape") { palette = undefined; render(); continue }
       if (pressed.type === "enter") {
-        const chosen = palette[paletteIndex]!.value
+        // The list can change between keystrokes; never trust the index.
+        const selected = palette[paletteIndex]
+        if (!selected) { palette = undefined; render(); continue }
+        const chosen = selected.value
 
         // A file mention is part of a question, not the whole of one. Picking
         // it drops the path in and leaves the composer open to ask about it.
@@ -772,7 +775,9 @@ process.stdin.on("data", (chunk) => {
         return
       }
       if (pressed.type === "ctrl" && pressed.value === "i") {
-        completeWith(palette[paletteIndex]!.value)
+        const selected = palette[paletteIndex]
+        if (!selected) { palette = undefined; render(); continue }
+        completeWith(selected.value)
         refreshPalette()
         dirty = true
         continue

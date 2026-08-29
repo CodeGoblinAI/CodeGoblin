@@ -106,8 +106,14 @@ export const PROVIDERS: Record<string, Provider> = {
         capabilities: { input: { text: true, image: true }, output: { image: true } },
       },
       {
-        id: "grok-imagine-image-speed",
-        label: "Grok Imagine (speed)",
+        id: "grok-imagine-image",
+        label: "Grok Imagine",
+        contextWindow: 0,
+        capabilities: { input: { text: true, image: true }, output: { image: true } },
+      },
+      {
+        id: "grok-imagine-image-2.0",
+        label: "Grok Imagine 2.0",
         contextWindow: 0,
         capabilities: { input: { text: true, image: true }, output: { image: true } },
       },

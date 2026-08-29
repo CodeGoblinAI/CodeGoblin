@@ -35,7 +35,10 @@ export type Usage = { used: number; limit: number; percent: number }
 
 export function usage(messages: Message[], contextWindow: number): Usage {
   const used = conversationTokens(messages)
-  return { used, limit: contextWindow, percent: Math.min(100, Math.round((used / contextWindow) * 100)) }
+  // A generation model has no window to fill. Dividing by zero read as 100%,
+  // which said the conversation was full when there was no conversation.
+  const percent = contextWindow > 0 ? Math.min(100, Math.round((used / contextWindow) * 100)) : 0
+  return { used, limit: contextWindow, percent }
 }
 
 /** Compact once the conversation passes this share of the window. */
