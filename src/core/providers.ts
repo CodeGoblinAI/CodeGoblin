@@ -273,6 +273,30 @@ const KIND_ALIASES: Record<string, ModelKind> = {
   mesh: "model3d",
 }
 
+/**
+ * Providers you can connect a key to.
+ *
+ * The original reaches this from the model picker rather than from a command
+ * you have to know the name of, and each line says what the key is for -
+ * because "elevenlabs" alone does not tell you it is the one that speaks.
+ */
+export const CONNECTABLE: { id: string; label: string; about: string }[] = [
+  { id: "deepseek", label: "DeepSeek", about: "chat and reasoning" },
+  { id: "zai", label: "GLM", about: "chat and reasoning" },
+  { id: "moonshotai", label: "Kimi", about: "chat, long context" },
+  { id: "google", label: "Google", about: "Gemini image generation" },
+  { id: "xai", label: "xAI", about: "Grok Imagine, image generation" },
+  { id: "openai", label: "OpenAI", about: "GPT Image" },
+  { id: "qwen", label: "Qwen", about: "Wan image generation" },
+  { id: "tripo", label: "Tripo", about: "text and image to 3D" },
+  { id: "elevenlabs", label: "ElevenLabs", about: "voice, speech and music" },
+]
+
+/** What a provider is called, falling back to the id for one we do not know. */
+export function providerLabel(id: string): string {
+  return CONNECTABLE.find((entry) => entry.id === id)?.label ?? PROVIDERS[id]?.label ?? id
+}
+
 export function kindFromWord(word: string): ModelKind | undefined {
   return KIND_ALIASES[word.trim().toLowerCase()]
 }

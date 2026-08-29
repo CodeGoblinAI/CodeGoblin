@@ -95,11 +95,25 @@ describe("describing a result", () => {
 })
 
 describe("the media commands", () => {
-  test("all three are offered", () => {
+  test("all three exist", () => {
     expect(MEDIA_KINDS.map((entry) => entry.command)).toEqual(["/image", "/audio", "/model3d"])
+  })
+
+  // The original does not advertise these either. You pick an image model and
+  // type; the command only exists so flags like --output have somewhere to
+  // live. Listing it taught people a command they should never need.
+  test("none of them is an advertised command", () => {
     for (const entry of MEDIA_KINDS) {
-      expect([entry.command, COMMANDS.some((c) => c.name === entry.command)]).toEqual([entry.command, true])
+      expect([entry.command, COMMANDS.some((c) => c.name === entry.command)]).toEqual([entry.command, false])
     }
+  })
+
+  test("but typing one still works, flags and all", () => {
+    expect(runCommand("/image --output a.png a goblin")).toEqual({
+      kind: "media",
+      media: "image",
+      line: "/image --output a.png a goblin",
+    })
   })
 
   test("a prompt is required, and saying so is not an error message", () => {

@@ -16,6 +16,7 @@ import {
   selectionsByKind,
   kindOf,
   KIND_LABEL,
+  CONNECTABLE,
 } from "../core/providers"
 import { apiKey } from "../core/auth"
 import * as auth from "../core/auth"
@@ -172,7 +173,7 @@ async function projectFiles(): Promise<string[]> {
         { value: "/undo", hint: "put back the files the last turn changed" },
         { value: "/redo", hint: "reapply what /undo took back" },
         { value: "/memory", hint: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
-        { value: "/connect", hint: "add an API key, stored only on this machine" },
+        { value: "/connect", hint: "connect a provider - pick one, paste its key", expands: true },
         { value: "/disconnect", hint: "remove a stored key: /disconnect tripo" },
         { value: "/status", hint: "what this session is using right now" },
         { value: "/export", hint: "save the conversation as markdown" },
@@ -191,6 +192,10 @@ async function projectFiles(): Promise<string[]> {
       })),
       settings: await settingsStore.load(),
       decisions: DECISIONS,
+      connectable: CONNECTABLE.map((entry) => ({
+        ...entry,
+        connected: auth.isConnected(entry.id),
+      })),
     })
   }
 

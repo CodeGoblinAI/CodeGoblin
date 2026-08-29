@@ -423,6 +423,7 @@ function connectForm(provider) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ provider, key }),
     }).then((r) => r.json()).catch(() => ({ message: "could not reach the server" }))
+    await loadCommands()
     box.querySelector(".pactions").innerHTML = '<span class="presolved"></span>'
     box.querySelector(".presolved").textContent = result.message
   }
@@ -851,7 +852,7 @@ function rankFiles(query) {
 }
 
 const MEDIA_COMMANDS = ["/image", "/audio", "/model3d"]
-let paletteData = { commands: [], models: [], sessions: [], files: [], themes: [] }
+let paletteData = { commands: [], models: [], sessions: [], files: [], themes: [], connectable: [] }
 let paletteItems = []
 let paletteIndex = 0
 
@@ -891,6 +892,16 @@ function itemsFor(text, cursor) {
   if (head === "/theme" && hasArgument) {
     const q = text.slice(7).trim().toLowerCase()
     return (paletteData.themes || []).filter((t) => !q || t.value.toLowerCase().includes(q)).slice(0, 8)
+  }
+  if (head === "/connect" && hasArgument) {
+    const q = text.slice(9).trim().toLowerCase()
+    return (paletteData.connectable || [])
+      .map((entry) => ({
+        value: "/connect " + entry.id,
+        hint: entry.label + "  " + (entry.connected ? "connected" : entry.about),
+      }))
+      .filter((item) => !q || item.value.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q))
+      .slice(0, 9)
   }
   if (head === "/resume" && hasArgument) {
     const q = text.slice(8).trim().toLowerCase()

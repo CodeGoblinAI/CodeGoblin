@@ -11,7 +11,14 @@ import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { parseKeys } from "./keys"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
 import { renderMarkdown } from "./markdown"
-import { paletteFor, renderPalette, setSessionCache, setFileCache, type PaletteItem } from "./palette"
+import {
+  paletteFor,
+  renderPalette,
+  setSessionCache,
+  setFileCache,
+  setConnectedProviders,
+  type PaletteItem,
+} from "./palette"
 import { findMention, expandMentions } from "../core/mention"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
 import * as settingsStore from "../core/settings"
@@ -381,6 +388,7 @@ async function send() {
     secret = undefined
     try {
       await connect(provider, key)
+      refreshConnected()
       status = "connected " + provider + " - stored in " + storePath()
     } catch (error) {
       status = error instanceof Error ? error.message : "could not store the key"
@@ -478,6 +486,7 @@ async function send() {
     }
     if (result.kind === "disconnect") {
       const gone = await disconnect(result.provider)
+      refreshConnected()
       status = gone ? "disconnected " + result.provider : "no stored key for " + result.provider
     }
     if (result.kind === "status") {
@@ -670,6 +679,11 @@ async function refreshFileCache() {
   setFileCache(await globFiles(process.cwd(), "**/*", 4000).catch(() => []))
 }
 void refreshFileCache()
+
+function refreshConnected() {
+  setConnectedProviders(connections().map((item) => item.id))
+}
+refreshConnected()
 
 async function loadSettings() {
   settings = await settingsStore.load()

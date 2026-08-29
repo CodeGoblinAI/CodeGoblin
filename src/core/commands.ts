@@ -36,7 +36,7 @@ export const COMMANDS = [
   { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/undo", description: "put back the files the last turn changed" },
   { name: "/redo", description: "reapply what /undo took back" },
-  { name: "/connect", description: "add an API key for a provider, stored only on this machine" },
+  { name: "/connect", description: "connect a provider - pick one, paste its key" },
   { name: "/disconnect", description: "remove a stored key: /disconnect tripo" },
   { name: "/memory", description: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
   { name: "/status", description: "what this session is using right now" },
@@ -44,7 +44,6 @@ export const COMMANDS = [
   { name: "/rename", description: "retitle this conversation: /rename plan review" },
   { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
-  ...MEDIA_KINDS.map((entry) => ({ name: entry.command, description: entry.description })),
   { name: "/quit", description: "exit" },
 ]
 
@@ -81,6 +80,9 @@ export function runCommand(text: string): CommandResult {
       return { kind: "undo" }
     case "/redo":
       return { kind: "redo" }
+    // Not in COMMANDS on purpose. The original does not advertise these
+    // either: you pick an image model and type, and the command only exists
+    // so flags like --output and --dry-run have somewhere to live.
     case "/image":
     case "/audio":
     case "/model3d": {

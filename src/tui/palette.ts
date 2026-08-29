@@ -1,5 +1,13 @@
 import { COMMANDS } from "../core/commands"
-import { allSelections, selectionsByKind, selectionsOfKind, kindFromWord, kindOf, KIND_LABEL } from "../core/providers"
+import {
+  allSelections,
+  selectionsByKind,
+  selectionsOfKind,
+  kindFromWord,
+  kindOf,
+  KIND_LABEL,
+  CONNECTABLE,
+} from "../core/providers"
 import { findMention } from "../core/mention"
 import { theme, dim, ansi } from "./ansi"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
@@ -19,6 +27,12 @@ export type PaletteItem = { value: string; hint: string }
  * is refreshed alongside the session store rather than read from disk here.
  */
 let sessionCache: { id: string; title: string }[] = []
+
+/** Which providers already have a key, so the list can say so. */
+let connectedIds = new Set<string>()
+export function setConnectedProviders(ids: string[]) {
+  connectedIds = new Set(ids)
+}
 export function setSessionCache(sessions: { id: string; title: string }[]) {
   sessionCache = sessions
 }
@@ -86,6 +100,18 @@ export function paletteFor(input: string, cursor = input.length): PaletteItem[] 
           item.hint.toLowerCase().includes(query),
       )
       .slice(0, 8)
+  }
+
+  // "/connect " lists providers to connect, because the alternative is knowing
+  // the id already - which is the thing that made it unusable.
+  if (/^\/connect\s+/.test(input)) {
+    const query = input.slice(input.indexOf(" ") + 1).trim().toLowerCase()
+    return CONNECTABLE.map((entry) => ({
+      value: `/connect ${entry.id}`,
+      hint: `${entry.label}  ${connectedIds.has(entry.id) ? "connected" : entry.about}`,
+    }))
+      .filter((item) => !query || item.value.toLowerCase().includes(query) || item.hint.toLowerCase().includes(query))
+      .slice(0, 9)
   }
 
   // "/resume " lists saved conversations the same way "/model " lists models,
