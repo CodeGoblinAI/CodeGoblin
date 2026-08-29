@@ -315,7 +315,7 @@ fetch("/api/providers").then((r) => r.json()).then((data) => {
   for (const p of data.providers) {
     const option = document.createElement("option")
     option.value = p.id
-    option.textContent = p.label + " \u00b7 " + p.model
+    option.textContent = p.label + (p.reasoning ? " (reasoning)" : "")
     providerSelect.appendChild(option)
   }
   const ready = data.providers.filter((p) => p.ready).length
