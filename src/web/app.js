@@ -9,6 +9,7 @@ const sessionList = document.getElementById("session-list")
 let sessionId = null
 let busy = false
 let controller = null
+let lastToolArgs = ""
 
 const escapeHtml = (s) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -109,6 +110,7 @@ function setBusy(state) {
   sendBtn.disabled = state ? false : !input.value.trim()
   stopBtn.hidden = true
   input.placeholder = state ? "goblin is working…" : "Ask the goblin…  / for commands, @ for context"
+  try { activityBusy(state) } catch { /* panel not built yet during startup */ }
 }
 
 function relativeTime(ms) {
@@ -227,6 +229,7 @@ async function runCommand(text) {
   if (name === "/new") {
     sessionId = null
     emptyState()
+    activityReset()
     refreshSessions()
     return true
   }
@@ -349,11 +352,25 @@ async function submit() {
           body.innerHTML = markdown(raw)
           if (stick) scrollDown()
         }
-        if (event.type === "tool_start") { body = null; toolChip(event.name, event.args) }
+        if (event.type === "tool_start") {
+          body = null
+          toolChip(event.name, event.args)
+          lastToolArgs = event.args
+          runningTools.push(event.name)
+          renderActivity()
+        }
+        if (event.type === "plan") { planItems = event.todos; renderActivity() }
         if (event.type === "permission") { body = null; permissionPrompt(event) }
         if (event.type === "tool_denied") {
           const chip = [...thread.querySelectorAll(".tool.running")].pop()
           if (chip) { chip.classList.remove("running"); chip.classList.add("failed"); chip.querySelector(".spin").textContent = "✗" }
+        }
+        if (event.type === "tool_end") {
+          runningTools = runningTools.filter((n) => n !== event.name)
+          const ok = !String(event.result || "").startsWith("error:")
+          feedItems.push({ label: event.name, ok })
+          noteChange(event.name, lastToolArgs, event.result)
+          renderActivity()
         }
         if (event.type === "tool_end") {
           const chip = thread.querySelector(".tool.running:last-of-type") || [...thread.querySelectorAll(".tool.running")].pop()
@@ -521,3 +538,105 @@ input.addEventListener("keydown", (event) => {
 }, true)
 
 loadCommands()
+
+/* ------------------------------------------------------------------ *
+ * Activity panel
+ *
+ * Sections follow the original: Plan, Running, Activity, Changes. All of
+ * it is driven by events the agent already emits, so nothing here needs
+ * its own bookkeeping on the server.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Looked up on first use rather than at load.
+ *
+ * setBusy runs during startup, before this block is evaluated, so a const
+ * here sat in its temporal dead zone and threw - which took the whole script
+ * down and left the thread empty.
+ */
+let actCache = null
+function panel() {
+  if (actCache) return actCache
+  actCache = {
+    state: document.getElementById("act-state"),
+    empty: document.getElementById("act-empty"),
+    plan: { box: document.getElementById("act-plan"), list: document.getElementById("plan-list"), count: document.getElementById("plan-count") },
+    running: { box: document.getElementById("act-running"), list: document.getElementById("running-list") },
+    feed: { box: document.getElementById("act-feed"), list: document.getElementById("feed-list") },
+    changes: { box: document.getElementById("act-changes"), list: document.getElementById("changes-list"), count: document.getElementById("changes-count") },
+  }
+  return actCache
+}
+
+let planItems = []
+let runningTools = []
+let feedItems = []
+let changedFiles = new Map()
+
+const MARK = { pending: "\u25cb", in_progress: "\u25b8", completed: "\u2713" }
+
+function row(mark, text, cls) {
+  const el = document.createElement("div")
+  el.className = "act-row " + (cls || "")
+  el.innerHTML = '<span class="mark"></span><span class="txt"></span>'
+  el.querySelector(".mark").textContent = mark
+  el.querySelector(".txt").textContent = text
+  el.querySelector(".txt").title = text
+  return el
+}
+
+function renderActivity() {
+  const anything = planItems.length || runningTools.length || feedItems.length || changedFiles.size
+  panel().empty.hidden = !!anything
+
+  panel().plan.box.hidden = !planItems.length
+  panel().plan.list.innerHTML = ""
+  if (planItems.length) {
+    const done = planItems.filter((t) => t.status === "completed").length
+    panel().plan.count.textContent = done + "/" + planItems.length
+    for (const todo of planItems) {
+      panel().plan.list.appendChild(
+        row(MARK[todo.status] || "\u25cb", todo.content, todo.status === "completed" ? "done" : todo.status === "in_progress" ? "active" : ""),
+      )
+    }
+  }
+
+  panel().running.box.hidden = !runningTools.length
+  panel().running.list.innerHTML = ""
+  for (const name of runningTools) panel().running.list.appendChild(row("\u25b8", name, "active"))
+
+  // Newest first: the last thing that happened is what you are looking for.
+  panel().feed.box.hidden = !feedItems.length
+  panel().feed.list.innerHTML = ""
+  for (const item of feedItems.slice(-12).reverse()) {
+    panel().feed.list.appendChild(row(item.ok ? "\u2713" : "\u2717", item.label, item.ok ? "done" : "failed"))
+  }
+
+  panel().changes.box.hidden = !changedFiles.size
+  panel().changes.list.innerHTML = ""
+  panel().changes.count.textContent = String(changedFiles.size)
+  for (const [file, detail] of changedFiles) panel().changes.list.appendChild(row("\u00b1", file + "  " + detail, "done"))
+}
+
+function activityBusy(state) {
+  panel().state.textContent = state ? "Working" : "Idle"
+  panel().state.classList.toggle("busy", state)
+}
+
+function activityReset() {
+  planItems = []
+  runningTools = []
+  feedItems = []
+  changedFiles = new Map()
+  renderActivity()
+}
+
+/** Pull a file and its diff counts out of an edit or write result. */
+function noteChange(name, args, result) {
+  if (name !== "edit_file" && name !== "write_file") return
+  let path = ""
+  try { path = JSON.parse(args || "{}").path || "" } catch { /* leave blank */ }
+  if (!path) return
+  const counts = /\+(\d+)\s*-(\d+)/.exec(result || "")
+  changedFiles.set(path, counts ? "+" + counts[1] + " -" + counts[2] : "written")
+}

@@ -2,6 +2,7 @@ import type { Provider } from "./providers"
 import { TOOL_SCHEMA, runTool } from "./tools"
 import type { Permissions } from "./permission"
 import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT } from "./context"
+import { parseTodos, type Todo } from "./todo"
 
 export type Role = "user" | "assistant" | "system" | "tool"
 export type ToolCall = { id: string; name: string; args: string }
@@ -19,6 +20,7 @@ export type AgentEvent =
   | { type: "tool_end"; name: string; result: string }
   | { type: "tool_denied"; name: string }
   | { type: "compacted"; before: number; after: number }
+  | { type: "plan"; todos: Todo[] }
   | { type: "turn_end" }
 
 /**
@@ -165,6 +167,11 @@ export async function* runAgent(input: {
       }
 
       const result = await runTool(call.name, args, input.root)
+
+      // The plan is state the surfaces render, not just a tool result.
+      if (call.name === "todo_write") {
+        yield { type: "plan", todos: parseTodos((args as Record<string, unknown>)?.todos) }
+      }
       input.messages.push({ role: "tool", tool_call_id: call.id, content: result })
       yield { type: "tool_end", name: call.name, result }
     }

@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { Permissions } from "../src/core/permission"
 
 describe("permissions", () => {
-  test("read-only tools never prompt", async () => {
+  test("tools that change nothing never prompt", async () => {
     let asked = 0
     const permissions = new Permissions(async () => { asked++; return "allow" })
-    for (const tool of ["read_file", "list_files", "grep", "glob"]) {
+    for (const tool of ["read_file", "list_files", "grep", "glob", "todo_write"]) {
       expect(await permissions.check(tool, "")).toBe(true)
     }
     expect(asked).toBe(0)

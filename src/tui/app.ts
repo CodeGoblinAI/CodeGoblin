@@ -18,6 +18,7 @@ import { runAgent, type Message } from "../core/agent"
 import { isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
 import { usage, shouldCompact, planCompaction, applyCompaction } from "../core/context"
+import { marker, counts, type Todo } from "../core/todo"
 import { Permissions, type Decision } from "../core/permission"
 
 const argv = process.argv.slice(2)
@@ -58,6 +59,10 @@ const permissions = new Permissions(
       render()
     }),
 )
+
+// The plan sits above the composer rather than scrolling away in the
+// transcript, because it is the thing you keep glancing at.
+let plan: Todo[] = []
 
 let palette: PaletteItem[] | undefined
 let paletteIndex = 0
@@ -130,8 +135,23 @@ function render() {
     }
   }
 
+  const planLines: string[] = []
+  if (plan.length) {
+    const { done, total } = counts(plan)
+    planLines.push(theme.gold + "  plan " + done + "/" + total + ansi.reset)
+    for (const todo of plan.slice(0, 8)) {
+      const done = todo.status === "completed"
+      const active = todo.status === "in_progress"
+      const colour = done ? theme.muted : active ? theme.goblin : theme.text
+      const text = truncateToWidth(todo.content, Math.max(10, cols - 12))
+      planLines.push(colour + "  [" + marker(todo.status) + "] " + text + ansi.reset)
+    }
+    if (plan.length > 8) planLines.push(theme.muted + "  … " + (plan.length - 8) + " more" + ansi.reset)
+    planLines.push("")
+  }
+
   const paletteLines = palette && !streaming ? renderPalette(palette, paletteIndex, cols) : []
-  const composerHeight = 4 + paletteLines.length
+  const composerHeight = 4 + paletteLines.length + planLines.length
   const room = Math.max(1, rows - composerHeight - 1)
 
   const maxScroll = Math.max(0, lines.length - room)
@@ -140,6 +160,7 @@ function render() {
   const body = lines.length > room ? lines.slice(Math.max(0, cut), Math.max(0, cut) + room) : lines
   while (body.length < room) body.push("")
 
+  for (const line of planLines) body.push(line)
   for (const line of paletteLines) body.push(line)
 
   const inner = Math.max(10, cols - 4)
@@ -203,6 +224,7 @@ async function send() {
     if (result.kind === "clear") {
       transcript = []
       messages = [SYSTEM]
+      plan = []
       session = sessions.create(selection.provider.id)
       permissions.reset()
       status = "new conversation"
@@ -302,6 +324,9 @@ async function send() {
       if (event.type === "tool_start") {
         current = undefined
         transcript.push({ kind: "tool", text: event.name + " " + event.args.slice(0, 60) })
+      }
+      if (event.type === "plan") {
+        plan = event.todos
       }
       if (event.type === "compacted") {
         transcript.push({ kind: "tool", text: "compacted context: " + event.before + " -> " + event.after + " messages" })

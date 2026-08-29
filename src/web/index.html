@@ -102,6 +102,20 @@
   .tool.note .tname { color: var(--muted); font-family: var(--font); }
   .send.stopping { background: linear-gradient(#ff8f9b, #cc5566); color: #2a0508; }
   .send.stopping:hover { filter: brightness(1.1); }
+
+  .act-head { margin-bottom: 14px; }
+  .act-section { margin-bottom: 16px; }
+  .act-label { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin-bottom: 6px; display: flex; justify-content: space-between; }
+  .act-count { color: var(--goblin); letter-spacing: 0; }
+  .act-row { display: flex; gap: 8px; font-size: 12.5px; padding: 4px 0; color: var(--muted); align-items: baseline; }
+  .act-row .mark { flex-shrink: 0; width: 12px; }
+  .act-row .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11.5px; }
+  .act-row.done .mark { color: var(--goblin); }
+  .act-row.failed .mark { color: var(--red); }
+  .act-row.active { color: var(--text); }
+  .act-row.active .mark { color: var(--goblin); }
+  .act-empty { color: var(--muted); font-size: 12.5px; }
+  .pill.busy { color: var(--goblin); border-color: #2c4a1e; }
 </style>
 
 <aside>
@@ -131,8 +145,24 @@
 </main>
 
 <section class="activity">
-  <span class="pill">Activity</span>
-  <p style="color:var(--muted);font-size:12.5px;margin-top:12px">Tool calls appear in the conversation as they run.</p>
+  <div class="act-head"><span class="pill" id="act-state">Idle</span></div>
+  <div class="act-section" id="act-plan" hidden>
+    <div class="act-label">Plan <span class="act-count" id="plan-count"></span></div>
+    <div id="plan-list"></div>
+  </div>
+  <div class="act-section" id="act-running" hidden>
+    <div class="act-label">Running</div>
+    <div id="running-list"></div>
+  </div>
+  <div class="act-section" id="act-feed" hidden>
+    <div class="act-label">Activity</div>
+    <div id="feed-list"></div>
+  </div>
+  <div class="act-section" id="act-changes" hidden>
+    <div class="act-label">Changes <span class="act-count" id="changes-count"></span></div>
+    <div id="changes-list"></div>
+  </div>
+  <p class="act-empty" id="act-empty">Nothing running yet.</p>
 </section>
 
 <script src="/app.js"></script>

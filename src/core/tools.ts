@@ -183,6 +183,37 @@ export const EXTRA_TOOLS: Tool[] = [
     run: async (args, root) => runShell(String(args.command ?? ""), root, Number(args.timeout_ms) || 30_000),
   },
   {
+    name: "todo_write",
+    description:
+      "Record or update the plan for the current task. Send the whole list each time, with each " +
+      "item marked pending, in_progress or completed. Use it for work of three or more steps so " +
+      "the user can see what you intend and what is left. Exactly one item should be in_progress.",
+    parameters: {
+      type: "object",
+      properties: {
+        todos: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              content: { type: "string" },
+              status: { type: "string", enum: ["pending", "in_progress", "completed"] },
+            },
+            required: ["content", "status"],
+          },
+        },
+      },
+      required: ["todos"],
+    },
+    // The plan is surfaced by the agent loop, which owns per-session state;
+    // the tool itself only validates and echoes it back.
+    run: async (args) => {
+      const { parseTodos, summarise } = await import("./todo")
+      const todos = parseTodos(args?.todos)
+      return summarise(todos)
+    },
+  },
+  {
     name: "grep",
     description:
       "Search file contents by regular expression. Returns file:line: match. " +

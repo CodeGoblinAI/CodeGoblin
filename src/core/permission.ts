@@ -11,8 +11,14 @@
  */
 export type Decision = "allow" | "deny"
 
-/** Tools that only observe never prompt. */
-const READ_ONLY = new Set(["read_file", "list_files", "grep", "glob"])
+/**
+ * Tools that change nothing outside the conversation never prompt.
+ *
+ * Reading and searching are observation. todo_write sounds like a write but
+ * only records the plan the user is already watching, so asking permission
+ * for it is friction with nothing behind it.
+ */
+const HARMLESS = new Set(["read_file", "list_files", "grep", "glob", "todo_write"])
 
 export class Permissions {
   private granted = new Set<string>()
@@ -21,7 +27,7 @@ export class Permissions {
   constructor(private ask: (tool: string, detail: string) => Promise<Decision>) {}
 
   needsConsent(tool: string): boolean {
-    return !READ_ONLY.has(tool)
+    return !HARMLESS.has(tool)
   }
 
   /** Returns true when the tool may run. */
