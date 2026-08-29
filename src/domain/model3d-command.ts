@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { getModel3DProvider, type Model3DInputImage, type Model3DInputMode } from "./model3d-providers"
+import { getModel3DProvider, type Model3DInputImage, type Model3DInputMode, type Model3DShape } from "./model3d-providers"
 import { readConnectedProviderKey } from "./connected-auth"
 
 export type { Model3DInputMode } from "./model3d-providers"
@@ -25,6 +25,8 @@ type GenerateInput = {
   model?: string
   provider?: string
   modelVersion?: string
+  /** Texture, topology and face count. Left off means Tripo's own defaults. */
+  shape?: Model3DShape
   inputMode?: Model3DInputMode
   inputImages?: Model3DInputImage[]
   outputFormat?: string
@@ -41,6 +43,8 @@ type SlashInput = {
   provider?: string
   model?: string
   modelVersion?: string
+  outputFormat?: string
+  shape?: Model3DShape
   inputImages?: Model3DInputImage[]
   require3DModel?: boolean
 }
@@ -72,6 +76,8 @@ export const CodeGoblin3DCommand = {
       provider: parsed.provider ?? input.provider,
       model: parsed.model ?? input.model,
       modelVersion: parsed.modelVersion ?? input.modelVersion,
+      outputFormat: input.outputFormat,
+      shape: input.shape,
       prompt: parsed.prompt ?? "",
       inputImages: parsed.inputImages?.length ? parsed.inputImages : input.inputImages,
       cwd: input.cwd,
@@ -178,6 +184,7 @@ async function generateModel3D(input: GenerateInput): Promise<Model3DCommandResu
   }
 
   const result = await provider.generate({
+    shape: input.shape,
     prompt: input.prompt,
     model,
     modelVersion,

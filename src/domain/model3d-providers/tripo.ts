@@ -1,13 +1,16 @@
 import fs from "fs/promises"
 import path from "path"
-import type { Model3DGenerateRequest, Model3DGenerateOutput, Model3DInputImage, Model3DProvider } from "./types"
+import type { Model3DGenerateRequest, Model3DShape, Model3DGenerateOutput, Model3DInputImage, Model3DProvider } from "./types"
 
 const API_BASE = "https://api.tripo3d.ai/v2/openapi"
 const DEFAULT_MODEL_VERSION = "v3.1-20260211"
 
 const MODEL_VERSIONS = [
+  { id: "P1-20260311", name: "Tripo P1" },
   { id: "v3.1-20260211", name: "Tripo H3 v3.1" },
   { id: "v3.0-20250812", name: "Tripo H3 v3.0" },
+  { id: "Turbo-v1.0-20250506", name: "Tripo Turbo v1.0" },
+  { id: "v2.5-20250123", name: "Tripo v2.5" },
 ] as const
 
 /** Tripo bills in credits; these are observed defaults for H3 v3.0/v3.1. */
@@ -176,8 +179,27 @@ async function downloadModel(url: string) {
   return new Uint8Array(await response.arrayBuffer())
 }
 
+/**
+ * The shape settings, in Tripo's own spelling.
+ *
+ * Left off entirely when nothing was chosen: Tripo has defaults of its own
+ * and sending its default back to it is not the same as staying quiet - the
+ * request is priced on what it is asked to do.
+ */
+function shapeFields(shape: Model3DShape | undefined): Record<string, unknown> {
+  if (!shape) return {}
+  return {
+    ...(shape.texture !== undefined ? { texture: shape.texture } : {}),
+    ...(shape.textureQuality ? { texture_quality: shape.textureQuality } : {}),
+    ...(shape.geometryQuality ? { geometry_quality: shape.geometryQuality } : {}),
+    ...(shape.quad !== undefined ? { quad: shape.quad } : {}),
+    ...(shape.faceLimit !== undefined ? { face_limit: shape.faceLimit } : {}),
+  }
+}
+
 async function generateTripo(request: Model3DGenerateRequest): Promise<Model3DGenerateOutput> {
   const modelVersion = request.modelVersion || DEFAULT_MODEL_VERSION
+  const shape = shapeFields(request.shape)
   let taskId: string | undefined
 
   try {
@@ -195,6 +217,7 @@ async function generateTripo(request: Model3DGenerateRequest): Promise<Model3DGe
         type: "image_to_model",
         model_version: modelVersion,
         file: filePayload,
+        ...shape,
       })
     } else {
       if (!request.prompt.trim()) return { ok: false, message: "Text-to-3D requires a prompt." }
@@ -202,6 +225,7 @@ async function generateTripo(request: Model3DGenerateRequest): Promise<Model3DGe
         type: "text_to_model",
         prompt: request.prompt.trim(),
         model_version: modelVersion,
+        ...shape,
       })
     }
 

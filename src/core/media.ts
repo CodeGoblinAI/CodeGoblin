@@ -1,4 +1,10 @@
 import path from "node:path"
+import {
+  audioOverrides,
+  imageOverrides,
+  model3dOverrides,
+  type MediaSettings,
+} from "./media-settings"
 
 /**
  * Images, audio and 3D models.
@@ -30,6 +36,16 @@ export const MEDIA_OUTPUT_DIR = "codegoblin-output"
  * default provider and picking Tripo changed nothing.
  */
 export type Chosen = { provider?: string; model?: string }
+
+/**
+ * How it should come out.
+ *
+ * Separate from Chosen because they answer different questions: the model
+ * decides what a prompt becomes, these decide how the result is made. An
+ * empty object means every generator behaves exactly as it did before
+ * settings existed, which is what makes the default safe.
+ */
+export type Tuning = MediaSettings
 export type MediaKind = "image" | "audio" | "model3d"
 
 export type MediaResult = {
@@ -58,13 +74,14 @@ export function promptFrom(line: string, command: string): string {
   return trimmed.toLowerCase().startsWith(command) ? trimmed.slice(command.length).trim() : trimmed
 }
 
-async function runImage(line: string, cwd: string, chosen: Chosen): Promise<MediaResult> {
+async function runImage(line: string, cwd: string, chosen: Chosen, tuning: Tuning): Promise<MediaResult> {
   const { CodeGoblinImageCommand } = await import("../domain/image-command")
   // requireImageModel makes it say so rather than guess when the selected
   // model is not one that draws. Flags on the line still win over it.
   const result = await CodeGoblinImageCommand.runSlash({
     input: line,
     cwd,
+    ...imageOverrides(tuning),
     provider: chosen.provider,
     model: chosen.model,
     requireImageModel: true,
@@ -79,7 +96,7 @@ async function runImage(line: string, cwd: string, chosen: Chosen): Promise<Medi
   }
 }
 
-async function runAudio(line: string, cwd: string, chosen: Chosen): Promise<MediaResult> {
+async function runAudio(line: string, cwd: string, chosen: Chosen, tuning: Tuning): Promise<MediaResult> {
   const { CodeGoblinAudioCommand } = await import("../domain/audio-command")
   const text = promptFrom(line, "/audio")
   if (!text) return { ok: false, message: "say what to speak: /audio hello there" }
@@ -88,6 +105,7 @@ async function runAudio(line: string, cwd: string, chosen: Chosen): Promise<Medi
   const result = await CodeGoblinAudioCommand.generate({
     text,
     cwd,
+    ...audioOverrides(tuning),
     provider: chosen.provider,
     model: chosen.model,
   })
@@ -100,11 +118,17 @@ async function runAudio(line: string, cwd: string, chosen: Chosen): Promise<Medi
   }
 }
 
-async function runModel3d(line: string, cwd: string, chosen: Chosen): Promise<MediaResult> {
+async function runModel3d(line: string, cwd: string, chosen: Chosen, tuning: Tuning): Promise<MediaResult> {
   const { CodeGoblin3DCommand } = await import("../domain/model3d-command")
+  const { modelVersion, outputFormat, ...shape } = model3dOverrides(tuning)
   const result = await CodeGoblin3DCommand.runSlash({
     input: line,
     cwd,
+    modelVersion,
+    outputFormat,
+    // Left off entirely when nothing was chosen, so Tripo keeps its own
+    // defaults rather than being told them back.
+    ...(Object.keys(shape).length ? { shape } : {}),
     provider: chosen.provider,
     model: chosen.model,
     require3DModel: true,
@@ -129,15 +153,16 @@ export async function runMedia(
   line: string,
   cwd: string,
   chosen: Chosen = {},
+  tuning: Tuning = {},
 ): Promise<MediaResult> {
   const dryRun = / --dry-run\b/.test(" " + line)
   try {
     const result =
       kind === "image"
-        ? await runImage(line, cwd, chosen)
+        ? await runImage(line, cwd, chosen, tuning)
         : kind === "audio"
-          ? await runAudio(line, cwd, chosen)
-          : await runModel3d(line, cwd, chosen)
+          ? await runAudio(line, cwd, chosen, tuning)
+          : await runModel3d(line, cwd, chosen, tuning)
     return { ...result, output: relativise(result.output, cwd), dryRun }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "generation failed", dryRun }

@@ -9,6 +9,15 @@ import {
   CONNECTABLE,
 } from "../core/providers"
 import { findMention } from "../core/mention"
+import {
+  MEDIA_OPTIONS,
+  optionById,
+  labelOf,
+  valueOf,
+  DEFAULT,
+  type MediaChoice,
+  type MediaSettings,
+} from "../core/media-settings"
 import { theme, dim, ansi } from "./ansi"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
 
@@ -46,6 +55,33 @@ export function setSessionCache(sessions: { id: string; title: string }[]) {
 let fileCache: string[] = []
 export function setFileCache(files: string[]) {
   fileCache = files
+}
+
+/**
+ * Media settings, and the voices an account has.
+ *
+ * The settings come in the same way the session list does - the app owns
+ * them and hands them over, because paletteFor runs on every keystroke and
+ * cannot read a file. Voices are the same, except they come from a network
+ * call the app makes the first time somebody asks for one.
+ */
+let mediaSettings: MediaSettings = {}
+export function setMediaSettings(settings: MediaSettings) {
+  mediaSettings = settings
+}
+
+let voices: MediaChoice[] = []
+let voicesLoaded = false
+/** Why the list is empty, when it is - "no key" and "none saved" are different. */
+let voicesNote = ""
+export function setVoices(list: MediaChoice[], note = "") {
+  voices = list
+  voicesNote = note
+  voicesLoaded = true
+}
+/** Whether the voice list still needs fetching, so the app knows to fetch it. */
+export function needsVoices(input: string): boolean {
+  return !voicesLoaded && input.startsWith("/set audio.voice")
 }
 
 /** Basename matches first, then the shortest path: what gets typed is usually a filename. */
@@ -115,6 +151,52 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
       .slice(0, LIST_LIMIT)
   }
 
+  // "/set " lists the knobs, and "/set <one> " lists what that one takes.
+  // Two levels of the same list rather than a dialog of its own: the popup
+  // already scrolls, filters and completes, and a settings screen would have
+  // to learn all three again.
+  if (/^\/set\s/.test(input)) {
+    const rest = input.slice(input.indexOf(" ") + 1)
+    const [word, ...tail] = rest.split(/\s+/)
+    const option = optionById(word)
+
+    // Past the option name: offer its values.
+    if (option && /\s/.test(rest)) {
+      const query = tail.join(" ").trim().toLowerCase()
+      // The default is always offered, so an empty voice list is never an
+      // empty popup - which means "still loading" has to be said rather than
+      // shown by absence.
+      const pending: MediaChoice[] =
+        option.dynamic === "voices" && !voicesLoaded
+          ? [{ id: "", label: "loading voices from your account…" }]
+          : []
+      const pool = option.dynamic === "voices"
+        ? [{ id: DEFAULT, label: "account default" }, ...voices, ...pending]
+        : option.choices
+      const current = valueOf(mediaSettings, option.id)
+      const rows = pool
+        .map((choice) => ({
+          value: "/set " + option.id + " " + choice.id,
+          hint: choice.label + (choice.id === current ? "   \u2713 set" : ""),
+        }))
+        .filter((item) => !query || item.value.toLowerCase().includes(query) || item.hint.toLowerCase().includes(query))
+        .slice(0, LIST_LIMIT)
+      // An empty voice list is not an empty answer - it means nobody has
+      // fetched them yet, and saying so beats an empty box.
+      if (!rows.length && option.dynamic === "voices") {
+        return [{ value: input, hint: voicesLoaded ? voicesNote || "no voices on this account" : "loading voices\u2026" }]
+      }
+      return rows
+    }
+
+    const query = word.trim().toLowerCase()
+    return MEDIA_OPTIONS.map((entry) => ({
+      value: "/set " + entry.id,
+      hint: labelOf(entry, valueOf(mediaSettings, entry.id), voices),
+    }))
+      .filter((item) => !query || item.value.toLowerCase().includes(query))
+      .slice(0, LIST_LIMIT)
+  }
   // "/connect " lists providers to connect, because the alternative is knowing
   // the id already - which is the thing that made it unusable.
   if (/^\/connect\s+/.test(input)) {

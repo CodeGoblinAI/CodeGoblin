@@ -521,6 +521,34 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/set") {
+    const NEWLINE = String.fromCharCode(10)
+    const [id, ...rest] = argument.split(/\s+/).filter(Boolean)
+    const options = paletteData.mediaOptions || []
+    if (!id) {
+      note(options.map((o) => "  " + o.id.padEnd(20) + mediaLabel(o, mediaValue(o.id))).join(NEWLINE))
+      return true
+    }
+    const option = options.find((o) => o.id === id)
+    if (!option) {
+      note("unknown setting: " + id + NEWLINE +
+        options.map((o) => "  " + o.id.padEnd(20) + o.about).join(NEWLINE))
+      return true
+    }
+    const value = rest.join(" ").trim() || "default"
+    const result = await fetch("/api/media-settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ option: option.id, value }),
+    }).then((r) => r.json()).catch(() => null)
+    if (!result || !result.ok) {
+      note((result && result.message) || "could not save that")
+      return true
+    }
+    paletteData.media = result.settings
+    note(option.label + ": " + mediaLabel(option, value))
+    return true
+  }
   if (MEDIA_COMMANDS.includes(name)) {
     const kind = name.slice(1) === "model3d" ? "model3d" : name.slice(1)
     if (!argument) {
@@ -852,6 +880,42 @@ function rankFiles(query) {
 }
 
 const MEDIA_COMMANDS = ["/image", "/audio", "/model3d"]
+
+/**
+ * Generation settings, mirrored from the server.
+ *
+ * Held on paletteData rather than in a variable of its own so a reload of
+ * the command list refreshes them too - the terminal writes the same file,
+ * and a page that has been open a while should not disagree with it.
+ */
+function mediaValue(id) {
+  const value = (paletteData.media || {})[id]
+  return value || "default"
+}
+
+function mediaLabel(option, value) {
+  const pool = option.dynamic === "voices"
+    ? [{ id: "default", label: "account default" }].concat(mediaVoices)
+    : option.choices
+  const found = pool.find((choice) => choice.id === value)
+  return found ? found.label : value
+}
+
+/** The account's voices, fetched the first time somebody opens that list. */
+let mediaVoices = []
+let voicesState = "cold"
+let voicesNote = ""
+async function loadVoices() {
+  if (voicesState !== "cold") return
+  voicesState = "loading"
+  const result = await fetch("/api/voices").then((r) => r.json()).catch(() => null)
+  mediaVoices = (result && result.voices) || []
+  voicesNote = result && !result.ok ? result.message : ""
+  voicesState = "loaded"
+  // The list is open while this lands, so it has to redraw itself.
+  paletteItems = itemsFor(input.value, input.selectionStart)
+  renderPalette()
+}
 let paletteData = { commands: [], models: [], sessions: [], files: [], themes: [], connectable: [] }
 let paletteItems = []
 let paletteIndex = 0
@@ -901,6 +965,44 @@ function itemsFor(text, cursor) {
         hint: entry.label + "  " + (entry.connected ? "connected" : entry.about),
       }))
       .filter((item) => !q || item.value.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q))
+      .slice(0, 9)
+  }
+  if (head === "/set" && hasArgument) {
+    const options = paletteData.mediaOptions || []
+    const rest = text.slice(text.indexOf(" ") + 1)
+    const [word, ...tail] = rest.split(/\s+/)
+    const option = options.find((o) => o.id === word)
+
+    // Past the option name: its values.
+    if (option && /\s/.test(rest)) {
+      if (option.dynamic === "voices") loadVoices()
+      const q = tail.join(" ").trim().toLowerCase()
+      // Same as the terminal: the default row means the popup is never empty,
+      // so "still loading" has to be a row of its own.
+      const pending = option.dynamic === "voices" && voicesState !== "loaded"
+        ? [{ id: "", label: "loading voices from your account…" }]
+        : []
+      const pool = option.dynamic === "voices"
+        ? [{ id: "default", label: "account default" }].concat(mediaVoices, pending)
+        : option.choices
+      const current = mediaValue(option.id)
+      const rows = pool
+        .map((choice) => ({
+          value: "/set " + option.id + " " + choice.id,
+          hint: choice.label + (choice.id === current ? "   \u2713 set" : ""),
+        }))
+        .filter((item) => !q || item.value.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q))
+        .slice(0, 9)
+      if (!rows.length && option.dynamic === "voices") {
+        return [{ value: text, hint: voicesState === "loaded" ? (voicesNote || "no voices on this account") : "loading voices\u2026" }]
+      }
+      return rows
+    }
+
+    const q = word.trim().toLowerCase()
+    return options
+      .map((entry) => ({ value: "/set " + entry.id, hint: mediaLabel(entry, mediaValue(entry.id)) }))
+      .filter((item) => !q || item.value.toLowerCase().includes(q))
       .slice(0, 9)
   }
   if (head === "/resume" && hasArgument) {

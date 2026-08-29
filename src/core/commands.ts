@@ -1,6 +1,7 @@
 import { PROVIDERS, allSelections, resolveSelection, selectionsOfKind, KIND_LABEL, KIND_ORDER } from "./providers"
 import { THEMES, isTheme } from "./theme"
 import { MEDIA_KINDS, type MediaKind } from "./media"
+import { optionById, MEDIA_OPTIONS, DEFAULT } from "./media-settings"
 
 /**
  * Slash commands.
@@ -23,6 +24,7 @@ export type CommandResult =
   | { kind: "theme"; name: string }
   | { kind: "thinking" }
   | { kind: "mouse" }
+  | { kind: "set"; option: string; value: string }
   | { kind: "media"; media: MediaKind; line: string }
   | { kind: "memory"; action: "list" | "add" | "forget" | "clear"; text?: string }
   | { kind: "connect"; provider?: string }
@@ -46,6 +48,7 @@ export const COMMANDS = [
   { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
   { name: "/mouse", description: "wheel and clicks, or the terminal's own text selection" },
+  { name: "/set", description: "how generation comes out: /set 3d.topology quad" },
   { name: "/quit", description: "exit" },
 ]
 
@@ -119,6 +122,27 @@ export function runCommand(text: string): CommandResult {
       return { kind: "status" }
     case "/export":
       return { kind: "export", path: argument || undefined }
+    case "/set": {
+      const NEWLINE = String.fromCharCode(10)
+      const [id, ...chosen] = argument.split(/\s+/).filter(Boolean)
+      // No argument lists what there is to change, with what each is set
+      // to now - which is the question someone typing /set usually has.
+      if (!id) return { kind: "set", option: "", value: "" }
+      const option = optionById(id)
+      if (!option) {
+        const names = MEDIA_OPTIONS.map((entry) => "  " + entry.id.padEnd(20) + entry.about).join(NEWLINE)
+        return { kind: "message", text: `unknown setting: ${id}` + NEWLINE + names }
+      }
+      const value = chosen.join(" ").trim()
+      // A voice id is whatever the account calls it, so only the fixed
+      // lists can be checked against. Refusing an unknown voice here
+      // would refuse every voice.
+      if (value && !option.dynamic && !option.choices.some((choice) => choice.id === value)) {
+        const choices = option.choices.map((choice) => "  " + choice.id.padEnd(20) + choice.label).join(NEWLINE)
+        return { kind: "message", text: `${option.label} has no ${value}` + NEWLINE + choices }
+      }
+      return { kind: "set", option: option.id, value: value || DEFAULT }
+    }
     case "/thinking":
       return { kind: "thinking" }
     case "/mouse":

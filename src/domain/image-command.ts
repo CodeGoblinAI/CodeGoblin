@@ -16,6 +16,12 @@ export type ImageCommandResult = {
 
 type GenerateInput = {
   prompt: string
+  /**
+   * Qwen only. It is the one image endpoint we post a size to; xAI,
+   * OpenAI and Gemini take none on the requests this file sends, and
+   * inventing one for them would 400 rather than resize.
+   */
+  size?: string
   output?: string
   model?: string
   provider?: string
@@ -30,6 +36,7 @@ type GenerateInput = {
 type SlashInput = {
   input: string
   cwd: string
+  size?: string
   provider?: string
   model?: string
   inputImages?: ImageInput[]
@@ -95,6 +102,7 @@ export const CodeGoblinImageCommand = {
       ...parsed,
       provider: parsed.provider ?? input.provider,
       model: parsed.model ?? input.model,
+      size: input.size,
       inputImages: parsed.inputImages?.length ? parsed.inputImages : input.inputImages,
       useLastImage: parsed.useLastImage || input.useLastImage,
       cwd: input.cwd,
@@ -458,7 +466,7 @@ async function generateQwen(input: ProviderGenerateInput): Promise<ImageCommandR
       },
       parameters: {
         n: 1,
-        size: "2K",
+        size: input.size?.trim() || "2K",
         watermark: false,
       },
     }),

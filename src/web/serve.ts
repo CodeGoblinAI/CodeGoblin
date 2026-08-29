@@ -29,6 +29,14 @@ import { THEMES, paletteOf } from "../core/theme"
 import * as settingsStore from "../core/settings"
 import { exportSession } from "../core/export"
 import { runMedia, MEDIA_KINDS, withinMediaOutput } from "../core/media"
+import {
+  MEDIA_OPTIONS,
+  optionById,
+  withValue,
+  loadMedia,
+  saveMedia,
+  DEFAULT,
+} from "../core/media-settings"
 import * as memory from "../core/memory"
 import { runCommand } from "../core/commands"
 import { resolveInside } from "../core/tools"
@@ -180,6 +188,7 @@ async function projectFiles(): Promise<string[]> {
         { value: "/rename", hint: "retitle this conversation" },
         { value: "/theme", hint: "change colours", expands: true },
         { value: "/thinking", hint: "show or hide the model's reasoning" },
+      { value: "/set", hint: "how generation comes out: /set 3d.topology quad", expands: true },
       ],
       models,
       sessions: saved.map((entry) => ({ value: "/resume " + entry.id, hint: entry.title })),
@@ -190,6 +199,8 @@ async function projectFiles(): Promise<string[]> {
         palette: entry.palette,
       })),
       settings: await settingsStore.load(),
+      mediaOptions: MEDIA_OPTIONS,
+      media: await loadMedia(),
       decisions: DECISIONS,
       connectable: CONNECTABLE.map((entry) => ({
         ...entry,
@@ -304,6 +315,40 @@ async function projectFiles(): Promise<string[]> {
     }
   }
 
+  /**
+   * The generation settings, and the voices an account has.
+   *
+   * GET hands the page the whole table so it can build the same two-level
+   * list the terminal builds; POST changes one. Voices are a separate route
+   * because they cost a network call, and a page that never opens the voice
+   * list should never pay for it.
+   */
+  if (url.pathname === "/api/media-settings") {
+    if (request.method === "POST") {
+      const body = (await request.json()) as { option?: string; value?: string }
+      const option = optionById(String(body.option ?? ""))
+      if (!option) return json({ ok: false, message: "unknown setting" }, 400)
+      const value = String(body.value ?? DEFAULT)
+      if (value !== DEFAULT && !option.dynamic && !option.choices.some((choice) => choice.id === value)) {
+        return json({ ok: false, message: option.label + " has no " + value }, 400)
+      }
+      const next = withValue(await loadMedia(), option.id, value)
+      await saveMedia(next)
+      return json({ ok: true, settings: next })
+    }
+    return json({ options: MEDIA_OPTIONS, settings: await loadMedia() })
+  }
+
+  if (url.pathname === "/api/voices") {
+    try {
+      const { CodeGoblinAudioCommand } = await import("../domain/audio-command")
+      const result = await CodeGoblinAudioCommand.voices({ cwd: root })
+      if (!result.ok) return json({ ok: false, message: result.message, voices: [] })
+      return json({ ok: true, voices: result.voices.map((voice) => ({ id: voice.id, label: voice.name })) })
+    } catch {
+      return json({ ok: false, message: "could not reach the voice list", voices: [] })
+    }
+  }
   if (url.pathname === "/api/media" && request.method === "POST") {
     const body = (await request.json()) as { kind?: string; line?: string; model?: string }
     const kind = MEDIA_KINDS.find((entry) => entry.kind === body.kind)
@@ -311,10 +356,16 @@ async function projectFiles(): Promise<string[]> {
     // The browser sends whichever model the picker is on, so the generator
     // uses the selection rather than a default nobody chose.
     const selected = resolveSelection(body.model)
-    const result = await runMedia(kind.kind, String(body.line ?? ""), root, {
-      provider: selected?.provider.id,
-      model: selected?.model.id,
-    })
+    const result = await runMedia(
+      kind.kind,
+      String(body.line ?? ""),
+      root,
+      { provider: selected?.provider.id, model: selected?.model.id },
+      // Read fresh rather than held: the terminal writes the same file, and
+      // a page left open overnight should not generate with last night's
+      // settings.
+      await loadMedia(),
+    )
     return json(result)
   }
 

@@ -10,4 +10,4 @@ export function getModel3DProvider(providerID?: string): Model3DProvider {
   return providers[id] ?? tripoProvider
 }
 
-export type { Model3DInputImage, Model3DInputMode, Model3DProvider } from "./types"
+export type { Model3DInputImage, Model3DInputMode, Model3DProvider, Model3DShape } from "./types"

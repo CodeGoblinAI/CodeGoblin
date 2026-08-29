@@ -27,12 +27,25 @@ import {
   renderPalette,
   setSessionCache,
   setFileCache,
+  setMediaSettings,
+  setVoices,
+  needsVoices,
   setConnectedProviders,
   type PaletteItem,
 } from "./palette"
 import { findMention, expandMentions } from "../core/mention"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
 import * as settingsStore from "../core/settings"
+import {
+  loadMedia,
+  saveMedia,
+  withValue,
+  optionById,
+  labelOf,
+  describeSettings,
+  type MediaSettings,
+  type MediaChoice,
+} from "../core/media-settings"
 import { exportSession } from "../core/export"
 import { runMedia, describeMedia, type MediaKind } from "../core/media"
 import * as memory from "../core/memory"
@@ -175,6 +188,10 @@ function unfoldPastes(text: string): string {
   return out
 }
 let settings = settingsStore.defaults()
+/** How generation should come out. Separate file, separate lifetime. */
+let media: MediaSettings = {}
+/** The account's voices, once fetched, so a voice id can be shown by name. */
+let voices: MediaChoice[] = []
 let session = sessions.create(selection.provider.id)
 
 let input = ""
@@ -321,6 +338,7 @@ function refreshPalette() {
   // would put part of it on screen in a palette row.
   if (secret) { palette = undefined; return }
   palette = paletteFor(input, cursor)
+  if (needsVoices(input)) void loadVoices()
   // Reset the highlight whenever the list itself changes: carrying an index
   // across two different lists selects something the user never looked at.
   const signature = (palette ?? []).map((item) => item.value).join("|")
@@ -641,10 +659,13 @@ async function generate(kind: MediaKind, line: string) {
   startSpinner()
   transcript.push({ kind: "user", text: line })
   render()
-  const generated = await runMedia(kind, line, process.cwd(), {
-    provider: selection.provider.id,
-    model: selection.model.id,
-  })
+  const generated = await runMedia(
+    kind,
+    line,
+    process.cwd(),
+    { provider: selection.provider.id, model: selection.model.id },
+    media,
+  )
   streaming = false
   stopSpinner()
   transcript.push({ kind: "tool", text: describeMedia(generated) })
@@ -652,6 +673,33 @@ async function generate(kind: MediaKind, line: string) {
   render()
 }
 
+/**
+ * Fetch the account's voices, once, the first time somebody looks.
+ *
+ * Not at startup: most sessions never generate a sound, and a network call
+ * on launch to fill a list nobody opens is a launch that is slower for no
+ * reason. The palette says it is loading in the meantime.
+ */
+let loadingVoices = false
+async function loadVoices() {
+  if (loadingVoices) return
+  loadingVoices = true
+  try {
+    const { CodeGoblinAudioCommand } = await import("../domain/audio-command")
+    const result = await CodeGoblinAudioCommand.voices({ cwd: process.cwd() })
+    voices = result.ok ? result.voices.map((voice) => ({ id: voice.id, label: voice.name })) : []
+    // An empty list because there is no key reads very differently from an
+    // empty list because the account has none, so the reason is kept.
+    setVoices(voices, result.ok ? "" : result.message)
+  } catch {
+    // A voice list that will not load is a shorter list, not an error worth
+    // interrupting anyone over.
+    voices = []
+    setVoices([], "could not reach the voice list")
+  }
+  refreshPalette()
+  render()
+}
 async function send() {
   if (secret) {
     const provider = secret.provider
@@ -706,6 +754,19 @@ async function send() {
       status = settings.mouse
         ? "mouse on - wheel scrolls, shift+drag selects"
         : "mouse off - drag selects text, pgup/dn scrolls"
+    }
+    if (result.kind === "set") {
+      if (!result.option) {
+        transcript.push({ kind: "tool", text: describeSettings(media, voices) })
+      } else {
+        media = withValue(media, result.option, result.value)
+        void saveMedia(media)
+        setMediaSettings(media)
+        const option = optionById(result.option)
+        status = option
+          ? option.label + ": " + labelOf(option, result.value, voices)
+          : "saved"
+      }
     }
     if (result.kind === "thinking") {
       settings = { ...settings, thinking: !settings.thinking }
@@ -1020,6 +1081,8 @@ refreshConnected()
 
 async function loadSettings() {
   settings = await settingsStore.load()
+  media = await loadMedia()
+  setMediaSettings(media)
   applyTheme(settings.theme)
   applyMouse()
   render()
