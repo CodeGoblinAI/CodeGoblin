@@ -15,6 +15,7 @@ import * as sessions from "../core/sessions"
 import { Permissions, type Decision } from "../core/permission"
 import { expandMentions } from "../core/mention"
 import { globFiles } from "../core/search"
+import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
 
 // fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..."
 // with a leading slash, which fails to open.
@@ -38,6 +39,21 @@ const pendingDecisions = new Map<string, (decision: Decision) => void>()
  */
 const activeTurns = new Map<string, AbortController>()
 const permissionsBySession = new Map<string, Permissions>()
+
+/**
+ * What each session has written, so /undo can put it back.
+ *
+ * Per session rather than per server: two conversations editing the same tree
+ * would otherwise undo each other's work.
+ */
+const editsBySession = new Map<string, History>()
+function editsFor(sessionId: string): History {
+  const existing = editsBySession.get(sessionId)
+  if (existing) return existing
+  const created = new History()
+  editsBySession.set(sessionId, created)
+  return created
+}
 
 function permissionsFor(sessionId: string, send: (event: unknown) => void): Permissions {
   const existing = permissionsBySession.get(sessionId)
@@ -136,6 +152,8 @@ async function projectFiles(): Promise<string[]> {
         { value: "/model", hint: "switch model", expands: true },
         { value: "/resume", hint: "reopen a saved conversation", expands: true },
         { value: "/compact", hint: "summarise to free context" },
+        { value: "/undo", hint: "put back the files the last turn changed" },
+        { value: "/redo", hint: "reapply what /undo took back" },
       ],
       models,
       sessions: saved.map((entry) => ({ value: "/resume " + entry.id, hint: entry.title })),
@@ -162,6 +180,20 @@ async function projectFiles(): Promise<string[]> {
     const body = (await request.json()) as { id?: string; title?: string }
     const ok = await sessions.rename(body.id ?? "", (body.title ?? "").trim() || "Untitled")
     return json({ ok })
+  }
+
+  if (url.pathname === "/api/undo" && request.method === "POST") {
+    const body = (await request.json()) as { sessionId?: string; direction?: string }
+    const edits = editsBySession.get(body.sessionId ?? "")
+    const forward = body.direction === "redo"
+    if (!edits) return json({ message: "nothing to undo - no file has been changed this session" })
+    try {
+      const checkpoint = forward ? await edits.redo(root) : await edits.undo(root)
+      if (!checkpoint) return json({ message: nothingToDo(edits, forward) })
+      return json({ message: (forward ? "redid " : "undid ") + describeCheckpoint(checkpoint) })
+    } catch (error) {
+      return json({ message: "undo failed: " + (error instanceof Error ? error.message : "unknown") }, 500)
+    }
   }
 
   if (url.pathname === "/api/stop" && request.method === "POST") {
@@ -238,6 +270,9 @@ async function projectFiles(): Promise<string[]> {
         activeTurns.set(session.id, turn)
 
         send({ type: "session", id: session.id })
+        // One checkpoint per turn, so undo takes back the whole answer.
+        const edits = editsFor(session.id)
+        edits.begin(text)
         // Say what was attached: a mention that silently did nothing and a
         // mention that worked would otherwise look exactly the same.
         if (mentioned.files.length) send({ type: "attached", files: mentioned.files })
@@ -250,6 +285,7 @@ async function projectFiles(): Promise<string[]> {
             root,
             contextWindow: model.contextWindow,
             permissions: permissionsFor(session.id, send),
+            history: edits,
             signal: turn.signal,
           })) {
             send(event)
@@ -259,6 +295,7 @@ async function projectFiles(): Promise<string[]> {
         } catch (error) {
           send({ type: "error", message: error instanceof Error ? error.message : "request failed" })
         } finally {
+          edits.commit()
           clearInterval(heartbeat)
           activeTurns.delete(session.id)
           controller.close()

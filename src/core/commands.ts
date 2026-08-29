@@ -13,6 +13,8 @@ export type CommandResult =
   | { kind: "provider"; id: string }
   | { kind: "resume"; id?: string }
   | { kind: "compact" }
+  | { kind: "undo" }
+  | { kind: "redo" }
   | { kind: "none" }
 
 export const COMMANDS = [
@@ -21,6 +23,8 @@ export const COMMANDS = [
   { name: "/model", description: "switch provider: /model zai" },
   { name: "/resume", description: "reopen a saved conversation" },
   { name: "/compact", description: "summarise the conversation to free context" },
+  { name: "/undo", description: "put back the files the last turn changed" },
+  { name: "/redo", description: "reapply what /undo took back" },
   { name: "/quit", description: "exit" },
 ]
 
@@ -52,6 +56,10 @@ export function runCommand(text: string): CommandResult {
       return { kind: "resume", id: argument || undefined }
     case "/compact":
       return { kind: "compact" }
+    case "/undo":
+      return { kind: "undo" }
+    case "/redo":
+      return { kind: "redo" }
     case "/model": {
       if (!argument) {
         const available = allSelections()

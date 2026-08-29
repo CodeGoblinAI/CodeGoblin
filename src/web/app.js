@@ -258,6 +258,17 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/undo" || name === "/redo") {
+    const result = await fetch("/api/undo", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId, direction: name.slice(1) }),
+    }).then((r) => r.json()).catch(() => ({ message: "could not reach the server" }))
+    note(result.message)
+    refreshSessions()
+    return true
+  }
+
   if (name === "/compact") {
     note("compaction runs automatically when the conversation nears the context limit")
     return true

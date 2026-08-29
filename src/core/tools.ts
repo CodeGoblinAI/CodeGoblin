@@ -13,6 +13,8 @@ export type Tool = {
   description: string
   parameters: Record<string, unknown>
   run: (args: any, root: string) => Promise<string>
+  /** Changes the file at args.path, so its previous state is worth keeping. */
+  writes?: boolean
 }
 
 const MAX_OUTPUT = 24_000
@@ -84,6 +86,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "write_file",
+    writes: true,
     description: "Write a UTF-8 text file, creating parent directories as needed.",
     parameters: {
       type: "object",
@@ -104,6 +107,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "edit_file",
+    writes: true,
     description:
       "Replace an exact string in a file. Prefer this over write_file: it changes only what you name, " +
       "and fails loudly if the text is missing or ambiguous instead of silently rewriting the file.",
@@ -301,10 +305,20 @@ export const TOOL_SCHEMA = ALL_TOOLS.map((tool) => ({
   function: { name: tool.name, description: tool.description, parameters: tool.parameters },
 }))
 
-export async function runTool(name: string, args: unknown, root: string): Promise<string> {
+export async function runTool(
+  name: string,
+  args: unknown,
+  root: string,
+  /** Called with the path a writing tool is about to change, before it changes. */
+  onWrite?: (relative: string) => Promise<void>,
+): Promise<string> {
   const tool = ALL_TOOLS.find((candidate) => candidate.name === name)
   if (!tool) return `unknown tool: ${name}`
   try {
+    if (tool.writes && onWrite) {
+      const target = (args as { path?: unknown }).path
+      if (typeof target === "string") await onWrite(target)
+    }
     return await tool.run(args, root)
   } catch (error) {
     return `error: ${error instanceof Error ? error.message : String(error)}`

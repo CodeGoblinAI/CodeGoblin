@@ -13,6 +13,7 @@ import { displayWidth, truncateToWidth, padToWidth } from "./width"
 import { renderMarkdown } from "./markdown"
 import { paletteFor, renderPalette, setSessionCache, setFileCache, type PaletteItem } from "./palette"
 import { findMention, expandMentions } from "../core/mention"
+import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
 import { globFiles } from "../core/search"
 import { defaultSelection, resolveSelection, type Selection } from "../core/providers"
 import { apiKey } from "../core/auth"
@@ -43,6 +44,8 @@ const SYSTEM: Message = {
 let messages: Message[] = [SYSTEM]
 type Entry = { kind: "user" | "agent" | "tool" | "thinking"; text: string }
 let transcript: Entry[] = []
+/** Named for what it holds, since "history" here is the prompt recall list. */
+const edits = new History()
 let session = sessions.create(selection.provider.id)
 
 let input = ""
@@ -249,9 +252,21 @@ async function send() {
       plan = []
       session = sessions.create(selection.provider.id)
       permissions.reset()
+      edits.reset()
       status = "new conversation"
     }
     if (result.kind === "message") transcript.push({ kind: "tool", text: result.text })
+    if (result.kind === "undo" || result.kind === "redo") {
+      const forward = result.kind === "redo"
+      try {
+        const checkpoint = forward ? await edits.redo(process.cwd()) : await edits.undo(process.cwd())
+        status = checkpoint
+          ? (forward ? "redid " : "undid ") + describeCheckpoint(checkpoint)
+          : nothingToDo(edits, forward)
+      } catch (error) {
+        status = "undo failed: " + (error instanceof Error ? error.message.slice(0, 90) : "unknown")
+      }
+    }
     if (result.kind === "provider") {
       const next = resolveSelection(result.id)
       if (next) {
@@ -325,6 +340,9 @@ async function send() {
   render()
 
   let current: Entry | undefined
+  // Everything this turn writes is captured under one checkpoint, so /undo
+  // takes back the whole answer rather than its last file.
+  edits.begin(text)
   try {
     for await (const event of runAgent({
       provider: selection.provider,
@@ -334,6 +352,7 @@ async function send() {
       root: process.cwd(),
       contextWindow: selection.model.contextWindow,
       permissions,
+      history: edits,
     })) {
       if (event.type === "thinking") {
         if (!current || current.kind !== "thinking") {
@@ -376,6 +395,7 @@ async function send() {
     status = error instanceof Error ? error.message.slice(0, 120) : "request failed"
   } finally {
     streaming = false
+    edits.commit()
     session.messages = messages
     void sessions.save(session).then(refreshSessionCache).catch(() => {})
     render()

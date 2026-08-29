@@ -3,6 +3,7 @@ import { TOOL_SCHEMA, runTool } from "./tools"
 import type { Permissions } from "./permission"
 import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT } from "./context"
 import { parseTodos, type Todo } from "./todo"
+import type { History } from "./undo"
 
 export type Role = "user" | "assistant" | "system" | "tool"
 export type ToolCall = { id: string; name: string; args: string }
@@ -53,6 +54,8 @@ export async function* runAgent(input: {
   root: string
   contextWindow?: number
   permissions?: Permissions
+  /** Given a turn, keeps the previous state of every file the turn writes. */
+  history?: History
   maxTurns?: number
   signal?: AbortSignal
 }): AsyncGenerator<AgentEvent, void, unknown> {
@@ -178,7 +181,9 @@ export async function* runAgent(input: {
         continue
       }
 
-      const result = await runTool(call.name, args, input.root)
+      const result = await runTool(call.name, args, input.root, async (relative) => {
+        await input.history?.record(input.root, relative)
+      })
 
       // The plan is state the surfaces render, not just a tool result.
       if (call.name === "todo_write") {
