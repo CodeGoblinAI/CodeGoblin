@@ -1,5 +1,6 @@
 import { COMMANDS } from "../core/commands"
 import { allSelections } from "../core/providers"
+import { findMention } from "../core/mention"
 import { theme, dim, ansi } from "./ansi"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
 
@@ -22,7 +23,47 @@ export function setSessionCache(sessions: { id: string; title: string }[]) {
   sessionCache = sessions
 }
 
-export function paletteFor(input: string): PaletteItem[] | undefined {
+/**
+ * Files the @ picker offers.
+ *
+ * Walking the tree on every keystroke would be far too slow, so the app fills
+ * this once at startup, the same way it fills the session list.
+ */
+let fileCache: string[] = []
+export function setFileCache(files: string[]) {
+  fileCache = files
+}
+
+/** Basename matches first, then the shortest path: what gets typed is usually a filename. */
+function rankFiles(query: string): string[] {
+  if (!query) return fileCache.slice(0, 8)
+  const needle = query.toLowerCase()
+  const scored: { file: string; score: number }[] = []
+  for (const file of fileCache) {
+    const lower = file.toLowerCase()
+    const base = lower.slice(lower.lastIndexOf("/") + 1)
+    const score = base.startsWith(needle) ? 0 : base.includes(needle) ? 1 : lower.includes(needle) ? 2 : -1
+    if (score >= 0) scored.push({ file, score })
+  }
+  return scored
+    .sort((a, b) => a.score - b.score || a.file.length - b.file.length)
+    .slice(0, 8)
+    .map((entry) => entry.file)
+}
+
+export function paletteFor(input: string, cursor = input.length): PaletteItem[] | undefined {
+  // @ opens the file picker wherever the caret happens to be; / only ever
+  // starts a command, so it is only meaningful at the beginning of the line.
+  const mention = findMention(input, cursor)
+  if (mention) {
+    const files = rankFiles(mention.query)
+    if (!files.length) return undefined
+    return files.map((file) => ({
+      value: "@" + file,
+      hint: file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "in this folder",
+    }))
+  }
+
   if (!input.startsWith("/")) return undefined
 
   // "/model " with an argument lists models instead of commands.

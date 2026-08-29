@@ -13,6 +13,8 @@ import { resolveSelection, allSelections, defaultSelection } from "../core/provi
 import { apiKey } from "../core/auth"
 import * as sessions from "../core/sessions"
 import { Permissions, type Decision } from "../core/permission"
+import { expandMentions } from "../core/mention"
+import { globFiles } from "../core/search"
 
 // fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..."
 // with a leading slash, which fails to open.
@@ -102,6 +104,23 @@ async function handle(request: Request): Promise<Response> {
     })
   }
 
+/**
+ * The file list behind the @ picker.
+ *
+ * Walking the tree per keystroke is out of the question, and walking it once
+ * for the life of the server would never notice a new file - so it is cached
+ * briefly and re-walked when the browser next asks.
+ */
+let fileList: { files: string[]; at: number } = { files: [], at: 0 }
+const FILE_CACHE_MS = 30_000
+
+async function projectFiles(): Promise<string[]> {
+  if (Date.now() - fileList.at < FILE_CACHE_MS) return fileList.files
+  const files = await globFiles(root, "**/*", 4000).catch(() => [] as string[])
+  fileList = { files, at: Date.now() }
+  return files
+}
+
   // The web composer needs the same command set the TUI has, so it comes
   // from one place rather than being duplicated in the browser.
   if (url.pathname === "/api/commands") {
@@ -120,6 +139,7 @@ async function handle(request: Request): Promise<Response> {
       ],
       models,
       sessions: saved.map((entry) => ({ value: "/resume " + entry.id, hint: entry.title })),
+      files: await projectFiles(),
     })
   }
 
@@ -189,7 +209,12 @@ async function handle(request: Request): Promise<Response> {
           "in the user's working directory. Prefer reading before editing. Be concise.",
       })
     }
-    session.messages.push({ role: "user", content: text })
+    // Mentions are read here, so the stored message carries its files and a
+    // resumed conversation still has the context it was answered with.
+    const mentioned = await expandMentions(text, root)
+    session.messages.push(
+      mentioned.files.length ? { role: "user", content: mentioned.content, display: text } : { role: "user", content: text },
+    )
 
     // Server-sent events: the browser gets the same event stream the TUI sees.
     const stream = new ReadableStream({
@@ -213,6 +238,9 @@ async function handle(request: Request): Promise<Response> {
         activeTurns.set(session.id, turn)
 
         send({ type: "session", id: session.id })
+        // Say what was attached: a mention that silently did nothing and a
+        // mention that worked would otherwise look exactly the same.
+        if (mentioned.files.length) send({ type: "attached", files: mentioned.files })
         try {
           for await (const event of runAgent({
             provider,

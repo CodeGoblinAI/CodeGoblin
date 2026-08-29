@@ -11,7 +11,9 @@ import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { parseKeys } from "./keys"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
 import { renderMarkdown } from "./markdown"
-import { paletteFor, renderPalette, setSessionCache, type PaletteItem } from "./palette"
+import { paletteFor, renderPalette, setSessionCache, setFileCache, type PaletteItem } from "./palette"
+import { findMention, expandMentions } from "../core/mention"
+import { globFiles } from "../core/search"
 import { defaultSelection, resolveSelection, type Selection } from "../core/providers"
 import { apiKey } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
@@ -81,8 +83,28 @@ const centre = (text: string, width: number) => " ".repeat(Math.max(0, Math.floo
 
 let paletteSignature = ""
 
+/**
+ * Put a completion where the caret is.
+ *
+ * A slash command replaces the whole line, because there is only ever one of
+ * them. A file mention replaces just its own token: it is part of a sentence,
+ * and the rest of what was typed has to survive being completed.
+ */
+function completeWith(value: string) {
+  if (value.startsWith("@")) {
+    const mention = findMention(input, cursor)
+    if (mention) {
+      input = input.slice(0, mention.start) + value + " " + input.slice(mention.end)
+      cursor = mention.start + value.length + 1
+      return
+    }
+  }
+  input = value + " "
+  cursor = input.length
+}
+
 function refreshPalette() {
-  palette = paletteFor(input)
+  palette = paletteFor(input, cursor)
   // Reset the highlight whenever the list itself changes: carrying an index
   // across two different lists selects something the user never looked at.
   const signature = (palette ?? []).map((item) => item.value).join("|")
@@ -199,7 +221,7 @@ function render() {
   const context = usage(messages, selection.model.contextWindow)
   const left =
     status || selection.provider.label + " . " + selection.model.id + "  " + context.percent + "% ctx"
-  const right = scroll > 0 ? "scrolled " + scroll : palette ? "tab complete . up/down pick" : "/ commands . ctrl+c quit"
+  const right = scroll > 0 ? "scrolled " + scroll : palette ? "tab complete . up/down pick" : "/ commands . @ files . ctrl+c quit"
   const plain = "  " + left
   const padded = padToWidth(plain, Math.max(displayWidth(plain) + 1, cols - displayWidth(right) - 2))
   body.push(dim + padded + ansi.reset + theme.muted + right + ansi.reset)
@@ -290,8 +312,14 @@ async function send() {
   scroll = 0
   history.push(text)
   historyIndex = -1
-  messages.push({ role: "user", content: text })
+  // Mentions are read here rather than in the agent so the stored message
+  // carries the files with it: a resumed conversation keeps its context.
+  const mentioned = await expandMentions(text, process.cwd())
+  messages.push(
+    mentioned.files.length ? { role: "user", content: mentioned.content, display: text } : { role: "user", content: text },
+  )
   transcript.push({ kind: "user", text })
+  if (mentioned.files.length) transcript.push({ kind: "tool", text: "attached " + mentioned.files.join(", ") })
   streaming = true
   status = ""
   render()
@@ -364,6 +392,11 @@ async function refreshSessionCache() {
 }
 void refreshSessionCache()
 
+async function refreshFileCache() {
+  setFileCache(await globFiles(process.cwd(), "**/*", 4000).catch(() => []))
+}
+void refreshFileCache()
+
 out.write(ansi.altScreen + ansi.hideCursor)
 render()
 out.on("resize", render)
@@ -401,6 +434,15 @@ process.stdin.on("data", (chunk) => {
       if (pressed.type === "enter") {
         const chosen = palette[paletteIndex]!.value
 
+        // A file mention is part of a question, not the whole of one. Picking
+        // it drops the path in and leaves the composer open to ask about it.
+        if (chosen.startsWith("@")) {
+          completeWith(chosen)
+          refreshPalette()
+          render()
+          continue
+        }
+
         // A bare command that takes an argument expands rather than runs:
         // typing /model and pressing enter should offer the models, not print
         // help. An item containing a space is already a complete choice, so it
@@ -424,8 +466,7 @@ process.stdin.on("data", (chunk) => {
         return
       }
       if (pressed.type === "ctrl" && pressed.value === "i") {
-        input = palette[paletteIndex]!.value + " "
-        cursor = input.length
+        completeWith(palette[paletteIndex]!.value)
         refreshPalette()
         dirty = true
         continue

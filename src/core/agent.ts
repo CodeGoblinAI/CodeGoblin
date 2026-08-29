@@ -8,7 +8,10 @@ export type Role = "user" | "assistant" | "system" | "tool"
 export type ToolCall = { id: string; name: string; args: string }
 export type Message = {
   role: Role
+  /** What the model sees. For a user message with @-mentions this includes the attached files. */
   content: string
+  /** What the human sees, when that differs - a message with its mentions still written as @paths. */
+  display?: string
   tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[]
   tool_call_id?: string
 }
@@ -22,6 +25,15 @@ export type AgentEvent =
   | { type: "compacted"; before: number; after: number }
   | { type: "plan"; todos: Todo[] }
   | { type: "turn_end" }
+
+/**
+ * Only the fields the API knows about.
+ *
+ * Messages carry a display copy for the UI, and providers that validate their
+ * input reject unknown keys outright - so the wire gets the wire fields.
+ */
+const wire = (messages: Message[]) =>
+  messages.map(({ role, content, tool_calls, tool_call_id }) => ({ role, content, tool_calls, tool_call_id }))
 
 /**
  * The agent loop.
@@ -66,7 +78,7 @@ export async function* runAgent(input: {
       headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
       body: JSON.stringify({
         model: input.modelId,
-        messages: input.messages,
+        messages: wire(input.messages),
         tools: TOOL_SCHEMA,
         stream: true,
       }),
@@ -195,7 +207,7 @@ async function summarise(
       headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
       body: JSON.stringify({
         model: input.modelId,
-        messages: [...messages, { role: "user", content: SUMMARY_PROMPT }],
+        messages: wire([...messages, { role: "user", content: SUMMARY_PROMPT }]),
         stream: false,
       }),
     })

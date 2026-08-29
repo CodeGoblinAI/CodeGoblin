@@ -208,7 +208,7 @@ async function openSession(id) {
   sessionId = id
   thread.innerHTML = ""
   for (const m of data.session.messages) {
-    if (m.role === "user") turn("user", m.content)
+    if (m.role === "user") turn("user", m.display || m.content)
     else if (m.role === "assistant" && m.content) turn("agent", m.content)
   }
   if (!thread.children.length) emptyState()
@@ -359,6 +359,7 @@ async function submit() {
           runningTools.push(event.name)
           renderActivity()
         }
+        if (event.type === "attached") note("attached " + event.files.join(", "))
         if (event.type === "plan") { planItems = event.todos; renderActivity() }
         if (event.type === "permission") { body = null; permissionPrompt(event) }
         if (event.type === "tool_denied") {
@@ -450,7 +451,49 @@ refreshSessions()
  * cannot drift apart.
  * ------------------------------------------------------------------ */
 
-let paletteData = { commands: [], models: [], sessions: [] }
+/**
+ * What counts as a mention.
+ *
+ * Mirrored from findMention in src/core/mention.ts. This file is served to
+ * the browser as a plain script rather than bundled, so it cannot import the
+ * real one - test/mention.test.ts runs both against the same cases so the
+ * copy cannot quietly drift away from the original.
+ */
+// Char codes rather than escapes: this line has been mangled by tooling before.
+const MENTION_SPACE = new Set([" ", String.fromCharCode(9), String.fromCharCode(10), String.fromCharCode(13)])
+const mentionIsSpace = (char) => char === undefined || MENTION_SPACE.has(char)
+
+function findMention(text, cursor) {
+  const caret = Math.max(0, Math.min(cursor, text.length))
+  let start = -1
+  for (let index = caret - 1; index >= 0; index--) {
+    const char = text[index]
+    if (mentionIsSpace(char)) return undefined
+    if (char === "@") { start = index; break }
+  }
+  if (start < 0) return undefined
+  if (start > 0 && !mentionIsSpace(text[start - 1])) return undefined
+  let end = caret
+  while (end < text.length && !mentionIsSpace(text[end])) end++
+  return { start, end, query: text.slice(start + 1, caret) }
+}
+
+/** Basename matches first, then the shortest path. Same ranking as the TUI. */
+function rankFiles(query) {
+  const files = paletteData.files || []
+  if (!query) return files.slice(0, 8)
+  const needle = query.toLowerCase()
+  const scored = []
+  for (const file of files) {
+    const lower = file.toLowerCase()
+    const base = lower.slice(lower.lastIndexOf("/") + 1)
+    const score = base.startsWith(needle) ? 0 : base.includes(needle) ? 1 : lower.includes(needle) ? 2 : -1
+    if (score >= 0) scored.push({ file, score })
+  }
+  return scored.sort((a, b) => a.score - b.score || a.file.length - b.file.length).slice(0, 8).map((e) => e.file)
+}
+
+let paletteData = { commands: [], models: [], sessions: [], files: [] }
 let paletteItems = []
 let paletteIndex = 0
 
@@ -463,7 +506,16 @@ async function loadCommands() {
   paletteData = await fetch("/api/commands").then((r) => r.json()).catch(() => paletteData)
 }
 
-function itemsFor(text) {
+function itemsFor(text, cursor) {
+  // @ opens the file picker wherever the caret is; / only starts a command.
+  const mention = findMention(text, cursor)
+  if (mention) {
+    return rankFiles(mention.query).map((file) => ({
+      value: "@" + file,
+      hint: file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "in this folder",
+    }))
+  }
+
   if (!text.startsWith("/")) return []
   const [head] = text.split(" ")
   const hasArgument = text.includes(" ")
@@ -498,7 +550,7 @@ function renderPalette() {
 let paletteSignature = ""
 
 function refreshPalette() {
-  paletteItems = itemsFor(input.value)
+  paletteItems = itemsFor(input.value, input.selectionStart ?? input.value.length)
   // Same rule as the TUI: a new list starts at the top.
   const signature = paletteItems.map((item) => item.value).join("|")
   if (signature !== paletteSignature) {
@@ -514,6 +566,22 @@ function refreshPalette() {
 function choose(index) {
   const item = paletteItems[index]
   if (!item) return
+
+  // A file mention is part of a question, not the whole of one: drop the path
+  // in and leave the composer open to ask about it.
+  if (item.value.startsWith("@")) {
+    const cursor = input.selectionStart ?? input.value.length
+    const mention = findMention(input.value, cursor)
+    if (mention) {
+      const before = input.value.slice(0, mention.start)
+      const caret = before.length + item.value.length + 1
+      input.value = before + item.value + " " + input.value.slice(mention.end)
+      input.setSelectionRange(caret, caret)
+    }
+    refreshPalette()
+    input.focus()
+    return
+  }
   const expands = paletteData.commands.find((c) => c.value === item.value && c.expands)
   if (expands) {
     input.value = item.value + " "
@@ -528,13 +596,25 @@ function choose(index) {
 }
 
 input.addEventListener("input", refreshPalette)
+// The caret can move without the text changing - clicking into the middle of a
+// mention should offer to complete it.
+input.addEventListener("click", refreshPalette)
+const PALETTE_KEYS = ["ArrowDown", "ArrowUp", "Escape", "Tab", "Enter"]
+
 input.addEventListener("keydown", (event) => {
-  if (!paletteItems.length) return
-  if (event.key === "ArrowDown") { event.preventDefault(); paletteIndex = Math.min(paletteItems.length - 1, paletteIndex + 1); renderPalette() }
-  if (event.key === "ArrowUp") { event.preventDefault(); paletteIndex = Math.max(0, paletteIndex - 1); renderPalette() }
+  if (!paletteItems.length || !PALETTE_KEYS.includes(event.key)) return
+
+  // The palette owns these keys outright while it is open, and preventDefault
+  // alone does not give it them: the composer's own keydown handler sits on
+  // this same element and still ran, so completing a file mention with enter
+  // filled the path in and then immediately sent the half-written question.
+  event.preventDefault()
+  event.stopImmediatePropagation()
+
+  if (event.key === "ArrowDown") { paletteIndex = Math.min(paletteItems.length - 1, paletteIndex + 1); renderPalette() }
+  if (event.key === "ArrowUp") { paletteIndex = Math.max(0, paletteIndex - 1); renderPalette() }
   if (event.key === "Escape") { paletteItems = []; renderPalette() }
-  if (event.key === "Tab") { event.preventDefault(); choose(paletteIndex) }
-  if (event.key === "Enter") { event.preventDefault(); choose(paletteIndex) }
+  if (event.key === "Tab" || event.key === "Enter") choose(paletteIndex)
 }, true)
 
 loadCommands()

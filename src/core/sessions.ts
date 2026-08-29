@@ -30,7 +30,8 @@ export function newSessionId(): string {
 
 /** First user line, trimmed - enough to recognise a session in a list. */
 export function titleFrom(messages: Message[]): string {
-  const first = messages.find((message) => message.role === "user")?.content ?? ""
+  const found = messages.find((message) => message.role === "user")
+  const first = found?.display ?? found?.content ?? ""
   const line = first.split(String.fromCharCode(10))[0] ?? ""
   return line.length > 48 ? line.slice(0, 48) + "…" : line || "New session"
 }
