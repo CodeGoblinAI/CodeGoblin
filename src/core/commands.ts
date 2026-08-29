@@ -11,7 +11,7 @@ export type CommandResult =
   | { kind: "clear" }
   | { kind: "quit" }
   | { kind: "provider"; id: string }
-  | { kind: "sessions" }
+  | { kind: "resume"; id?: string }
   | { kind: "compact" }
   | { kind: "none" }
 
@@ -19,7 +19,7 @@ export const COMMANDS = [
   { name: "/help", description: "show these commands" },
   { name: "/new", description: "start a fresh conversation" },
   { name: "/model", description: "switch provider: /model zai" },
-  { name: "/sessions", description: "list saved sessions" },
+  { name: "/resume", description: "reopen a saved conversation" },
   { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/quit", description: "exit" },
 ]
@@ -45,8 +45,11 @@ export function runCommand(text: string): CommandResult {
     case "/quit":
     case "/exit":
       return { kind: "quit" }
+    case "/resume":
     case "/sessions":
-      return { kind: "sessions" }
+    case "/continue":
+      // An argument is a session id chosen from the list.
+      return { kind: "resume", id: argument || undefined }
     case "/compact":
       return { kind: "compact" }
     case "/model": {

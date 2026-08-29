@@ -89,6 +89,15 @@
   .pallow:hover { border-color: var(--goblin); color: var(--goblin); }
   .pdeny:hover { border-color: var(--red); color: var(--red); }
   .presolved { color: var(--muted); font-size: 12px; }
+
+  .composer { position: relative; }
+  .palette { position: absolute; bottom: calc(100% + 6px); left: 20px; right: 20px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,.45); z-index: 20; }
+  .prow { display: flex; gap: 14px; padding: 8px 13px; cursor: pointer; font-size: 13px; }
+  .prow .pvalue { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
+  .prow .phint { color: var(--muted); opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prow.active { background: var(--panel2); }
+  .prow.active .pvalue { color: var(--goblin); }
+  .prow.active .phint { color: var(--text); opacity: 1; }
 </style>
 
 <aside>

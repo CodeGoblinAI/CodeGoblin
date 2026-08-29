@@ -303,6 +303,9 @@ sendBtn.onclick = submit
 stopBtn.onclick = () => { if (controller) controller.abort() }
 input.oninput = () => { sendBtn.disabled = busy || !input.value.trim() }
 input.onkeydown = (e) => {
+  // The palette owns enter while it is open, otherwise this would submit the
+  // half-typed command the palette was about to complete.
+  if (paletteItems.length) return
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit() }
 }
 document.getElementById("new-session").onclick = () => {
@@ -325,3 +328,100 @@ fetch("/api/providers").then((r) => r.json()).then((data) => {
 emptyState()
 setBusy(false)
 refreshSessions()
+
+/* ------------------------------------------------------------------ *
+ * Slash palette
+ *
+ * Typing "/" opened nothing in the browser, so commands only existed in
+ * the TUI. The command set comes from the server so the two surfaces
+ * cannot drift apart.
+ * ------------------------------------------------------------------ */
+
+let paletteData = { commands: [], models: [], sessions: [] }
+let paletteItems = []
+let paletteIndex = 0
+
+const paletteEl = document.createElement("div")
+paletteEl.className = "palette"
+paletteEl.hidden = true
+document.querySelector(".composer").prepend(paletteEl)
+
+async function loadCommands() {
+  paletteData = await fetch("/api/commands").then((r) => r.json()).catch(() => paletteData)
+}
+
+function itemsFor(text) {
+  if (!text.startsWith("/")) return []
+  const [head] = text.split(" ")
+  const hasArgument = text.includes(" ")
+
+  if (head === "/model" && hasArgument) {
+    const q = text.slice(7).trim().toLowerCase()
+    return paletteData.models.filter((m) => !q || m.value.toLowerCase().includes(q)).slice(0, 8)
+  }
+  if (head === "/resume" && hasArgument) {
+    const q = text.slice(8).trim().toLowerCase()
+    return paletteData.sessions.filter((s) => !q || s.hint.toLowerCase().includes(q)).slice(0, 8)
+  }
+  return paletteData.commands.filter((c) => c.value.startsWith(text.split(" ")[0]))
+}
+
+function renderPalette() {
+  paletteEl.innerHTML = ""
+  if (!paletteItems.length) { paletteEl.hidden = true; return }
+  paletteEl.hidden = false
+
+  paletteItems.forEach((item, index) => {
+    const row = document.createElement("div")
+    row.className = "prow" + (index === paletteIndex ? " active" : "")
+    row.innerHTML = '<span class="pvalue"></span><span class="phint"></span>'
+    row.querySelector(".pvalue").textContent = item.value
+    row.querySelector(".phint").textContent = item.hint
+    row.onclick = () => choose(index)
+    paletteEl.appendChild(row)
+  })
+}
+
+let paletteSignature = ""
+
+function refreshPalette() {
+  paletteItems = itemsFor(input.value)
+  // Same rule as the TUI: a new list starts at the top.
+  const signature = paletteItems.map((item) => item.value).join("|")
+  if (signature !== paletteSignature) {
+    paletteSignature = signature
+    paletteIndex = 0
+  } else {
+    paletteIndex = Math.min(paletteIndex, Math.max(0, paletteItems.length - 1))
+  }
+  renderPalette()
+}
+
+/** Picking a bare command that takes an argument expands it; anything else runs. */
+function choose(index) {
+  const item = paletteItems[index]
+  if (!item) return
+  const expands = paletteData.commands.find((c) => c.value === item.value && c.expands)
+  if (expands) {
+    input.value = item.value + " "
+    refreshPalette()
+    input.focus()
+    return
+  }
+  input.value = item.value
+  paletteItems = []
+  renderPalette()
+  submit()
+}
+
+input.addEventListener("input", refreshPalette)
+input.addEventListener("keydown", (event) => {
+  if (!paletteItems.length) return
+  if (event.key === "ArrowDown") { event.preventDefault(); paletteIndex = Math.min(paletteItems.length - 1, paletteIndex + 1); renderPalette() }
+  if (event.key === "ArrowUp") { event.preventDefault(); paletteIndex = Math.max(0, paletteIndex - 1); renderPalette() }
+  if (event.key === "Escape") { paletteItems = []; renderPalette() }
+  if (event.key === "Tab") { event.preventDefault(); choose(paletteIndex) }
+  if (event.key === "Enter") { event.preventDefault(); choose(paletteIndex) }
+}, true)
+
+loadCommands()

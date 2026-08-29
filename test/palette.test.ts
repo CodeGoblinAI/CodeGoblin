@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { paletteFor } from "../src/tui/palette"
+import { paletteFor, setSessionCache } from "../src/tui/palette"
 
 /**
  * The rule the TUI applies on enter:
@@ -47,5 +47,30 @@ describe("palette expansion", () => {
 
   test("plain text opens nothing", () => {
     expect(paletteFor("hello")).toBeUndefined()
+  })
+})
+
+describe("resume palette", () => {
+  test("/resume expands into saved conversations", () => {
+    setSessionCache([{ id: "abc", title: "first chat" }, { id: "def", title: "second chat" }])
+    const items = paletteFor("/resume ")
+    expect(items?.map((i) => i.value)).toEqual(["/resume abc", "/resume def"])
+  })
+
+  test("filters by title as you type", () => {
+    setSessionCache([{ id: "abc", title: "about widths" }, { id: "def", title: "about colours" }])
+    expect(paletteFor("/resume colour")?.length).toBe(1)
+  })
+
+  // The alias the original used, kept so muscle memory still works.
+  test("/sessions and /continue behave the same", () => {
+    setSessionCache([{ id: "abc", title: "x" }])
+    expect(paletteFor("/sessions ")?.[0]!.value).toBe("/sessions abc")
+    expect(paletteFor("/continue ")?.[0]!.value).toBe("/continue abc")
+  })
+
+  test("a bare /resume is a command, not a list", () => {
+    setSessionCache([{ id: "abc", title: "x" }])
+    expect(paletteFor("/resume")?.map((i) => i.value)).toEqual(["/resume"])
   })
 })

@@ -11,6 +11,17 @@ import { displayWidth, truncateToWidth, padToWidth } from "./width"
  */
 export type PaletteItem = { value: string; hint: string }
 
+/**
+ * Sessions the palette can offer.
+ *
+ * paletteFor is synchronous because it runs on every keystroke, so the list
+ * is refreshed alongside the session store rather than read from disk here.
+ */
+let sessionCache: { id: string; title: string }[] = []
+export function setSessionCache(sessions: { id: string; title: string }[]) {
+  sessionCache = sessions
+}
+
 export function paletteFor(input: string): PaletteItem[] | undefined {
   if (!input.startsWith("/")) return undefined
 
@@ -20,6 +31,20 @@ export function paletteFor(input: string): PaletteItem[] | undefined {
     return allSelections()
       .map((s) => ({ value: `/model ${s.provider.id}/${s.model.id}`, hint: `${s.provider.label} ${s.model.label}` }))
       .filter((item) => !query || item.value.toLowerCase().includes(query))
+      .slice(0, 8)
+  }
+
+  // "/resume " lists saved conversations the same way "/model " lists models,
+  // so both are picked from a list rather than typed from memory.
+  // String comparison rather than a pattern: escaping a regex through
+  // tooling has silently broken this check twice already.
+  const RESUME_ALIASES = ["/resume", "/sessions", "/continue"]
+  const resumeCommand = RESUME_ALIASES.find((name) => input.startsWith(name + " "))
+  if (resumeCommand) {
+    const query = input.slice(resumeCommand.length).trim().toLowerCase()
+    return sessionCache
+      .map((entry) => ({ value: resumeCommand + " " + entry.id, hint: entry.title }))
+      .filter((item) => !query || item.hint.toLowerCase().includes(query) || item.value.includes(query))
       .slice(0, 8)
   }
 

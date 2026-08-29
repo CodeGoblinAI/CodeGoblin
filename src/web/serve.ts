@@ -94,6 +94,27 @@ async function handle(request: Request): Promise<Response> {
     })
   }
 
+  // The web composer needs the same command set the TUI has, so it comes
+  // from one place rather than being duplicated in the browser.
+  if (url.pathname === "/api/commands") {
+    const models = allSelections().map((s) => ({
+      value: "/model " + s.provider.id + "/" + s.model.id,
+      hint: s.provider.label + " " + s.model.label,
+    }))
+    const saved = await sessions.list(20)
+    return json({
+      commands: [
+        { value: "/help", hint: "show these commands" },
+        { value: "/new", hint: "start a fresh conversation" },
+        { value: "/model", hint: "switch model", expands: true },
+        { value: "/resume", hint: "reopen a saved conversation", expands: true },
+        { value: "/compact", hint: "summarise to free context" },
+      ],
+      models,
+      sessions: saved.map((entry) => ({ value: "/resume " + entry.id, hint: entry.title })),
+    })
+  }
+
   if (url.pathname === "/api/sessions") {
     const all = await sessions.list()
     return json({ sessions: all.map(({ id, title, updated }) => ({ id, title, updated })) })

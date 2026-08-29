@@ -11,7 +11,7 @@ import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { parseKeys } from "./keys"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
 import { renderMarkdown } from "./markdown"
-import { paletteFor, renderPalette, type PaletteItem } from "./palette"
+import { paletteFor, renderPalette, setSessionCache, type PaletteItem } from "./palette"
 import { defaultSelection, resolveSelection, type Selection } from "../core/providers"
 import { apiKey } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
@@ -74,10 +74,19 @@ const size = () => ({ cols: out.columns ?? 80, rows: out.rows ?? 24 })
 const charWidthOf = (char: string) => displayWidth(char)
 const centre = (text: string, width: number) => " ".repeat(Math.max(0, Math.floor(width))) + text
 
+let paletteSignature = ""
+
 function refreshPalette() {
   palette = paletteFor(input)
-  if (!palette) paletteIndex = 0
-  else paletteIndex = Math.min(paletteIndex, palette.length - 1)
+  // Reset the highlight whenever the list itself changes: carrying an index
+  // across two different lists selects something the user never looked at.
+  const signature = (palette ?? []).map((item) => item.value).join("|")
+  if (signature !== paletteSignature) {
+    paletteSignature = signature
+    paletteIndex = 0
+    return
+  }
+  if (palette) paletteIndex = Math.min(paletteIndex, palette.length - 1)
 }
 
 function render() {
@@ -220,14 +229,32 @@ async function send() {
         status = "compacted to " + messages.length + " messages"
       }
     }
-    if (result.kind === "sessions") {
-      const saved = await sessions.list(10)
-      transcript.push({
-        kind: "tool",
-        text: saved.length
-          ? saved.map((entry) => entry.id + "  " + entry.title).join(String.fromCharCode(10))
-          : "no saved sessions yet",
-      })
+    if (result.kind === "resume") {
+      await refreshSessionCache()
+      if (!result.id) {
+        const saved = await sessions.list(10)
+        transcript.push({
+          kind: "tool",
+          text: saved.length
+            ? "type /resume and a space to pick one:" + String.fromCharCode(10) +
+              saved.map((entry) => entry.id + "  " + entry.title).join(String.fromCharCode(10))
+            : "no saved conversations yet",
+        })
+      } else {
+        const loaded = await sessions.load(result.id)
+        if (!loaded) status = "no such conversation: " + result.id
+        else {
+          session = loaded
+          messages = loaded.messages
+          // Rebuild what the user sees from what the model was told.
+          transcript = []
+          for (const message of messages) {
+            if (message.role === "user") transcript.push({ kind: "user", text: message.content })
+            else if (message.role === "assistant" && message.content) transcript.push({ kind: "agent", text: message.content })
+          }
+          status = "resumed: " + loaded.title
+        }
+      }
     }
     render()
     return
@@ -297,7 +324,7 @@ async function send() {
   } finally {
     streaming = false
     session.messages = messages
-    void sessions.save(session).catch(() => {})
+    void sessions.save(session).then(refreshSessionCache).catch(() => {})
     render()
   }
 }
@@ -306,6 +333,11 @@ function shutdown() {
   out.write(ansi.showCursor + ansi.mainScreen)
   process.exit(0)
 }
+
+async function refreshSessionCache() {
+  setSessionCache((await sessions.list(30)).map(({ id, title }) => ({ id, title })))
+}
+void refreshSessionCache()
 
 out.write(ansi.altScreen + ansi.hideCursor)
 render()
