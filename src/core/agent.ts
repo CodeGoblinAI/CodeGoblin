@@ -25,6 +25,7 @@ export type AgentEvent =
   | { type: "tool_denied"; name: string }
   | { type: "compacted"; before: number; after: number }
   | { type: "plan"; todos: Todo[] }
+  | { type: "spend"; input: number; output: number }
   | { type: "turn_end" }
 
 /**
@@ -148,6 +149,19 @@ export async function* runAgent(input: {
           chunk = JSON.parse(payload)
         } catch {
           continue
+        }
+
+        // Usage rides on the final chunk of the stream, after the deltas
+        // stop. Throwing it away is why nothing could say what a session had
+        // cost - the one number people want from a tool that spends their
+        // money.
+        const used = chunk?.usage
+        if (used && (used.prompt_tokens || used.completion_tokens)) {
+          yield {
+            type: "spend",
+            input: Number(used.prompt_tokens ?? 0),
+            output: Number(used.completion_tokens ?? 0),
+          }
         }
 
         const delta = chunk?.choices?.[0]?.delta

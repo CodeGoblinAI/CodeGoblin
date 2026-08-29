@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   estimateTokens, conversationTokens, usage, shouldCompact, planCompaction, applyCompaction,
+  addSpend, priceOf, formatSpend,
 } from "../src/core/context"
 import type { Message } from "../src/core/agent"
 
@@ -61,5 +62,49 @@ describe("compaction", () => {
     expect(rebuilt[0]!.role).toBe("system")
     expect(rebuilt[1]!.content).toContain("we did things")
     expect(rebuilt[2]!.content).toBe("latest")
+  })
+})
+
+describe("what a session cost", () => {
+  const DOLLAR = String.fromCharCode(36)
+
+  test("adds up across turns", () => {
+    let total = { input: 0, output: 0 }
+    total = addSpend(total, { input: 100, output: 50, dollars: 0.001 })
+    total = addSpend(total, { input: 200, output: 80, dollars: 0.002 })
+    expect(total).toEqual({ input: 300, output: 130, dollars: 0.003 })
+  })
+
+  test("prices a turn from the model's rate", () => {
+    // 1M in at $0.28 and 1M out at $0.42.
+    expect(priceOf({ input: 1_000_000, output: 0 }, { input: 0.28, output: 0.42 })).toBeCloseTo(0.28, 6)
+    expect(priceOf({ input: 0, output: 1_000_000 }, { input: 0.28, output: 0.42 })).toBeCloseTo(0.42, 6)
+  })
+
+  test("an unpriced model has no price, not a price of zero", () => {
+    expect(priceOf({ input: 1000, output: 1000 }, undefined)).toBeUndefined()
+    // and stays unpriced however many turns are added
+    let total = { input: 0, output: 0 }
+    total = addSpend(total, { input: 10, output: 10, dollars: undefined })
+    expect(total.dollars).toBeUndefined()
+  })
+
+  test("shows tokens when nobody has published a price", () => {
+    expect(formatSpend({ input: 1200, output: 300 })).toBe("1,500 tok")
+    expect(formatSpend({ input: 1200, output: 300 })).not.toContain(DOLLAR)
+  })
+
+  test("carries a dollar sign, and four places while it is pennies", () => {
+    // The sign has been silently eaten by tooling here before.
+    expect(formatSpend({ input: 1, output: 1, dollars: 0.0004 })).toBe(DOLLAR + "0.0004")
+    expect(formatSpend({ input: 1, output: 1, dollars: 1.5 })).toBe(DOLLAR + "1.50")
+    expect(formatSpend({ input: 0, output: 0, dollars: 0 })).toBe(DOLLAR + "0")
+  })
+
+  test("one priced turn among unpriced ones still reports what is known", () => {
+    let total = { input: 0, output: 0 }
+    total = addSpend(total, { input: 10, output: 10, dollars: undefined })
+    total = addSpend(total, { input: 10, output: 10, dollars: 0.002 })
+    expect(total.dollars).toBeCloseTo(0.002, 6)
   })
 })

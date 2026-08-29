@@ -41,6 +41,46 @@ export function usage(messages: Message[], contextWindow: number): Usage {
   return { used, limit: contextWindow, percent }
 }
 
+/** What a turn used, as the provider reported it. */
+export type Spend = { input: number; output: number; dollars?: number }
+
+/**
+ * Add up a turn.
+ *
+ * Providers report usage on the last chunk of the stream and we were
+ * throwing it away, so the app could not say what a session had cost -
+ * which is the one number people actually want from a tool that spends
+ * money on their behalf.
+ */
+export function addSpend(total: Spend, next: Spend): Spend {
+  return {
+    input: total.input + next.input,
+    output: total.output + next.output,
+    dollars:
+      total.dollars === undefined && next.dollars === undefined
+        ? undefined
+        : (total.dollars ?? 0) + (next.dollars ?? 0),
+  }
+}
+
+export function priceOf(
+  usage: { input: number; output: number },
+  price?: { input: number; output: number },
+): number | undefined {
+  if (!price) return undefined
+  return (usage.input * price.input + usage.output * price.output) / 1_000_000
+}
+
+/** Cents to four places while it is pennies, then two. Never bare zero. */
+export function formatSpend(spend: Spend): string {
+  if (spend.dollars === undefined) return `${(spend.input + spend.output).toLocaleString()} tok`
+  if (spend.dollars === 0) return "$0"
+  // Built from a char code: a dollar sign next to a template placeholder has
+  // been eaten by tooling here more than once, and it fails silently.
+  const DOLLAR = String.fromCharCode(36)
+  return DOLLAR + (spend.dollars < 0.01 ? spend.dollars.toFixed(4) : spend.dollars.toFixed(2))
+}
+
 /** Compact once the conversation passes this share of the window. */
 export const COMPACT_AT = 0.75
 

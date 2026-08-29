@@ -8,7 +8,7 @@
  */
 import { ansi, theme, dim, applyTheme } from "./ansi"
 import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
-import { parseKeys } from "./keys"
+import { createKeyReader } from "./keys"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
 import { renderMarkdown } from "./markdown"
 import {
@@ -31,7 +31,16 @@ import { apiKey, connect, disconnect, connections, storePath, envVariable } from
 import { runAgent, type Message } from "../core/agent"
 import { isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
-import { usage, shouldCompact, planCompaction, applyCompaction } from "../core/context"
+import {
+  usage,
+  shouldCompact,
+  planCompaction,
+  applyCompaction,
+  addSpend,
+  priceOf,
+  formatSpend,
+  type Spend,
+} from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
 import { Permissions, DECISIONS, MODES, nextMode, type Decision } from "../core/permission"
 
@@ -67,11 +76,39 @@ let selection: Selection = resolveSelection(flag("--model") ?? flag("--provider"
 let key = apiKey(selection.provider.id)
 
 const out = process.stdout
+/**
+ * What the model is told before anything else.
+ *
+ * This was two sentences that named four tools and left out the other five,
+ * said nothing about where it was running, and gave no guidance at all -
+ * so the model guessed at paths, re-read files it had just written, and
+ * asked permission for things it could simply do.
+ */
 const SYSTEM: Message = {
   role: "system",
-  content:
-    "You are CodeGoblin, a coding agent. You have tools to read, list, write and edit files " +
-    "in the working directory. Prefer reading before editing. Be concise.",
+  content: [
+    "You are CodeGoblin, a coding agent working in a terminal.",
+    "",
+    "Tools: read_file, list_files, grep and glob to look around; write_file and",
+    "edit_file to change things; shell to run commands; webfetch to read a page;",
+    "todo_write to keep a plan the user can see.",
+    "",
+    "Everything is confined to the working directory - paths outside it are",
+    "refused, so use relative paths. Read a file before editing it, and prefer",
+    "edit_file over write_file: it changes only what you name and fails loudly",
+    "rather than silently rewriting the whole file.",
+    "",
+    "Use todo_write for anything that takes more than a couple of steps, and",
+    "keep it updated as you go - it is how the user follows along.",
+    "",
+    "Writing, running commands and fetching pages ask the user for permission.",
+    "A refusal is an answer: say what you would have done and stop, rather than",
+    "trying another way around it.",
+    "",
+    "Be concise. Answer in prose, not headings, unless the answer really is a",
+    "list. Do not narrate what you are about to do; do it, then say what",
+    "happened.",
+  ].join(String.fromCharCode(10)),
 }
 
 let messages: Message[] = [SYSTEM]
@@ -136,6 +173,15 @@ let turn: AbortController | undefined
  * until the model is finished.
  */
 let queued: string | undefined
+
+/**
+ * What this session has cost.
+ *
+ * Providers report usage on the last chunk of each turn. An unpriced model
+ * shows tokens instead of a number, because a spend of nothing and a spend
+ * nobody has published are different things.
+ */
+let spend: Spend = { input: 0, output: 0 }
 
 /**
  * Something moving while the model thinks.
@@ -477,8 +523,12 @@ function render() {
 
   const context = usage(messages, selection.model.contextWindow)
   const modeTag = permissions.mode === "ask" ? "" : "  [" + permissions.mode + "]"
+  const spendTag = spend.input + spend.output > 0 ? "  " + formatSpend(spend) : ""
   const left =
-    status || modeTag.trim() + (modeTag ? "  " : "") + selection.provider.label + " . " + selection.model.id + "  " + context.percent + "% ctx"
+    status ||
+    modeTag.trim() + (modeTag ? "  " : "") +
+      selection.provider.label + " . " + selection.model.id +
+      "  " + context.percent + "% ctx" + spendTag
   const right = streaming
     ? (queued ? "queued . esc stops" : "enter queues . esc stops")
     : secret
@@ -575,6 +625,7 @@ async function send() {
       permissions.reset()
       edits.reset()
       pastes = []
+      spend = { input: 0, output: 0 }
       overlay = undefined
       status = "new conversation"
     }
@@ -658,6 +709,12 @@ async function send() {
         ["model", selection.provider.label + " " + selection.model.label],
         ["session", session.title + "  (" + messages.length + " messages)"],
         ["context", context.percent + "% of " + selection.model.contextWindow.toLocaleString()],
+        [
+          "spent",
+          spend.input + spend.output > 0
+            ? formatSpend(spend) + "  (" + spend.input.toLocaleString() + " in, " + spend.output.toLocaleString() + " out)"
+            : "nothing yet",
+        ],
         ["theme", settings.theme],
         ["thinking", settings.thinking ? "shown" : "hidden"],
         ["approved", approved.length ? approved.join(", ") : "nothing yet"],
@@ -804,6 +861,13 @@ async function send() {
         current = undefined
         transcript.push({ kind: "tool", text: event.name + " " + event.args.slice(0, 60) })
       }
+      if (event.type === "spend") {
+        spend = addSpend(spend, {
+          input: event.input,
+          output: event.output,
+          dollars: priceOf(event, selection.model.price),
+        })
+      }
       if (event.type === "plan") {
         plan = event.todos
       }
@@ -885,10 +949,14 @@ out.on("resize", render)
 
 process.stdin.setRawMode?.(true)
 process.stdin.resume()
+// One reader for the whole session, so a paste split across chunks is still
+// one paste.
+const readKeys = createKeyReader()
+
 process.stdin.on("data", (chunk) => {
   let dirty = false
 
-  for (const pressed of parseKeys(chunk.toString())) {
+  for (const pressed of readKeys(chunk.toString())) {
     if (pressed.type === "ctrl" && pressed.value === "c") return shutdown()
 
     if (overlay) {

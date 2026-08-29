@@ -27,6 +27,13 @@ export type Model = {
   reasoning?: boolean
   /** Context window in tokens; drives when a conversation is compacted. */
   contextWindow: number
+  /**
+   * US dollars per million tokens, in and out.
+   *
+   * Absent means unpriced rather than free - a spend of nothing and a spend
+   * nobody has told us are different things, and the status line says which.
+   */
+  price?: { input: number; output: number }
   capabilities?: Capabilities
 }
 
@@ -51,8 +58,8 @@ export const PROVIDERS: Record<string, Provider> = {
     label: "DeepSeek",
     baseUrl: "https://api.deepseek.com/chat/completions",
     models: [
-      { id: "deepseek-v4-flash", label: "V4 Flash", contextWindow: 128000 },
-      { id: "deepseek-v4-pro", label: "V4 Pro", reasoning: true, contextWindow: 128000 },
+      { id: "deepseek-v4-flash", label: "V4 Flash", contextWindow: 128000, price: { input: 0.28, output: 0.42 } },
+      { id: "deepseek-v4-pro", label: "V4 Pro", reasoning: true, contextWindow: 128000, price: { input: 0.55, output: 2.19 } },
       { id: "deepseek-v4-flash-vision-exp", label: "V4 Flash Vision", contextWindow: 128000 },
     ],
   },

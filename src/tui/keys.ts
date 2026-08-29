@@ -51,9 +51,49 @@ const TILDE: Record<string, Key["type"]> = {
   "8": "end",
 }
 
+const ESCAPE = String.fromCharCode(27)
 const PASTE_START = "[200~"
 const PASTE_END = "[201~"
+const PASTE_OPEN = ESCAPE + PASTE_START
+const PASTE_CLOSE = ESCAPE + PASTE_END
 
+/**
+ * Reads keys across chunk boundaries.
+ *
+ * A big paste does not arrive in one piece - stdin hands it over in several
+ * chunks, and parseKeys sees only one at a time. The opening ESC[200~ landed
+ * in the first chunk with no terminator anywhere in it, so everything after
+ * it was read as ordinary typing: newlines included, and every newline is an
+ * enter. Pasting a long block therefore submitted it, repeatedly, in pieces.
+ *
+ * So the paste state lives here, between chunks, and the text is only handed
+ * on once its closing marker actually arrives.
+ */
+export function createKeyReader(): (chunk: string) => Key[] {
+  let pasting: string | undefined
+
+  return function read(chunk: string): Key[] {
+    if (pasting !== undefined) {
+      const end = chunk.indexOf(PASTE_CLOSE)
+      if (end === -1) {
+        pasting += chunk
+        return []
+      }
+      const value = pasting + chunk.slice(0, end)
+      pasting = undefined
+      return [{ type: "paste", value }, ...read(chunk.slice(end + PASTE_CLOSE.length))]
+    }
+
+    const start = chunk.indexOf(PASTE_OPEN)
+    if (start !== -1 && chunk.indexOf(PASTE_CLOSE, start) === -1) {
+      // Opened but not closed in this chunk: keep the rest until it is.
+      pasting = chunk.slice(start + PASTE_OPEN.length)
+      return parseKeys(chunk.slice(0, start))
+    }
+
+    return parseKeys(chunk)
+  }
+}
 export function parseKeys(input: string): Key[] {
   const keys: Key[] = []
   let i = 0
