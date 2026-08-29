@@ -24,6 +24,9 @@ export type Key =
   | { type: "wheelup" }
   | { type: "wheeldown" }
   | { type: "shifttab" }
+  | { type: "shiftup" }
+  | { type: "shiftdown" }
+  | { type: "paste"; value: string }
   | { type: "escape" }
   | { type: "ctrl"; value: string }
 
@@ -48,6 +51,9 @@ const TILDE: Record<string, Key["type"]> = {
   "8": "end",
 }
 
+const PASTE_START = "[200~"
+const PASTE_END = "[201~"
+
 export function parseKeys(input: string): Key[] {
   const keys: Key[] = []
   let i = 0
@@ -58,6 +64,17 @@ export function parseKeys(input: string): Key[] {
 
     // Escape sequence, or a bare Escape if nothing follows it.
     if (code === 27) {
+      // A bracketed paste arrives whole. Taken as one event so newlines in
+      // it are content, not a stream of submits.
+      if (input.startsWith(PASTE_START, i + 1)) {
+        const from = i + 1 + PASTE_START.length
+        const closer = input.indexOf(String.fromCharCode(27) + PASTE_END, from)
+        const end = closer === -1 ? input.length : closer
+        keys.push({ type: "paste", value: input.slice(from, end) })
+        i = closer === -1 ? input.length : closer + 1 + PASTE_END.length
+        continue
+      }
+
       const next = input[i + 1]
       if (next !== "[" && next !== "O") {
         keys.push({ type: "escape" })
@@ -90,7 +107,12 @@ export function parseKeys(input: string): Key[] {
         const type = TILDE[params.split(";")[0] ?? ""]
         if (type) keys.push({ type } as Key)
       } else if (final && CSI[final]) {
-        keys.push({ type: CSI[final]! } as Key)
+        // Modifier 2 is shift: CSI 1;2A and 1;2B scroll a line at a time,
+        // since the wheel belongs to the terminal now.
+        const shifted = params.endsWith(";2")
+        if (shifted && final === "A") keys.push({ type: "shiftup" })
+        else if (shifted && final === "B") keys.push({ type: "shiftdown" })
+        else keys.push({ type: CSI[final]! } as Key)
       }
       i = (final ? j + 1 : j)
       continue

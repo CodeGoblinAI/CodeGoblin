@@ -18,14 +18,29 @@ export const ansi = {
   moveTo: (row: number, col: number) => `${ESC}${row};${col}H`,
   reset: `${ESC}0m`,
   /**
-   * Wheel reporting only (1000 = button events, 1006 = SGR encoding).
+   * Turn OFF alternate scroll, and ask for no mouse reporting at all.
    *
-   * Without this the terminal turns the wheel into arrow keys, which the
-   * composer reads as prompt history - so scrolling the transcript walked
-   * back through what you had already typed instead.
+   * Mouse reporting would give the app the wheel - and, unavoidably, the drag
+   * with it, which is the terminal own text selection. Taking the wheel cost
+   * the ability to highlight anything at all, which is a bad trade: reading
+   * and copying output matters more than scrolling with a wheel.
+   *
+   * So the mouse stays entirely the terminal own. Alternate scroll (1007) is
+   * what turns the wheel into arrow keys on the alternate screen, and those
+   * arrows landed in the composer as prompt history - disabling it makes the
+   * wheel do nothing rather than do damage. Scrolling moved to the keyboard.
    */
-  mouseOn: `${ESC}?1000h${ESC}?1006h`,
-  mouseOff: `${ESC}?1006l${ESC}?1000l`,
+  /**
+   * Bracketed paste: the terminal wraps pasted text in ESC[200~ ... ESC[201~.
+   *
+   * Without it a paste is indistinguishable from very fast typing, so a
+   * hundred lines arrive as a hundred lines of keystrokes - newlines and
+   * all, which submit the half-arrived prompt again and again.
+   */
+  pasteOn: `${ESC}?2004h`,
+  pasteOff: `${ESC}?2004l`,
+  ownMouse: `${ESC}?1007l`,
+  releaseMouse: `${ESC}?1007h`,
 }
 
 /** 24-bit colour. Every modern terminal supports it. */

@@ -79,6 +79,35 @@ type Entry = { kind: "user" | "agent" | "tool" | "thinking"; text: string }
 let transcript: Entry[] = []
 /** Named for what it holds, since "history" here is the prompt recall list. */
 const edits = new History()
+
+/**
+ * Text that was pasted rather than typed.
+ *
+ * A long paste used to land in the composer whole, so the prompt became a
+ * wall you could not read past or edit around. Each one is held here and
+ * shown as a single line saying how much it was; the real text goes to the
+ * model on submit, so nothing is lost - it just stops being in the way.
+ */
+type Pasted = { token: string; text: string; lines: number }
+let pastes: Pasted[] = []
+
+/** Long enough to be worth folding away; below this it just reads as typing. */
+const PASTE_FOLD_LINES = 4
+
+function foldPaste(text: string): string {
+  const lines = text.split(String.fromCharCode(10)).length
+  if (lines < PASTE_FOLD_LINES) return text
+  const token = `[Pasted ~${lines} lines]`
+  pastes.push({ token, text, lines })
+  return token
+}
+
+/** Put the real text back, for the model rather than the screen. */
+function unfoldPastes(text: string): string {
+  let out = text
+  for (const paste of pastes) out = out.split(paste.token).join(paste.text)
+  return out
+}
 let settings = settingsStore.defaults()
 let session = sessions.create(selection.provider.id)
 
@@ -96,6 +125,17 @@ let streaming = false
  * exit was killing the process, which loses the conversation with it.
  */
 let turn: AbortController | undefined
+
+/**
+ * Something to say while the model is still talking.
+ *
+ * Watching an answer go the wrong way and being able to do nothing about it
+ * but stop it is the worst version of this. Typing mid-turn is allowed, and
+ * enter queues the message: it is sent the moment the turn ends, so a
+ * correction can be written the moment it is noticed rather than remembered
+ * until the model is finished.
+ */
+let queued: string | undefined
 
 /**
  * Something moving while the model thinks.
@@ -399,8 +439,11 @@ function render() {
     shown =
       theme.gold + pending.tool + ansi.reset + " " +
       dim + pending.detail.slice(0, Math.max(10, visibleInput - 24)) + ansi.reset
-  } else if (streaming) {
-    shown = dim + spinnerFrame() + " goblin is working..." + ansi.reset
+  } else if (streaming && !input) {
+    caretOffset = 0
+    shown =
+      dim + spinnerFrame() + " goblin is working... " + ansi.reset +
+      dim + "type to steer" + ansi.reset
   } else if (secret) {
     // Dots, and one per character rather than a fixed run, so backspace is
     // visible without the key ever being.
@@ -437,7 +480,7 @@ function render() {
   const left =
     status || modeTag.trim() + (modeTag ? "  " : "") + selection.provider.label + " . " + selection.model.id + "  " + context.percent + "% ctx"
   const right = streaming
-    ? "esc stops . ctrl+c quits"
+    ? (queued ? "queued . esc stops" : "enter queues . esc stops")
     : secret
     ? "enter saves . esc cancels . nothing is echoed"
     : overlay
@@ -448,7 +491,7 @@ function render() {
       ? "scrolled " + scroll
       : palette
         ? "tab complete . up/down pick"
-        : "/ commands . @ files . shift+tab mode . ctrl+c quit"
+        : "pgup/dn scroll . shift+tab mode . ctrl+c quit"
   const plain = "  " + left
   const padded = padToWidth(plain, Math.max(displayWidth(plain) + 1, cols - displayWidth(right) - 2))
   body.push(dim + padded + ansi.reset + theme.muted + right + ansi.reset)
@@ -531,6 +574,7 @@ async function send() {
       session = sessions.create(selection.provider.id)
       permissions.reset()
       edits.reset()
+      pastes = []
       overlay = undefined
       status = "new conversation"
     }
@@ -709,9 +753,13 @@ async function send() {
   historyIndex = -1
   // Mentions are read here rather than in the agent so the stored message
   // carries the files with it: a resumed conversation keeps its context.
-  const mentioned = await expandMentions(text, process.cwd())
+  // What was folded away goes back before anything sees it.
+  const whole = unfoldPastes(text)
+  const mentioned = await expandMentions(whole, process.cwd())
   messages.push(
-    mentioned.files.length ? { role: "user", content: mentioned.content, display: text } : { role: "user", content: text },
+    mentioned.files.length || whole !== text
+      ? { role: "user", content: mentioned.content, display: text }
+      : { role: "user", content: text },
   )
   transcript.push({ kind: "user", text })
   if (mentioned.files.length) transcript.push({ kind: "tool", text: "attached " + mentioned.files.join(", ") })
@@ -790,12 +838,22 @@ async function send() {
     edits.commit()
     session.messages = messages
     void sessions.save(session).then(refreshSessionCache).catch(() => {})
+
+    // Anything typed mid-turn goes now, without a keystroke to remind it.
+    if (queued) {
+      const next = queued
+      queued = undefined
+      input = next
+      cursor = next.length
+      void send()
+      return
+    }
     render()
   }
 }
 
 function shutdown() {
-  out.write(ansi.mouseOff + ansi.showCursor + ansi.mainScreen)
+  out.write(ansi.pasteOff + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
   process.exit(0)
 }
 
@@ -821,7 +879,7 @@ async function loadSettings() {
 }
 void loadSettings()
 
-out.write(ansi.altScreen + ansi.mouseOn)
+out.write(ansi.altScreen + ansi.ownMouse + ansi.pasteOn)
 render()
 out.on("resize", render)
 
@@ -861,13 +919,56 @@ process.stdin.on("data", (chunk) => {
       // interrupted answer is still worth reading, and the conversation
       // survives, which is the whole difference from ctrl+c.
       if (pressed.type === "escape") {
+        if (input) {
+          // A half-written steer is thrown away first; stopping the model
+          // is the second press, so neither is done by accident.
+          input = ""
+          cursor = 0
+          render()
+          continue
+        }
         turn?.abort()
         status = "stopped"
         render()
       }
+
+      // Everything else composes. Enter queues rather than sends, because
+      // the turn in flight has to finish before the next one starts.
+      if (pressed.type === "enter") {
+        if (input.trim()) {
+          queued = input
+          input = ""
+          cursor = 0
+          status = "queued - sending when this turn ends"
+        }
+        render()
+        continue
+      }
+      if (pressed.type === "char") {
+        input = input.slice(0, cursor) + pressed.value + input.slice(cursor)
+        cursor += pressed.value.length
+        render()
+        continue
+      }
+      if (pressed.type === "paste") {
+        const value = foldPaste(pressed.value.replace(/\r\n?/g, String.fromCharCode(10)))
+        input = input.slice(0, cursor) + value + input.slice(cursor)
+        cursor += value.length
+        render()
+        continue
+      }
+      if (pressed.type === "backspace") {
+        if (cursor > 0) { input = input.slice(0, cursor - 1) + input.slice(cursor); cursor-- }
+        render()
+        continue
+      }
+      if (pressed.type === "left") { cursor = Math.max(0, cursor - 1); render(); continue }
+      if (pressed.type === "right") { cursor = Math.min(input.length, cursor + 1); render(); continue }
       // Scrolling has to keep working while the model writes.
       if (pressed.type === "pageup") { scroll += 5; render() }
       if (pressed.type === "pagedown") { scroll = Math.max(0, scroll - 5); render() }
+      if (pressed.type === "shiftup") { scroll += 1; render() }
+      if (pressed.type === "shiftdown") { scroll = Math.max(0, scroll - 1); render() }
       if (pressed.type === "wheelup") { scroll += 3; render() }
       if (pressed.type === "wheeldown") { scroll = Math.max(0, scroll - 3); render() }
       continue
@@ -934,6 +1035,15 @@ process.stdin.on("data", (chunk) => {
         dirty = true
         break
       }
+      case "paste": {
+        // Newlines inside a paste are content. A paste that is only one
+        // short line is just typing, and goes in as it is.
+        const value = foldPaste(pressed.value.replace(/\r\n?/g, String.fromCharCode(10)))
+        input = input.slice(0, cursor) + value + input.slice(cursor)
+        cursor += value.length
+        dirty = true
+        break
+      }
       case "escape":
         if (secret) { secret = undefined; input = ""; cursor = 0; status = "cancelled"; dirty = true; break }
         if (input) { input = ""; cursor = 0; dirty = true }
@@ -968,6 +1078,8 @@ process.stdin.on("data", (chunk) => {
         break
       case "wheelup": scroll += 3; dirty = true; break
       case "wheeldown": scroll = Math.max(0, scroll - 3); dirty = true; break
+      case "shiftup": scroll += 1; dirty = true; break
+      case "shiftdown": scroll = Math.max(0, scroll - 1); dirty = true; break
       case "pageup": scroll += 5; dirty = true; break
       case "pagedown": scroll = Math.max(0, scroll - 5); dirty = true; break
       case "ctrl":
