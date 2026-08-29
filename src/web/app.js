@@ -17,7 +17,17 @@ let currentModel = ""
 
 function renderModelMenu() {
   providerMenu.innerHTML = ""
+  let section = null
   for (const option of modelOptions) {
+    // A heading each time the section changes, so the list reads as groups
+    // rather than as one run of names.
+    if (option.section && option.section !== section) {
+      section = option.section
+      const head = document.createElement("div")
+      head.className = "picker-section"
+      head.textContent = section
+      providerMenu.appendChild(head)
+    }
     const row = document.createElement("div")
     row.className = "picker-item" + (option.value === currentModel ? " chosen" : "")
     row.setAttribute("role", "option")
@@ -550,6 +560,23 @@ async function submit() {
     if (await runCommand(text)) { setBusy(false); return }
   }
   input.value = ""
+
+  // A generation model has no conversation to join, so a plain prompt is a
+  // generation request. Picking one and typing is the whole interaction.
+  const selected = modelOptions.find((option) => option.value === currentModel)
+  if (selected && selected.kind && selected.kind !== "text") {
+    turn("user", text)
+    setBusy(true)
+    const generated = await fetch("/api/media", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: selected.kind, line: text, model: currentModel }),
+    }).then((r) => r.json()).catch(() => ({ ok: false, message: "could not reach the server" }))
+    setBusy(false)
+    showMedia(selected.kind, generated)
+    return
+  }
+
   setBusy(true)
   turn("user", text)
 
@@ -696,8 +723,11 @@ fetch("/api/providers").then((r) => r.json()).then((data) => {
   modelOptions = data.providers.map((p) => ({
     value: p.id,
     label: p.label + (p.reasoning ? " (reasoning)" : ""),
+    kind: p.kind,
+    section: p.section,
   }))
-  if (modelOptions.length) setModel(modelOptions[0].value)
+  const firstChat = modelOptions.find((option) => option.kind === "text")
+  if (firstChat || modelOptions.length) setModel((firstChat || modelOptions[0]).value)
   const ready = data.providers.filter((p) => p.ready).length
   hint.textContent = ready ? "" : "no API keys found"
 })

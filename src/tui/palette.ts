@@ -1,5 +1,5 @@
 import { COMMANDS } from "../core/commands"
-import { allSelections } from "../core/providers"
+import { allSelections, selectionsByKind, selectionsOfKind, kindFromWord, kindOf, KIND_LABEL } from "../core/providers"
 import { findMention } from "../core/mention"
 import { theme, dim, ansi } from "./ansi"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
@@ -69,9 +69,22 @@ export function paletteFor(input: string, cursor = input.length): PaletteItem[] 
   // "/model " with an argument lists models instead of commands.
   if (/^\/model\s+/.test(input)) {
     const query = input.slice(input.indexOf(" ") + 1).trim().toLowerCase()
-    return allSelections()
-      .map((s) => ({ value: `/model ${s.provider.id}/${s.model.id}`, hint: `${s.provider.label} ${s.model.label}` }))
-      .filter((item) => !query || item.value.toLowerCase().includes(query))
+    // One list of models, in sections. Typing a section name narrows to it,
+    // so typing image is how you get to the models that draw.
+    const kind = kindFromWord(query)
+    const pool = kind ? selectionsOfKind(kind) : selectionsByKind()
+    return pool
+      .map((s) => ({
+        value: `/model ${s.provider.id}/${s.model.id}`,
+        hint: `${KIND_LABEL[kindOf(s.model)]} \u00b7 ${s.provider.label} ${s.model.label}`,
+      }))
+      .filter(
+        (item) =>
+          kind ||
+          !query ||
+          item.value.toLowerCase().includes(query) ||
+          item.hint.toLowerCase().includes(query),
+      )
       .slice(0, 8)
   }
 

@@ -9,18 +9,39 @@
  * `reasoning` marks models that stream a thinking channel, so the UI can show
  * it separately from the answer.
  */
+/**
+ * What a model can take in and give back.
+ *
+ * This is what puts a model in the right section of the picker, and what
+ * decides whether a prompt becomes a sentence, a picture, a sound or a mesh.
+ * Absent means text in, text out - the ordinary case.
+ */
+export type Capabilities = {
+  input?: { text?: boolean; image?: boolean; audio?: boolean }
+  output?: { text?: boolean; image?: boolean; audio?: boolean; model3d?: boolean }
+}
+
 export type Model = {
   id: string
   label: string
   reasoning?: boolean
   /** Context window in tokens; drives when a conversation is compacted. */
   contextWindow: number
+  capabilities?: Capabilities
 }
 
 export type Provider = {
   id: string
   label: string
-  baseUrl: string
+  /**
+   * The chat-completions endpoint, for providers that have one.
+   *
+   * Image, audio and 3D providers do not: they are reached through their own
+   * generators, which speak their own shapes. They live in this catalogue
+   * anyway, because there should be one list of models rather than a separate
+   * hidden one per medium.
+   */
+  baseUrl?: string
   models: Model[]
 }
 
@@ -62,6 +83,108 @@ export const PROVIDERS: Record<string, Provider> = {
       { id: "kimi-k2.5", label: "K2.5", contextWindow: 128000 },
     ],
   },
+  google: {
+    id: "google",
+    label: "Google",
+    models: [
+      {
+        id: "gemini-2.5-flash-image",
+        label: "Gemini 2.5 Flash Image",
+        contextWindow: 0,
+        capabilities: { input: { text: true, image: true }, output: { image: true } },
+      },
+    ],
+  },
+  xai: {
+    id: "xai",
+    label: "xAI",
+    models: [
+      {
+        id: "grok-imagine-image-quality",
+        label: "Grok Imagine (quality)",
+        contextWindow: 0,
+        capabilities: { input: { text: true, image: true }, output: { image: true } },
+      },
+      {
+        id: "grok-imagine-image-speed",
+        label: "Grok Imagine (speed)",
+        contextWindow: 0,
+        capabilities: { input: { text: true, image: true }, output: { image: true } },
+      },
+    ],
+  },
+  openai: {
+    id: "openai",
+    label: "OpenAI",
+    models: [
+      {
+        id: "gpt-image-1",
+        label: "GPT Image 1",
+        contextWindow: 0,
+        capabilities: { input: { text: true, image: true }, output: { image: true } },
+      },
+    ],
+  },
+  qwen: {
+    id: "qwen",
+    label: "Qwen",
+    models: [
+      {
+        id: "wan2.7-image-pro",
+        label: "Wan 2.7 Image Pro",
+        contextWindow: 0,
+        capabilities: { input: { text: true, image: true }, output: { image: true } },
+      },
+    ],
+  },
+  tripo: {
+    id: "tripo",
+    label: "Tripo",
+    models: [
+      {
+        id: "text-to-model",
+        label: "Text to 3D",
+        contextWindow: 0,
+        capabilities: { input: { text: true }, output: { model3d: true } },
+      },
+      {
+        id: "image-to-model",
+        label: "Image to 3D",
+        contextWindow: 0,
+        capabilities: { input: { image: true }, output: { model3d: true } },
+      },
+    ],
+  },
+  elevenlabs: {
+    id: "elevenlabs",
+    label: "ElevenLabs",
+    models: [
+      {
+        id: "eleven_multilingual_v2",
+        label: "Multilingual v2",
+        contextWindow: 0,
+        capabilities: { input: { text: true }, output: { audio: true } },
+      },
+      {
+        id: "eleven_turbo_v2_5",
+        label: "Turbo v2.5",
+        contextWindow: 0,
+        capabilities: { input: { text: true }, output: { audio: true } },
+      },
+      {
+        id: "eleven_flash_v2_5",
+        label: "Flash v2.5",
+        contextWindow: 0,
+        capabilities: { input: { text: true }, output: { audio: true } },
+      },
+      {
+        id: "eleven_v3",
+        label: "Eleven v3",
+        contextWindow: 0,
+        capabilities: { input: { text: true }, output: { audio: true } },
+      },
+    ],
+  },
 }
 
 export const DEFAULT_PROVIDER = "deepseek"
@@ -73,6 +196,11 @@ export function defaultSelection(): Selection {
   return { provider, model: provider.models[0]! }
 }
 
+/** Where a bare provider id lands: its first chat model, never a generator. */
+function firstUsable(provider: Provider): Model | undefined {
+  return provider.models.find((model) => kindOf(model) === "text") ?? provider.models[0]
+}
+
 /** Accepts "zai", "glm-5.3", or "zai/glm-5.3". */
 export function resolveSelection(input?: string): Selection | undefined {
   if (!input) return defaultSelection()
@@ -80,7 +208,7 @@ export function resolveSelection(input?: string): Selection | undefined {
 
   const byProvider = PROVIDERS[head!]
   if (byProvider) {
-    const model = tail ? byProvider.models.find((m) => m.id === tail) : byProvider.models[0]
+    const model = tail ? byProvider.models.find((m) => m.id === tail) : firstUsable(byProvider)
     return model ? { provider: byProvider, model } : undefined
   }
 
@@ -89,6 +217,73 @@ export function resolveSelection(input?: string): Selection | undefined {
     if (model) return { provider, model }
   }
   return undefined
+}
+
+/**
+ * What a model produces.
+ *
+ * A model with no capabilities is a chat model - every text provider in this
+ * catalogue predates the field and none of them needed it.
+ */
+export type ModelKind = "text" | "image" | "audio" | "model3d"
+
+export function kindOf(model: Model): ModelKind {
+  const output = model.capabilities?.output
+  if (!output) return "text"
+  if (output.model3d) return "model3d"
+  if (output.image) return "image"
+  if (output.audio) return "audio"
+  return "text"
+}
+
+/** Only a chat model can answer a question, and only it has somewhere to send one. */
+export function isChatModel(selection: Selection): boolean {
+  return kindOf(selection.model) === "text" && Boolean(selection.provider.baseUrl)
+}
+
+/**
+ * The section a model belongs to, and the order the sections come in.
+ *
+ * The original guesses these from the model id with regexes, because its
+ * catalogue arrives from a server that does not say what a model can do.
+ * Ours declares it, so the section is simply read rather than inferred.
+ */
+export const KIND_LABEL: Record<ModelKind, string> = {
+  text: "Text models",
+  image: "Image models",
+  audio: "Voice & audio models",
+  model3d: "3D models",
+}
+
+export const KIND_ORDER: ModelKind[] = ["text", "image", "audio", "model3d"]
+
+/** What someone might type after /model to narrow the list. */
+const KIND_ALIASES: Record<string, ModelKind> = {
+  text: "text",
+  chat: "text",
+  image: "image",
+  images: "image",
+  picture: "image",
+  audio: "audio",
+  voice: "audio",
+  speech: "audio",
+  tts: "audio",
+  "3d": "model3d",
+  model3d: "model3d",
+  mesh: "model3d",
+}
+
+export function kindFromWord(word: string): ModelKind | undefined {
+  return KIND_ALIASES[word.trim().toLowerCase()]
+}
+
+/** Every model, text first, then the generators, each section together. */
+export function selectionsByKind(): Selection[] {
+  return KIND_ORDER.flatMap((kind) => selectionsOfKind(kind))
+}
+
+export function selectionsOfKind(kind: ModelKind): Selection[] {
+  return allSelections().filter((selection) => kindOf(selection.model) === kind)
 }
 
 export function allSelections(): Selection[] {

@@ -16,10 +16,10 @@ import { findMention, expandMentions } from "../core/mention"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
 import * as settingsStore from "../core/settings"
 import { exportSession } from "../core/export"
-import { runMedia, describeMedia } from "../core/media"
+import { runMedia, describeMedia, type MediaKind } from "../core/media"
 import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
-import { defaultSelection, resolveSelection, type Selection } from "../core/providers"
+import { defaultSelection, resolveSelection, type Selection, kindOf } from "../core/providers"
 import { apiKey } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
 import { isCommand, runCommand } from "../core/commands"
@@ -324,6 +324,29 @@ function render() {
   )
 }
 
+/**
+ * Run a generator and put the result in the transcript.
+ *
+ * The selected model is passed through, which is the whole mechanism: there
+ * is one list of models, and the one you picked decides what a prompt turns
+ * into. Without this /image fell back to a default provider and choosing
+ * Tripo changed nothing at all.
+ */
+async function generate(kind: MediaKind, line: string) {
+  streaming = true
+  status = "generating..."
+  transcript.push({ kind: "user", text: line })
+  render()
+  const generated = await runMedia(kind, line, process.cwd(), {
+    provider: selection.provider.id,
+    model: selection.model.id,
+  })
+  streaming = false
+  transcript.push({ kind: "tool", text: describeMedia(generated) })
+  status = generated.ok ? "" : "generation failed"
+  render()
+}
+
 async function send() {
   const text = input.trim()
   if (!text || streaming) return
@@ -372,17 +395,7 @@ async function send() {
       }
     }
     if (result.kind === "media") {
-      // Generating takes real seconds, so the composer says so and stops
-      // taking input the way it does mid-turn.
-      streaming = true
-      status = "generating..."
-      transcript.push({ kind: "user", text })
-      render()
-      const generated = await runMedia(result.media, result.line, process.cwd())
-      streaming = false
-      transcript.push({ kind: "tool", text: describeMedia(generated) })
-      status = generated.ok ? "" : "generation failed"
-      render()
+      await generate(result.media, result.line)
       return
     }
     if (result.kind === "memory") {
@@ -482,6 +495,20 @@ async function send() {
       }
     }
     render()
+    return
+  }
+
+  // A generation model has no chat endpoint, so a plain prompt belongs to it
+  // rather than to a conversation. Picking one and typing is how you make a
+  // picture without remembering a command.
+  const selectedKind = kindOf(selection.model)
+  if (selectedKind !== "text") {
+    input = ""
+    cursor = 0
+    palette = undefined
+    history.push(text)
+    historyIndex = -1
+    await generate(selectedKind, text)
     return
   }
 

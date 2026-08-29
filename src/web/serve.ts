@@ -9,7 +9,14 @@
 import { file } from "bun"
 import { fileURLToPath } from "node:url"
 import { runAgent, type Message } from "../core/agent"
-import { resolveSelection, allSelections, defaultSelection } from "../core/providers"
+import {
+  resolveSelection,
+  allSelections,
+  defaultSelection,
+  selectionsByKind,
+  kindOf,
+  KIND_LABEL,
+} from "../core/providers"
 import { apiKey } from "../core/auth"
 import * as sessions from "../core/sessions"
 import { Permissions, DECISIONS, type Decision } from "../core/permission"
@@ -118,7 +125,9 @@ async function handle(request: Request): Promise<Response> {
 
   if (url.pathname === "/api/providers") {
     return json({
-      providers: allSelections().map((s) => ({
+      providers: selectionsByKind().map((s) => ({
+        kind: kindOf(s.model),
+        section: KIND_LABEL[kindOf(s.model)],
         id: s.provider.id + "/" + s.model.id,
         label: s.provider.label + " " + s.model.label,
         reasoning: Boolean(s.model.reasoning),
@@ -263,7 +272,13 @@ async function projectFiles(): Promise<string[]> {
     const body = (await request.json()) as { kind?: string; line?: string; model?: string }
     const kind = MEDIA_KINDS.find((entry) => entry.kind === body.kind)
     if (!kind) return json({ ok: false, message: "unknown media kind" }, 400)
-    const result = await runMedia(kind.kind, String(body.line ?? ""), root, body.model)
+    // The browser sends whichever model the picker is on, so the generator
+    // uses the selection rather than a default nobody chose.
+    const selected = resolveSelection(body.model)
+    const result = await runMedia(kind.kind, String(body.line ?? ""), root, {
+      provider: selected?.provider.id,
+      model: selected?.model.id,
+    })
     return json(result)
   }
 

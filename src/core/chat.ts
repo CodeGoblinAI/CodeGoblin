@@ -18,6 +18,9 @@ export async function* streamChat(input: {
   messages: Message[]
   signal?: AbortSignal
 }): AsyncGenerator<string, void, unknown> {
+  if (!input.provider.baseUrl) {
+    throw new Error(`${input.provider.label} generates media, not conversation - pick a text model with /model`)
+  }
   const response = await fetch(input.provider.baseUrl, {
     method: "POST",
     headers: {

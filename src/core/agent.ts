@@ -28,6 +28,23 @@ export type AgentEvent =
   | { type: "turn_end" }
 
 /**
+ * The chat endpoint, or a refusal.
+ *
+ * Image, audio and 3D providers sit in the same catalogue but have nowhere
+ * to send a conversation. The surfaces route those prompts to their own
+ * generators before it gets this far; this is the backstop, and it says what
+ * happened rather than posting to undefined.
+ */
+function chatEndpoint(provider: Provider): string {
+  if (!provider.baseUrl) {
+    throw new Error(
+      `${provider.label} generates media, not conversation - pick a text model with /model to chat`,
+    )
+  }
+  return provider.baseUrl
+}
+
+/**
  * Only the fields the API knows about.
  *
  * Messages carry a display copy for the UI, and providers that validate their
@@ -91,7 +108,7 @@ export async function* runAgent(input: {
   for (let turn = 0; turn < maxTurns; turn++) {
     if (input.signal?.aborted) return
 
-    const response = await fetch(input.provider.baseUrl, {
+    const response = await fetch(chatEndpoint(input.provider), {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
       body: JSON.stringify({
@@ -222,7 +239,7 @@ async function summarise(
   messages: Message[],
 ): Promise<string> {
   try {
-    const response = await fetch(input.provider.baseUrl, {
+    const response = await fetch(chatEndpoint(input.provider), {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
       body: JSON.stringify({

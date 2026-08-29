@@ -21,6 +21,15 @@ import path from "node:path"
  */
 export const MEDIA_OUTPUT_DIR = "codegoblin-output"
 
+/**
+ * The model a generator should use.
+ *
+ * There is one list of models, and whichever is selected decides what a
+ * prompt becomes - the same way the original works. Passing the selection
+ * through is the whole point: without it /image quietly fell back to a
+ * default provider and picking Tripo changed nothing.
+ */
+export type Chosen = { provider?: string; model?: string }
 export type MediaKind = "image" | "audio" | "model3d"
 
 export type MediaResult = {
@@ -49,9 +58,17 @@ export function promptFrom(line: string, command: string): string {
   return trimmed.toLowerCase().startsWith(command) ? trimmed.slice(command.length).trim() : trimmed
 }
 
-async function runImage(line: string, cwd: string, model?: string): Promise<MediaResult> {
+async function runImage(line: string, cwd: string, chosen: Chosen): Promise<MediaResult> {
   const { CodeGoblinImageCommand } = await import("../domain/image-command")
-  const result = await CodeGoblinImageCommand.runSlash({ input: line, cwd, model })
+  // requireImageModel makes it say so rather than guess when the selected
+  // model is not one that draws. Flags on the line still win over it.
+  const result = await CodeGoblinImageCommand.runSlash({
+    input: line,
+    cwd,
+    provider: chosen.provider,
+    model: chosen.model,
+    requireImageModel: true,
+  })
   return {
     ok: result.ok,
     message: result.message,
@@ -62,13 +79,18 @@ async function runImage(line: string, cwd: string, model?: string): Promise<Medi
   }
 }
 
-async function runAudio(line: string, cwd: string, model?: string): Promise<MediaResult> {
+async function runAudio(line: string, cwd: string, chosen: Chosen): Promise<MediaResult> {
   const { CodeGoblinAudioCommand } = await import("../domain/audio-command")
   const text = promptFrom(line, "/audio")
   if (!text) return { ok: false, message: "say what to speak: /audio hello there" }
 
   // Audio has no slash entry point of its own - it takes the text directly.
-  const result = await CodeGoblinAudioCommand.generate({ text, cwd, model })
+  const result = await CodeGoblinAudioCommand.generate({
+    text,
+    cwd,
+    provider: chosen.provider,
+    model: chosen.model,
+  })
   return {
     ok: result.ok,
     message: result.message,
@@ -78,9 +100,15 @@ async function runAudio(line: string, cwd: string, model?: string): Promise<Medi
   }
 }
 
-async function runModel3d(line: string, cwd: string, model?: string): Promise<MediaResult> {
+async function runModel3d(line: string, cwd: string, chosen: Chosen): Promise<MediaResult> {
   const { CodeGoblin3DCommand } = await import("../domain/model3d-command")
-  const result = await CodeGoblin3DCommand.runSlash({ input: line, cwd, model })
+  const result = await CodeGoblin3DCommand.runSlash({
+    input: line,
+    cwd,
+    provider: chosen.provider,
+    model: chosen.model,
+    require3DModel: true,
+  })
   return {
     ok: result.ok,
     message: result.message,
@@ -100,16 +128,16 @@ export async function runMedia(
   kind: MediaKind,
   line: string,
   cwd: string,
-  model?: string,
+  chosen: Chosen = {},
 ): Promise<MediaResult> {
   const dryRun = / --dry-run\b/.test(" " + line)
   try {
     const result =
       kind === "image"
-        ? await runImage(line, cwd, model)
+        ? await runImage(line, cwd, chosen)
         : kind === "audio"
-          ? await runAudio(line, cwd, model)
-          : await runModel3d(line, cwd, model)
+          ? await runAudio(line, cwd, chosen)
+          : await runModel3d(line, cwd, chosen)
     return { ...result, output: relativise(result.output, cwd), dryRun }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "generation failed", dryRun }

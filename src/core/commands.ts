@@ -1,4 +1,4 @@
-import { PROVIDERS, allSelections, resolveSelection } from "./providers"
+import { PROVIDERS, allSelections, resolveSelection, selectionsOfKind, KIND_LABEL, KIND_ORDER } from "./providers"
 import { THEMES, isTheme } from "./theme"
 import { MEDIA_KINDS, type MediaKind } from "./media"
 
@@ -123,10 +123,24 @@ export function runCommand(text: string): CommandResult {
     }
     case "/model": {
       if (!argument) {
-        const available = allSelections()
-          .map((s) => `${(s.provider.id + "/" + s.model.id).padEnd(28)}${s.provider.label} ${s.model.label}`)
-          .join(String.fromCharCode(10))
-        return { kind: "message", text: `usage: /model <id>${String.fromCharCode(10)}${available}` }
+        const NEWLINE = String.fromCharCode(10)
+        // Grouped, because the list is no longer all one thing: picking a
+        // model is now also picking what a prompt turns into.
+        const sections = KIND_ORDER.map((kind) => {
+          const rows = selectionsOfKind(kind)
+          if (!rows.length) return ""
+          return (
+            KIND_LABEL[kind] +
+            NEWLINE +
+            rows
+              .map((s) => "  " + (s.provider.id + "/" + s.model.id).padEnd(34) + s.provider.label + " " + s.model.label)
+              .join(NEWLINE)
+          )
+        }).filter(Boolean)
+        return {
+          kind: "message",
+          text: "usage: /model <id>, or /model image to narrow" + NEWLINE + NEWLINE + sections.join(NEWLINE + NEWLINE),
+        }
       }
       if (!resolveSelection(argument)) return { kind: "message", text: `unknown model: ${argument}  (try /model)` }
       return { kind: "provider", id: argument }
