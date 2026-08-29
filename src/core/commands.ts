@@ -1,4 +1,5 @@
 import { PROVIDERS, allSelections, resolveSelection } from "./providers"
+import { THEMES, isTheme } from "./theme"
 
 /**
  * Slash commands.
@@ -15,6 +16,11 @@ export type CommandResult =
   | { kind: "compact" }
   | { kind: "undo" }
   | { kind: "redo" }
+  | { kind: "status" }
+  | { kind: "export" }
+  | { kind: "rename"; title: string }
+  | { kind: "theme"; name: string }
+  | { kind: "thinking" }
   | { kind: "none" }
 
 export const COMMANDS = [
@@ -25,6 +31,11 @@ export const COMMANDS = [
   { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/undo", description: "put back the files the last turn changed" },
   { name: "/redo", description: "reapply what /undo took back" },
+  { name: "/status", description: "what this session is using right now" },
+  { name: "/export", description: "save the conversation as markdown" },
+  { name: "/rename", description: "retitle this conversation: /rename plan review" },
+  { name: "/theme", description: "change colours: /theme midnight" },
+  { name: "/thinking", description: "show or hide the model's reasoning" },
   { name: "/quit", description: "exit" },
 ]
 
@@ -60,6 +71,26 @@ export function runCommand(text: string): CommandResult {
       return { kind: "undo" }
     case "/redo":
       return { kind: "redo" }
+    case "/status":
+      return { kind: "status" }
+    case "/export":
+      return { kind: "export" }
+    case "/thinking":
+      return { kind: "thinking" }
+    case "/rename": {
+      if (!argument) return { kind: "message", text: "usage: /rename a shorter title" }
+      return { kind: "rename", title: argument }
+    }
+    case "/theme": {
+      if (!argument) {
+        const available = Object.entries(THEMES)
+          .map(([name, theme]) => name.padEnd(12) + theme.label)
+          .join(String.fromCharCode(10))
+        return { kind: "message", text: "usage: /theme <name>" + String.fromCharCode(10) + available }
+      }
+      if (!isTheme(argument)) return { kind: "message", text: `unknown theme: ${argument}  (try /theme)` }
+      return { kind: "theme", name: argument }
+    }
     case "/model": {
       if (!argument) {
         const available = allSelections()

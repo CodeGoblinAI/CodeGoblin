@@ -1,11 +1,12 @@
 /**
  * Terminal control, written directly rather than pulled from a framework.
  *
- * Colours are CodeGoblin's own charcoal theme, taken from the theme
- * definition in the existing app so both look like the same product:
- * neutral greys, green reserved for identity and active state, gold for
- * accents.
+ * Colours come from core/theme, which the browser reads too, so /theme
+ * means the same thing in either surface.
  */
+
+import { paletteOf, DEFAULT_THEME } from "../core/theme"
+
 const ESC = "\x1b["
 
 export const ansi = {
@@ -30,29 +31,36 @@ const hex = (value: string) =>
     parseInt(value.slice(5, 7), 16),
   )
 
-export const palette = {
-  step1: "#16181c",
-  step2: "#1a1d22",
-  step3: "#22262c",
-  step5: "#333842",
-  step7: "#4b515d",
-  step11: "#9aa1ab",
-  step12: "#e8eaed",
-  green: "#62f56e",
-  greenBright: "#92ff9b",
-  gold: "#d4b06a",
-  red: "#ff6f7d",
-  orange: "#ffb84d",
+/**
+ * The colours in use, as ready-made escape sequences.
+ *
+ * Mutated in place by applyTheme rather than replaced, because every module
+ * that draws holds a reference to this object - swapping it would leave half
+ * the screen painted in the old theme.
+ */
+export const theme = {
+  goblin: "",
+  goblinBright: "",
+  gold: "",
+  text: "",
+  muted: "",
+  border: "",
+  borderStrong: "",
+  error: "",
+  warning: "",
 }
 
-export const theme = {
-  goblin: hex(palette.green),
-  goblinBright: hex(palette.greenBright),
-  gold: hex(palette.gold),
-  text: hex(palette.step12),
-  muted: hex(palette.step11),
-  border: hex(palette.step5),
-  borderStrong: hex(palette.step7),
-  error: hex(palette.red),
-  warning: hex(palette.orange),
+export function applyTheme(name: string) {
+  const palette = paletteOf(name)
+  theme.goblin = hex(palette.green)
+  theme.goblinBright = hex(palette.greenBright)
+  theme.gold = hex(palette.gold)
+  theme.text = hex(palette.step12)
+  theme.muted = hex(palette.step11)
+  theme.border = hex(palette.step5)
+  theme.borderStrong = hex(palette.step7)
+  theme.error = hex(palette.red)
+  theme.warning = hex(palette.orange)
 }
+
+applyTheme(DEFAULT_THEME)

@@ -16,6 +16,9 @@ import { Permissions, type Decision } from "../core/permission"
 import { expandMentions } from "../core/mention"
 import { globFiles } from "../core/search"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
+import { THEMES, paletteOf } from "../core/theme"
+import * as settingsStore from "../core/settings"
+import { exportSession } from "../core/export"
 
 // fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..."
 // with a leading slash, which fails to open.
@@ -154,10 +157,21 @@ async function projectFiles(): Promise<string[]> {
         { value: "/compact", hint: "summarise to free context" },
         { value: "/undo", hint: "put back the files the last turn changed" },
         { value: "/redo", hint: "reapply what /undo took back" },
+        { value: "/status", hint: "what this session is using right now" },
+        { value: "/export", hint: "save the conversation as markdown" },
+        { value: "/rename", hint: "retitle this conversation" },
+        { value: "/theme", hint: "change colours", expands: true },
+        { value: "/thinking", hint: "show or hide the model's reasoning" },
       ],
       models,
       sessions: saved.map((entry) => ({ value: "/resume " + entry.id, hint: entry.title })),
       files: await projectFiles(),
+      themes: Object.entries(THEMES).map(([name, entry]) => ({
+        value: "/theme " + name,
+        hint: entry.label,
+        palette: entry.palette,
+      })),
+      settings: await settingsStore.load(),
     })
   }
 
@@ -180,6 +194,28 @@ async function projectFiles(): Promise<string[]> {
     const body = (await request.json()) as { id?: string; title?: string }
     const ok = await sessions.rename(body.id ?? "", (body.title ?? "").trim() || "Untitled")
     return json({ ok })
+  }
+
+  // Preferences live on the server so the TUI and the browser agree about
+  // which theme is current rather than each remembering its own.
+  if (url.pathname === "/api/settings" && request.method === "POST") {
+    const body = (await request.json()) as { theme?: unknown; thinking?: unknown }
+    const current = await settingsStore.load()
+    const next = settingsStore.normalise({ ...current, ...body })
+    await settingsStore.save(next)
+    return json({ settings: next, palette: paletteOf(next.theme) })
+  }
+
+  if (url.pathname === "/api/export" && request.method === "POST") {
+    const body = (await request.json()) as { sessionId?: string }
+    const session = await sessions.load(body.sessionId ?? "")
+    if (!session) return json({ message: "nothing to export yet - say something first" })
+    try {
+      const name = await exportSession(session, root, Date.now())
+      return json({ message: "wrote " + name })
+    } catch (error) {
+      return json({ message: "export failed: " + (error instanceof Error ? error.message : "unknown") }, 500)
+    }
   }
 
   if (url.pathname === "/api/undo" && request.method === "POST") {

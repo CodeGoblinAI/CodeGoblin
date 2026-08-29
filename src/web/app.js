@@ -58,6 +58,23 @@ function turn(kind, text) {
   return body
 }
 
+/**
+ * The model thinking out loud.
+ *
+ * The stream has always carried this and the browser dropped it, so the TUI
+ * showed its reasoning and this did not. Kept visually quiet - it is context
+ * for what follows, not the answer.
+ */
+function thinkingBlock() {
+  if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
+  const wrap = document.createElement("div")
+  wrap.className = "thinking"
+  wrap.innerHTML = '<div class="tlabel">thinking</div><div class="tbody"></div>'
+  thread.appendChild(wrap)
+  scrollDown()
+  return wrap.querySelector(".tbody")
+}
+
 function toolChip(name, args) {
   if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
   const chip = document.createElement("div")
@@ -222,6 +239,44 @@ async function openSession(id) {
  * politely tried to answer it, which is not what picking a conversation from
  * a list should do.
  */
+/**
+ * Repaint from a palette.
+ *
+ * The stylesheet only ever refers to these custom properties, so a theme is
+ * twelve assignments rather than a second stylesheet to keep in step.
+ */
+function applyPalette(palette) {
+  if (!palette) return
+  const root = document.documentElement.style
+  root.setProperty("--step1", palette.step1)
+  root.setProperty("--step2", palette.step2)
+  root.setProperty("--step3", palette.step3)
+  root.setProperty("--step5", palette.step5)
+  root.setProperty("--step7", palette.step7)
+  root.setProperty("--step11", palette.step11)
+  root.setProperty("--step12", palette.step12)
+  root.setProperty("--goblin", palette.green)
+  root.setProperty("--goblin-bright", palette.greenBright)
+  root.setProperty("--gold", palette.gold)
+  root.setProperty("--red", palette.red)
+  root.setProperty("--orange", palette.orange)
+}
+
+let webSettings = { theme: "goblin", thinking: true }
+
+async function saveSettings(change) {
+  const result = await fetch("/api/settings", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(change),
+  }).then((r) => r.json()).catch(() => null)
+  if (!result) return null
+  webSettings = result.settings
+  applyPalette(result.palette)
+  document.body.classList.toggle("hide-thinking", !webSettings.thinking)
+  return result
+}
+
 async function runCommand(text) {
   const [name, ...rest] = text.split(" ")
   const argument = rest.join(" ").trim()
@@ -255,6 +310,56 @@ async function runCommand(text) {
 
   if (name === "/help") {
     note(paletteData.commands.map((c) => c.value + "  -  " + c.hint).join(String.fromCharCode(10)))
+    return true
+  }
+
+  if (name === "/theme") {
+    if (!argument) { input.value = "/theme "; refreshPalette(); return true }
+    const known = (paletteData.themes || []).some((t) => t.value === "/theme " + argument)
+    if (!known) { note("unknown theme: " + argument + "  (try /theme)"); return true }
+    await saveSettings({ theme: argument })
+    note("theme: " + argument)
+    return true
+  }
+
+  if (name === "/thinking") {
+    const result = await saveSettings({ thinking: !webSettings.thinking })
+    note(result && result.settings.thinking ? "showing the model's reasoning" : "hiding the model's reasoning")
+    return true
+  }
+
+  if (name === "/rename") {
+    if (!argument) { note("usage: /rename a shorter title"); return true }
+    if (!sessionId) { note("nothing to rename yet - say something first"); return true }
+    await fetch("/api/session", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: sessionId, title: argument }),
+    }).catch(() => {})
+    note("renamed to " + argument)
+    refreshSessions()
+    return true
+  }
+
+  if (name === "/export") {
+    const result = await fetch("/api/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    }).then((r) => r.json()).catch(() => ({ message: "could not reach the server" }))
+    note(result.message)
+    return true
+  }
+
+  if (name === "/status") {
+    const model = [...providerSelect.options].find((o) => o.value === providerSelect.value)
+    note([
+      "model     " + (model ? model.textContent : providerSelect.value),
+      "session   " + (sessionId || "not started yet"),
+      "theme     " + webSettings.theme,
+      "thinking  " + (webSettings.thinking ? "shown" : "hidden"),
+      "files     " + ((paletteData.files || []).length + " known to the @ picker"),
+    ].join(String.fromCharCode(10)))
     return true
   }
 
@@ -314,6 +419,8 @@ async function submit() {
 
   let body = null
   let raw = ""
+  let thinking = null
+  let thinkingRaw = ""
   controller = new AbortController()
 
   let response
@@ -356,8 +463,17 @@ async function submit() {
         try { event = JSON.parse(line.slice(5).trim()) } catch { continue }
 
         if (event.type === "session") sessionId = event.id
+        if (event.type === "thinking") {
+          const stick = atBottom()
+          if (!thinking) { thinkingRaw = ""; thinking = thinkingBlock() }
+          thinkingRaw += event.delta
+          thinking.textContent = thinkingRaw
+          if (stick) scrollDown()
+        }
         if (event.type === "text") {
           const stick = atBottom()
+          // A new answer ends the reasoning that led to it.
+          thinking = null
           if (!body) { raw = ""; body = turn("agent", "") }
           raw += event.delta
           body.innerHTML = markdown(raw)
@@ -365,6 +481,7 @@ async function submit() {
         }
         if (event.type === "tool_start") {
           body = null
+          thinking = null
           toolChip(event.name, event.args)
           lastToolArgs = event.args
           runningTools.push(event.name)
@@ -504,7 +621,7 @@ function rankFiles(query) {
   return scored.sort((a, b) => a.score - b.score || a.file.length - b.file.length).slice(0, 8).map((e) => e.file)
 }
 
-let paletteData = { commands: [], models: [], sessions: [], files: [] }
+let paletteData = { commands: [], models: [], sessions: [], files: [], themes: [] }
 let paletteItems = []
 let paletteIndex = 0
 
@@ -515,6 +632,12 @@ document.querySelector(".composer").prepend(paletteEl)
 
 async function loadCommands() {
   paletteData = await fetch("/api/commands").then((r) => r.json()).catch(() => paletteData)
+  if (paletteData.settings) {
+    webSettings = paletteData.settings
+    const chosen = (paletteData.themes || []).find((t) => t.value === "/theme " + webSettings.theme)
+    applyPalette(chosen && chosen.palette)
+    document.body.classList.toggle("hide-thinking", !webSettings.thinking)
+  }
 }
 
 function itemsFor(text, cursor) {
@@ -535,11 +658,19 @@ function itemsFor(text, cursor) {
     const q = text.slice(7).trim().toLowerCase()
     return paletteData.models.filter((m) => !q || m.value.toLowerCase().includes(q)).slice(0, 8)
   }
+  if (head === "/theme" && hasArgument) {
+    const q = text.slice(7).trim().toLowerCase()
+    return (paletteData.themes || []).filter((t) => !q || t.value.toLowerCase().includes(q)).slice(0, 8)
+  }
   if (head === "/resume" && hasArgument) {
     const q = text.slice(8).trim().toLowerCase()
     return paletteData.sessions.filter((s) => !q || s.hint.toLowerCase().includes(q)).slice(0, 8)
   }
-  return paletteData.commands.filter((c) => c.value.startsWith(text.split(" ")[0]))
+  // Match the whole line, not just the first word, the way the TUI does.
+  // Matching only the first word kept the palette open after "/rename a new
+  // title", and enter then picked the bare "/rename" item and submitted that
+  // instead - so the title the user typed was silently thrown away.
+  return paletteData.commands.filter((c) => c.value.startsWith(text))
 }
 
 function renderPalette() {

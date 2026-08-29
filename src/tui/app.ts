@@ -6,7 +6,7 @@
  *
  * Raw ANSI, no framework.
  */
-import { ansi, theme, dim } from "./ansi"
+import { ansi, theme, dim, applyTheme } from "./ansi"
 import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { parseKeys } from "./keys"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
@@ -14,6 +14,8 @@ import { renderMarkdown } from "./markdown"
 import { paletteFor, renderPalette, setSessionCache, setFileCache, type PaletteItem } from "./palette"
 import { findMention, expandMentions } from "../core/mention"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
+import * as settingsStore from "../core/settings"
+import { exportSession } from "../core/export"
 import { globFiles } from "../core/search"
 import { defaultSelection, resolveSelection, type Selection } from "../core/providers"
 import { apiKey } from "../core/auth"
@@ -46,6 +48,7 @@ type Entry = { kind: "user" | "agent" | "tool" | "thinking"; text: string }
 let transcript: Entry[] = []
 /** Named for what it holds, since "history" here is the prompt recall list. */
 const edits = new History()
+let settings = settingsStore.defaults()
 let session = sessions.create(selection.provider.id)
 
 let input = ""
@@ -142,6 +145,9 @@ function render() {
         continue
       }
       if (entry.kind === "thinking") {
+        // Hiding reasoning is a view, not a filter on what is collected -
+        // turning it back on should show what was said while it was off.
+        if (!settings.thinking) continue
         lines.push(dim + "  thinking" + ansi.reset)
         for (const line of entry.text.split(String.fromCharCode(10)).slice(-6)) {
           lines.push(dim + "  | " + line.slice(0, width) + ansi.reset)
@@ -256,6 +262,49 @@ async function send() {
       status = "new conversation"
     }
     if (result.kind === "message") transcript.push({ kind: "tool", text: result.text })
+    if (result.kind === "theme") {
+      settings = { ...settings, theme: result.name }
+      applyTheme(result.name)
+      void settingsStore.save(settings)
+      status = "theme: " + result.name
+    }
+    if (result.kind === "thinking") {
+      settings = { ...settings, thinking: !settings.thinking }
+      void settingsStore.save(settings)
+      status = settings.thinking ? "showing the model's reasoning" : "hiding the model's reasoning"
+    }
+    if (result.kind === "rename") {
+      session.title = result.title.slice(0, 80)
+      void sessions.save(session).then(refreshSessionCache).catch(() => {})
+      status = "renamed to " + session.title
+    }
+    if (result.kind === "export") {
+      session.messages = messages
+      try {
+        const name = await exportSession(session, process.cwd(), Date.now())
+        status = "wrote " + name
+      } catch (error) {
+        status = "export failed: " + (error instanceof Error ? error.message.slice(0, 80) : "unknown")
+      }
+    }
+    if (result.kind === "status") {
+      const context = usage(messages, selection.model.contextWindow)
+      const approved = permissions.summary()
+      const rows: [string, string][] = [
+        ["model", selection.provider.label + " " + selection.model.label],
+        ["session", session.title + "  (" + messages.length + " messages)"],
+        ["context", context.percent + "% of " + selection.model.contextWindow.toLocaleString()],
+        ["theme", settings.theme],
+        ["thinking", settings.thinking ? "shown" : "hidden"],
+        ["approved", approved.length ? approved.join(", ") : "nothing yet"],
+        ["undo", edits.canUndo() ? "available" : "nothing to take back"],
+        ["working in", process.cwd()],
+      ]
+      transcript.push({
+        kind: "tool",
+        text: rows.map(([label, value]) => label.padEnd(12) + value).join(String.fromCharCode(10)),
+      })
+    }
     if (result.kind === "undo" || result.kind === "redo") {
       const forward = result.kind === "redo"
       try {
@@ -416,6 +465,13 @@ async function refreshFileCache() {
   setFileCache(await globFiles(process.cwd(), "**/*", 4000).catch(() => []))
 }
 void refreshFileCache()
+
+async function loadSettings() {
+  settings = await settingsStore.load()
+  applyTheme(settings.theme)
+  render()
+}
+void loadSettings()
 
 out.write(ansi.altScreen + ansi.hideCursor)
 render()
