@@ -33,8 +33,21 @@ export type AgentEvent =
  * Messages carry a display copy for the UI, and providers that validate their
  * input reject unknown keys outright - so the wire gets the wire fields.
  */
-const wire = (messages: Message[]) =>
-  messages.map(({ role, content, tool_calls, tool_call_id }) => ({ role, content, tool_calls, tool_call_id }))
+const wire = (messages: Message[], memory?: string) => {
+  const sent = messages.map(({ role, content, tool_calls, tool_call_id }) => ({
+    role,
+    content,
+    tool_calls,
+    tool_call_id,
+  }))
+  // Memory rides along with the system prompt rather than being stored in
+  // the conversation: it is read fresh every turn, so forgetting something
+  // takes effect immediately instead of lingering in old messages.
+  if (memory && sent[0]?.role === "system") {
+    sent[0] = { ...sent[0], content: sent[0].content + String.fromCharCode(10, 10) + memory }
+  }
+  return sent
+}
 
 /**
  * The agent loop.
@@ -54,6 +67,8 @@ export async function* runAgent(input: {
   root: string
   contextWindow?: number
   permissions?: Permissions
+  /** What is remembered, folded into the system prompt for this request. */
+  memory?: string
   /** Given a turn, keeps the previous state of every file the turn writes. */
   history?: History
   maxTurns?: number
@@ -81,7 +96,7 @@ export async function* runAgent(input: {
       headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
       body: JSON.stringify({
         model: input.modelId,
-        messages: wire(input.messages),
+        messages: wire(input.messages, input.memory),
         tools: TOOL_SCHEMA,
         stream: true,
       }),

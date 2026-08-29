@@ -20,6 +20,8 @@ import { THEMES, paletteOf } from "../core/theme"
 import * as settingsStore from "../core/settings"
 import { exportSession } from "../core/export"
 import { runMedia, MEDIA_KINDS, withinMediaOutput } from "../core/media"
+import * as memory from "../core/memory"
+import { runCommand } from "../core/commands"
 import { resolveInside } from "../core/tools"
 
 // fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..."
@@ -159,6 +161,7 @@ async function projectFiles(): Promise<string[]> {
         { value: "/compact", hint: "summarise to free context" },
         { value: "/undo", hint: "put back the files the last turn changed" },
         { value: "/redo", hint: "reapply what /undo took back" },
+        { value: "/memory", hint: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
         { value: "/status", hint: "what this session is using right now" },
         { value: "/export", hint: "save the conversation as markdown" },
         { value: "/rename", hint: "retitle this conversation" },
@@ -224,6 +227,38 @@ async function projectFiles(): Promise<string[]> {
 
   // Generating takes real seconds and is the same work in both surfaces, so
   // the browser asks the server to do it rather than reimplementing any of it.
+  // Memory is the same store the TUI writes, so both surfaces remember the
+  // same things about the same project.
+  if (url.pathname === "/api/memory" && request.method === "POST") {
+    const body = (await request.json()) as { argument?: string; sessionId?: string }
+    const parsed = runCommand("/memory " + (body.argument ?? "").trim())
+    if (parsed.kind === "message") return json({ message: parsed.text })
+    if (parsed.kind !== "memory") return json({ message: "not a memory command" }, 400)
+    try {
+      if (parsed.action === "add") {
+        const entry = await memory.add({ scope: "project", content: parsed.text!, project: root })
+        return json({ message: "remembered: " + entry.content })
+      }
+      if (parsed.action === "forget") {
+        const gone = await memory.remove(parsed.text!)
+        return json({ message: gone ? "forgotten" : "no memory with that id" })
+      }
+      if (parsed.action === "clear") {
+        const count = await memory.clear()
+        return json({ message: count ? "forgot " + count + (count === 1 ? " memory" : " memories") : "nothing to forget" })
+      }
+      const entries = await memory.list({ project: root, query: parsed.text })
+      const NEWLINE = String.fromCharCode(10)
+      return json({
+        message: entries.length
+          ? entries.map((entry) => entry.id + "  " + (entry.pinned ? "* " : "") + entry.content).join(NEWLINE)
+          : parsed.text ? "nothing matches" : "nothing remembered yet",
+      })
+    } catch (error) {
+      return json({ message: error instanceof Error ? error.message : "memory failed" })
+    }
+  }
+
   if (url.pathname === "/api/media" && request.method === "POST") {
     const body = (await request.json()) as { kind?: string; line?: string; model?: string }
     const kind = MEDIA_KINDS.find((entry) => entry.kind === body.kind)
@@ -364,6 +399,7 @@ async function projectFiles(): Promise<string[]> {
             root,
             contextWindow: model.contextWindow,
             permissions: permissionsFor(session.id, send),
+            memory: await memory.recall({ project: root, session: session.id }),
             history: edits,
             signal: turn.signal,
           })) {

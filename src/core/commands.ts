@@ -23,6 +23,7 @@ export type CommandResult =
   | { kind: "theme"; name: string }
   | { kind: "thinking" }
   | { kind: "media"; media: MediaKind; line: string }
+  | { kind: "memory"; action: "list" | "add" | "forget" | "clear"; text?: string }
   | { kind: "none" }
 
 export const COMMANDS = [
@@ -33,6 +34,7 @@ export const COMMANDS = [
   { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/undo", description: "put back the files the last turn changed" },
   { name: "/redo", description: "reapply what /undo took back" },
+  { name: "/memory", description: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
   { name: "/status", description: "what this session is using right now" },
   { name: "/export", description: "save as markdown: /export, or /export notes/chat.md" },
   { name: "/rename", description: "retitle this conversation: /rename plan review" },
@@ -81,6 +83,23 @@ export function runCommand(text: string): CommandResult {
       const media = MEDIA_KINDS.find((entry) => entry.command === name)!
       if (!argument) return { kind: "message", text: "usage: " + media.description }
       return { kind: "media", media: media.kind, line: text.trim() }
+    }
+    case "/memory": {
+      const [action, ...rest] = argument.split(/\s+/)
+      const remainder = rest.join(" ").trim()
+      if (!argument) return { kind: "memory", action: "list" }
+      if (action === "add") {
+        if (!remainder) return { kind: "message", text: "usage: /memory add something worth remembering" }
+        return { kind: "memory", action: "add", text: remainder }
+      }
+      if (action === "forget") {
+        if (!remainder) return { kind: "message", text: "usage: /memory forget <id>" }
+        return { kind: "memory", action: "forget", text: remainder }
+      }
+      if (action === "clear") return { kind: "memory", action: "clear" }
+      // Anything else is a search, which is what someone typing words after
+      // /memory almost always means.
+      return { kind: "memory", action: "list", text: argument }
     }
     case "/status":
       return { kind: "status" }

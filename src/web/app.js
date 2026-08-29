@@ -489,6 +489,16 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/memory") {
+    const result = await fetch("/api/memory", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ argument, sessionId }),
+    }).then((r) => r.json()).catch(() => ({ message: "could not reach the server" }))
+    note(result.message)
+    return true
+  }
+
   if (name === "/undo" || name === "/redo") {
     const result = await fetch("/api/undo", {
       method: "POST",

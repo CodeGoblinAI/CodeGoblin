@@ -17,6 +17,7 @@ import { History, describe as describeCheckpoint, nothingToDo } from "../core/un
 import * as settingsStore from "../core/settings"
 import { exportSession } from "../core/export"
 import { runMedia, describeMedia } from "../core/media"
+import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
 import { defaultSelection, resolveSelection, type Selection } from "../core/providers"
 import { apiKey } from "../core/auth"
@@ -384,6 +385,28 @@ async function send() {
       render()
       return
     }
+    if (result.kind === "memory") {
+      try {
+        if (result.action === "add") {
+          const entry = await memory.add({ scope: "project", content: result.text!, project: process.cwd() })
+          transcript.push({ kind: "tool", text: "remembered: " + entry.content })
+          status = "remembered"
+        } else if (result.action === "forget") {
+          const gone = await memory.remove(result.text!)
+          status = gone ? "forgotten" : "no memory with that id"
+        } else if (result.action === "clear") {
+          const count = await memory.clear()
+          status = count ? "forgot " + count + (count === 1 ? " memory" : " memories") : "nothing to forget"
+        } else {
+          const entries = await memory.list({ project: process.cwd(), query: result.text })
+          overlay = entries.length
+            ? { title: result.text ? "memory matching " + result.text : "memory", rows: entries.map((entry) => [entry.id, (entry.pinned ? "* " : "") + entry.content] as [string, string]) }
+            : { title: "memory", rows: [["", result.text ? "nothing matches" : "nothing remembered yet"]] }
+        }
+      } catch (error) {
+        status = error instanceof Error ? error.message.slice(0, 90) : "memory failed"
+      }
+    }
     if (result.kind === "status") {
       const context = usage(messages, selection.model.contextWindow)
       const approved = permissions.summary()
@@ -496,6 +519,7 @@ async function send() {
       contextWindow: selection.model.contextWindow,
       permissions,
       history: edits,
+      memory: await memory.recall({ project: process.cwd(), session: session.id }),
     })) {
       if (event.type === "thinking") {
         if (!current || current.kind !== "thinking") {
