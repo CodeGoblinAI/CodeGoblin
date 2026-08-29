@@ -2,7 +2,56 @@ const thread = document.getElementById("thread")
 const input = document.getElementById("input")
 const sendBtn = document.getElementById("send")
 const stopBtn = document.getElementById("stop")
-const providerSelect = document.getElementById("provider")
+/**
+ * The model picker.
+ *
+ * A native select cannot be themed and looked exactly like one, so this is a
+ * small list borrowing the palette styling. It opens upward because it lives
+ * at the bottom of the window, which is where it belongs.
+ */
+const providerBtn = document.getElementById("provider-btn")
+const providerMenu = document.getElementById("provider-menu")
+const providerLabel = providerBtn.querySelector(".picker-label")
+let modelOptions = []
+let currentModel = ""
+
+function renderModelMenu() {
+  providerMenu.innerHTML = ""
+  for (const option of modelOptions) {
+    const row = document.createElement("div")
+    row.className = "picker-item" + (option.value === currentModel ? " chosen" : "")
+    row.setAttribute("role", "option")
+    row.textContent = option.label
+    row.onclick = () => { setModel(option.value); closeModelMenu() }
+    providerMenu.appendChild(row)
+  }
+}
+
+function setModel(value) {
+  const option = modelOptions.find((o) => o.value === value)
+  if (!option) return false
+  currentModel = value
+  providerLabel.textContent = option.label
+  renderModelMenu()
+  return true
+}
+
+function closeModelMenu() {
+  providerMenu.hidden = true
+  providerBtn.setAttribute("aria-expanded", "false")
+}
+
+providerBtn.onclick = (event) => {
+  event.stopPropagation()
+  providerMenu.hidden = !providerMenu.hidden
+  providerBtn.setAttribute("aria-expanded", String(!providerMenu.hidden))
+}
+document.addEventListener("click", (event) => {
+  if (!providerMenu.hidden && !providerMenu.contains(event.target)) closeModelMenu()
+})
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeModelMenu()
+})
 const hint = document.getElementById("hint")
 const sessionList = document.getElementById("session-list")
 
@@ -318,10 +367,10 @@ async function runCommand(text) {
 
   if (name === "/model") {
     if (!argument) { input.value = "/model "; refreshPalette(); return true }
-    const option = [...providerSelect.options].find((o) => o.value === argument)
+    const option = modelOptions.find((o) => o.value === argument)
     if (option) {
-      providerSelect.value = argument
-      note("switched to " + option.textContent)
+      setModel(argument)
+      note("switched to " + option.label)
     } else note("unknown model: " + argument)
     return true
   }
@@ -370,9 +419,9 @@ async function runCommand(text) {
   }
 
   if (name === "/status") {
-    const model = [...providerSelect.options].find((o) => o.value === providerSelect.value)
+    const model = modelOptions.find((o) => o.value === currentModel)
     note([
-      "model     " + (model ? model.textContent : providerSelect.value),
+      "model     " + (model ? model.label : currentModel),
       "session   " + (sessionId || "not started yet"),
       "theme     " + webSettings.theme,
       "thinking  " + (webSettings.thinking ? "shown" : "hidden"),
@@ -446,7 +495,7 @@ async function submit() {
     response = await fetch("/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, sessionId, provider: providerSelect.value }),
+      body: JSON.stringify({ text, sessionId, provider: currentModel }),
       signal: controller.signal,
     })
   } catch {
@@ -575,12 +624,11 @@ document.getElementById("new-session").onclick = () => {
 }
 
 fetch("/api/providers").then((r) => r.json()).then((data) => {
-  for (const p of data.providers) {
-    const option = document.createElement("option")
-    option.value = p.id
-    option.textContent = p.label + (p.reasoning ? " (reasoning)" : "")
-    providerSelect.appendChild(option)
-  }
+  modelOptions = data.providers.map((p) => ({
+    value: p.id,
+    label: p.label + (p.reasoning ? " (reasoning)" : ""),
+  }))
+  if (modelOptions.length) setModel(modelOptions[0].value)
   const ready = data.providers.filter((p) => p.ready).length
   hint.textContent = ready ? "" : "no API keys found"
 })
@@ -703,14 +751,43 @@ function renderPalette() {
     row.querySelector(".pvalue").textContent = item.value
     row.querySelector(".phint").textContent = item.hint
     row.onclick = () => choose(index)
+    row.onmouseenter = () => {
+      // Update the class directly rather than re-rendering: rebuilding the
+      // list under the pointer re-fires mouseenter and flickers.
+      paletteIndex = index
+      for (const [at, el] of [...paletteEl.children].entries()) el.classList.toggle("active", at === index)
+      previewTheme(item)
+    }
     paletteEl.appendChild(row)
   })
 }
 
 let paletteSignature = ""
 
+/**
+ * Show a theme while it is being considered.
+ *
+ * Picking colours from a name is guesswork; hovering repaints the page so the
+ * choice is made by looking rather than by reading.
+ */
+function previewTheme(item) {
+  if (!item || !item.palette) return
+  applyPalette(item.palette)
+}
+
+function endPreview() {
+  const chosen = (paletteData.themes || []).find((t) => t.value === "/theme " + webSettings.theme)
+  if (chosen) applyPalette(chosen.palette)
+}
+
+paletteEl.onmouseleave = endPreview
+
 function refreshPalette() {
+  const wasTheme = paletteItems.some((item) => item.palette)
   paletteItems = itemsFor(input.value, input.selectionStart ?? input.value.length)
+  // Leaving the theme list by typing has to put the colours back too, not
+  // only moving the pointer away.
+  if (wasTheme && !paletteItems.some((item) => item.palette)) endPreview()
   // Same rule as the TUI: a new list starts at the top.
   const signature = paletteItems.map((item) => item.value).join("|")
   if (signature !== paletteSignature) {

@@ -151,7 +151,7 @@ async function projectFiles(): Promise<string[]> {
     return json({
       commands: [
         { value: "/help", hint: "show these commands" },
-        { value: "/new", hint: "start a fresh conversation" },
+        { value: "/clear", hint: "start a fresh conversation" },
         { value: "/model", hint: "switch model", expands: true },
         { value: "/resume", hint: "reopen a saved conversation", expands: true },
         { value: "/compact", hint: "summarise to free context" },

@@ -75,6 +75,28 @@
   .thinking .tbody { white-space: pre-wrap; opacity: .75; line-height: 1.5; max-height: 8.5em; overflow-y: auto; }
   body.hide-thinking .thinking { display: none; }
 
+  /* Scrollbars in the theme rather than the browser default white. */
+  * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; border: 2px solid var(--bg); }
+  *::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
+  *::-webkit-scrollbar-corner { background: transparent; }
+
+  /* Model picker. A native select cannot be themed, and looked it. */
+  .picker { position: relative; display: inline-block; }
+  .picker-btn { display: flex; align-items: center; gap: 7px; background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+  .picker-btn:hover { border-color: var(--line-strong); }
+  .picker-btn .picker-caret { color: var(--muted); font-size: 10px; }
+  .picker-menu { position: absolute; bottom: calc(100% + 6px); left: 0; min-width: 240px; max-height: 320px;
+    overflow-y: auto; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45); z-index: 30; padding: 4px; }
+  .picker-item { padding: 7px 11px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--muted);
+    white-space: nowrap; }
+  .picker-item:hover { background: var(--panel2); color: var(--text); }
+  .picker-item.chosen { color: var(--goblin); }
+
   /* sidebar rows */
   .row.session { display: flex; align-items: center; gap: 8px; }
   .row.session .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -104,6 +126,7 @@
   .prow { display: flex; gap: 14px; padding: 8px 13px; cursor: pointer; font-size: 13px; }
   .prow .pvalue { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
   .prow .phint { color: var(--muted); opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prow:hover { background: var(--panel2); }
   .prow.active { background: var(--panel2); }
   .prow.active .pvalue { color: var(--goblin); }
   .prow.active .phint { color: var(--text); opacity: 1; }
@@ -147,7 +170,12 @@
     </div>
     <div class="meta">
       <span>main</span>
-      <select id="provider"></select>
+      <div class="picker" id="provider">
+        <button class="picker-btn" id="provider-btn" type="button" aria-haspopup="listbox" aria-expanded="false">
+          <span class="picker-label">…</span><span class="picker-caret">▾</span>
+        </button>
+        <div class="picker-menu" id="provider-menu" role="listbox" hidden></div>
+      </div>
       <span id="hint"></span>
     </div>
   </div>
