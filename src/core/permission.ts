@@ -20,6 +20,28 @@ export type Decision = "allow" | "deny"
  */
 const HARMLESS = new Set(["read_file", "list_files", "grep", "glob", "todo_write"])
 
+/**
+ * What a single approval covers.
+ *
+ * For most tools it is the tool itself: asking on every write trains people
+ * to approve without reading, which is worse than asking once. webfetch is
+ * the exception, because there the host is the decision. "Yes, fetch
+ * github.com" must never quietly become "yes, fetch anywhere" - that is
+ * exactly the route by which a README talks the model into posting what it
+ * knows to someone else's server.
+ */
+export function scopeOf(tool: string, detail: string): string {
+  if (tool !== "webfetch") return tool
+  try {
+    const parsed = JSON.parse(detail) as { url?: unknown }
+    return tool + ":" + new URL(String(parsed.url ?? "")).host
+  } catch {
+    // An unreadable target gets a scope of its own, so a malformed URL cannot
+    // inherit the approval that was given to a real host.
+    return tool + ":?" + detail.slice(0, 80)
+  }
+}
+
 export class Permissions {
   private granted = new Set<string>()
   private denied = new Set<string>()
@@ -33,15 +55,16 @@ export class Permissions {
   /** Returns true when the tool may run. */
   async check(tool: string, detail: string): Promise<boolean> {
     if (!this.needsConsent(tool)) return true
-    if (this.granted.has(tool)) return true
-    if (this.denied.has(tool)) return false
+    const scope = scopeOf(tool, detail)
+    if (this.granted.has(scope)) return true
+    if (this.denied.has(scope)) return false
 
     const decision = await this.ask(tool, detail)
     if (decision === "allow") {
-      this.granted.add(tool)
+      this.granted.add(scope)
       return true
     }
-    this.denied.add(tool)
+    this.denied.add(scope)
     return false
   }
 

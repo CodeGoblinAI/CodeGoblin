@@ -251,6 +251,21 @@ export const EXTRA_TOOLS: Tool[] = [
       return files.length ? clip(files.join(NEWLINE)) : "no files matched"
     },
   },
+  {
+    name: "webfetch",
+    description:
+      "Fetch a public http or https URL and return its readable text. Refuses private and " +
+      "loopback addresses, and asks the user before each new host.",
+    parameters: {
+      type: "object",
+      properties: { url: { type: "string", description: "Absolute http or https URL." } },
+      required: ["url"],
+    },
+    run: async (args) => {
+      const { fetchUrl } = await import("./webfetch")
+      return clip(await fetchUrl(String(args.url ?? "")))
+    },
+  },
 ]
 
 const NEWLINE = String.fromCharCode(10)
