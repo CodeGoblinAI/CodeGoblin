@@ -94,23 +94,41 @@ function toolChip(name, args) {
 function permissionPrompt(event) {
   const box = document.createElement("div")
   box.className = "permission"
+  // Three answers, the same three the TUI offers. "Allow once" first,
+  // because the least committal choice should be the easiest to reach.
+  const choices = paletteData.decisions || [
+    { id: "once", label: "Allow once", hint: "just this one call" },
+    { id: "always", label: "Allow for this session", hint: "stop asking about this tool" },
+    { id: "reject", label: "Reject", hint: "refuse, and tell the model so" },
+  ]
   box.innerHTML =
-    "<div class=\"ptext\">Allow <strong></strong>?<span class=\"pdetail\"></span></div>" +
-    "<div class=\"pactions\"><button class=\"pallow\">Allow</button><button class=\"pdeny\">Deny</button></div>"
+    '<div class="ptext">Allow <strong></strong>?<span class="pdetail"></span></div><div class="pactions"></div>'
   box.querySelector("strong").textContent = event.tool
   box.querySelector(".pdetail").textContent = (event.detail || "").slice(0, 120)
 
+  const actions = box.querySelector(".pactions")
   const answer = async (decision) => {
-    box.querySelector(".pactions").innerHTML =
-      "<span class=\"presolved\">" + (decision === "allow" ? "allowed" : "denied") + "</span>"
+    const chosen = choices.find((c) => c.id === decision)
+    actions.innerHTML = ""
+    const done = document.createElement("span")
+    done.className = "presolved"
+    done.textContent = chosen ? chosen.label.toLowerCase() : decision
+    actions.appendChild(done)
     await fetch("/api/permission", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: event.id, decision }),
     })
   }
-  box.querySelector(".pallow").onclick = () => answer("allow")
-  box.querySelector(".pdeny").onclick = () => answer("deny")
+
+  for (const choice of choices) {
+    const button = document.createElement("button")
+    button.className = choice.id === "reject" ? "pdeny" : "pallow"
+    button.textContent = choice.label
+    button.title = choice.hint
+    button.onclick = () => answer(choice.id)
+    actions.appendChild(button)
+  }
 
   thread.appendChild(box)
   scrollDown()

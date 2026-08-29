@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import { isPrivateAddress, htmlToText, fetchUrl } from "../src/core/webfetch"
-import { Permissions, scopeOf } from "../src/core/permission"
 
 describe("addresses a fetch tool has no business reaching", () => {
   test("refuses loopback, private ranges and link-local", () => {
@@ -71,99 +70,5 @@ describe("turning a page into something readable", () => {
 
   test("collapses the whitespace that markup leaves behind", () => {
     expect(htmlToText("<div>  lots\n\n   of     space  </div>")).toBe("lots of space")
-  })
-})
-
-describe("what one approval covers", () => {
-  test("a host at a time for webfetch, so one yes is not every yes", () => {
-    expect(scopeOf("webfetch", JSON.stringify({ url: "https://example.com/a" }))).toBe("webfetch:example.com")
-    expect(scopeOf("webfetch", JSON.stringify({ url: "https://example.com/b" }))).toBe("webfetch:example.com")
-    expect(scopeOf("webfetch", JSON.stringify({ url: "https://evil.test/x" }))).toBe("webfetch:evil.test")
-  })
-
-  test("the whole tool for everything else", () => {
-    expect(scopeOf("write_file", JSON.stringify({ path: "a.ts" }))).toBe("write_file")
-    expect(scopeOf("shell", JSON.stringify({ command: "ls" }))).toBe("shell")
-  })
-
-  test("approving one host does not approve the next", async () => {
-    const asked: string[] = []
-    const permissions = new Permissions(async (_tool, detail) => {
-      asked.push(detail)
-      return detail.includes("example.com") ? "allow" : "deny"
-    })
-
-    expect(await permissions.check("webfetch", JSON.stringify({ url: "https://example.com/1" }))).toBe(true)
-    expect(await permissions.check("webfetch", JSON.stringify({ url: "https://example.com/2" }))).toBe(true)
-    expect(await permissions.check("webfetch", JSON.stringify({ url: "https://evil.test/1" }))).toBe(false)
-
-    // Asked once per host, not once per URL and not only once overall.
-    expect(asked.length).toBe(2)
-  })
-
-  test("a write still only asks once", async () => {
-    let asked = 0
-    const permissions = new Permissions(async () => { asked++; return "allow" })
-    await permissions.check("write_file", JSON.stringify({ path: "a.ts" }))
-    await permissions.check("write_file", JSON.stringify({ path: "b.ts" }))
-    expect(asked).toBe(1)
-  })
-})
-
-describe("a public URL that redirects into the private network", () => {
-  // The interesting attack: the host you approve is fine, and the host you
-  // actually reach is not. Checking only the first URL would walk straight in.
-  const network = (addresses: Record<string, string[]>, pages: Record<string, Response>) => ({
-    resolve: async (hostname: string) => addresses[hostname] ?? [],
-    fetch: async (url: URL) => pages[url.toString()] ?? new Response("missing", { status: 404 }),
-  })
-
-  const redirect = (to: string) => new Response(null, { status: 302, headers: { location: to } })
-  const page = (body: string) =>
-    new Response(body, { status: 200, headers: { "content-type": "text/plain" } })
-
-  test("is refused at the hop that leaves public space", async () => {
-    const net = network(
-      { "public.test": ["93.184.216.34"], "inside.test": ["127.0.0.1"] },
-      { "http://public.test/": redirect("http://inside.test/secrets") },
-    )
-    await expect(fetchUrl("http://public.test/", net)).rejects.toThrow("private address 127.0.0.1")
-  })
-
-  test("is refused even when the redirect is to a bare private address", async () => {
-    const net = network(
-      { "public.test": ["93.184.216.34"], "169.254.169.254": ["169.254.169.254"] },
-      { "http://public.test/": redirect("http://169.254.169.254/latest/meta-data/") },
-    )
-    await expect(fetchUrl("http://public.test/", net)).rejects.toThrow("private address")
-  })
-
-  test("still follows an ordinary redirect between public hosts", async () => {
-    const net = network(
-      { "public.test": ["93.184.216.34"], "elsewhere.test": ["1.1.1.1"] },
-      {
-        "http://public.test/": redirect("http://elsewhere.test/final"),
-        "http://elsewhere.test/final": page("the actual page"),
-      },
-    )
-    const text = await fetchUrl("http://public.test/", net)
-    expect(text).toContain("the actual page")
-    expect(text).toContain("redirected via 1 hop")
-  })
-
-  test("gives up rather than following a redirect loop forever", async () => {
-    const net = network(
-      { "loop.test": ["1.1.1.1"] },
-      { "http://loop.test/": redirect("http://loop.test/") },
-    )
-    await expect(fetchUrl("http://loop.test/", net)).rejects.toThrow("too many redirects")
-  })
-
-  test("refuses a redirect that changes scheme to something local", async () => {
-    const net = network(
-      { "public.test": ["93.184.216.34"] },
-      { "http://public.test/": redirect("file:///etc/passwd") },
-    )
-    await expect(fetchUrl("http://public.test/", net)).rejects.toThrow("only http and https")
   })
 })

@@ -24,7 +24,7 @@ import { isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
 import { usage, shouldCompact, planCompaction, applyCompaction } from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
-import { Permissions, type Decision } from "../core/permission"
+import { Permissions, DECISIONS, type Decision } from "../core/permission"
 
 const argv = process.argv.slice(2)
 const flag = (name: string) => {
@@ -60,10 +60,21 @@ let streaming = false
 let status = key ? "" : "no key for " + selection.provider.label
 
 let pending: { tool: string; detail: string; resolve: (d: Decision) => void } | undefined
+/** Which answer is highlighted. Starts on "allow once", the least committal. */
+let pendingChoice = 0
+
+/**
+ * A panel you read and dismiss.
+ *
+ * /status used to print into the transcript, where it stayed forever and
+ * pushed the conversation up. It is a glance, not a message.
+ */
+let overlay: { title: string; rows: [string, string][] } | undefined
 const permissions = new Permissions(
   (tool, detail) =>
     new Promise<Decision>((resolve) => {
       pending = { tool, detail, resolve }
+      pendingChoice = 0
       render()
     }),
 )
@@ -75,13 +86,15 @@ let plan: Todo[] = []
 let palette: PaletteItem[] | undefined
 let paletteIndex = 0
 
-let caretOn = true
-const blink = setInterval(() => {
-  if (streaming) return
-  caretOn = !caretOn
-  render()
-}, 530)
-blink.unref?.()
+/**
+ * Where the caret sits on screen, so the terminal can draw its own.
+ *
+ * This used to be a block character toggled by a timer, which meant a full
+ * repaint twice a second - and a repaint discards whatever the user has
+ * selected, so text could never stay highlighted long enough to copy. The
+ * terminal already has a cursor, and it blinks for free.
+ */
+let caretAt: { row: number; col: number } | undefined
 
 const size = () => ({ cols: out.columns ?? 80, rows: out.rows ?? 24 })
 const charWidthOf = (char: string) => displayWidth(char)
@@ -194,19 +207,71 @@ function render() {
   for (const line of planLines) body.push(line)
   for (const line of paletteLines) body.push(line)
 
+  if (overlay) {
+    const labelWidth = Math.max(...overlay.rows.map(([label]) => displayWidth(label))) + 2
+    const valueWidth = Math.min(
+      Math.max(...overlay.rows.map(([, value]) => displayWidth(value))),
+      Math.max(20, cols - labelWidth - 12),
+    )
+    const inner = labelWidth + valueWidth + 4
+    body.push(theme.border + "  ╭" + "─".repeat(inner) + "╮" + ansi.reset)
+    body.push(
+      theme.border + "  │" + ansi.reset +
+        theme.gold + padToWidth("  " + overlay.title, inner) + ansi.reset +
+        theme.border + "│" + ansi.reset,
+    )
+    for (const [label, value] of overlay.rows) {
+      const row =
+        "  " + theme.muted + padToWidth(label, labelWidth) + ansi.reset +
+        theme.text + truncateToWidth(value, valueWidth) + ansi.reset
+      body.push(
+        theme.border + "  │" + ansi.reset + padToWidth(row, inner) + theme.border + "│" + ansi.reset,
+      )
+    }
+    body.push(theme.border + "  ╰" + "─".repeat(inner) + "╯" + ansi.reset)
+  }
+
+  // Consent is a list you move through, not a letter you have to know. It
+  // sits where the palette does, so the answer is next to the question.
+  if (pending) {
+    // One width for every row, padded after colouring - displayWidth skips
+    // escape sequences, so the box lines up whatever colour the text is.
+    const labelWidth = Math.max(...DECISIONS.map((d) => displayWidth(d.label))) + 2
+    const hintWidth = Math.max(...DECISIONS.map((d) => displayWidth(d.hint)))
+    const inner = 3 + labelWidth + hintWidth + 1
+
+    body.push(theme.border + "  " + "╭" + "─".repeat(inner) + "╮" + ansi.reset)
+    body.push(
+      theme.border + "  │" + ansi.reset +
+        theme.gold + padToWidth(" allow this?", inner) + ansi.reset +
+        theme.border + "│" + ansi.reset,
+    )
+    for (const [index, choice] of DECISIONS.entries()) {
+      const active = index === pendingChoice
+      const marker = active ? theme.goblin + " ❯ " + ansi.reset : "   "
+      const label = (active ? theme.text : theme.muted) + padToWidth(choice.label, labelWidth) + ansi.reset
+      const row = marker + label + dim + choice.hint + ansi.reset
+      body.push(
+        theme.border + "  │" + ansi.reset + padToWidth(row, inner) + theme.border + "│" + ansi.reset,
+      )
+    }
+    body.push(theme.border + "  " + "╰" + "─".repeat(inner) + "╯" + ansi.reset)
+  }
+
   const inner = Math.max(10, cols - 4)
   const visibleInput = Math.max(10, inner - 4)
-  const caret = caretOn ? "\u2588" : " "
+  /** Columns from the start of the composer content to the caret. */
+  let caretOffset: number | undefined
   let shown: string
   if (pending) {
     shown =
-      theme.gold + "allow " + pending.tool + "? " + ansi.reset +
-      theme.text + pending.detail.slice(0, Math.max(10, visibleInput - 24)) + ansi.reset +
-      theme.muted + "  [y/n]" + ansi.reset
+      theme.gold + pending.tool + ansi.reset + " " +
+      dim + pending.detail.slice(0, Math.max(10, visibleInput - 24)) + ansi.reset
   } else if (streaming) {
     shown = dim + "goblin is working... ctrl+c to quit" + ansi.reset
   } else if (!input) {
-    shown = theme.text + caret + ansi.reset + dim + "ask the goblin anything..." + ansi.reset
+    caretOffset = 0
+    shown = dim + "ask the goblin anything..." + ansi.reset
   } else {
     // Walk back from the cursor until the slice fills the visible width.
     let from = cursor
@@ -217,9 +282,10 @@ function render() {
     }
     const slice = truncateToWidth(input.slice(from), visibleInput)
     const at = cursor - from
+    caretOffset = (from > 0 ? 3 : 0) + displayWidth(slice.slice(0, at))
     shown =
       (from > 0 ? theme.muted + "..." + ansi.reset : "") +
-      theme.text + slice.slice(0, at) + caret + slice.slice(at) + ansi.reset +
+      theme.text + slice + ansi.reset +
       (from + visibleInput < input.length ? theme.muted + "..." + ansi.reset : "")
   }
 
@@ -230,7 +296,15 @@ function render() {
   const context = usage(messages, selection.model.contextWindow)
   const left =
     status || selection.provider.label + " . " + selection.model.id + "  " + context.percent + "% ctx"
-  const right = scroll > 0 ? "scrolled " + scroll : palette ? "tab complete . up/down pick" : "/ commands . @ files . ctrl+c quit"
+  const right = overlay
+    ? "any key closes"
+    : pending
+    ? "up/down choose . enter confirm . esc reject"
+    : scroll > 0
+      ? "scrolled " + scroll
+      : palette
+        ? "tab complete . up/down pick"
+        : "/ commands . @ files . ctrl+c quit"
   const plain = "  " + left
   const padded = padToWidth(plain, Math.max(displayWidth(plain) + 1, cols - displayWidth(right) - 2))
   body.push(dim + padded + ansi.reset + theme.muted + right + ansi.reset)
@@ -239,7 +313,13 @@ function render() {
   // looks short by .length can still overflow and wrap.
   const clamped = body.map((line) => (displayWidth(line) <= cols ? line : truncateToWidth(line, cols - 1) + ansi.reset))
 
-  out.write(ansi.clear + clamped.join(String.fromCharCode(10)))
+  // The composer is the third line from the bottom: rule, input, rule, status.
+  caretAt = caretOffset === undefined ? undefined : { row: body.length - 2, col: 5 + caretOffset }
+
+  out.write(
+    ansi.hideCursor + ansi.clear + clamped.join(String.fromCharCode(10)) +
+      (caretAt ? ansi.moveTo(caretAt.row, caretAt.col) + ansi.showCursor : ""),
+  )
 }
 
 async function send() {
@@ -259,6 +339,7 @@ async function send() {
       session = sessions.create(selection.provider.id)
       permissions.reset()
       edits.reset()
+      overlay = undefined
       status = "new conversation"
     }
     if (result.kind === "message") transcript.push({ kind: "tool", text: result.text })
@@ -277,11 +358,12 @@ async function send() {
       session.title = result.title.slice(0, 80)
       void sessions.save(session).then(refreshSessionCache).catch(() => {})
       status = "renamed to " + session.title
+      transcript.push({ kind: "tool", text: "renamed this conversation to " + session.title })
     }
     if (result.kind === "export") {
       session.messages = messages
       try {
-        const name = await exportSession(session, process.cwd(), Date.now())
+        const name = await exportSession(session, process.cwd(), Date.now(), result.path)
         status = "wrote " + name
       } catch (error) {
         status = "export failed: " + (error instanceof Error ? error.message.slice(0, 80) : "unknown")
@@ -300,10 +382,7 @@ async function send() {
         ["undo", edits.canUndo() ? "available" : "nothing to take back"],
         ["working in", process.cwd()],
       ]
-      transcript.push({
-        kind: "tool",
-        text: rows.map(([label, value]) => label.padEnd(12) + value).join(String.fromCharCode(10)),
-      })
+      overlay = { title: "status", rows }
     }
     if (result.kind === "undo" || result.kind === "redo") {
       const forward = result.kind === "redo"
@@ -473,7 +552,7 @@ async function loadSettings() {
 }
 void loadSettings()
 
-out.write(ansi.altScreen + ansi.hideCursor)
+out.write(ansi.altScreen)
 render()
 out.on("resize", render)
 
@@ -485,14 +564,25 @@ process.stdin.on("data", (chunk) => {
   for (const pressed of parseKeys(chunk.toString())) {
     if (pressed.type === "ctrl" && pressed.value === "c") return shutdown()
 
+    if (overlay) {
+      // Anything at all closes it: it is a panel to read, not one to operate.
+      overlay = undefined
+      if (pressed.type === "escape" || pressed.type === "enter") { render(); continue }
+      // A keystroke meant for the composer still lands there, so dismissing
+      // it does not cost the character someone was already typing.
+    }
+
     if (pending) {
-      if (pressed.type === "char" && /^[yn]$/i.test(pressed.value)) {
-        const answer = pressed.value.toLowerCase() === "y" ? "allow" : "deny"
-        const ask = pending
+      const answer = (decision: Decision) => {
+        const ask = pending!
         pending = undefined
-        ask.resolve(answer)
+        ask.resolve(decision)
         render()
       }
+      if (pressed.type === "up") { pendingChoice = Math.max(0, pendingChoice - 1); render(); continue }
+      if (pressed.type === "down") { pendingChoice = Math.min(DECISIONS.length - 1, pendingChoice + 1); render(); continue }
+      if (pressed.type === "enter") { answer(DECISIONS[pendingChoice]!.id); continue }
+      if (pressed.type === "escape") { answer("reject"); continue }
       // Anything else is ignored: a stray key must not answer for the user.
       continue
     }
@@ -598,7 +688,7 @@ process.stdin.on("data", (chunk) => {
     }
   }
 
-  if (dirty) { refreshPalette(); caretOn = true; render() }
+  if (dirty) { refreshPalette(); render() }
 })
 
 process.on("SIGINT", shutdown)

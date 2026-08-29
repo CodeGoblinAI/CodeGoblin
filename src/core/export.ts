@@ -60,10 +60,24 @@ export function toMarkdown(session: Session, when: number): string {
   return lines.join(NEWLINE).replace(new RegExp(NEWLINE + "{3,}", "g"), BLANK) + NEWLINE
 }
 
-/** Writes beside the project, since an export nobody can find is not one. */
-export async function exportSession(session: Session, root: string, when: number): Promise<string> {
-  const name = `codegoblin-${slug(session.title)}.md`
-  const target = path.join(root, name)
-  await fs.writeFile(target, toMarkdown(session, when), "utf8")
-  return name
+/**
+ * Writes beside the project by default, since an export nobody can find is
+ * not one, and wherever the user says otherwise.
+ *
+ * A given path is not confined to the working directory. Everywhere else a
+ * path is checked, it came from the model; this one was typed by the person
+ * asking for the file, and refusing to put their own export on their own
+ * desktop would be protecting them from themselves.
+ */
+export async function exportSession(
+  session: Session,
+  root: string,
+  when: number,
+  target?: string,
+): Promise<string> {
+  const name = target?.trim() || `codegoblin-${slug(session.title)}.md`
+  const absolute = path.resolve(root, name)
+  await fs.mkdir(path.dirname(absolute), { recursive: true })
+  await fs.writeFile(absolute, toMarkdown(session, when), "utf8")
+  return path.relative(root, absolute).startsWith("..") ? absolute : path.relative(root, absolute)
 }

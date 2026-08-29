@@ -5,11 +5,21 @@
  * what to call, so the guard belongs here rather than in the prompt - a
  * prompt can be talked around, this cannot.
  *
- * Granularity is per tool, per session: the first write asks, and approving
- * covers writes for the rest of that conversation. Asking every single time
- * trains people to approve without reading, which is worse than asking once.
+ * There are three answers, not two. "Allow once" lets a single call through
+ * and asks again next time; "always" covers the tool for the rest of the
+ * conversation, because asking on every write trains people to approve
+ * without reading; "reject" refuses this call only. Only "always" is sticky,
+ * which makes the rule easy to hold in your head: nothing is remembered
+ * unless you said to remember it.
  */
-export type Decision = "allow" | "deny"
+export type Decision = "once" | "always" | "reject"
+
+/** What each answer is called where a person has to read it. */
+export const DECISIONS: { id: Decision; label: string; hint: string }[] = [
+  { id: "once", label: "Allow once", hint: "just this one call" },
+  { id: "always", label: "Allow for this session", hint: "stop asking about this tool" },
+  { id: "reject", label: "Reject", hint: "refuse, and tell the model so" },
+]
 
 /**
  * Tools that change nothing outside the conversation never prompt.
@@ -44,7 +54,6 @@ export function scopeOf(tool: string, detail: string): string {
 
 export class Permissions {
   private granted = new Set<string>()
-  private denied = new Set<string>()
 
   constructor(private ask: (tool: string, detail: string) => Promise<Decision>) {}
 
@@ -57,21 +66,15 @@ export class Permissions {
     if (!this.needsConsent(tool)) return true
     const scope = scopeOf(tool, detail)
     if (this.granted.has(scope)) return true
-    if (this.denied.has(scope)) return false
 
     const decision = await this.ask(tool, detail)
-    if (decision === "allow") {
-      this.granted.add(scope)
-      return true
-    }
-    this.denied.add(scope)
-    return false
+    if (decision === "always") this.granted.add(scope)
+    return decision !== "reject"
   }
 
   /** A new conversation starts with no standing approvals. */
   reset() {
     this.granted.clear()
-    this.denied.clear()
   }
 
   summary(): string[] {
@@ -80,4 +83,4 @@ export class Permissions {
 }
 
 /** Used where consent is not applicable, such as tests. */
-export const allowAll = () => new Permissions(async () => "allow")
+export const allowAll = () => new Permissions(async () => "always")

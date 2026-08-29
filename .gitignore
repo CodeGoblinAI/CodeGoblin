@@ -7,3 +7,7 @@ dist/
 *-probe.txt
 *-demo.txt
 test-*.txt
+
+# /export writes here by default; exports are yours, not the repo's.
+codegoblin-*.md
+model_test/

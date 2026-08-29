@@ -2,6 +2,8 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { resolveInside } from "./tools"
 
+const BACKSLASH = String.fromCharCode(92)
+
 /**
  * Taking back what the agent wrote.
  *
@@ -17,10 +19,35 @@ import { resolveInside } from "./tools"
 
 /** before is null when the file did not exist, so undo removes it again. */
 export type Snapshot = { path: string; before: string | null }
-export type Checkpoint = { label: string; files: Snapshot[] }
+export type Checkpoint = {
+  label: string
+  files: Snapshot[]
+  /**
+   * Directories that did not exist before this turn.
+   *
+   * Undoing a created file used to leave the folder it was created in
+   * standing - empty, and no more wanted than the file was.
+   */
+  dirs: string[]
+}
 
 /** Enough to walk back through an afternoon, not enough to hoard a tree. */
 const MAX_CHECKPOINTS = 20
+
+/** The ancestors of a path that do not exist yet, outermost first. */
+async function missingAncestors(root: string, relative: string): Promise<string[]> {
+  const parts = relative.split(BACKSLASH).join("/").split("/").filter(Boolean)
+  const missing: string[] = []
+  for (let depth = 1; depth < parts.length; depth++) {
+    const dir = parts.slice(0, depth).join("/")
+    try {
+      await fs.stat(resolveInside(root, dir))
+    } catch {
+      missing.push(dir)
+    }
+  }
+  return missing
+}
 
 async function readOrNull(root: string, relative: string): Promise<string | null> {
   try {
@@ -43,7 +70,13 @@ async function restore(root: string, checkpoint: Checkpoint): Promise<Checkpoint
     await fs.mkdir(path.dirname(target), { recursive: true })
     await fs.writeFile(target, snapshot.before, "utf8")
   }
-  return { label: checkpoint.label, files: inverse }
+  // Deepest first, and rmdir only removes an empty directory - so a folder
+  // that has since been given other contents is left alone.
+  for (const dir of [...checkpoint.dirs].sort((a, b) => b.length - a.length)) {
+    await fs.rmdir(resolveInside(root, dir)).catch(() => {})
+  }
+
+  return { label: checkpoint.label, files: inverse, dirs: checkpoint.dirs }
 }
 
 export class History {
@@ -53,7 +86,7 @@ export class History {
 
   /** Start a turn. Nothing is kept unless the turn actually writes something. */
   begin(label: string) {
-    this.open = { label: label.slice(0, 60), files: [] }
+    this.open = { label: label.slice(0, 60), files: [], dirs: [] }
   }
 
   /**
@@ -74,6 +107,9 @@ export class History {
       return
     }
     if (this.open.files.some((snapshot) => snapshot.path === relative)) return
+    for (const dir of await missingAncestors(root, relative)) {
+      if (!this.open.dirs.includes(dir)) this.open.dirs.push(dir)
+    }
     this.open.files.push({ path: relative, before: await readOrNull(root, relative) })
   }
 

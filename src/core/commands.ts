@@ -17,7 +17,7 @@ export type CommandResult =
   | { kind: "undo" }
   | { kind: "redo" }
   | { kind: "status" }
-  | { kind: "export" }
+  | { kind: "export"; path?: string }
   | { kind: "rename"; title: string }
   | { kind: "theme"; name: string }
   | { kind: "thinking" }
@@ -25,14 +25,14 @@ export type CommandResult =
 
 export const COMMANDS = [
   { name: "/help", description: "show these commands" },
-  { name: "/new", description: "start a fresh conversation" },
+  { name: "/clear", description: "start a fresh conversation" },
   { name: "/model", description: "switch provider: /model zai" },
   { name: "/resume", description: "reopen a saved conversation" },
   { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/undo", description: "put back the files the last turn changed" },
   { name: "/redo", description: "reapply what /undo took back" },
   { name: "/status", description: "what this session is using right now" },
-  { name: "/export", description: "save the conversation as markdown" },
+  { name: "/export", description: "save as markdown: /export, or /export notes/chat.md" },
   { name: "/rename", description: "retitle this conversation: /rename plan review" },
   { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
@@ -55,6 +55,7 @@ export function runCommand(text: string): CommandResult {
           String.fromCharCode(10),
         ),
       }
+    case "/clear":
     case "/new":
       return { kind: "clear" }
     case "/quit":
@@ -74,7 +75,7 @@ export function runCommand(text: string): CommandResult {
     case "/status":
       return { kind: "status" }
     case "/export":
-      return { kind: "export" }
+      return { kind: "export", path: argument || undefined }
     case "/thinking":
       return { kind: "thinking" }
     case "/rename": {

@@ -200,3 +200,82 @@ describe("saying why there was nothing to do", () => {
     expect(nothingToDo(history, false)).toContain("already back to how this session started")
   })
 })
+
+describe("folders the turn created", () => {
+  test("are taken back with the files that were put in them", async () => {
+    const root = await scratch()
+    const history = new History()
+    history.begin("make a folder and a file")
+    await history.record(root, "model_test/note.txt")
+    await fs.mkdir(path.join(root, "model_test"), { recursive: true })
+    await fs.writeFile(path.join(root, "model_test", "note.txt"), "a note", "utf8")
+    history.commit()
+
+    await history.undo(root)
+    expect(await read(root, "model_test/note.txt")).toBeNull()
+    // The folder was as unwanted as the file in it.
+    await expect(fs.stat(path.join(root, "model_test"))).rejects.toThrow()
+  })
+
+  test("nested folders go all the way back", async () => {
+    const root = await scratch()
+    const history = new History()
+    history.begin("deep")
+    await history.record(root, "a/b/c/file.txt")
+    await fs.mkdir(path.join(root, "a", "b", "c"), { recursive: true })
+    await fs.writeFile(path.join(root, "a", "b", "c", "file.txt"), "x", "utf8")
+    history.commit()
+
+    await history.undo(root)
+    await expect(fs.stat(path.join(root, "a"))).rejects.toThrow()
+  })
+
+  test("a folder that already existed is left alone", async () => {
+    const root = await scratch()
+    await fs.mkdir(path.join(root, "src"), { recursive: true })
+    const history = new History()
+    history.begin("write into src")
+    await history.record(root, "src/new.ts")
+    await fs.writeFile(path.join(root, "src", "new.ts"), "x", "utf8")
+    history.commit()
+
+    await history.undo(root)
+    expect(await read(root, "src/new.ts")).toBeNull()
+    expect((await fs.stat(path.join(root, "src"))).isDirectory()).toBe(true)
+  })
+
+  test("a folder that has since gained other files survives", async () => {
+    const root = await scratch()
+    const history = new History()
+    history.begin("make a folder")
+    await history.record(root, "shared/one.txt")
+    await fs.mkdir(path.join(root, "shared"), { recursive: true })
+    await fs.writeFile(path.join(root, "shared", "one.txt"), "one", "utf8")
+    history.commit()
+
+    // Something else lands in there before the undo.
+    await fs.writeFile(path.join(root, "shared", "two.txt"), "two", "utf8")
+
+    await history.undo(root)
+    expect(await read(root, "shared/one.txt")).toBeNull()
+    expect(await read(root, "shared/two.txt")).toBe("two")
+  })
+
+  test("redo puts the folder and its file back", async () => {
+    const root = await scratch()
+    const history = new History()
+    history.begin("make a folder")
+    await history.record(root, "again/file.txt")
+    await fs.mkdir(path.join(root, "again"), { recursive: true })
+    await fs.writeFile(path.join(root, "again", "file.txt"), "back", "utf8")
+    history.commit()
+
+    await history.undo(root)
+    await history.redo(root)
+    expect(await read(root, "again/file.txt")).toBe("back")
+
+    // And undoing once more takes the folder away again.
+    await history.undo(root)
+    await expect(fs.stat(path.join(root, "again"))).rejects.toThrow()
+  })
+})

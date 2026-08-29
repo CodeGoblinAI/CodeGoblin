@@ -12,7 +12,7 @@ import { runAgent, type Message } from "../core/agent"
 import { resolveSelection, allSelections, defaultSelection } from "../core/providers"
 import { apiKey } from "../core/auth"
 import * as sessions from "../core/sessions"
-import { Permissions, type Decision } from "../core/permission"
+import { Permissions, DECISIONS, type Decision } from "../core/permission"
 import { expandMentions } from "../core/mention"
 import { globFiles } from "../core/search"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
@@ -172,6 +172,7 @@ async function projectFiles(): Promise<string[]> {
         palette: entry.palette,
       })),
       settings: await settingsStore.load(),
+      decisions: DECISIONS,
     })
   }
 
@@ -240,7 +241,7 @@ async function projectFiles(): Promise<string[]> {
       activeTurns.delete(body.sessionId ?? "")
       // Unblock a turn waiting on consent, or it will hang forever.
       for (const [id, resolve] of pendingDecisions) {
-        if (id.startsWith((body.sessionId ?? "") + ":")) { resolve("deny"); pendingDecisions.delete(id) }
+        if (id.startsWith((body.sessionId ?? "") + ":")) { resolve("reject"); pendingDecisions.delete(id) }
       }
       return json({ ok: true })
     }
@@ -252,7 +253,9 @@ async function projectFiles(): Promise<string[]> {
     const resolve = pendingDecisions.get(body.id ?? "")
     if (!resolve) return json({ ok: false, error: "no pending request" }, 404)
     pendingDecisions.delete(body.id!)
-    resolve(body.decision === "allow" ? "allow" : "deny")
+    // Anything unrecognised is a refusal: a malformed answer must never be
+    // read as consent.
+    resolve(DECISIONS.some((d) => d.id === body.decision) ? body.decision! : "reject")
     return json({ ok: true })
   }
 

@@ -1,38 +1,56 @@
 import { describe, expect, test } from "bun:test"
-import { Permissions } from "../src/core/permission"
+import { Permissions, DECISIONS, scopeOf } from "../src/core/permission"
 
 describe("permissions", () => {
   test("tools that change nothing never prompt", async () => {
     let asked = 0
-    const permissions = new Permissions(async () => { asked++; return "allow" })
+    const permissions = new Permissions(async () => { asked++; return "always" })
     for (const tool of ["read_file", "list_files", "grep", "glob", "todo_write"]) {
       expect(await permissions.check(tool, "")).toBe(true)
     }
     expect(asked).toBe(0)
   })
 
-  // The whole point of per-session granularity: asking every time trains
-  // people to approve without reading.
-  test("asks once per tool, then remembers", async () => {
+  // Asking on every write trains people to approve without reading, so
+  // "always" exists - but it has to be chosen, never assumed.
+  test("allow-for-the-session asks once and then remembers", async () => {
     let asked = 0
-    const permissions = new Permissions(async () => { asked++; return "allow" })
+    const permissions = new Permissions(async () => { asked++; return "always" })
     await permissions.check("write_file", "a")
     await permissions.check("write_file", "b")
     await permissions.check("write_file", "c")
     expect(asked).toBe(1)
   })
 
-  test("a refusal is remembered too, and blocks", async () => {
+  test("allow-once lets one call through and asks again", async () => {
     let asked = 0
-    const permissions = new Permissions(async () => { asked++; return "deny" })
+    const permissions = new Permissions(async () => { asked++; return "once" })
+    expect(await permissions.check("write_file", "a")).toBe(true)
+    expect(await permissions.check("write_file", "b")).toBe(true)
+    expect(asked).toBe(2)
+  })
+
+  test("a rejection refuses this call and nothing more", async () => {
+    let asked = 0
+    const permissions = new Permissions(async () => { asked++; return "reject" })
     expect(await permissions.check("shell", "rm -rf /")).toBe(false)
-    expect(await permissions.check("shell", "anything")).toBe(false)
-    expect(asked).toBe(1)
+    expect(await permissions.check("shell", "ls")).toBe(false)
+    // Asked twice: only "always" is sticky, so a refusal never silently
+    // hardens into a standing rule the user did not ask for.
+    expect(asked).toBe(2)
+  })
+
+  test("one allow-once never becomes a standing approval", async () => {
+    const answers: string[] = ["once", "reject"]
+    let index = 0
+    const permissions = new Permissions(async () => answers[index++] as never)
+    expect(await permissions.check("shell", "first")).toBe(true)
+    expect(await permissions.check("shell", "second")).toBe(false)
   })
 
   test("different tools are approved separately", async () => {
     const seen: string[] = []
-    const permissions = new Permissions(async (tool) => { seen.push(tool); return "allow" })
+    const permissions = new Permissions(async (tool) => { seen.push(tool); return "always" })
     await permissions.check("write_file", "")
     await permissions.check("shell", "")
     expect(seen).toEqual(["write_file", "shell"])
@@ -40,10 +58,54 @@ describe("permissions", () => {
 
   test("a new conversation clears standing approvals", async () => {
     let asked = 0
-    const permissions = new Permissions(async () => { asked++; return "allow" })
+    const permissions = new Permissions(async () => { asked++; return "always" })
     await permissions.check("shell", "")
     permissions.reset()
     await permissions.check("shell", "")
     expect(asked).toBe(2)
+  })
+
+  test("only what was granted shows up in the summary", async () => {
+    const permissions = new Permissions(async (tool) => (tool === "shell" ? "always" : "once"))
+    await permissions.check("shell", "")
+    await permissions.check("write_file", "")
+    expect(permissions.summary()).toEqual(["shell"])
+  })
+})
+
+describe("the answers on offer", () => {
+  test("there are three, and reject is one of them", () => {
+    expect(DECISIONS.map((d) => d.id)).toEqual(["once", "always", "reject"])
+  })
+
+  test("the least committal one comes first", () => {
+    expect(DECISIONS[0]!.id).toBe("once")
+  })
+
+  test("each has something a person can read", () => {
+    for (const decision of DECISIONS) {
+      expect([decision.id, decision.label.length > 0 && decision.hint.length > 0]).toEqual([decision.id, true])
+    }
+  })
+})
+
+describe("what one approval covers", () => {
+  test("a host at a time for webfetch, so one yes is not every yes", () => {
+    expect(scopeOf("webfetch", JSON.stringify({ url: "https://example.com/a" }))).toBe("webfetch:example.com")
+    expect(scopeOf("webfetch", JSON.stringify({ url: "https://evil.test/x" }))).toBe("webfetch:evil.test")
+  })
+
+  test("approving one host for the session does not approve the next", async () => {
+    const asked: string[] = []
+    const permissions = new Permissions(async (_tool, detail) => {
+      asked.push(detail)
+      return detail.includes("example.com") ? "always" : "reject"
+    })
+
+    expect(await permissions.check("webfetch", JSON.stringify({ url: "https://example.com/1" }))).toBe(true)
+    expect(await permissions.check("webfetch", JSON.stringify({ url: "https://example.com/2" }))).toBe(true)
+    expect(await permissions.check("webfetch", JSON.stringify({ url: "https://evil.test/1" }))).toBe(false)
+
+    expect(asked.length).toBe(2)
   })
 })
