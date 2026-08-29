@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Permissions, DECISIONS, scopeOf } from "../src/core/permission"
+import { Permissions, DECISIONS, MODES, nextMode, scopeOf } from "../src/core/permission"
 
 describe("permissions", () => {
   test("tools that change nothing never prompt", async () => {
@@ -107,5 +107,53 @@ describe("what one approval covers", () => {
     expect(await permissions.check("webfetch", JSON.stringify({ url: "https://evil.test/1" }))).toBe(false)
 
     expect(asked.length).toBe(2)
+  })
+})
+
+describe("how much to ask", () => {
+  test("ask is the default, and nothing is remembered until you say so", async () => {
+    const permissions = new Permissions(async () => "once")
+    expect(permissions.mode).toBe("ask")
+  })
+
+  test("auto approves without asking at all", async () => {
+    let asked = 0
+    const permissions = new Permissions(async () => { asked++; return "reject" })
+    permissions.mode = "auto"
+    expect(await permissions.check("shell", JSON.stringify({ command: "ls" }))).toBe(true)
+    expect(await permissions.check("write_file", JSON.stringify({ path: "a" }))).toBe(true)
+    expect(asked).toBe(0)
+  })
+
+  test("plan refuses anything that changes something, without asking", async () => {
+    let asked = 0
+    const permissions = new Permissions(async () => { asked++; return "always" })
+    permissions.mode = "plan"
+    for (const tool of ["write_file", "edit_file", "shell", "webfetch"]) {
+      expect([tool, await permissions.check(tool, "{}")]).toEqual([tool, false])
+    }
+    // The point is that nothing changes, not that you are asked whether it may.
+    expect(asked).toBe(0)
+  })
+
+  test("plan still lets the model read and search", async () => {
+    const permissions = new Permissions(async () => "reject")
+    permissions.mode = "plan"
+    for (const tool of ["read_file", "list_files", "grep", "glob", "todo_write"]) {
+      expect([tool, await permissions.check(tool, "{}")]).toEqual([tool, true])
+    }
+  })
+
+  test("the modes cycle, and come back round", () => {
+    expect(MODES.map((m) => m.id)).toEqual(["ask", "auto", "plan"])
+    expect(nextMode("ask")).toBe("auto")
+    expect(nextMode("auto")).toBe("plan")
+    expect(nextMode("plan")).toBe("ask")
+  })
+
+  test("every mode says what it does", () => {
+    for (const mode of MODES) {
+      expect([mode.id, mode.label.length > 0 && mode.hint.length > 0]).toEqual([mode.id, true])
+    }
   })
 })

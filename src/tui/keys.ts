@@ -23,6 +23,7 @@ export type Key =
   | { type: "pagedown" }
   | { type: "wheelup" }
   | { type: "wheeldown" }
+  | { type: "shifttab" }
   | { type: "escape" }
   | { type: "ctrl"; value: string }
 
@@ -33,6 +34,8 @@ const CSI: Record<string, Key["type"]> = {
   D: "left",
   H: "home",
   F: "end",
+  // CSI Z is shift+tab, which cycles the permission mode.
+  Z: "shifttab",
 }
 
 const TILDE: Record<string, Key["type"]> = {

@@ -33,7 +33,7 @@ import { isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
 import { usage, shouldCompact, planCompaction, applyCompaction } from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
-import { Permissions, DECISIONS, type Decision } from "../core/permission"
+import { Permissions, DECISIONS, MODES, nextMode, type Decision } from "../core/permission"
 
 const argv = process.argv.slice(2)
 const flag = (name: string) => {
@@ -411,8 +411,9 @@ function render() {
   body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
 
   const context = usage(messages, selection.model.contextWindow)
+  const modeTag = permissions.mode === "ask" ? "" : "  [" + permissions.mode + "]"
   const left =
-    status || selection.provider.label + " . " + selection.model.id + "  " + context.percent + "% ctx"
+    status || modeTag.trim() + (modeTag ? "  " : "") + selection.provider.label + " . " + selection.model.id + "  " + context.percent + "% ctx"
   const right = streaming
     ? "esc stops . ctrl+c quits"
     : secret
@@ -425,7 +426,7 @@ function render() {
       ? "scrolled " + scroll
       : palette
         ? "tab complete . up/down pick"
-        : "/ commands . @ files . ctrl+c quit"
+        : "/ commands . @ files . shift+tab mode . ctrl+c quit"
   const plain = "  " + left
   const padded = padToWidth(plain, Math.max(displayWidth(plain) + 1, cols - displayWidth(right) - 2))
   body.push(dim + padded + ansi.reset + theme.muted + right + ansi.reset)
@@ -904,6 +905,13 @@ process.stdin.on("data", (chunk) => {
 
     switch (pressed.type) {
       // Escape clears the line; it never exits. Quitting is ctrl+c.
+      case "shifttab": {
+        permissions.mode = nextMode(permissions.mode)
+        const mode = MODES.find((entry) => entry.id === permissions.mode)!
+        status = "mode: " + mode.label + " - " + mode.hint
+        dirty = true
+        break
+      }
       case "escape":
         if (secret) { secret = undefined; input = ""; cursor = 0; status = "cancelled"; dirty = true; break }
         if (input) { input = ""; cursor = 0; dirty = true }

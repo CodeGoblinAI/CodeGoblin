@@ -52,8 +52,34 @@ export function scopeOf(tool: string, detail: string): string {
   }
 }
 
+/**
+ * How much to ask.
+ *
+ * ask   - the default; the first call of each kind asks.
+ * auto  - approve everything without asking. For a run you are watching.
+ * plan  - refuse everything that changes anything, so the model can read,
+ *         search and think out loud but cannot act.
+ *
+ * Per session and never persisted. Auto-approval that quietly survived a
+ * restart would be a nasty surprise, and it is the kind of setting people
+ * turn on for one task and forget.
+ */
+export type PermissionMode = "ask" | "auto" | "plan"
+
+export const MODES: { id: PermissionMode; label: string; hint: string }[] = [
+  { id: "ask", label: "ask", hint: "approve each kind of call once" },
+  { id: "auto", label: "auto", hint: "approve everything, no prompts" },
+  { id: "plan", label: "plan", hint: "read and think only, change nothing" },
+]
+
+export function nextMode(mode: PermissionMode): PermissionMode {
+  const at = MODES.findIndex((entry) => entry.id === mode)
+  return MODES[(at + 1) % MODES.length]!.id
+}
+
 export class Permissions {
   private granted = new Set<string>()
+  mode: PermissionMode = "ask"
 
   constructor(private ask: (tool: string, detail: string) => Promise<Decision>) {}
 
@@ -64,6 +90,12 @@ export class Permissions {
   /** Returns true when the tool may run. */
   async check(tool: string, detail: string): Promise<boolean> {
     if (!this.needsConsent(tool)) return true
+
+    // Plan mode refuses before anything is asked: the point is that nothing
+    // changes, not that you are asked whether it may.
+    if (this.mode === "plan") return false
+    if (this.mode === "auto") return true
+
     const scope = scopeOf(tool, detail)
     if (this.granted.has(scope)) return true
 

@@ -206,7 +206,10 @@ export async function* runAgent(input: {
       // gets the same prompt and the model still receives a normal tool
       // result when it is refused.
       if (input.permissions && !(await input.permissions.check(call.name, call.args))) {
-        const refusal = "refused by the user"
+        const refusal =
+          input.permissions?.mode === "plan"
+            ? "not run: plan mode is on, so nothing that changes files or runs commands is executed"
+            : "refused by the user"
         input.messages.push({ role: "tool", tool_call_id: call.id, content: refusal })
         yield { type: "tool_denied", name: call.name }
         yield { type: "tool_end", name: call.name, result: refusal }
