@@ -16,6 +16,7 @@ import { findMention, expandMentions } from "../core/mention"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
 import * as settingsStore from "../core/settings"
 import { exportSession } from "../core/export"
+import { runMedia, describeMedia } from "../core/media"
 import { globFiles } from "../core/search"
 import { defaultSelection, resolveSelection, type Selection } from "../core/providers"
 import { apiKey } from "../core/auth"
@@ -368,6 +369,20 @@ async function send() {
       } catch (error) {
         status = "export failed: " + (error instanceof Error ? error.message.slice(0, 80) : "unknown")
       }
+    }
+    if (result.kind === "media") {
+      // Generating takes real seconds, so the composer says so and stops
+      // taking input the way it does mid-turn.
+      streaming = true
+      status = "generating..."
+      transcript.push({ kind: "user", text })
+      render()
+      const generated = await runMedia(result.media, result.line, process.cwd())
+      streaming = false
+      transcript.push({ kind: "tool", text: describeMedia(generated) })
+      status = generated.ok ? "" : "generation failed"
+      render()
+      return
     }
     if (result.kind === "status") {
       const context = usage(messages, selection.model.contextWindow)

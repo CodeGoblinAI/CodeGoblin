@@ -228,11 +228,20 @@ function parseModel3DArgs(input: string) {
     modelVersion?: string
     output?: string
     inputImages?: Model3DInputImage[]
+    dryRun?: boolean
   } = { prompt: "" }
   const tokens = tokenize(input)
   const promptParts: string[] = []
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]
+    // generateModel3D has always understood dryRun; the slash parser did not,
+    // so --dry-run fell through into the prompt and the call went out for real.
+    // /image accepts the flag, which makes silently spending Tripo credits here
+    // the worst kind of inconsistency.
+    if (token === "--dry-run") {
+      result.dryRun = true
+      continue
+    }
     if (token === "--provider" && tokens[i + 1]) {
       result.provider = tokens[++i]
       continue

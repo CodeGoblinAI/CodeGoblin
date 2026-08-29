@@ -11,3 +11,6 @@ test-*.txt
 # /export writes here by default; exports are yours, not the repo's.
 codegoblin-*.md
 model_test/
+
+# Generated images, audio and 3D models are output, not source.
+codegoblin-output/

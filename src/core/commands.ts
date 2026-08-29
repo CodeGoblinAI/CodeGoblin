@@ -1,5 +1,6 @@
 import { PROVIDERS, allSelections, resolveSelection } from "./providers"
 import { THEMES, isTheme } from "./theme"
+import { MEDIA_KINDS, type MediaKind } from "./media"
 
 /**
  * Slash commands.
@@ -21,6 +22,7 @@ export type CommandResult =
   | { kind: "rename"; title: string }
   | { kind: "theme"; name: string }
   | { kind: "thinking" }
+  | { kind: "media"; media: MediaKind; line: string }
   | { kind: "none" }
 
 export const COMMANDS = [
@@ -36,6 +38,7 @@ export const COMMANDS = [
   { name: "/rename", description: "retitle this conversation: /rename plan review" },
   { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
+  ...MEDIA_KINDS.map((entry) => ({ name: entry.command, description: entry.description })),
   { name: "/quit", description: "exit" },
 ]
 
@@ -72,6 +75,13 @@ export function runCommand(text: string): CommandResult {
       return { kind: "undo" }
     case "/redo":
       return { kind: "redo" }
+    case "/image":
+    case "/audio":
+    case "/model3d": {
+      const media = MEDIA_KINDS.find((entry) => entry.command === name)!
+      if (!argument) return { kind: "message", text: "usage: " + media.description }
+      return { kind: "media", media: media.kind, line: text.trim() }
+    }
     case "/status":
       return { kind: "status" }
     case "/export":

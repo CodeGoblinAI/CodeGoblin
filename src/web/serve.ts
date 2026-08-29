@@ -19,6 +19,8 @@ import { History, describe as describeCheckpoint, nothingToDo } from "../core/un
 import { THEMES, paletteOf } from "../core/theme"
 import * as settingsStore from "../core/settings"
 import { exportSession } from "../core/export"
+import { runMedia, MEDIA_KINDS, withinMediaOutput } from "../core/media"
+import { resolveInside } from "../core/tools"
 
 // fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..."
 // with a leading slash, which fails to open.
@@ -162,6 +164,7 @@ async function projectFiles(): Promise<string[]> {
         { value: "/rename", hint: "retitle this conversation" },
         { value: "/theme", hint: "change colours", expands: true },
         { value: "/thinking", hint: "show or hide the model's reasoning" },
+        ...MEDIA_KINDS.map((entry) => ({ value: entry.command, hint: entry.description })),
       ],
       models,
       sessions: saved.map((entry) => ({ value: "/resume " + entry.id, hint: entry.title })),
@@ -219,6 +222,43 @@ async function projectFiles(): Promise<string[]> {
     }
   }
 
+  // Generating takes real seconds and is the same work in both surfaces, so
+  // the browser asks the server to do it rather than reimplementing any of it.
+  if (url.pathname === "/api/media" && request.method === "POST") {
+    const body = (await request.json()) as { kind?: string; line?: string; model?: string }
+    const kind = MEDIA_KINDS.find((entry) => entry.kind === body.kind)
+    if (!kind) return json({ ok: false, message: "unknown media kind" }, 400)
+    const result = await runMedia(kind.kind, String(body.line ?? ""), root, body.model)
+    return json(result)
+  }
+
+  /**
+   * Serve a generated file back to the page.
+   *
+   * An image nobody can look at is barely an image, so the browser has to be
+   * able to fetch what was just written.
+   *
+   * Confined to the media output directory rather than the working tree. The
+   * first version allowed anything resolveInside allowed, which meant this
+   * would happily hand over .git/config - a file that quite often has a token
+   * in a remote URL. This endpoint exists to show generated media and now it
+   * can do nothing else.
+   */
+  if (url.pathname === "/api/file" && request.method === "GET") {
+    const target = url.searchParams.get("path") ?? ""
+    let absolute: string
+    try {
+      absolute = resolveInside(root, target)
+    } catch {
+      return json({ error: "outside the working directory" }, 403)
+    }
+    if (!withinMediaOutput(root, absolute)) {
+      return json({ error: "only generated media is served here" }, 403)
+    }
+    const handle = file(absolute)
+    if (!(await handle.exists())) return json({ error: "not found" }, 404)
+    return new Response(handle, { headers: { "cache-control": "no-store" } })
+  }
   if (url.pathname === "/api/undo" && request.method === "POST") {
     const body = (await request.json()) as { sessionId?: string; direction?: string }
     const edits = editsBySession.get(body.sessionId ?? "")

@@ -344,6 +344,47 @@ async function saveSettings(change) {
   return result
 }
 
+/**
+ * Show what was generated.
+ *
+ * A path in a log is not much of a picture. The browser can display the
+ * thing it just asked for, so it does - and falls back to naming the file
+ * when there is nothing to show, as for a 3D model.
+ */
+function showMedia(kind, result) {
+  if (!result.ok || result.dryRun || !result.output) {
+    note(result.message)
+    return
+  }
+
+  const wrap = document.createElement("div")
+  wrap.className = "media"
+  const src = "/api/file?path=" + encodeURIComponent(result.output)
+
+  if (kind === "image") {
+    const img = document.createElement("img")
+    img.src = src
+    img.alt = result.output
+    wrap.appendChild(img)
+  } else if (kind === "audio") {
+    const audio = document.createElement("audio")
+    audio.controls = true
+    audio.src = src
+    wrap.appendChild(audio)
+  }
+
+  const caption = document.createElement("a")
+  caption.className = "media-caption"
+  caption.href = src
+  caption.target = "_blank"
+  caption.textContent = result.output + (result.model ? "  via " + result.model : "")
+  wrap.appendChild(caption)
+
+  if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
+  thread.appendChild(wrap)
+  scrollDown()
+}
+
 async function runCommand(text) {
   const [name, ...rest] = text.split(" ")
   const argument = rest.join(" ").trim()
@@ -427,6 +468,24 @@ async function runCommand(text) {
       "thinking  " + (webSettings.thinking ? "shown" : "hidden"),
       "files     " + ((paletteData.files || []).length + " known to the @ picker"),
     ].join(String.fromCharCode(10)))
+    return true
+  }
+
+  if (MEDIA_COMMANDS.includes(name)) {
+    const kind = name.slice(1) === "model3d" ? "model3d" : name.slice(1)
+    if (!argument) {
+      note("usage: " + (paletteData.commands.find((c) => c.value === name) || {}).hint)
+      return true
+    }
+    turn("user", text)
+    setBusy(true)
+    const result = await fetch("/api/media", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind, line: text, model: currentModel }),
+    }).then((r) => r.json()).catch(() => ({ ok: false, message: "could not reach the server" }))
+    setBusy(false)
+    showMedia(kind, result)
     return true
   }
 
@@ -687,6 +746,7 @@ function rankFiles(query) {
   return scored.sort((a, b) => a.score - b.score || a.file.length - b.file.length).slice(0, 8).map((e) => e.file)
 }
 
+const MEDIA_COMMANDS = ["/image", "/audio", "/model3d"]
 let paletteData = { commands: [], models: [], sessions: [], files: [], themes: [] }
 let paletteItems = []
 let paletteIndex = 0
