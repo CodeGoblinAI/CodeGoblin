@@ -41,6 +41,28 @@ const flag = (name: string) => {
   return index === -1 ? undefined : argv[index + 1]
 }
 
+/**
+ * Work somewhere else.
+ *
+ * Every tool is confined to the working directory, which is the right rule
+ * and the wrong default when the directory is fixed to wherever the app
+ * happened to be launched. A first argument moves it, so
+ *
+ *   cg ../some-other-project
+ *
+ * opens there and the sandbox follows. The confinement is unchanged - it is
+ * the same one rule, just pointed where you meant.
+ */
+const requested = argv.find((entry) => !entry.startsWith("--"))
+if (requested) {
+  try {
+    process.chdir(requested)
+  } catch {
+    process.stderr.write(`cannot open ${requested}` + String.fromCharCode(10))
+    process.exit(1)
+  }
+}
+
 let selection: Selection = resolveSelection(flag("--model") ?? flag("--provider")) ?? defaultSelection()
 let key = apiKey(selection.provider.id)
 
