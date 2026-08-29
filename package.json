@@ -17,7 +17,6 @@
     "@earendil-works/pi-ai": "^0.84.2",
     "@earendil-works/pi-server": "^0.84.2",
     "@earendil-works/pi-tui": "^0.84.2",
-    "drizzle-orm": "^0.44.7",
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
