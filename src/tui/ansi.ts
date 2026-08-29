@@ -17,6 +17,15 @@ export const ansi = {
   mainScreen: `${ESC}?1049l`,
   moveTo: (row: number, col: number) => `${ESC}${row};${col}H`,
   reset: `${ESC}0m`,
+  /**
+   * Wheel reporting only (1000 = button events, 1006 = SGR encoding).
+   *
+   * Without this the terminal turns the wheel into arrow keys, which the
+   * composer reads as prompt history - so scrolling the transcript walked
+   * back through what you had already typed instead.
+   */
+  mouseOn: `${ESC}?1000h${ESC}?1006h`,
+  mouseOff: `${ESC}?1006l${ESC}?1000l`,
 }
 
 /** 24-bit colour. Every modern terminal supports it. */

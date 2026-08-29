@@ -21,6 +21,8 @@ export type Key =
   | { type: "end" }
   | { type: "pageup" }
   | { type: "pagedown" }
+  | { type: "wheelup" }
+  | { type: "wheeldown" }
   | { type: "escape" }
   | { type: "ctrl"; value: string }
 
@@ -68,6 +70,18 @@ export function parseKeys(input: string): Key[] {
         j++
       }
       const final = input[j]
+
+      // SGR mouse: ESC [ < button ; col ; row M|m. 64 and 65 are the wheel.
+      // Without this the terminal sends the wheel as arrow keys and the
+      // composer reads them as prompt history, so scrolling walked back
+      // through what you had already typed.
+      if (params.startsWith("<") && (final === "M" || final === "m")) {
+        const button = Number(params.slice(1).split(";")[0])
+        if (button === 64) keys.push({ type: "wheelup" })
+        if (button === 65) keys.push({ type: "wheeldown" })
+        i = j + 1
+        continue
+      }
 
       if (final === "~") {
         const type = TILDE[params.split(";")[0] ?? ""]

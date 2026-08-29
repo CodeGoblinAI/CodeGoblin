@@ -66,6 +66,44 @@ let scroll = 0
 const history: string[] = []
 let historyIndex = -1
 let streaming = false
+
+/**
+ * The running turn, so it can be stopped.
+ *
+ * There was no way to interrupt one at all: once a model started, the only
+ * exit was killing the process, which loses the conversation with it.
+ */
+let turn: AbortController | undefined
+
+/**
+ * Something moving while the model thinks.
+ *
+ * A still line reads as frozen, and these calls take real seconds. The
+ * timer only runs while a turn does: the screen is already repainting on
+ * every token then, so it costs nothing - and when idle nothing is written
+ * at all, which is what keeps text selectable.
+ */
+const SPINNER = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"]
+let spinnerTick = 0
+let spinnerTimer: ReturnType<typeof setInterval> | undefined
+
+function spinnerFrame() {
+  return SPINNER[spinnerTick % SPINNER.length]!
+}
+
+function startSpinner() {
+  if (spinnerTimer) return
+  spinnerTimer = setInterval(() => {
+    spinnerTick++
+    render()
+  }, 90)
+  spinnerTimer.unref?.()
+}
+
+function stopSpinner() {
+  if (spinnerTimer) clearInterval(spinnerTimer)
+  spinnerTimer = undefined
+}
 let status = key ? "" : "no key for " + selection.provider.label
 
 let pending: { tool: string; detail: string; resolve: (d: Decision) => void } | undefined
@@ -157,6 +195,48 @@ function refreshPalette() {
   if (palette) paletteIndex = Math.min(paletteIndex, palette.length - 1)
 }
 
+/**
+ * Break the prompt into lines that fit.
+ *
+ * It used to scroll sideways: a long prompt ran off to the right and you
+ * could only ever see the tail of it. It grows downward now, up to a limit,
+ * because a composer that eats the whole screen is its own problem.
+ *
+ * Measured in display width, so a line of CJK wraps where it looks like it
+ * should rather than at twice the width.
+ */
+const COMPOSER_MAX_LINES = 6
+
+function wrapToWidth(text: string, width: number): string[] {
+  if (width <= 0) return [text]
+  const rows: string[] = []
+  let row = ""
+  let used = 0
+  for (const char of text) {
+    const w = charWidthOf(char)
+    if (used + w > width) {
+      rows.push(row)
+      row = ""
+      used = 0
+    }
+    row += char
+    used += w
+  }
+  rows.push(row)
+  return rows
+}
+
+/** Which wrapped line the caret sits on, and how far along it. */
+function caretIn(rows: string[], cursor: number): { line: number; column: number } {
+  let seen = 0
+  for (const [index, row] of rows.entries()) {
+    const length = [...row].length
+    if (cursor <= seen + length) return { line: index, column: displayWidth([...row].slice(0, cursor - seen).join("")) }
+    seen += length
+  }
+  const last = rows.length - 1
+  return { line: last, column: displayWidth(rows[last] ?? "") }
+}
 function render() {
   const { cols, rows } = size()
   const width = Math.max(20, cols - 6)
@@ -217,7 +297,10 @@ function render() {
   }
 
   const paletteLines = palette && !streaming ? renderPalette(palette, paletteIndex, cols) : []
-  const composerHeight = 4 + paletteLines.length + planLines.length
+  const promptHeight = input && !secret && !streaming && !pending
+    ? Math.min(COMPOSER_MAX_LINES, wrapToWidth(input, Math.max(10, cols - 8)).length)
+    : 1
+  const composerHeight = 3 + promptHeight + paletteLines.length + planLines.length
   const room = Math.max(1, rows - composerHeight - 1)
 
   const maxScroll = Math.max(0, lines.length - room)
@@ -286,13 +369,16 @@ function render() {
   const visibleInput = Math.max(10, inner - 4)
   /** Columns from the start of the composer content to the caret. */
   let caretOffset: number | undefined
+  /** The prompt as it will be drawn, one entry per visible line. */
+  let composerRows: string[] = []
+  let caretLine = 0
   let shown: string
   if (pending) {
     shown =
       theme.gold + pending.tool + ansi.reset + " " +
       dim + pending.detail.slice(0, Math.max(10, visibleInput - 24)) + ansi.reset
   } else if (streaming) {
-    shown = dim + "goblin is working... ctrl+c to quit" + ansi.reset
+    shown = dim + spinnerFrame() + " goblin is working..." + ansi.reset
   } else if (secret) {
     // Dots, and one per character rather than a fixed run, so backspace is
     // visible without the key ever being.
@@ -304,30 +390,32 @@ function render() {
     caretOffset = 0
     shown = dim + "ask the goblin anything..." + ansi.reset
   } else {
-    // Walk back from the cursor until the slice fills the visible width.
-    let from = cursor
-    let used = 0
-    while (from > 0 && used + charWidthOf(input[from - 1]!) <= visibleInput - 1) {
-      from--
-      used += charWidthOf(input[from]!)
-    }
-    const slice = truncateToWidth(input.slice(from), visibleInput)
-    const at = cursor - from
-    caretOffset = (from > 0 ? 3 : 0) + displayWidth(slice.slice(0, at))
-    shown =
-      (from > 0 ? theme.muted + "..." + ansi.reset : "") +
-      theme.text + slice + ansi.reset +
-      (from + visibleInput < input.length ? theme.muted + "..." + ansi.reset : "")
+    const rows = wrapToWidth(input, visibleInput)
+    const spot = caretIn(rows, cursor)
+    // Keep the caret's line on screen when the prompt outgrows the box.
+    const first = Math.max(0, Math.min(spot.line - COMPOSER_MAX_LINES + 1, rows.length - COMPOSER_MAX_LINES))
+    composerRows = rows.slice(first, first + COMPOSER_MAX_LINES)
+    caretLine = spot.line - first
+    caretOffset = spot.column
+    shown = theme.text + composerRows[0] + ansi.reset
   }
 
   body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
-  body.push(theme.goblin + "  | " + ansi.reset + shown)
+  if (composerRows.length > 1) {
+    for (const row of composerRows) {
+      body.push(theme.goblin + "  | " + ansi.reset + theme.text + row + ansi.reset)
+    }
+  } else {
+    body.push(theme.goblin + "  | " + ansi.reset + shown)
+  }
   body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
 
   const context = usage(messages, selection.model.contextWindow)
   const left =
     status || selection.provider.label + " . " + selection.model.id + "  " + context.percent + "% ctx"
-  const right = secret
+  const right = streaming
+    ? "esc stops . ctrl+c quits"
+    : secret
     ? "enter saves . esc cancels . nothing is echoed"
     : overlay
     ? "any key closes"
@@ -346,8 +434,13 @@ function render() {
   // looks short by .length can still overflow and wrap.
   const clamped = body.map((line) => (displayWidth(line) <= cols ? line : truncateToWidth(line, cols - 1) + ansi.reset))
 
-  // The composer is the third line from the bottom: rule, input, rule, status.
-  caretAt = caretOffset === undefined ? undefined : { row: body.length - 2, col: 5 + caretOffset }
+  // rule, prompt lines, rule, status - so the caret's row counts back past
+  // however many lines the prompt currently takes.
+  const promptLines = Math.max(1, composerRows.length)
+  caretAt =
+    caretOffset === undefined
+      ? undefined
+      : { row: body.length - promptLines - 1 + caretLine, col: 5 + caretOffset }
 
   out.write(
     ansi.hideCursor + ansi.clear + clamped.join(String.fromCharCode(10)) +
@@ -366,6 +459,7 @@ function render() {
 async function generate(kind: MediaKind, line: string) {
   streaming = true
   status = "generating..."
+  startSpinner()
   transcript.push({ kind: "user", text: line })
   render()
   const generated = await runMedia(kind, line, process.cwd(), {
@@ -373,6 +467,7 @@ async function generate(kind: MediaKind, line: string) {
     model: selection.model.id,
   })
   streaming = false
+  stopSpinner()
   transcript.push({ kind: "tool", text: describeMedia(generated) })
   status = generated.ok ? "" : "generation failed"
   render()
@@ -599,9 +694,11 @@ async function send() {
   if (mentioned.files.length) transcript.push({ kind: "tool", text: "attached " + mentioned.files.join(", ") })
   streaming = true
   status = ""
+  startSpinner()
   render()
 
   let current: Entry | undefined
+  turn = new AbortController()
   // Everything this turn writes is captured under one checkpoint, so /undo
   // takes back the whole answer rather than its last file.
   edits.begin(text)
@@ -615,6 +712,7 @@ async function send() {
       contextWindow: selection.model.contextWindow,
       permissions,
       history: edits,
+      signal: turn.signal,
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
     })) {
       if (event.type === "thinking") {
@@ -655,9 +753,17 @@ async function send() {
       render()
     }
   } catch (error) {
-    status = error instanceof Error ? error.message.slice(0, 120) : "request failed"
+    // Stopping is not a failure, and the runtime word for it is not one
+    // anybody asked to read.
+    status = turn?.signal.aborted
+      ? "stopped"
+      : error instanceof Error
+        ? error.message.slice(0, 120)
+        : "request failed"
   } finally {
     streaming = false
+    stopSpinner()
+    turn = undefined
     edits.commit()
     session.messages = messages
     void sessions.save(session).then(refreshSessionCache).catch(() => {})
@@ -666,7 +772,7 @@ async function send() {
 }
 
 function shutdown() {
-  out.write(ansi.showCursor + ansi.mainScreen)
+  out.write(ansi.mouseOff + ansi.showCursor + ansi.mainScreen)
   process.exit(0)
 }
 
@@ -692,7 +798,7 @@ async function loadSettings() {
 }
 void loadSettings()
 
-out.write(ansi.altScreen)
+out.write(ansi.altScreen + ansi.mouseOn)
 render()
 out.on("resize", render)
 
@@ -728,7 +834,19 @@ process.stdin.on("data", (chunk) => {
     }
 
     if (streaming) {
-      // Nothing to do mid-turn; quitting is ctrl+c only.
+      // Escape stops the turn. Everything already streamed stays: an
+      // interrupted answer is still worth reading, and the conversation
+      // survives, which is the whole difference from ctrl+c.
+      if (pressed.type === "escape") {
+        turn?.abort()
+        status = "stopped"
+        render()
+      }
+      // Scrolling has to keep working while the model writes.
+      if (pressed.type === "pageup") { scroll += 5; render() }
+      if (pressed.type === "pagedown") { scroll = Math.max(0, scroll - 5); render() }
+      if (pressed.type === "wheelup") { scroll += 3; render() }
+      if (pressed.type === "wheeldown") { scroll = Math.max(0, scroll - 3); render() }
       continue
     }
 
@@ -818,10 +936,22 @@ process.stdin.on("data", (chunk) => {
           dirty = true
         }
         break
+      case "wheelup": scroll += 3; dirty = true; break
+      case "wheeldown": scroll = Math.max(0, scroll - 3); dirty = true; break
       case "pageup": scroll += 5; dirty = true; break
       case "pagedown": scroll = Math.max(0, scroll - 5); dirty = true; break
       case "ctrl":
         if (pressed.value === "u") { input = ""; cursor = 0; dirty = true; refreshPalette() }
+        if (pressed.value === "w") {
+          // Delete the word before the caret. ctrl+u wiping the whole line
+          // was the only option, which is a lot to lose to fix one word.
+          const before = input.slice(0, cursor)
+          const trimmed = before.replace(/\s*\S+\s*$/, "")
+          input = trimmed + input.slice(cursor)
+          cursor = trimmed.length
+          dirty = true
+          refreshPalette()
+        }
         if (pressed.value === "a") { cursor = 0; dirty = true }
         if (pressed.value === "e") { cursor = input.length; dirty = true }
         break

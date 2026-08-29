@@ -180,7 +180,6 @@ async function projectFiles(): Promise<string[]> {
         { value: "/rename", hint: "retitle this conversation" },
         { value: "/theme", hint: "change colours", expands: true },
         { value: "/thinking", hint: "show or hide the model's reasoning" },
-        ...MEDIA_KINDS.map((entry) => ({ value: entry.command, hint: entry.description })),
       ],
       models,
       sessions: saved.map((entry) => ({ value: "/resume " + entry.id, hint: entry.title })),
