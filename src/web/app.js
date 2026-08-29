@@ -395,6 +395,45 @@ function showMedia(kind, result) {
   scrollDown()
 }
 
+/**
+ * Ask for a key.
+ *
+ * A password field, submitted and then cleared - the value never becomes a
+ * message, never enters the thread, and is not kept anywhere in the page
+ * after it is sent.
+ */
+function connectForm(provider) {
+  if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
+  const box = document.createElement("div")
+  box.className = "permission"
+  box.innerHTML =
+    '<div class="ptext">Connect <strong></strong><span class="pdetail"></span></div>' +
+    '<div class="pactions"><input class="pkey" type="password" autocomplete="off" spellcheck="false" ' +
+    'placeholder="paste the key" /><button class="pallow">Save</button></div>'
+  box.querySelector("strong").textContent = provider
+  box.querySelector(".pdetail").textContent =
+    provider.toUpperCase().replace(/[^A-Z0-9]/g, "_") + "_API_KEY would also work, without storing anything"
+
+  const field = box.querySelector(".pkey")
+  const save = async () => {
+    const key = field.value
+    field.value = ""
+    const result = await fetch("/api/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider, key }),
+    }).then((r) => r.json()).catch(() => ({ message: "could not reach the server" }))
+    box.querySelector(".pactions").innerHTML = '<span class="presolved"></span>'
+    box.querySelector(".presolved").textContent = result.message
+  }
+  box.querySelector(".pallow").onclick = save
+  field.addEventListener("keydown", (event) => { if (event.key === "Enter") save() })
+
+  thread.appendChild(box)
+  scrollDown()
+  field.focus()
+}
+
 async function runCommand(text) {
   const [name, ...rest] = text.split(" ")
   const argument = rest.join(" ").trim()
@@ -496,6 +535,31 @@ async function runCommand(text) {
     }).then((r) => r.json()).catch(() => ({ ok: false, message: "could not reach the server" }))
     setBusy(false)
     showMedia(kind, result)
+    return true
+  }
+
+  if (name === "/connect") {
+    if (argument) { connectForm(argument); return true }
+    const data = await fetch("/api/connect").then((r) => r.json()).catch(() => null)
+    if (!data) { note("could not reach the server"); return true }
+    const NEWLINE = String.fromCharCode(10)
+    note(
+      (data.connections.length
+        ? data.connections
+            .map((c) => c.id.padEnd(18) + c.type.padEnd(7) + c.source + (c.hint ? "  " + c.hint : ""))
+            .join(NEWLINE)
+        : "nothing connected yet") +
+        NEWLINE + NEWLINE + "/connect <provider> to add one - stored in " + data.store,
+    )
+    return true
+  }
+
+  if (name === "/disconnect") {
+    if (!argument) { note("usage: /disconnect <provider>"); return true }
+    const result = await fetch("/api/connect?provider=" + encodeURIComponent(argument), { method: "DELETE" })
+      .then((r) => r.json())
+      .catch(() => ({ message: "could not reach the server" }))
+    note(result.message)
     return true
   }
 

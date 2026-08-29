@@ -24,6 +24,8 @@ export type CommandResult =
   | { kind: "thinking" }
   | { kind: "media"; media: MediaKind; line: string }
   | { kind: "memory"; action: "list" | "add" | "forget" | "clear"; text?: string }
+  | { kind: "connect"; provider?: string }
+  | { kind: "disconnect"; provider: string }
   | { kind: "none" }
 
 export const COMMANDS = [
@@ -34,6 +36,8 @@ export const COMMANDS = [
   { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/undo", description: "put back the files the last turn changed" },
   { name: "/redo", description: "reapply what /undo took back" },
+  { name: "/connect", description: "add an API key for a provider, stored only on this machine" },
+  { name: "/disconnect", description: "remove a stored key: /disconnect tripo" },
   { name: "/memory", description: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
   { name: "/status", description: "what this session is using right now" },
   { name: "/export", description: "save as markdown: /export, or /export notes/chat.md" },
@@ -100,6 +104,12 @@ export function runCommand(text: string): CommandResult {
       // Anything else is a search, which is what someone typing words after
       // /memory almost always means.
       return { kind: "memory", action: "list", text: argument }
+    }
+    case "/connect":
+      return { kind: "connect", provider: argument || undefined }
+    case "/disconnect": {
+      if (!argument) return { kind: "message", text: "usage: /disconnect <provider>" }
+      return { kind: "disconnect", provider: argument }
     }
     case "/status":
       return { kind: "status" }

@@ -1,25 +1,130 @@
 import fs from "node:fs"
-import os from "node:os"
+import fsp from "node:fs/promises"
 import path from "node:path"
+import { Global } from "../platform/paths"
+
+/**
+ * Where API keys live.
+ *
+ * On this machine and nowhere else. A key is read from the environment or from
+ * a file in the user's own data directory, handed to the request that needs
+ * it, and written nowhere else - not into a session, not into a transcript,
+ * not into a log. Nothing here sends a key anywhere except the provider it
+ * belongs to.
+ *
+ * The file is written owner-only, the way the original writes it. That holds
+ * on POSIX. On Windows it does not: Node maps mode onto the read-only
+ * attribute and nothing else, so the file stays readable by the account and
+ * anything running as it. Saying so is better than implying a protection
+ * that is not there - restricting it properly needs an ACL, not a mode.
+ */
+
+export type ApiAuth = { type: "api"; key: string }
+export type StoredAuth = { type: string; key?: string; [field: string]: unknown }
+
+const file = path.join(Global.Path.data, "auth.json")
+
+/** Owner read/write only, where the platform honours it. */
+const SECRET_MODE = 0o600
+
+const envName = (providerId: string) => `${providerId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`
+
+function readStore(): Record<string, StoredAuth> {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"))
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, StoredAuth>) : {}
+  } catch {
+    // No store, or unreadable: no keys. Never a reason to fail to start.
+    return {}
+  }
+}
+
+async function writeStore(store: Record<string, StoredAuth>): Promise<void> {
+  await fsp.mkdir(path.dirname(file), { recursive: true })
+  // Through a temporary file, so an interrupted write cannot leave the store
+  // truncated and lose every other key along with it. Created owner-only from
+  // the start rather than relaxed afterwards.
+  const temporary = file + ".tmp"
+  await fsp.writeFile(temporary, JSON.stringify(store, null, 2), { encoding: "utf8", mode: SECRET_MODE })
+  await fsp.rename(temporary, file)
+  await fsp.chmod(file, SECRET_MODE).catch(() => {})
+}
 
 /**
  * Resolves a provider API key.
  *
- * Prefers the environment, then falls back to the existing CodeGoblin
- * auth.json so this can be run today without re-entering keys. Keys are only
- * ever read into memory and handed to the request.
+ * The environment wins, so a key can be supplied for one run without being
+ * written down at all.
  */
 export function apiKey(providerId: string): string | undefined {
-  const fromEnv = process.env[`${providerId.toUpperCase()}_API_KEY`]
+  const fromEnv = process.env[envName(providerId)]
   if (fromEnv) return fromEnv
 
-  const store = path.join(os.homedir(), ".local", "share", "codegoblin", "auth.json")
-  try {
-    const parsed = JSON.parse(fs.readFileSync(store, "utf8")) as Record<string, { type?: string; key?: string }>
-    const entry = parsed[providerId]
-    if (entry?.type === "api" && entry.key) return entry.key
-  } catch {
-    // No store, or unreadable: fall through to undefined.
-  }
+  const entry = readStore()[providerId]
+  if (entry?.type === "api" && typeof entry.key === "string" && entry.key) return entry.key
   return undefined
+}
+
+/** Enough to recognise a key you already have, and useless to anyone else. */
+export function maskKey(key: string): string {
+  return key.length <= 4 ? "····" : "····" + key.slice(-4)
+}
+
+export type Connection = {
+  id: string
+  /** "api" for a key that was pasted, "oauth" for a provider that was logged in to. */
+  type: string
+  /** Where it came from, so an environment key is not mistaken for a stored one. */
+  source: "environment" | "file"
+  hint?: string
+}
+
+export function connections(): Connection[] {
+  const found: Connection[] = Object.entries(readStore()).map(([id, entry]) => ({
+    id,
+    type: entry.type,
+    source: "file" as const,
+    hint: entry.type === "api" && typeof entry.key === "string" ? maskKey(entry.key) : undefined,
+  }))
+
+  // An environment key never appears in the file, and someone wondering why a
+  // provider works without being connected deserves to see why.
+  for (const name of Object.keys(process.env)) {
+    if (!name.endsWith("_API_KEY")) continue
+    const id = name.slice(0, -"_API_KEY".length).toLowerCase()
+    if (found.some((connection) => connection.id === id)) continue
+    found.push({ id, type: "api", source: "environment" })
+  }
+
+  return found.sort((a, b) => a.id.localeCompare(b.id))
+}
+
+export function isConnected(providerId: string): boolean {
+  return Boolean(apiKey(providerId))
+}
+
+export async function connect(providerId: string, key: string): Promise<void> {
+  const trimmed = key.trim()
+  if (!trimmed) throw new Error("no key given")
+  const store = readStore()
+  store[providerId] = { type: "api", key: trimmed }
+  await writeStore(store)
+}
+
+export async function disconnect(providerId: string): Promise<boolean> {
+  const store = readStore()
+  if (!(providerId in store)) return false
+  delete store[providerId]
+  await writeStore(store)
+  return true
+}
+
+/** The path, for telling someone where their keys are. Never the contents. */
+export function storePath(): string {
+  return file
+}
+
+/** The variable that would supply this provider's key without storing it. */
+export function envVariable(providerId: string): string {
+  return envName(providerId)
 }

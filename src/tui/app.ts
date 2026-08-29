@@ -20,7 +20,7 @@ import { runMedia, describeMedia, type MediaKind } from "../core/media"
 import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
 import { defaultSelection, resolveSelection, type Selection, kindOf } from "../core/providers"
-import { apiKey } from "../core/auth"
+import { apiKey, connect, disconnect, connections, storePath, envVariable } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
 import { isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
@@ -71,6 +71,16 @@ let pendingChoice = 0
  * /status used to print into the transcript, where it stayed forever and
  * pushed the conversation up. It is a glance, not a message.
  */
+/**
+ * Entering a key.
+ *
+ * While this is set the composer stops being a composer: what is typed is
+ * drawn as dots, never reaches the transcript, never joins the prompt
+ * history, and is handed straight to the auth store. A key that is echoed
+ * once is a key in a screenshot forever.
+ */
+let secret: { provider: string } | undefined
+
 let overlay: { title: string; rows: [string, string][] } | undefined
 const permissions = new Permissions(
   (tool, detail) =>
@@ -125,6 +135,9 @@ function completeWith(value: string) {
 }
 
 function refreshPalette() {
+  // A key is not a command and not a mention. Matching it against either
+  // would put part of it on screen in a palette row.
+  if (secret) { palette = undefined; return }
   palette = paletteFor(input, cursor)
   // Reset the highlight whenever the list itself changes: carrying an index
   // across two different lists selects something the user never looked at.
@@ -215,7 +228,9 @@ function render() {
       Math.max(...overlay.rows.map(([, value]) => displayWidth(value))),
       Math.max(20, cols - labelWidth - 12),
     )
-    const inner = labelWidth + valueWidth + 4
+    // Wide enough for the title too: a heading longer than the widest row
+    // used to run straight through the right-hand border.
+    const inner = Math.max(labelWidth + valueWidth + 4, displayWidth(overlay.title) + 4)
     body.push(theme.border + "  ╭" + "─".repeat(inner) + "╮" + ansi.reset)
     body.push(
       theme.border + "  │" + ansi.reset +
@@ -271,6 +286,13 @@ function render() {
       dim + pending.detail.slice(0, Math.max(10, visibleInput - 24)) + ansi.reset
   } else if (streaming) {
     shown = dim + "goblin is working... ctrl+c to quit" + ansi.reset
+  } else if (secret) {
+    // Dots, and one per character rather than a fixed run, so backspace is
+    // visible without the key ever being.
+    caretOffset = displayWidth(secret.provider) + 7 + input.length
+    shown =
+      theme.gold + secret.provider + " key: " + ansi.reset +
+      theme.text + "\u00b7".repeat(Math.min(input.length, Math.max(4, visibleInput - 24))) + ansi.reset
   } else if (!input) {
     caretOffset = 0
     shown = dim + "ask the goblin anything..." + ansi.reset
@@ -298,7 +320,9 @@ function render() {
   const context = usage(messages, selection.model.contextWindow)
   const left =
     status || selection.provider.label + " . " + selection.model.id + "  " + context.percent + "% ctx"
-  const right = overlay
+  const right = secret
+    ? "enter saves . esc cancels . nothing is echoed"
+    : overlay
     ? "any key closes"
     : pending
     ? "up/down choose . enter confirm . esc reject"
@@ -348,6 +372,23 @@ async function generate(kind: MediaKind, line: string) {
 }
 
 async function send() {
+  if (secret) {
+    const provider = secret.provider
+    const key = input
+    // Cleared before the await, so a slow disk cannot leave it on screen.
+    input = ""
+    cursor = 0
+    secret = undefined
+    try {
+      await connect(provider, key)
+      status = "connected " + provider + " - stored in " + storePath()
+    } catch (error) {
+      status = error instanceof Error ? error.message : "could not store the key"
+    }
+    render()
+    return
+  }
+
   const text = input.trim()
   if (!text || streaming) return
 
@@ -419,6 +460,25 @@ async function send() {
       } catch (error) {
         status = error instanceof Error ? error.message.slice(0, 90) : "memory failed"
       }
+    }
+    if (result.kind === "connect") {
+      if (result.provider) {
+        secret = { provider: result.provider }
+        status = envVariable(result.provider) + " would also work, without storing anything"
+      } else {
+        const rows = connections().map(
+          (item) =>
+            [item.id, item.type + "  " + item.source + (item.hint ? "  " + item.hint : "")] as [string, string],
+        )
+        overlay = {
+          title: "connected providers  (/connect <name> to add)",
+          rows: rows.length ? rows : [["", "nothing connected yet"]],
+        }
+      }
+    }
+    if (result.kind === "disconnect") {
+      const gone = await disconnect(result.provider)
+      status = gone ? "disconnected " + result.provider : "no stored key for " + result.provider
     }
     if (result.kind === "status") {
       const context = usage(messages, selection.model.contextWindow)
@@ -708,6 +768,7 @@ process.stdin.on("data", (chunk) => {
     switch (pressed.type) {
       // Escape clears the line; it never exits. Quitting is ctrl+c.
       case "escape":
+        if (secret) { secret = undefined; input = ""; cursor = 0; status = "cancelled"; dirty = true; break }
         if (input) { input = ""; cursor = 0; dirty = true }
         break
       case "enter": void send(); return

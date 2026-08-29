@@ -18,6 +18,7 @@ import {
   KIND_LABEL,
 } from "../core/providers"
 import { apiKey } from "../core/auth"
+import * as auth from "../core/auth"
 import * as sessions from "../core/sessions"
 import { Permissions, DECISIONS, type Decision } from "../core/permission"
 import { expandMentions } from "../core/mention"
@@ -171,6 +172,8 @@ async function projectFiles(): Promise<string[]> {
         { value: "/undo", hint: "put back the files the last turn changed" },
         { value: "/redo", hint: "reapply what /undo took back" },
         { value: "/memory", hint: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
+        { value: "/connect", hint: "add an API key, stored only on this machine" },
+        { value: "/disconnect", hint: "remove a stored key: /disconnect tripo" },
         { value: "/status", hint: "what this session is using right now" },
         { value: "/export", hint: "save the conversation as markdown" },
         { value: "/rename", hint: "retitle this conversation" },
@@ -238,6 +241,35 @@ async function projectFiles(): Promise<string[]> {
   // the browser asks the server to do it rather than reimplementing any of it.
   // Memory is the same store the TUI writes, so both surfaces remember the
   // same things about the same project.
+  /**
+   * Connecting a provider.
+   *
+   * The key crosses one loopback hop from the page to this process and is
+   * written to the same file the terminal writes. It is never echoed back,
+   * never put in a session, and the listing only ever carries a masked hint.
+   */
+  if (url.pathname === "/api/connect" && request.method === "GET") {
+    return json({ connections: auth.connections(), store: auth.storePath() })
+  }
+
+  if (url.pathname === "/api/connect" && request.method === "POST") {
+    const body = (await request.json()) as { provider?: string; key?: string }
+    const provider = (body.provider ?? "").trim()
+    if (!provider) return json({ message: "which provider?" }, 400)
+    try {
+      await auth.connect(provider, String(body.key ?? ""))
+      return json({ message: "connected " + provider })
+    } catch (error) {
+      return json({ message: error instanceof Error ? error.message : "could not store the key" }, 400)
+    }
+  }
+
+  if (url.pathname === "/api/connect" && request.method === "DELETE") {
+    const provider = url.searchParams.get("provider") ?? ""
+    const gone = await auth.disconnect(provider)
+    return json({ message: gone ? "disconnected " + provider : "no stored key for " + provider })
+  }
+
   if (url.pathname === "/api/memory" && request.method === "POST") {
     const body = (await request.json()) as { argument?: string; sessionId?: string }
     const parsed = runCommand("/memory " + (body.argument ?? "").trim())
