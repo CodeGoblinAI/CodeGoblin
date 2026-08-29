@@ -57,6 +57,8 @@ export async function* runAgent(input: {
   }
 
   for (let turn = 0; turn < maxTurns; turn++) {
+    if (input.signal?.aborted) return
+
     const response = await fetch(input.provider.baseUrl, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
@@ -142,6 +144,7 @@ export async function* runAgent(input: {
     })
 
     for (const call of pending) {
+      if (input.signal?.aborted) return
       yield { type: "tool_start", name: call.name, args: call.args }
       let args: unknown = {}
       try {

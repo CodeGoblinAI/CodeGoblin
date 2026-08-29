@@ -27,6 +27,14 @@ const root = process.cwd()
  * answered or the turn is abandoned.
  */
 const pendingDecisions = new Map<string, (decision: Decision) => void>()
+
+/**
+ * Turns that can be cancelled.
+ *
+ * Aborting the browser fetch only closes the reader; without this the agent
+ * kept running server-side, spending tokens on a turn nobody would see.
+ */
+const activeTurns = new Map<string, AbortController>()
 const permissionsBySession = new Map<string, Permissions>()
 
 function permissionsFor(sessionId: string, send: (event: unknown) => void): Permissions {
@@ -136,6 +144,21 @@ async function handle(request: Request): Promise<Response> {
     return json({ ok })
   }
 
+  if (url.pathname === "/api/stop" && request.method === "POST") {
+    const body = (await request.json()) as { sessionId?: string }
+    const controller = activeTurns.get(body.sessionId ?? "")
+    if (controller) {
+      controller.abort()
+      activeTurns.delete(body.sessionId ?? "")
+      // Unblock a turn waiting on consent, or it will hang forever.
+      for (const [id, resolve] of pendingDecisions) {
+        if (id.startsWith((body.sessionId ?? "") + ":")) { resolve("deny"); pendingDecisions.delete(id) }
+      }
+      return json({ ok: true })
+    }
+    return json({ ok: false, error: "no turn running" }, 404)
+  }
+
   if (url.pathname === "/api/permission" && request.method === "POST") {
     const body = (await request.json()) as { id?: string; decision?: Decision }
     const resolve = pendingDecisions.get(body.id ?? "")
@@ -186,6 +209,9 @@ async function handle(request: Request): Promise<Response> {
           }
         }, 5000)
 
+        const turn = new AbortController()
+        activeTurns.set(session.id, turn)
+
         send({ type: "session", id: session.id })
         try {
           for await (const event of runAgent({
@@ -196,6 +222,7 @@ async function handle(request: Request): Promise<Response> {
             root,
             contextWindow: model.contextWindow,
             permissions: permissionsFor(session.id, send),
+            signal: turn.signal,
           })) {
             send(event)
           }
@@ -205,6 +232,7 @@ async function handle(request: Request): Promise<Response> {
           send({ type: "error", message: error instanceof Error ? error.message : "request failed" })
         } finally {
           clearInterval(heartbeat)
+          activeTurns.delete(session.id)
           controller.close()
         }
       },

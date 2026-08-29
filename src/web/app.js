@@ -100,8 +100,14 @@ function permissionPrompt(event) {
 
 function setBusy(state) {
   busy = state
-  sendBtn.disabled = state || !input.value.trim()
-  stopBtn.hidden = !state
+  // The send button becomes stop while a turn runs. A separate small button
+  // was there before and was easy to miss, especially on fast models where
+  // it appears for barely a second.
+  sendBtn.classList.toggle("stopping", state)
+  sendBtn.textContent = state ? "■" : "↑"
+  sendBtn.title = state ? "Stop" : "Send"
+  sendBtn.disabled = state ? false : !input.value.trim()
+  stopBtn.hidden = true
   input.placeholder = state ? "goblin is working…" : "Ask the goblin…  / for commands, @ for context"
 }
 
@@ -207,9 +213,87 @@ async function openSession(id) {
   refreshSessions()
 }
 
+/**
+ * Slash commands run here rather than being posted to the model.
+ *
+ * Without this the browser sent "/resume <id>" as a prompt and the model
+ * politely tried to answer it, which is not what picking a conversation from
+ * a list should do.
+ */
+async function runCommand(text) {
+  const [name, ...rest] = text.split(" ")
+  const argument = rest.join(" ").trim()
+
+  if (name === "/new") {
+    sessionId = null
+    emptyState()
+    refreshSessions()
+    return true
+  }
+
+  if (name === "/resume" || name === "/sessions" || name === "/continue") {
+    if (argument) await openSession(argument)
+    else {
+      input.value = name + " "
+      refreshPalette()
+    }
+    return true
+  }
+
+  if (name === "/model") {
+    if (!argument) { input.value = "/model "; refreshPalette(); return true }
+    const option = [...providerSelect.options].find((o) => o.value === argument)
+    if (option) {
+      providerSelect.value = argument
+      note("switched to " + option.textContent)
+    } else note("unknown model: " + argument)
+    return true
+  }
+
+  if (name === "/help") {
+    note(paletteData.commands.map((c) => c.value + "  -  " + c.hint).join(String.fromCharCode(10)))
+    return true
+  }
+
+  if (name === "/compact") {
+    note("compaction runs automatically when the conversation nears the context limit")
+    return true
+  }
+
+  if (name.startsWith("/")) {
+    note("unknown command: " + name)
+    return true
+  }
+
+  return false
+}
+
+/** A short system line in the thread, styled like a tool row. */
+function note(text) {
+  if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
+  const row = document.createElement("div")
+  row.className = "tool done note"
+  row.innerHTML = "<span class=\"spin\">ℹ</span>"
+  const body = document.createElement("span")
+  body.className = "tname"
+  body.style.whiteSpace = "pre-wrap"
+  body.textContent = text
+  row.appendChild(body)
+  thread.appendChild(row)
+  scrollDown()
+}
+
 async function submit() {
   const text = input.value.trim()
   if (!text || busy) return
+
+  // Commands never reach the model.
+  if (text.startsWith("/")) {
+    input.value = ""
+    paletteItems = []
+    renderPalette()
+    if (await runCommand(text)) { setBusy(false); return }
+  }
   input.value = ""
   setBusy(true)
   turn("user", text)
@@ -299,8 +383,20 @@ async function submit() {
   controller = null
 }
 
-sendBtn.onclick = submit
-stopBtn.onclick = () => { if (controller) controller.abort() }
+sendBtn.onclick = () => (busy ? stopTurn() : submit())
+async function stopTurn() {
+  // Tell the server first: aborting only the fetch leaves the agent running
+  // and still spending tokens on a turn nobody will see.
+  if (sessionId) {
+    await fetch("/api/stop", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    }).catch(() => {})
+  }
+  if (controller) controller.abort()
+}
+stopBtn.onclick = stopTurn
 input.oninput = () => { sendBtn.disabled = busy || !input.value.trim() }
 input.onkeydown = (e) => {
   // The palette owns enter while it is open, otherwise this would submit the
