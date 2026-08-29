@@ -15,11 +15,21 @@ export type Settings = {
   theme: string
   /** Whether the model's reasoning is shown. Useful, but not everyone wants it. */
   thinking: boolean
+  /**
+   * Whether the app takes the mouse.
+   *
+   * A real trade, and the original makes it a setting rather than a choice:
+   * taking the mouse gets wheel scrolling and clickable things, and costs
+   * the terminal's own drag-to-select. Off here by default, because reading
+   * and copying output is the thing people miss immediately. shift+drag
+   * still selects in most terminals when it is on.
+   */
+  mouse: boolean
 }
 
 const file = path.join(Global.Path.state, "settings.json")
 
-export const defaults = (): Settings => ({ theme: DEFAULT_THEME, thinking: true })
+export const defaults = (): Settings => ({ theme: DEFAULT_THEME, thinking: true, mouse: false })
 
 export function normalise(raw: unknown): Settings {
   const base = defaults()
@@ -28,6 +38,7 @@ export function normalise(raw: unknown): Settings {
   return {
     theme: typeof value.theme === "string" && isTheme(value.theme) ? value.theme : base.theme,
     thinking: typeof value.thinking === "boolean" ? value.thinking : base.thinking,
+    mouse: typeof value.mouse === "boolean" ? value.mouse : base.mouse,
   }
 }
 

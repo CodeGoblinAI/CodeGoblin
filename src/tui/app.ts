@@ -6,9 +6,20 @@
  *
  * Raw ANSI, no framework.
  */
-import { ansi, theme, dim, applyTheme } from "./ansi"
+import { ansi, theme, dim, invert, noInvert, applyTheme } from "./ansi"
 import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { createKeyReader } from "./keys"
+import {
+  ComposerHistory,
+  deleteRange,
+  insert as insertText,
+  moveTo,
+  selectAll,
+  selection as composerSelection,
+  wordEnd,
+  wordStart,
+  type Composer,
+} from "./composer"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
 import { renderMarkdown } from "./markdown"
 import {
@@ -115,6 +126,24 @@ let messages: Message[] = [SYSTEM]
 type Entry = { kind: "user" | "agent" | "tool" | "thinking"; text: string }
 let transcript: Entry[] = []
 /** Named for what it holds, since "history" here is the prompt recall list. */
+/**
+ * The prompt, as an editor.
+ *
+ * input and cursor stay the source of truth so nothing else has to change;
+ * anchor is the one new piece, and composer.ts holds all the actual rules so
+ * they can be tested without a terminal.
+ */
+let anchor: number | undefined
+const composerHistory = new ComposerHistory()
+
+const composerState = (): Composer => ({ text: input, cursor, anchor })
+
+function applyComposer(next: Composer, remember = false) {
+  if (remember) composerHistory.remember(composerState())
+  input = next.text
+  cursor = next.cursor
+  anchor = next.anchor
+}
 const edits = new History()
 
 /**
@@ -479,6 +508,8 @@ function render() {
   let caretOffset: number | undefined
   /** The prompt as it will be drawn, one entry per visible line. */
   let composerRows: string[] = []
+  /** Characters of prompt scrolled off above the first drawn row. */
+  let rowsBefore = 0
   let caretLine = 0
   let shown: string
   if (pending) {
@@ -501,20 +532,52 @@ function render() {
     caretOffset = 0
     shown = dim + "ask the goblin anything..." + ansi.reset
   } else {
+    const span = composerSelection(composerState())
     const rows = wrapToWidth(input, visibleInput)
     const spot = caretIn(rows, cursor)
     // Keep the caret's line on screen when the prompt outgrows the box.
     const first = Math.max(0, Math.min(spot.line - COMPOSER_MAX_LINES + 1, rows.length - COMPOSER_MAX_LINES))
     composerRows = rows.slice(first, first + COMPOSER_MAX_LINES)
+    rowsBefore = rows.slice(0, first).join("").length
     caretLine = spot.line - first
     caretOffset = spot.column
-    shown = theme.text + composerRows[0] + ansi.reset
+    // A selection is drawn in reverse video, which is what every terminal
+    // editor does and what makes it read as selected rather than as text
+    // that happens to be a different colour.
+    const before = rows.slice(0, first).join("").length
+    const line = composerRows[0] ?? ""
+    if (span && composerRows.length === 1) {
+      const from = Math.max(0, Math.min(span.from - before, line.length))
+      const to = Math.max(0, Math.min(span.to - before, line.length))
+      shown =
+        theme.text + line.slice(0, from) +
+        invert + line.slice(from, to) + noInvert +
+        line.slice(to) + ansi.reset
+    } else {
+      shown = theme.text + line + ansi.reset
+    }
   }
 
   body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
   if (composerRows.length > 1) {
+    let seen = rowsBefore
     for (const row of composerRows) {
-      body.push(theme.goblin + "  | " + ansi.reset + theme.text + row + ansi.reset)
+      const start = seen
+      const end = seen + row.length
+      seen = end
+      const span = composerSelection(composerState())
+      if (!span || span.to <= start || span.from >= end) {
+        body.push(theme.goblin + "  | " + ansi.reset + theme.text + row + ansi.reset)
+        continue
+      }
+      const from = Math.max(0, span.from - start)
+      const to = Math.min(row.length, span.to - start)
+      body.push(
+        theme.goblin + "  | " + ansi.reset +
+          theme.text + row.slice(0, from) +
+          invert + row.slice(from, to) + noInvert +
+          row.slice(to) + ansi.reset,
+      )
     }
   } else {
     body.push(theme.goblin + "  | " + ansi.reset + shown)
@@ -635,6 +698,14 @@ async function send() {
       applyTheme(result.name)
       void settingsStore.save(settings)
       status = "theme: " + result.name
+    }
+    if (result.kind === "mouse") {
+      settings = { ...settings, mouse: !settings.mouse }
+      void settingsStore.save(settings)
+      applyMouse()
+      status = settings.mouse
+        ? "mouse on - wheel scrolls, shift+drag selects"
+        : "mouse off - drag selects text, pgup/dn scrolls"
     }
     if (result.kind === "thinking") {
       settings = { ...settings, thinking: !settings.thinking }
@@ -931,6 +1002,17 @@ async function refreshFileCache() {
 }
 void refreshFileCache()
 
+/**
+ * Hand the mouse to the app, or leave it to the terminal.
+ *
+ * Taking it gets the wheel and clickable things; leaving it keeps the
+ * terminal's own drag-to-select. The original makes this a setting rather
+ * than a choice, which is the right call - so does this.
+ */
+function applyMouse() {
+  out.write(settings.mouse ? ansi.takeMouse : ansi.ownMouse)
+}
+
 function refreshConnected() {
   setConnectedProviders(connections().map((item) => item.id))
 }
@@ -939,6 +1021,7 @@ refreshConnected()
 async function loadSettings() {
   settings = await settingsStore.load()
   applyTheme(settings.theme)
+  applyMouse()
   render()
 }
 void loadSettings()
@@ -1107,26 +1190,50 @@ process.stdin.on("data", (chunk) => {
         // Newlines inside a paste are content. A paste that is only one
         // short line is just typing, and goes in as it is.
         const value = foldPaste(pressed.value.replace(/\r\n?/g, String.fromCharCode(10)))
-        input = input.slice(0, cursor) + value + input.slice(cursor)
-        cursor += value.length
+        applyComposer(insertText(composerState(), value), true)
         dirty = true
         break
       }
       case "escape":
-        if (secret) { secret = undefined; input = ""; cursor = 0; status = "cancelled"; dirty = true; break }
-        if (input) { input = ""; cursor = 0; dirty = true }
+        if (secret) { secret = undefined; input = ""; cursor = 0; anchor = undefined; status = "cancelled"; dirty = true; break }
+        // Escape drops a selection before it clears the line, so losing a
+        // highlight does not also lose everything you had written.
+        if (anchor !== undefined) { anchor = undefined; dirty = true; break }
+        if (input) { applyComposer({ text: "", cursor: 0 }, true); dirty = true }
         break
       case "enter": void send(); return
       case "backspace":
-        if (cursor > 0) { input = input.slice(0, cursor - 1) + input.slice(cursor); cursor--; dirty = true; refreshPalette() }
+        applyComposer(deleteRange(composerState(), "back"), true)
+        dirty = true
+        refreshPalette()
         break
       case "delete":
-        if (cursor < input.length) { input = input.slice(0, cursor) + input.slice(cursor + 1); dirty = true; refreshPalette() }
+        applyComposer(deleteRange(composerState(), "forward"), true)
+        dirty = true
+        refreshPalette()
         break
-      case "left": if (cursor > 0) { cursor--; dirty = true } break
-      case "right": if (cursor < input.length) { cursor++; dirty = true } break
-      case "home": cursor = 0; dirty = true; break
-      case "end": cursor = input.length; dirty = true; break
+      case "left": {
+        const state = composerState()
+        const to = pressed.ctrl ? wordStart(input, cursor) : cursor - 1
+        applyComposer(moveTo(state, { to, select: Boolean(pressed.shift) }))
+        dirty = true
+        break
+      }
+      case "right": {
+        const state = composerState()
+        const to = pressed.ctrl ? wordEnd(input, cursor) : cursor + 1
+        applyComposer(moveTo(state, { to, select: Boolean(pressed.shift) }))
+        dirty = true
+        break
+      }
+      case "home":
+        applyComposer(moveTo(composerState(), { to: 0, select: Boolean(pressed.shift) }))
+        dirty = true
+        break
+      case "end":
+        applyComposer(moveTo(composerState(), { to: input.length, select: Boolean(pressed.shift) }))
+        dirty = true
+        break
       case "up":
         if (history.length) {
           historyIndex = historyIndex < 0 ? history.length - 1 : Math.max(0, historyIndex - 1)
@@ -1151,7 +1258,17 @@ process.stdin.on("data", (chunk) => {
       case "pageup": scroll += 5; dirty = true; break
       case "pagedown": scroll = Math.max(0, scroll - 5); dirty = true; break
       case "ctrl":
-        if (pressed.value === "u") { input = ""; cursor = 0; dirty = true; refreshPalette() }
+        if (pressed.value === "u") { applyComposer({ text: "", cursor: 0 }, true); dirty = true; refreshPalette() }
+        if (pressed.value === "k") { applyComposer(deleteRange(composerState(), "toEnd"), true); dirty = true; refreshPalette() }
+        if (pressed.value === "z") {
+          const back = composerHistory.undo(composerState())
+          if (back) { applyComposer(back); dirty = true; refreshPalette() }
+        }
+        if (pressed.value === "y") {
+          const forward = composerHistory.redo(composerState())
+          if (forward) { applyComposer(forward); dirty = true; refreshPalette() }
+        }
+        if (pressed.value === "l") { applyComposer(selectAll(composerState())); dirty = true }
         if (pressed.value === "w") {
           // Delete the word before the caret. ctrl+u wiping the whole line
           // was the only option, which is a lot to lose to fix one word.
@@ -1162,8 +1279,8 @@ process.stdin.on("data", (chunk) => {
           dirty = true
           refreshPalette()
         }
-        if (pressed.value === "a") { cursor = 0; dirty = true }
-        if (pressed.value === "e") { cursor = input.length; dirty = true }
+        if (pressed.value === "a") { applyComposer(moveTo(composerState(), { to: 0, select: false })); dirty = true }
+        if (pressed.value === "e") { applyComposer(moveTo(composerState(), { to: input.length, select: false })); dirty = true }
         break
       case "char":
         input = input.slice(0, cursor) + pressed.value + input.slice(cursor)

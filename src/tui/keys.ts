@@ -13,12 +13,12 @@ export type Key =
   | { type: "enter" }
   | { type: "backspace" }
   | { type: "delete" }
-  | { type: "up" }
-  | { type: "down" }
-  | { type: "left" }
-  | { type: "right" }
-  | { type: "home" }
-  | { type: "end" }
+  | { type: "up"; shift?: boolean; ctrl?: boolean }
+  | { type: "down"; shift?: boolean; ctrl?: boolean }
+  | { type: "left"; shift?: boolean; ctrl?: boolean }
+  | { type: "right"; shift?: boolean; ctrl?: boolean }
+  | { type: "home"; shift?: boolean; ctrl?: boolean }
+  | { type: "end"; shift?: boolean; ctrl?: boolean }
   | { type: "pageup" }
   | { type: "pagedown" }
   | { type: "wheelup" }
@@ -147,12 +147,19 @@ export function parseKeys(input: string): Key[] {
         const type = TILDE[params.split(";")[0] ?? ""]
         if (type) keys.push({ type } as Key)
       } else if (final && CSI[final]) {
-        // Modifier 2 is shift: CSI 1;2A and 1;2B scroll a line at a time,
-        // since the wheel belongs to the terminal now.
-        const shifted = params.endsWith(";2")
-        if (shifted && final === "A") keys.push({ type: "shiftup" })
-        else if (shifted && final === "B") keys.push({ type: "shiftdown" })
-        else keys.push({ type: CSI[final]! } as Key)
+        // CSI 1;Nx carries a modifier: N is 1 plus a bitmask where 1 is shift
+        // and 4 is control. So 2 is shift, 5 is control, 6 is both. Arrows
+        // with modifiers are how the composer selects and moves by word.
+        const modifier = Number(params.split(";")[1] ?? "1")
+        const mask = Number.isFinite(modifier) ? modifier - 1 : 0
+        const shift = (mask & 1) === 1
+        const ctrl = (mask & 4) === 4
+
+        const type = CSI[final]!
+        if (shift && !ctrl && type === "up") keys.push({ type: "shiftup" })
+        else if (shift && !ctrl && type === "down") keys.push({ type: "shiftdown" })
+        else if (shift || ctrl) keys.push({ type, shift, ctrl } as Key)
+        else keys.push({ type } as Key)
       }
       i = (final ? j + 1 : j)
       continue

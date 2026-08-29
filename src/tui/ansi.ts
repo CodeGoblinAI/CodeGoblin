@@ -39,6 +39,8 @@ export const ansi = {
    */
   pasteOn: `${ESC}?2004h`,
   pasteOff: `${ESC}?2004l`,
+  /** Button and wheel reporting, SGR encoded - the app takes the mouse. */
+  takeMouse: `${ESC}?1000h${ESC}?1006h`,
   ownMouse: `${ESC}?1007l`,
   releaseMouse: `${ESC}?1007h`,
 }
@@ -47,6 +49,9 @@ export const ansi = {
 export const rgb = (r: number, g: number, b: number) => `${ESC}38;2;${r};${g};${b}m`
 export const bold = `${ESC}1m`
 export const dim = `${ESC}2m`
+/** Reverse video, for a selected span in the composer. */
+export const invert = `${ESC}7m`
+export const noInvert = `${ESC}27m`
 
 const hex = (value: string) =>
   rgb(

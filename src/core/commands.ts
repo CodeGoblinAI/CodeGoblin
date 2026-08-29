@@ -22,6 +22,7 @@ export type CommandResult =
   | { kind: "rename"; title: string }
   | { kind: "theme"; name: string }
   | { kind: "thinking" }
+  | { kind: "mouse" }
   | { kind: "media"; media: MediaKind; line: string }
   | { kind: "memory"; action: "list" | "add" | "forget" | "clear"; text?: string }
   | { kind: "connect"; provider?: string }
@@ -44,6 +45,7 @@ export const COMMANDS = [
   { name: "/rename", description: "retitle this conversation: /rename plan review" },
   { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
+  { name: "/mouse", description: "wheel and clicks, or the terminal's own text selection" },
   { name: "/quit", description: "exit" },
 ]
 
@@ -119,6 +121,8 @@ export function runCommand(text: string): CommandResult {
       return { kind: "export", path: argument || undefined }
     case "/thinking":
       return { kind: "thinking" }
+    case "/mouse":
+      return { kind: "mouse" }
     case "/rename": {
       if (!argument) return { kind: "message", text: "usage: /rename a shorter title" }
       return { kind: "rename", title: argument }

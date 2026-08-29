@@ -80,7 +80,11 @@ describe("themes", () => {
 
 describe("settings", () => {
   test("keeps what is valid and replaces what is not", () => {
-    expect(normalise({ theme: "midnight", thinking: false })).toEqual({ theme: "midnight", thinking: false })
+    expect(normalise({ theme: "midnight", thinking: false })).toEqual({
+      theme: "midnight",
+      thinking: false,
+      mouse: false,
+    })
     expect(normalise({ theme: "not-a-theme", thinking: "yes" })).toEqual(defaults())
     expect(normalise(null)).toEqual(defaults())
     expect(normalise("garbage")).toEqual(defaults())
@@ -199,5 +203,30 @@ describe("a command that takes free text", () => {
     expect(paletteFor("/rename")).toBeDefined()
     expect(paletteFor("/rename a new title")).toBeUndefined()
     expect(paletteFor("/rename ")).toBeUndefined()
+  })
+})
+
+describe("who gets the mouse", () => {
+  // A real trade rather than a right answer, so it is a setting - which is how
+  // the original has it too. Taking the mouse gets the wheel and clickable
+  // things; leaving it keeps the terminal's own drag-to-select.
+  test("is off by default, so output can be selected out of the box", () => {
+    expect(defaults().mouse).toBe(false)
+  })
+
+  test("survives being written and read back", () => {
+    expect(normalise({ mouse: true }).mouse).toBe(true)
+    expect(normalise({ mouse: false }).mouse).toBe(false)
+  })
+
+  test("anything that is not a boolean falls back rather than being truthy", () => {
+    expect(normalise({ mouse: "yes" }).mouse).toBe(false)
+    expect(normalise({ mouse: 1 }).mouse).toBe(false)
+    expect(normalise({}).mouse).toBe(false)
+  })
+
+  test("/mouse is a command that toggles it", () => {
+    expect(runCommand("/mouse")).toEqual({ kind: "mouse" })
+    expect(COMMANDS.some((c) => c.name === "/mouse")).toBe(true)
   })
 })
