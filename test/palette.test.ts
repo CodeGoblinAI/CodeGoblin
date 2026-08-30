@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { paletteFor, setSessionCache } from "../src/tui/palette"
+import { paletteFor } from "../src/tui/palette"
 
 /**
  * The rule the TUI applies on enter:
@@ -50,27 +50,15 @@ describe("palette expansion", () => {
   })
 })
 
-describe("resume palette", () => {
-  test("/resume expands into saved conversations", () => {
-    setSessionCache([{ id: "abc", title: "first chat" }, { id: "def", title: "second chat" }])
-    const items = paletteFor("/resume ")
-    expect(items?.map((i) => i.value)).toEqual(["/resume abc", "/resume def"])
-  })
-
-  test("filters by title as you type", () => {
-    setSessionCache([{ id: "abc", title: "about widths" }, { id: "def", title: "about colours" }])
-    expect(paletteFor("/resume colour")?.length).toBe(1)
-  })
-
-  // The alias the original used, kept so muscle memory still works.
-  test("/sessions and /continue behave the same", () => {
-    setSessionCache([{ id: "abc", title: "x" }])
-    expect(paletteFor("/sessions ")?.[0]!.value).toBe("/sessions abc")
-    expect(paletteFor("/continue ")?.[0]!.value).toBe("/continue abc")
-  })
-
-  test("a bare /resume is a command, not a list", () => {
-    setSessionCache([{ id: "abc", title: "x" }])
+describe("resume is a picker now, not a completion", () => {
+  // Completing "/resume " to an id was a second way in that skipped the
+  // panel - and the panel is the only place a conversation can be deleted,
+  // so the delete was hidden behind the path nobody took.
+  test("/resume offers the command and nothing more", () => {
     expect(paletteFor("/resume")?.map((i) => i.value)).toEqual(["/resume"])
+  })
+
+  test("a trailing space no longer expands into ids", () => {
+    expect(paletteFor("/resume ")).toBeUndefined()
   })
 })

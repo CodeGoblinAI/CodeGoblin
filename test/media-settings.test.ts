@@ -112,36 +112,59 @@ describe("what reaches a provider", () => {
 })
 
 describe("the command", () => {
-  test("bare /set asks for the list rather than an error", () => {
-    expect(runCommand("/set")).toEqual({ kind: "set", option: "", value: "" })
+  // The two-level grammar is gone. It was two commands where one had to know
+  // the other's argument names, which is exactly the coupling that breaks -
+  // a settings screen you can only drive by typing the answer is not one.
+  test("/settings opens the panel", () => {
+    expect(runCommand("/settings")).toEqual({ kind: "settings" })
   })
 
-  test("a real setting and a real value are accepted", () => {
-    expect(runCommand("/set 3d.topology quad")).toEqual({ kind: "set", option: "3d.topology", value: "quad" })
+  test("/set is kept as an alias, and opens the same panel", () => {
+    expect(runCommand("/set")).toEqual({ kind: "settings" })
   })
 
-  test("naming a setting without a value puts it back to the default", () => {
-    expect(runCommand("/set 3d.topology")).toEqual({ kind: "set", option: "3d.topology", value: DEFAULT })
+  test("arguments no longer change the meaning", () => {
+    // Whatever follows is ignored rather than half-parsed: there is one way
+    // in, and it is the panel.
+    expect(runCommand("/set 3d.topology quad")).toEqual({ kind: "settings" })
   })
 
-  test("a value the provider does not take is refused, with the ones it does", () => {
-    const result = runCommand("/set 3d.topology hexagons")
-    expect(result.kind).toBe("message")
-    expect(result.kind === "message" && result.text).toContain("quad")
+  test("/diff and /changes both ask for the review panel", () => {
+    expect(runCommand("/diff")).toEqual({ kind: "diff" })
+    expect(runCommand("/changes")).toEqual({ kind: "diff" })
+  })
+})
+
+describe("what a panel offers", () => {
+  // The dialog only ever shows real choices, so an invalid value cannot be
+  // picked. The check still matters for the web, which accepts a posted
+  // value - so the rule itself is tested here rather than the old command.
+  const accepts = (id: string, value: string) => {
+    const option = optionById(id)
+    if (!option) return false
+    if (value === DEFAULT) return true
+    if (option.dynamic) return true
+    return option.choices.some((choice) => choice.id === value)
+  }
+
+  test("a value the provider takes is accepted", () => {
+    expect(accepts("3d.topology", "quad")).toBe(true)
   })
 
-  test("an unknown setting lists what there is", () => {
-    const result = runCommand("/set colour red")
-    expect(result.kind).toBe("message")
-    expect(result.kind === "message" && result.text).toContain("audio.voice")
+  test("a value it does not take is refused", () => {
+    expect(accepts("3d.topology", "hexagons")).toBe(false)
+  })
+
+  test("a setting that does not exist is refused", () => {
+    expect(accepts("colour", "red")).toBe(false)
   })
 
   test("any voice id is accepted, because the account decides what they are", () => {
-    expect(runCommand("/set audio.voice 21m00Tcm4TlvDq8ikWAM")).toEqual({
-      kind: "set",
-      option: "audio.voice",
-      value: "21m00Tcm4TlvDq8ikWAM",
-    })
+    expect(accepts("audio.voice", "21m00Tcm4TlvDq8ikWAM")).toBe(true)
+  })
+
+  test("the default is always allowed, so a choice can be taken back", () => {
+    expect(accepts("3d.topology", DEFAULT)).toBe(true)
   })
 })
 

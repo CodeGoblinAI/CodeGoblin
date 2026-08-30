@@ -9,6 +9,8 @@
 import { ansi, theme, dim, invert, noInvert, applyTheme } from "./ansi"
 import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { createKeyReader } from "./keys"
+import * as Dialogs from "./dialog"
+import { changesIn, summarise, countsOf, statusLetter, type Changes } from "../core/changes"
 import {
   ComposerHistory,
   deleteRange,
@@ -25,11 +27,7 @@ import { renderMarkdown } from "./markdown"
 import {
   paletteFor,
   renderPalette,
-  setSessionCache,
   setFileCache,
-  setMediaSettings,
-  setVoices,
-  needsVoices,
   setConnectedProviders,
   type PaletteItem,
 } from "./palette"
@@ -43,6 +41,9 @@ import {
   optionById,
   labelOf,
   describeSettings,
+  optionsOfKind,
+  valueOf,
+  DEFAULT as MEDIA_DEFAULT,
   type MediaSettings,
   type MediaChoice,
 } from "../core/media-settings"
@@ -241,6 +242,20 @@ const SPINNER = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u
 let spinnerTick = 0
 let spinnerTimer: ReturnType<typeof setInterval> | undefined
 
+/**
+ * What the user sees, rebuilt from what the model was told.
+ *
+ * Shared so opening a conversation from the dialog and resuming one by id
+ * cannot drift into showing different things.
+ */
+function fromMessages(list: Message[]): Entry[] {
+  const out: Entry[] = []
+  for (const message of list) {
+    if (message.role === "user") out.push({ kind: "user", text: message.content })
+    else if (message.role === "assistant" && message.content) out.push({ kind: "agent", text: message.content })
+  }
+  return out
+}
 function spinnerFrame() {
   return SPINNER[spinnerTick % SPINNER.length]!
 }
@@ -281,6 +296,14 @@ let pendingChoice = 0
 let secret: { provider: string } | undefined
 
 let overlay: { title: string; rows: [string, string][] } | undefined
+/** The popup, when there is one. Only ever one: dialogs replace, not stack. */
+let dialog: Dialogs.Dialog | undefined
+/** Which files are expanded in the diff viewer. */
+const diffOpen = new Set<string>()
+/** The last diff computed, so expanding a file does not recompute it. */
+let lastChanges: Changes | undefined
+/** Which setting is having its value chosen. */
+let settingBeing: string | undefined
 const permissions = new Permissions(
   (tool, detail) =>
     new Promise<Decision>((resolve) => {
@@ -338,7 +361,6 @@ function refreshPalette() {
   // would put part of it on screen in a palette row.
   if (secret) { palette = undefined; return }
   palette = paletteFor(input, cursor)
-  if (needsVoices(input)) void loadVoices()
   // Reset the highlight whenever the list itself changes: carrying an index
   // across two different lists selects something the user never looked at.
   const signature = (palette ?? []).map((item) => item.value).join("|")
@@ -610,7 +632,9 @@ function render() {
     modeTag.trim() + (modeTag ? "  " : "") +
       selection.provider.label + " . " + selection.model.id +
       "  " + context.percent + "% ctx" + spendTag
-  const right = streaming
+  const right = dialog
+    ? "up/down move . enter chooses . esc closes"
+    : streaming
     ? (queued ? "queued . esc stops" : "enter queues . esc stops")
     : secret
     ? "enter saves . esc cancels . nothing is echoed"
@@ -639,9 +663,15 @@ function render() {
       ? undefined
       : { row: body.length - promptLines - 1 + caretLine, col: 5 + caretOffset }
 
+  // A dialog goes over the top, with the conversation dimmed behind it.
+  // The caret is hidden while one is open: the composer is not where the
+  // keys are going, and a blinking caret there would say it was.
+  const painted = dialog ? Dialogs.compose(clamped, Dialogs.box(dialog, cols, rows), cols, rows) : clamped
+  const showCaret = caretAt && !dialog
+
   out.write(
-    ansi.hideCursor + ansi.clear + clamped.join(String.fromCharCode(10)) +
-      (caretAt ? ansi.moveTo(caretAt.row, caretAt.col) + ansi.showCursor : ""),
+    ansi.hideCursor + ansi.clear + painted.join(String.fromCharCode(10)) +
+      (showCaret ? ansi.moveTo(caretAt!.row, caretAt!.col) + ansi.showCursor : ""),
   )
 }
 
@@ -681,6 +711,9 @@ async function generate(kind: MediaKind, line: string) {
  * reason. The palette says it is loading in the meantime.
  */
 let loadingVoices = false
+let voicesLoaded = false
+/** Why the list is empty, when it is: no key and none saved read differently. */
+let voicesNote = ""
 async function loadVoices() {
   if (loadingVoices) return
   loadingVoices = true
@@ -690,16 +723,277 @@ async function loadVoices() {
     voices = result.ok ? result.voices.map((voice) => ({ id: voice.id, label: voice.name })) : []
     // An empty list because there is no key reads very differently from an
     // empty list because the account has none, so the reason is kept.
-    setVoices(voices, result.ok ? "" : result.message)
+    voicesNote = result.ok ? "" : result.message
+    voicesLoaded = true
   } catch {
     // A voice list that will not load is a shorter list, not an error worth
     // interrupting anyone over.
     voices = []
-    setVoices([], "could not reach the voice list")
+    voicesNote = "could not reach the voice list"
+    voicesLoaded = true
   }
   refreshPalette()
+  // A settings dialog opened before the voices landed is rebuilt with them.
+  if (dialog?.kind === "setting-value" && settingBeing) openSettingValues(settingBeing)
   render()
 }
+
+/**
+ * The dialogs.
+ *
+ * All three are the same widget with different rows, which is the point of
+ * having a widget at all - the last version of settings was two slash
+ * commands where one had to know the other's grammar, and every list here
+ * would have needed its own version of that.
+ */
+
+/** Files this session has changed, newest and largest first. */
+async function openDiff() {
+  const changes = await changesIn(process.cwd(), edits)
+  if (!changes.files.length) {
+    status = "no file has been changed this session"
+    return
+  }
+  diffOpen.clear()
+  dialog = Dialogs.open("diff", "Changes  " + summarise(changes), diffRows(changes), {
+    footer: "enter opens a file . n/p next and previous . q or esc closes",
+    size: "full",
+  })
+  lastChanges = changes
+}
+
+/** One row per file, plus the lines of whichever files are open. */
+function diffRows(changes: Changes): Dialogs.DialogRow[] {
+  const rows: Dialogs.DialogRow[] = []
+  for (const file of changes.files) {
+    const open = diffOpen.has(file.path)
+    rows.push({
+      label: (open ? "\u25be " : "\u25b8 ") + statusLetter(file) + "  " + file.path,
+      hint: countsOf(file) + (file.truncated ? "  (summary)" : ""),
+      value: file.path,
+      tone: file.status === "added" ? "added" : file.status === "removed" ? "removed" : "text",
+    })
+    if (!open) continue
+    for (const hunk of file.hunks) {
+      rows.push({
+        label: "    @@ -" + hunk.beforeStart + "," + hunk.beforeCount + " +" + hunk.afterStart + "," + hunk.afterCount + " @@",
+        tone: "gold",
+        inert: true,
+      })
+      for (const line of hunk.lines) {
+        const sign = line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " "
+        const number = String(line.after ?? line.before ?? "").padStart(5)
+        rows.push({
+          label: "  " + number + " " + sign + line.text,
+          tone: line.kind === "add" ? "added" : line.kind === "remove" ? "removed" : "muted",
+          inert: true,
+        })
+      }
+    }
+    if (!file.hunks.length) {
+      rows.push({ label: "    (no line changes)", tone: "muted", inert: true })
+    }
+  }
+  return rows
+}
+
+/** Saved conversations, with the one you are in marked. */
+async function openSessions() {
+  const saved = await sessions.list(60)
+  if (!saved.length) {
+    status = "no saved conversations yet"
+    return
+  }
+  dialog = Dialogs.open(
+    "sessions",
+    "Conversations",
+    saved.map((entry) => ({
+      label: (entry.id === session.id ? "\u2022 " : "  ") + entry.title,
+      hint: entry.id === session.id ? "open" : "",
+      value: entry.id,
+    })),
+    { footer: "enter opens . ctrl+d twice deletes . esc closes", size: "large" },
+  )
+}
+
+/** How generation comes out. A popup, because a settings screen should be one. */
+function openSettings() {
+  dialog = Dialogs.open("settings", "Generation settings", settingsRows(), {
+    footer: "enter changes this setting . esc closes",
+    size: "large",
+  })
+}
+
+function settingsRows(): Dialogs.DialogRow[] {
+  const rows: Dialogs.DialogRow[] = []
+  const titles = { image: "Image", audio: "Audio", model3d: "3D" } as const
+  for (const kind of ["image", "audio", "model3d"] as MediaKind[]) {
+    const group = optionsOfKind(kind)
+    if (!group.length) continue
+    if (rows.length) rows.push({ label: "", inert: true })
+    rows.push({ label: titles[kind], tone: "heading", inert: true })
+    for (const option of group) {
+      rows.push({
+        label: "  " + option.label,
+        hint: labelOf(option, valueOf(media, option.id), voices),
+        value: option.id,
+      })
+    }
+  }
+  return rows
+}
+
+/** The values one setting takes. Replaces the list rather than stacking on it. */
+function openSettingValues(id: string) {
+  const option = optionById(id)
+  if (!option) return
+  if (option.dynamic === "voices" && !voicesLoaded) void loadVoices()
+  const current = valueOf(media, option.id)
+  const pool = option.dynamic === "voices"
+    ? [{ id: MEDIA_DEFAULT, label: "account default" }, ...voices]
+    : option.choices
+  const rows: Dialogs.DialogRow[] = pool.map((choice) => ({
+    label: choice.label,
+    hint: choice.id === current ? "\u2713 set" : "",
+    value: choice.id,
+  }))
+  if (option.dynamic === "voices" && !voicesLoaded) {
+    rows.push({ label: "loading voices from your account\u2026", tone: "muted", inert: true })
+  } else if (option.dynamic === "voices" && voicesNote) {
+    rows.push({ label: voicesNote, tone: "muted", inert: true })
+  }
+  dialog = Dialogs.open("setting-value", option.label, rows, {
+    footer: option.about,
+    size: "large",
+  })
+  settingBeing = option.id
+}
+/**
+ * Jump to the next or previous file header.
+ *
+ * A file header is a row with a value; everything under an expanded file is
+ * inert. So "the next file" is simply the next row that can be selected at
+ * all, which is what the arrow keys would eventually reach.
+ */
+function toFile(dialog: Dialogs.Dialog, direction: number): Dialogs.Dialog {
+  const headers = dialog.rows
+    .map((row, index) => (row.inert ? -1 : index))
+    .filter((index) => index >= 0)
+  if (!headers.length) return dialog
+  const at = headers.findIndex((index) => index === dialog.index)
+  const next = Math.max(0, Math.min(headers.length - 1, (at === -1 ? 0 : at) + direction))
+  return { ...dialog, index: headers[next]!, armed: undefined }
+}
+
+function closeDialog() {
+  dialog = undefined
+  settingBeing = undefined
+}
+
+/** Enter, whatever the dialog happens to be. */
+async function chooseInDialog() {
+  if (!dialog) return
+  const row = Dialogs.selected(dialog)
+  if (!row || !row.value) { render(); return }
+
+  if (dialog.kind === "diff") {
+    // Opening a file rebuilds the rows in place rather than pushing a
+    // second dialog, so escape still means "done reviewing".
+    if (diffOpen.has(row.value)) diffOpen.delete(row.value)
+    else diffOpen.add(row.value)
+    if (lastChanges) dialog = Dialogs.withRows(dialog, diffRows(lastChanges))
+    render()
+    return
+  }
+
+  if (dialog.kind === "sessions") {
+    const loaded = await sessions.load(row.value)
+    if (!loaded) { status = "could not open that conversation"; closeDialog(); render(); return }
+    session = loaded
+    messages = session.messages
+    transcript = fromMessages(session.messages)
+    scroll = 0
+    edits.reset()
+    status = "opened " + session.title
+    closeDialog()
+    render()
+    return
+  }
+
+  if (dialog.kind === "settings") {
+    openSettingValues(row.value)
+    render()
+    return
+  }
+
+  if (dialog.kind === "setting-value" && settingBeing) {
+    media = withValue(media, settingBeing, row.value)
+    void saveMedia(media)
+    const option = optionById(settingBeing)
+    status = option ? option.label + ": " + labelOf(option, row.value, voices) : "saved"
+    // Back to the list it came from, so several can be changed in a row.
+    settingBeing = undefined
+    openSettings()
+    render()
+    return
+  }
+
+  closeDialog()
+  render()
+}
+
+/**
+ * ctrl+d, which only means anything in the session list.
+ *
+ * Two presses, the way the original does it: the row says so in between.
+ * A confirmation dialog stacked on a dialog is worse than what it guards.
+ */
+async function deleteInDialog() {
+  if (!dialog || dialog.kind !== "sessions") { render(); return }
+  const row = Dialogs.selected(dialog)
+  if (!row || !row.value) { render(); return }
+
+  if (dialog.armed !== row.value) {
+    dialog = { ...dialog, armed: row.value }
+    render()
+    return
+  }
+
+  const gone = await sessions.remove(row.value)
+  if (!gone) {
+    status = "could not delete that conversation"
+    dialog = { ...dialog, armed: undefined }
+    render()
+    return
+  }
+  // Deleting the one you are in leaves you somewhere real rather than in a
+  // conversation whose file is gone.
+  if (row.value === session.id) {
+    session = sessions.create(selection.provider.id)
+    messages = []
+    transcript = []
+    edits.reset()
+  }
+  await refreshSessionCache()
+  const saved = await sessions.list(60)
+  if (!saved.length) {
+    status = "deleted - no conversations left"
+    closeDialog()
+    render()
+    return
+  }
+  dialog = Dialogs.withRows(
+    dialog,
+    saved.map((entry) => ({
+      label: (entry.id === session.id ? "\u2022 " : "  ") + entry.title,
+      hint: entry.id === session.id ? "open" : "",
+      value: entry.id,
+    })),
+  )
+  status = "deleted"
+  render()
+}
+
 async function send() {
   if (secret) {
     const provider = secret.provider
@@ -755,19 +1049,8 @@ async function send() {
         ? "mouse on - wheel scrolls, shift+drag selects"
         : "mouse off - drag selects text, pgup/dn scrolls"
     }
-    if (result.kind === "set") {
-      if (!result.option) {
-        transcript.push({ kind: "tool", text: describeSettings(media, voices) })
-      } else {
-        media = withValue(media, result.option, result.value)
-        void saveMedia(media)
-        setMediaSettings(media)
-        const option = optionById(result.option)
-        status = option
-          ? option.label + ": " + labelOf(option, result.value, voices)
-          : "saved"
-      }
-    }
+    if (result.kind === "settings") { openSettings(); render(); return }
+    if (result.kind === "diff") { await openDiff(); render(); return }
     if (result.kind === "thinking") {
       settings = { ...settings, thinking: !settings.thinking }
       void settingsStore.save(settings)
@@ -889,27 +1172,19 @@ async function send() {
     }
     if (result.kind === "resume") {
       await refreshSessionCache()
+      // No id opens the picker, which is also the only place a conversation
+      // can be deleted. Printing a list of ids to copy was never the plan.
       if (!result.id) {
-        const saved = await sessions.list(10)
-        transcript.push({
-          kind: "tool",
-          text: saved.length
-            ? "type /resume and a space to pick one:" + String.fromCharCode(10) +
-              saved.map((entry) => entry.id + "  " + entry.title).join(String.fromCharCode(10))
-            : "no saved conversations yet",
-        })
+        await openSessions()
+        render()
+        return
       } else {
         const loaded = await sessions.load(result.id)
         if (!loaded) status = "no such conversation: " + result.id
         else {
           session = loaded
           messages = loaded.messages
-          // Rebuild what the user sees from what the model was told.
-          transcript = []
-          for (const message of messages) {
-            if (message.role === "user") transcript.push({ kind: "user", text: message.content })
-            else if (message.role === "assistant" && message.content) transcript.push({ kind: "agent", text: message.content })
-          }
+          transcript = fromMessages(messages)
           status = "resumed: " + loaded.title
         }
       }
@@ -1054,7 +1329,9 @@ function shutdown() {
 }
 
 async function refreshSessionCache() {
-  setSessionCache((await sessions.list(30)).map(({ id, title }) => ({ id, title })))
+  // Kept as a hook: the picker reads the store directly now, but saving a
+  // session still wants somewhere to say so as the list grows other readers.
+  await sessions.list(1)
 }
 void refreshSessionCache()
 
@@ -1082,7 +1359,6 @@ refreshConnected()
 async function loadSettings() {
   settings = await settingsStore.load()
   media = await loadMedia()
-  setMediaSettings(media)
   applyTheme(settings.theme)
   applyMouse()
   render()
@@ -1105,6 +1381,40 @@ process.stdin.on("data", (chunk) => {
   for (const pressed of readKeys(chunk.toString())) {
     if (pressed.type === "ctrl" && pressed.value === "c") return shutdown()
 
+    // A dialog owns the keyboard while it is open. Nothing behind it moves,
+    // which is the difference between a popup and a panel.
+    if (dialog) {
+      const height = Dialogs.dialogHeight(dialog, size().rows)
+      if (pressed.type === "escape") { closeDialog(); render(); continue }
+      if (pressed.type === "up") { dialog = Dialogs.move(dialog, -1); render(); continue }
+      if (pressed.type === "down") { dialog = Dialogs.move(dialog, 1); render(); continue }
+      if (pressed.type === "wheelup") { dialog = Dialogs.move(dialog, -3); render(); continue }
+      if (pressed.type === "wheeldown") { dialog = Dialogs.move(dialog, 3); render(); continue }
+      if (pressed.type === "pageup") { dialog = Dialogs.move(dialog, -height); render(); continue }
+      if (pressed.type === "pagedown") { dialog = Dialogs.move(dialog, height); render(); continue }
+      if (pressed.type === "home") { dialog = Dialogs.move(dialog, -dialog.rows.length); render(); continue }
+      if (pressed.type === "end") { dialog = Dialogs.move(dialog, dialog.rows.length); render(); continue }
+      if (pressed.type === "enter") { void chooseInDialog(); continue }
+      if (pressed.type === "ctrl" && pressed.value === "d") { void deleteInDialog(); continue }
+      // q closes the diff viewer, the way the original binds it - reviewing
+      // is a mode you leave, and reaching for escape every time is a tell
+      // that nobody who reads diffs was asked.
+      if (dialog.kind === "diff" && pressed.type === "char" && pressed.value === "q") {
+        closeDialog()
+        render()
+        continue
+      }
+      // n and p jump between files in the diff, which is the only way to get
+      // past a long one without holding the down arrow.
+      if (dialog.kind === "diff" && pressed.type === "char" && (pressed.value === "n" || pressed.value === "p")) {
+        dialog = toFile(dialog, pressed.value === "n" ? 1 : -1)
+        render()
+        continue
+      }
+      // Anything else is swallowed rather than typed into the composer
+      // behind: a key pressed at a dialog was meant for the dialog.
+      continue
+    }
     if (overlay) {
       // Anything at all closes it: it is a panel to read, not one to operate.
       overlay = undefined

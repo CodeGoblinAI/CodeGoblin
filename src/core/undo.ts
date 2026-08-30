@@ -83,6 +83,15 @@ export class History {
   private done: Checkpoint[] = []
   private undone: Checkpoint[] = []
   private open: Checkpoint | undefined
+  /**
+   * How every file this session has touched looked before it did.
+   *
+   * Kept apart from the checkpoints on purpose. Checkpoints move as things
+   * are undone and redone, but "what did this session do to my tree" is
+   * answered against where the tree started, and that answer should not
+   * change because somebody undid something in the middle.
+   */
+  private origin = new Map<string, string | null>()
 
   /** Start a turn. Nothing is kept unless the turn actually writes something. */
   begin(label: string) {
@@ -110,7 +119,14 @@ export class History {
     for (const dir of await missingAncestors(root, relative)) {
       if (!this.open.dirs.includes(dir)) this.open.dirs.push(dir)
     }
-    this.open.files.push({ path: relative, before: await readOrNull(root, relative) })
+    const before = await readOrNull(root, relative)
+    if (!this.origin.has(relative)) this.origin.set(relative, before)
+    this.open.files.push({ path: relative, before })
+  }
+
+  /** Every file this session has touched, and how it looked to begin with. */
+  origins(): Map<string, string | null> {
+    return new Map(this.origin)
   }
 
   /** End a turn. A turn that changed nothing leaves no checkpoint to undo. */
@@ -149,6 +165,7 @@ export class History {
     this.done = []
     this.undone = []
     this.open = undefined
+    this.origin.clear()
   }
 }
 
