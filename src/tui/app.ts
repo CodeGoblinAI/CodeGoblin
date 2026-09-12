@@ -11,6 +11,7 @@ import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { THEMES } from "../core/theme"
 import { EFFORTS } from "../core/settings"
 import { createKeyReader } from "./keys"
+import { parseLaunch } from "./args"
 import * as Dialogs from "./dialog"
 import { changesIn, summarise, countsOf, statusLetter, type Changes } from "../core/changes"
 import {
@@ -42,8 +43,7 @@ import {
   withValue,
   optionById,
   labelOf,
-  describeSettings,
-  optionsOfKind,
+  optionsForModel,
   valueOf,
   DEFAULT as MEDIA_DEFAULT,
   type MediaSettings,
@@ -72,10 +72,6 @@ import { marker, counts, type Todo } from "../core/todo"
 import { Permissions, DECISIONS, MODES, nextMode, type Decision } from "../core/permission"
 
 const argv = process.argv.slice(2)
-const flag = (name: string) => {
-  const index = argv.indexOf(name)
-  return index === -1 ? undefined : argv[index + 1]
-}
 
 /**
  * Work somewhere else.
@@ -89,7 +85,7 @@ const flag = (name: string) => {
  * opens there and the sandbox follows. The confinement is unchanged - it is
  * the same one rule, just pointed where you meant.
  */
-const requested = argv.find((entry) => !entry.startsWith("--"))
+const requested = parseLaunch(argv).directory
 if (requested) {
   try {
     process.chdir(requested)
@@ -99,7 +95,7 @@ if (requested) {
   }
 }
 
-let selection: Selection = resolveSelection(flag("--model") ?? flag("--provider")) ?? defaultSelection()
+let selection: Selection = resolveSelection(parseLaunch(argv).model) ?? defaultSelection()
 let key = apiKey(selection.provider.id)
 
 const out = process.stdout
@@ -912,29 +908,38 @@ function openEffortPicker() {
 
 /** How generation comes out. A popup, because a settings screen should be one. */
 function openSettings() {
-  dialog = Dialogs.open("settings", "Generation settings", settingsRows(), {
+  dialog = Dialogs.open("settings", "Settings  ·  " + selection.provider.label + " " + selection.model.label, settingsRows(), {
     footer: "enter changes this setting . esc closes",
     size: "large",
   })
 }
 
+/**
+ * The settings the selected model takes, and nothing else.
+ *
+ * This was every knob for every generator in one list, so a voice-clone
+ * setting sat beside 3D topology whatever was selected, and a value chosen for
+ * one model applied to another that might not take it. Settings belong to a
+ * model: pick the model, and these are its settings.
+ */
 function settingsRows(): Dialogs.DialogRow[] {
-  const rows: Dialogs.DialogRow[] = []
-  const titles = { image: "Image", audio: "Audio", model3d: "3D" } as const
-  for (const kind of ["image", "audio", "model3d"] as MediaKind[]) {
-    const group = optionsOfKind(kind)
-    if (!group.length) continue
-    if (rows.length) rows.push({ label: "", inert: true })
-    rows.push({ label: titles[kind], tone: "heading", inert: true })
-    for (const option of group) {
-      rows.push({
-        label: "  " + option.label,
-        hint: labelOf(option, valueOf(media, option.id), voices),
-        value: option.id,
-      })
-    }
+  const provider = selection.provider.id
+  const model = selection.model.id
+  const options = optionsForModel(provider, model)
+  if (!options.length) {
+    // Say why the list is empty - a chat model has no generation settings at
+    // all, which is a different answer from a generator we send nothing to.
+    const why =
+      kindOf(selection.model) === "text"
+        ? "a chat model has no generation settings - pick an image, voice or 3D model"
+        : "nothing on this model's request can be changed from here"
+    return [{ label: "  " + why, tone: "muted", inert: true }]
   }
-  return rows
+  return options.map((option) => ({
+    label: "  " + option.label,
+    hint: labelOf(option, valueOf(media, provider, model, option.id), voices),
+    value: option.id,
+  }))
 }
 
 /** The values one setting takes. Replaces the list rather than stacking on it. */
@@ -942,7 +947,7 @@ function openSettingValues(id: string) {
   const option = optionById(id)
   if (!option) return
   if (option.dynamic === "voices" && !voicesLoaded) void loadVoices()
-  const current = valueOf(media, option.id)
+  const current = valueOf(media, selection.provider.id, selection.model.id, option.id)
   const pool = option.dynamic === "voices"
     ? [{ id: MEDIA_DEFAULT, label: "account default" }, ...voices]
     : option.choices
@@ -1063,7 +1068,7 @@ async function chooseInDialog() {
   }
 
   if (dialog.kind === "setting-value" && settingBeing) {
-    media = withValue(media, settingBeing, row.value)
+    media = withValue(media, selection.provider.id, selection.model.id, settingBeing, row.value)
     void saveMedia(media)
     const option = optionById(settingBeing)
     status = option ? option.label + ": " + labelOf(option, row.value, voices) : "saved"

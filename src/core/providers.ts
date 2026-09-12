@@ -294,6 +294,22 @@ export function resolveSelection(input?: string): Selection | undefined {
  * A model with no capabilities is a chat model - every text provider in this
  * catalogue predates the field and none of them needed it.
  */
+/**
+ * Exactly the model named, or nothing.
+ *
+ * resolveSelection is forgiving on purpose: nothing at all picks the default,
+ * and a bare provider id picks one of that provider's models. That is right
+ * for starting a conversation and wrong anywhere a choice has to land on one
+ * specific model - a setting saved against "whichever model the default happens
+ * to be" is a setting nobody chose.
+ */
+export function exactSelection(named: string | undefined): Selection | undefined {
+  const id = typeof named === "string" ? named.trim() : ""
+  if (!id) return undefined
+  const resolved = resolveSelection(id)
+  return resolved && resolved.provider.id + "/" + resolved.model.id === id ? resolved : undefined
+}
+
 export type ModelKind = "text" | "image" | "audio" | "model3d"
 
 export function kindOf(model: Model): ModelKind {

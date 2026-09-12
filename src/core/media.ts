@@ -4,6 +4,7 @@ import {
   imageOverrides,
   model3dOverrides,
   type MediaSettings,
+  type On,
 } from "./media-settings"
 
 /**
@@ -46,6 +47,14 @@ export type Chosen = { provider?: string; model?: string }
  * settings existed, which is what makes the default safe.
  */
 export type Tuning = MediaSettings
+
+/**
+ * Which model's settings to read.
+ *
+ * Nothing is read at all until a model is chosen, which is the rule: settings
+ * belong to a model, and a generation with no model selected has none.
+ */
+const on = (chosen: Chosen): On => ({ provider: chosen.provider ?? "", model: chosen.model ?? "" })
 export type MediaKind = "image" | "audio" | "model3d"
 
 export type MediaResult = {
@@ -81,7 +90,7 @@ async function runImage(line: string, cwd: string, chosen: Chosen, tuning: Tunin
   const result = await CodeGoblinImageCommand.runSlash({
     input: line,
     cwd,
-    ...imageOverrides(tuning),
+    ...imageOverrides(tuning, on(chosen)),
     provider: chosen.provider,
     model: chosen.model,
     requireImageModel: true,
@@ -105,7 +114,7 @@ async function runAudio(line: string, cwd: string, chosen: Chosen, tuning: Tunin
   const result = await CodeGoblinAudioCommand.generate({
     text,
     cwd,
-    ...audioOverrides(tuning),
+    ...audioOverrides(tuning, on(chosen)),
     provider: chosen.provider,
     model: chosen.model,
   })
@@ -120,7 +129,7 @@ async function runAudio(line: string, cwd: string, chosen: Chosen, tuning: Tunin
 
 async function runModel3d(line: string, cwd: string, chosen: Chosen, tuning: Tuning): Promise<MediaResult> {
   const { CodeGoblin3DCommand } = await import("../domain/model3d-command")
-  const { modelVersion, outputFormat, ...shape } = model3dOverrides(tuning)
+  const { modelVersion, outputFormat, ...shape } = model3dOverrides(tuning, on(chosen))
   const result = await CodeGoblin3DCommand.runSlash({
     input: line,
     cwd,

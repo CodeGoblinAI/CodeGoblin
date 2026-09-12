@@ -59,12 +59,15 @@ await show("3D with quads, no texture, detailed geometry, 20k faces, P1", () =>
     "/model3d a small stone bridge",
     cwd,
     { provider: "tripo", model: "text-to-model" },
+    // Keyed to the model, the way media.json holds them now. The old global
+    // keys would match nothing and this probe would quietly show an empty
+    // request - which is exactly the thing it exists to catch.
     {
-      "3d.topology": "quad",
-      "3d.texture": "off",
-      "3d.geometry-quality": "detailed",
-      "3d.faces": "20000",
-      "3d.version": "P1-20260311",
+      "tripo/text-to-model:3d.topology": "quad",
+      "tripo/text-to-model:3d.texture": "off",
+      "tripo/text-to-model:3d.geometry-quality": "detailed",
+      "tripo/text-to-model:3d.faces": "20000",
+      "tripo/text-to-model:3d.version": "P1-20260311",
     },
   ),
 )
@@ -79,7 +82,12 @@ await show("audio at speed 1.2, stability 0, boost off", () =>
     "/audio hello there",
     cwd,
     { provider: "elevenlabs", model: "eleven_multilingual_v2" },
-    { "audio.speed": "1.2", "audio.stability": "0", "audio.boost": "off", "audio.format": "mp3_22050_32" },
+    {
+      "elevenlabs/eleven_multilingual_v2:audio.speed": "1.2",
+      "elevenlabs/eleven_multilingual_v2:audio.stability": "0",
+      "elevenlabs/eleven_multilingual_v2:audio.boost": "off",
+      "elevenlabs/eleven_multilingual_v2:audio.format": "mp3_22050_32",
+    },
   ),
 )
 

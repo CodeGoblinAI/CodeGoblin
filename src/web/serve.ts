@@ -17,6 +17,7 @@ import {
   selectionsByKind,
   kindOf,
   effortFor,
+  exactSelection,
   KIND_LABEL,
   CONNECTABLE,
 } from "../core/providers"
@@ -34,6 +35,7 @@ import { runMedia, MEDIA_KINDS, withinMediaOutput } from "../core/media"
 import {
   MEDIA_OPTIONS,
   optionById,
+  optionsForModel,
   withValue,
   loadMedia,
   saveMedia,
@@ -146,6 +148,13 @@ async function handle(request: Request): Promise<Response> {
         ready: Boolean(apiKey(s.provider.id)),
         /** Can be shown a picture, as distinct from one that draws them. */
         vision: acceptsImages(s),
+        /**
+         * The settings this model takes, by id.
+         *
+         * Sent with the model rather than worked out in the browser, so the rule
+         * about which knobs belong to which model lives in one file.
+         */
+        settings: optionsForModel(s.provider.id, s.model.id).map((option) => option.id),
       })),
     })
   }
@@ -330,14 +339,34 @@ async function projectFiles(): Promise<string[]> {
    */
   if (url.pathname === "/api/media-settings") {
     if (request.method === "POST") {
-      const body = (await request.json()) as { option?: string; value?: string }
-      const option = optionById(String(body.option ?? ""))
-      if (!option) return json({ ok: false, message: "unknown setting" }, 400)
+      const body = (await request.json()) as { option?: string; value?: string; model?: string }
+      // A value belongs to a model, so saving one without saying which model is
+      // saving it nowhere - refuse rather than guess.
+      const named = typeof body.model === "string" ? body.model.trim() : ""
+      // Exactly the model named, or nowhere. The forgiving resolver would pick
+      // the default for nothing at all and write this onto a model nobody chose.
+      const selected = exactSelection(named)
+      if (!selected) return json({ ok: false, message: named ? "no such model: " + named : "which model?" }, 400)
+      const option = optionsForModel(selected.provider.id, selected.model.id).find(
+        (each) => each.id === String(body.option ?? ""),
+      )
+      if (!option) {
+        const known = optionById(String(body.option ?? ""))
+        return json(
+          {
+            ok: false,
+            message: known
+              ? selected.provider.label + " " + selected.model.label + " does not take " + known.label.toLowerCase()
+              : "unknown setting",
+          },
+          400,
+        )
+      }
       const value = String(body.value ?? DEFAULT)
       if (value !== DEFAULT && !option.dynamic && !option.choices.some((choice) => choice.id === value)) {
         return json({ ok: false, message: option.label + " has no " + value }, 400)
       }
-      const next = withValue(await loadMedia(), option.id, value)
+      const next = withValue(await loadMedia(), selected.provider.id, selected.model.id, option.id, value)
       await saveMedia(next)
       return json({ ok: true, settings: next })
     }

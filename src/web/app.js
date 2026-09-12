@@ -770,14 +770,26 @@ async function runCommand(text) {
   if (name === "/settings" || name === "/set") {
     const NEWLINE = String.fromCharCode(10)
     const [id, ...rest] = argument.split(/\s+/).filter(Boolean)
-    const options = paletteData.mediaOptions || []
+    // Only what the model on the picker takes. This used to be every setting
+    // for every generator, whatever was selected.
+    const options = modelSettings()
+    const model = modelOptions.find((option) => option.value === currentModel)
+    const modelName = model ? model.label : currentModel
+    if (!options.length) {
+      note(
+        model && model.kind === "text"
+          ? modelName + " is a chat model, so it has no generation settings - pick an image, voice or 3D model"
+          : "nothing on " + modelName + "'s request can be changed from here",
+      )
+      return true
+    }
     if (!id) {
-      note(options.map((o) => "  " + o.id.padEnd(20) + mediaLabel(o, mediaValue(o.id))).join(NEWLINE))
+      note(modelName + NEWLINE + options.map((o) => "  " + o.id.padEnd(20) + mediaLabel(o, mediaValue(o.id))).join(NEWLINE))
       return true
     }
     const option = options.find((o) => o.id === id)
     if (!option) {
-      note("unknown setting: " + id + NEWLINE +
+      note(modelName + " does not take " + id + NEWLINE +
         options.map((o) => "  " + o.id.padEnd(20) + o.about).join(NEWLINE))
       return true
     }
@@ -785,7 +797,7 @@ async function runCommand(text) {
     const result = await fetch("/api/media-settings", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ option: option.id, value }),
+      body: JSON.stringify({ option: option.id, value, model: currentModel }),
     }).then((r) => r.json()).catch(() => null)
     if (!result || !result.ok) {
       note((result && result.message) || "could not save that")
@@ -1094,6 +1106,7 @@ async function loadProviders() {
     kind: p.kind,
     section: p.section,
     ready: p.ready,
+    settings: p.settings || [],
     vision: p.vision,
   }))
   // Open on something that can actually answer, rather than on whichever text
@@ -1174,9 +1187,22 @@ const MEDIA_COMMANDS = ["/image", "/audio", "/model3d"]
  * the command list refreshes them too - the terminal writes the same file,
  * and a page that has been open a while should not disagree with it.
  */
+/**
+ * The value the model on the picker holds for a setting.
+ *
+ * Keyed provider/model:option, the way media-settings.ts stores it. A value
+ * belongs to the model it was chosen on, not to the setting's name.
+ */
 function mediaValue(id) {
-  const value = (paletteData.media || {})[id]
+  const value = (paletteData.media || {})[currentModel + ":" + id]
   return value || "default"
+}
+
+/** The settings the model on the picker takes, in table order. */
+function modelSettings() {
+  const model = modelOptions.find((option) => option.value === currentModel)
+  const ids = (model && model.settings) || []
+  return (paletteData.mediaOptions || []).filter((option) => ids.includes(option.id))
 }
 
 function mediaLabel(option, value) {
@@ -1254,7 +1280,8 @@ function itemsFor(text, cursor) {
       .slice(0, 9)
   }
   if ((head === "/settings" || head === "/set") && hasArgument) {
-    const options = paletteData.mediaOptions || []
+    const options = modelSettings()
+    if (!options.length) return [{ value: text, hint: "this model has no settings to change" }]
     const rest = text.slice(text.indexOf(" ") + 1)
     const [word, ...tail] = rest.split(/\s+/)
     const option = options.find((o) => o.id === word)
@@ -1274,7 +1301,7 @@ function itemsFor(text, cursor) {
       const current = mediaValue(option.id)
       const rows = pool
         .map((choice) => ({
-          value: "/set " + option.id + " " + choice.id,
+          value: "/settings " + option.id + " " + choice.id,
           hint: choice.label + (choice.id === current ? "   \u2713 set" : ""),
         }))
         .filter((item) => !q || item.value.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q))
@@ -1287,7 +1314,7 @@ function itemsFor(text, cursor) {
 
     const q = word.trim().toLowerCase()
     return options
-      .map((entry) => ({ value: "/set " + entry.id, hint: mediaLabel(entry, mediaValue(entry.id)) }))
+      .map((entry) => ({ value: "/settings " + entry.id, hint: mediaLabel(entry, mediaValue(entry.id)) }))
       .filter((item) => !q || item.value.toLowerCase().includes(q))
       .slice(0, 9)
   }

@@ -11,7 +11,7 @@ import {
   audioOverrides,
   model3dOverrides,
   imageOverrides,
-  describeSettings,
+  optionsForModel,
 } from "../src/core/media-settings"
 import { runCommand } from "../src/core/commands"
 
@@ -42,25 +42,67 @@ describe("the table itself", () => {
   })
 })
 
+const TRIPO = { provider: "tripo", model: "text-to-model" }
+const ELEVEN = { provider: "elevenlabs", model: "eleven_multilingual_v2" }
+const key = (on: { provider: string; model: string }, id: string) => on.provider + "/" + on.model + ":" + id
+
+describe("settings belong to a model", () => {
+  test("a model only offers what it takes", () => {
+    const ids = optionsForModel("tripo", "text-to-model").map((o) => o.id)
+    expect(ids).toContain("3d.topology")
+    expect(ids).not.toContain("audio.voice")
+  })
+
+  test("an image model we send no options for says so with an empty list", () => {
+    // Not a claim about xAI's API - a fact about the request this code sends.
+    expect(optionsForModel("xai", "grok-imagine-image-quality")).toEqual([])
+  })
+
+  test("a model that does not exist has nothing", () => {
+    expect(optionsForModel("nope", "nope")).toEqual([])
+  })
+
+  test("the same option on two models is two separate values", () => {
+    // The whole point: a choice made on one model must not follow you to
+    // another that may not take the same values.
+    let media = withValue({}, "tripo", "text-to-model", "3d.topology", "quad")
+    media = withValue(media, "tripo", "image-to-model", "3d.topology", "triangle")
+    expect(valueOf(media, "tripo", "text-to-model", "3d.topology")).toBe("quad")
+    expect(valueOf(media, "tripo", "image-to-model", "3d.topology")).toBe("triangle")
+  })
+})
+
 describe("holding a value", () => {
   test("nothing set reads as the default", () => {
-    expect(valueOf({}, "3d.topology")).toBe(DEFAULT)
+    expect(valueOf({}, TRIPO.provider, TRIPO.model, "3d.topology")).toBe(DEFAULT)
   })
 
   test("setting back to the default forgets the key rather than storing the word", () => {
-    const set = withValue({}, "3d.topology", "quad")
-    expect(set["3d.topology"]).toBe("quad")
-    expect(withValue(set, "3d.topology", DEFAULT)).toEqual({})
+    const set = withValue({}, TRIPO.provider, TRIPO.model, "3d.topology", "quad")
+    expect(set[key(TRIPO, "3d.topology")]).toBe("quad")
+    expect(withValue(set, TRIPO.provider, TRIPO.model, "3d.topology", DEFAULT)).toEqual({})
   })
 
   test("a key that names nothing does not survive a reload", () => {
-    expect(normaliseMedia({ "3d.topology": "quad", "not.a.setting": "x" })).toEqual({ "3d.topology": "quad" })
+    expect(
+      normaliseMedia({ [key(TRIPO, "3d.topology")]: "quad", "not.a.setting": "x" }),
+    ).toEqual({ [key(TRIPO, "3d.topology")]: "quad" })
+  })
+
+  test("an option a model does not take does not survive either", () => {
+    expect(normaliseMedia({ [key(TRIPO, "audio.voice")]: "abc" })).toEqual({})
+  })
+
+  test("the old global keys are dropped rather than carried forward", () => {
+    // They described a setting that applied to every model, which is the
+    // thing that turned out to be wrong.
+    expect(normaliseMedia({ "3d.topology": "quad" })).toEqual({})
   })
 
   test("junk on disk is an empty set, not a crash", () => {
     expect(normaliseMedia(null)).toEqual({})
     expect(normaliseMedia("nonsense")).toEqual({})
-    expect(normaliseMedia({ "audio.speed": 12 })).toEqual({})
+    expect(normaliseMedia({ [key(ELEVEN, "audio.speed")]: 12 })).toEqual({})
   })
 
   test("a voice is shown by name once the list is known, and by id before", () => {
@@ -74,40 +116,55 @@ describe("what reaches a provider", () => {
   // The whole point of the sentinel: an install nobody has touched must send
   // exactly what it sent before any of this existed.
   test("untouched settings send nothing at all", () => {
-    expect(audioOverrides({})).toEqual({})
-    expect(model3dOverrides({})).toEqual({})
-    expect(imageOverrides({})).toEqual({ size: undefined })
+    expect(audioOverrides({}, ELEVEN)).toEqual({})
+    expect(model3dOverrides({}, TRIPO)).toEqual({})
+    expect(imageOverrides({}, { provider: "qwen", model: "wan2.7-image-pro" })).toEqual({ size: undefined })
   })
 
   test("a shape is only present when something asked for one", () => {
-    expect(Object.keys(model3dOverrides({})).length).toBe(0)
-    expect(model3dOverrides({ "3d.topology": "quad" })).toEqual({ quad: true })
-    expect(model3dOverrides({ "3d.topology": "triangle" })).toEqual({ quad: false })
+    expect(Object.keys(model3dOverrides({}, TRIPO)).length).toBe(0)
+    expect(model3dOverrides({ [key(TRIPO, "3d.topology")]: "quad" }, TRIPO)).toEqual({ quad: true })
+    expect(model3dOverrides({ [key(TRIPO, "3d.topology")]: "triangle" }, TRIPO)).toEqual({ quad: false })
+  })
+
+  test("a setting chosen on one model does not reach another", () => {
+    // This is the reason settings moved onto the model in the first place.
+    const media = withValue({}, "tripo", "text-to-model", "3d.topology", "quad")
+    expect(model3dOverrides(media, TRIPO)).toEqual({ quad: true })
+    expect(model3dOverrides(media, { provider: "tripo", model: "image-to-model" })).toEqual({})
   })
 
   test("texture off is sent as false, not left out", () => {
-    expect(model3dOverrides({ "3d.texture": "off" })).toEqual({ texture: false })
+    expect(model3dOverrides({ [key(TRIPO, "3d.texture")]: "off" }, TRIPO)).toEqual({ texture: false })
   })
 
   test("quality only passes through the two words Tripo takes", () => {
-    expect(model3dOverrides({ "3d.texture-quality": "detailed" })).toEqual({ textureQuality: "detailed" })
-    expect(model3dOverrides({ "3d.texture-quality": "ultra" })).toEqual({})
+    expect(model3dOverrides({ [key(TRIPO, "3d.texture-quality")]: "detailed" }, TRIPO)).toEqual({
+      textureQuality: "detailed",
+    })
+    expect(model3dOverrides({ [key(TRIPO, "3d.texture-quality")]: "ultra" }, TRIPO)).toEqual({})
   })
 
   test("a face limit arrives as a number", () => {
-    expect(model3dOverrides({ "3d.faces": "20000" })).toEqual({ faceLimit: 20000 })
-    expect(model3dOverrides({ "3d.faces": "lots" })).toEqual({})
+    expect(model3dOverrides({ [key(TRIPO, "3d.faces")]: "20000" }, TRIPO)).toEqual({ faceLimit: 20000 })
+    expect(model3dOverrides({ [key(TRIPO, "3d.faces")]: "lots" }, TRIPO)).toEqual({})
   })
 
   test("voice settings are grouped, and absent when none were chosen", () => {
-    expect(audioOverrides({ "audio.voice": "abc" })).toEqual({ voice: "abc" })
-    expect(audioOverrides({ "audio.speed": "1.2" })).toEqual({ voiceSettings: { speed: 1.2 } })
-    expect(audioOverrides({ "audio.boost": "off" })).toEqual({ voiceSettings: { useSpeakerBoost: false } })
+    expect(audioOverrides({ [key(ELEVEN, "audio.voice")]: "abc" }, ELEVEN)).toEqual({ voice: "abc" })
+    expect(audioOverrides({ [key(ELEVEN, "audio.speed")]: "1.2" }, ELEVEN)).toEqual({
+      voiceSettings: { speed: 1.2 },
+    })
+    expect(audioOverrides({ [key(ELEVEN, "audio.boost")]: "off" }, ELEVEN)).toEqual({
+      voiceSettings: { useSpeakerBoost: false },
+    })
   })
 
   test("stability zero is a real choice, not an absent one", () => {
     // "0" is falsy as a number and this has been got wrong before.
-    expect(audioOverrides({ "audio.stability": "0" })).toEqual({ voiceSettings: { stability: 0 } })
+    expect(audioOverrides({ [key(ELEVEN, "audio.stability")]: "0" }, ELEVEN)).toEqual({
+      voiceSettings: { stability: 0 },
+    })
   })
 })
 
@@ -166,10 +223,4 @@ describe("what a panel offers", () => {
   test("the default is always allowed, so a choice can be taken back", () => {
     expect(accepts("3d.topology", DEFAULT)).toBe(true)
   })
-})
-
-test("the summary names every option, set or not", () => {
-  const text = describeSettings({ "3d.topology": "quad" })
-  for (const option of MEDIA_OPTIONS) expect(text).toContain(option.id)
-  expect(text).toContain("quads")
 })
