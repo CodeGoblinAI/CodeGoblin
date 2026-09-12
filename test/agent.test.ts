@@ -315,6 +315,125 @@ describe("how a provider's key is presented", () => {
   })
 })
 
+describe("showing a model a picture", () => {
+  const PICTURE = { name: "shot.png", dataUrl: "data:image/png;base64,AAAA" }
+
+  /** What the loop actually put in the request body. */
+  async function bodySentWith(images: boolean): Promise<any> {
+    let body: any
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body))
+      return answers("ok")
+    }) as unknown as typeof fetch
+
+    for await (const _ of runAgent({
+      provider,
+      modelId: "test-model",
+      apiKey: "k",
+      messages: [{ role: "user", content: "what is this", images: [PICTURE] }],
+      root: process.cwd(),
+      maxTurns: 1,
+      images,
+    })) {
+      // drained
+    }
+    return body
+  }
+
+  test("a vision model gets the picture in the shape it reads", async () => {
+    const body = await bodySentWith(true)
+    const content = body.messages[0].content
+
+    expect(Array.isArray(content)).toBe(true)
+    expect(content[0]).toEqual({ type: "text", text: "what is this" })
+    expect(content[1]).toEqual({ type: "image_url", image_url: { url: PICTURE.dataUrl } })
+  })
+
+  test("a model that cannot see is told one was attached, and not sent it", async () => {
+    const body = await bodySentWith(false)
+    const content = body.messages[0].content
+
+    expect(typeof content).toBe("string")
+    expect(content).toContain("what is this")
+    expect(content).toContain("shot.png")
+    expect(content).toContain("cannot see images")
+    // The bytes must not go out to a model that has no use for them.
+    expect(JSON.stringify(body)).not.toContain(PICTURE.dataUrl)
+  })
+
+  test("a message with no picture is unchanged either way", async () => {
+    for (const images of [true, false]) {
+      globalThis.fetch = (async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body))
+        expect(body.messages[0].content).toBe("plain")
+        return answers("ok")
+      }) as unknown as typeof fetch
+
+      for await (const _ of runAgent({
+        provider,
+        modelId: "test-model",
+        apiKey: "k",
+        messages: [{ role: "user", content: "plain" }],
+        root: process.cwd(),
+        maxTurns: 1,
+        images,
+      })) {
+        // drained
+      }
+    }
+  })
+
+  test("memory still reaches the system prompt when a picture is present", async () => {
+    let body: any
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body))
+      return answers("ok")
+    }) as unknown as typeof fetch
+
+    for await (const _ of runAgent({
+      provider,
+      modelId: "test-model",
+      apiKey: "k",
+      messages: [
+        { role: "system", content: "you are a goblin" },
+        { role: "user", content: "what is this", images: [PICTURE] },
+      ],
+      root: process.cwd(),
+      maxTurns: 1,
+      images: true,
+      memory: "remember: the user likes brevity",
+    })) {
+      // drained
+    }
+
+    expect(body.messages[0].content).toContain("you are a goblin")
+    expect(body.messages[0].content).toContain("likes brevity")
+  })
+})
+
+describe("which models can be shown one", () => {
+  test("the vision model can, and the others cannot", async () => {
+    const { acceptsImages, resolveSelection } = await import("../src/core/providers")
+
+    expect(acceptsImages(resolveSelection("deepseek/deepseek-v4-flash-vision-exp")!)).toBe(true)
+    expect(acceptsImages(resolveSelection("deepseek/deepseek-v4-flash")!)).toBe(false)
+  })
+
+  test("a generator's reference image is not the same claim", async () => {
+    const { acceptsImages, resolveSelection } = await import("../src/core/providers")
+
+    // These declare input.image too, meaning "takes a picture and makes one" -
+    // which is the opposite direction and not a conversation at all.
+    expect(acceptsImages(resolveSelection("google/gemini-2.5-flash-image")!)).toBe(false)
+    expect(acceptsImages(resolveSelection("tripo/image-to-model")!)).toBe(false)
+  })
+
+  test("declaring image input does not move a model out of the text section", async () => {
+    const { kindOf, resolveSelection } = await import("../src/core/providers")
+    expect(kindOf(resolveSelection("deepseek/deepseek-v4-flash-vision-exp")!.model)).toBe("text")
+  })
+})
+
 describe("the loop itself", () => {
   test("a refusal from the provider is raised, not swallowed", async () => {
     globalThis.fetch = (async () => new Response("no key for you", { status: 401 })) as typeof fetch

@@ -81,7 +81,15 @@ export const PROVIDERS: Record<string, Provider> = {
     models: [
       { id: "deepseek-v4-flash", label: "V4 Flash", contextWindow: 128000, price: { input: 0.28, output: 0.42 } },
       { id: "deepseek-v4-pro", label: "V4 Pro", reasoning: true, contextWindow: 128000, price: { input: 0.55, output: 2.19 } },
-      { id: "deepseek-v4-flash-vision-exp", label: "V4 Flash Vision", contextWindow: 128000 },
+      {
+        id: "deepseek-v4-flash-vision-exp",
+        label: "V4 Flash Vision",
+        contextWindow: 128000,
+        price: { input: 0.28, output: 0.42 },
+        // Declared, and now meant: a model called Vision that could not be
+        // shown a picture was the only kind of vision this had.
+        capabilities: { input: { text: true, image: true } },
+      },
     ],
   },
   zai: {
@@ -273,6 +281,19 @@ export function kindOf(model: Model): ModelKind {
 /** Only a chat model can answer a question, and only it has somewhere to send one. */
 export function isChatModel(selection: Selection): boolean {
   return kindOf(selection.model) === "text" && Boolean(selection.provider.baseUrl)
+}
+
+/**
+ * Whether a picture can be attached to a message sent to this model.
+ *
+ * Chat models only, and deliberately. input.image already means something
+ * else on the generators - an image model or a 3D model takes a reference
+ * picture and answers with a picture or a mesh - so reading the flag alone
+ * would call every one of those a vision model. A vision model is the other
+ * direction: a picture goes in and words come out.
+ */
+export function acceptsImages(selection: Selection): boolean {
+  return isChatModel(selection) && selection.model.capabilities?.input?.image === true
 }
 
 /**

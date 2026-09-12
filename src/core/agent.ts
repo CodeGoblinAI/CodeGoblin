@@ -7,12 +7,24 @@ import type { History } from "./undo"
 
 export type Role = "user" | "assistant" | "system" | "tool"
 export type ToolCall = { id: string; name: string; args: string }
+
+/**
+ * A picture attached to a message.
+ *
+ * Held as a data URL because that is what the wire wants and what a session
+ * file can hold: a path would go stale the moment the file moved, and a
+ * conversation reopened next week should still show what it was asked about.
+ */
+export type Attachment = { name: string; dataUrl: string }
+
 export type Message = {
   role: Role
   /** What the model sees. For a user message with @-mentions this includes the attached files. */
   content: string
   /** What the human sees, when that differs - a message with its mentions still written as @paths. */
   display?: string
+  /** Images attached to this message, for models that can be shown one. */
+  images?: Attachment[]
   tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[]
   tool_call_id?: string
 }
@@ -66,18 +78,48 @@ function chatEndpoint(provider: Provider): string {
  * Messages carry a display copy for the UI, and providers that validate their
  * input reject unknown keys outright - so the wire gets the wire fields.
  */
-const wire = (messages: Message[], memory?: string) => {
-  const sent = messages.map(({ role, content, tool_calls, tool_call_id }) => ({
-    role,
-    content,
-    tool_calls,
-    tool_call_id,
-  }))
+const wire = (messages: Message[], memory?: string, images = false) => {
+  const sent = messages.map(({ role, content, images: attached, tool_calls, tool_call_id }) => {
+    // A message with pictures becomes the multimodal shape, which is the only
+    // form a vision model reads them in. Without this the attachment simply
+    // did not reach the model: content was always a plain string.
+    if (images && attached?.length) {
+      return {
+        role,
+        content: [
+          ...(content ? [{ type: "text", text: content }] : []),
+          ...attached.map((image) => ({ type: "image_url", image_url: { url: image.dataUrl } })),
+        ],
+        tool_calls,
+        tool_call_id,
+      }
+    }
+
+    // Attached to a model that cannot see - say so rather than leave the model
+    // answering a question about a picture it was never sent.
+    if (!images && attached?.length) {
+      const names = attached.map((image) => image.name).join(", ")
+      return {
+        role,
+        content:
+          content +
+          String.fromCharCode(10, 10) +
+          `(${attached.length === 1 ? "an image was" : "images were"} attached - ${names} - ` +
+          `but this model cannot see images, so it has not been sent)`,
+        tool_calls,
+        tool_call_id,
+      }
+    }
+
+    return { role, content, tool_calls, tool_call_id }
+  })
+
   // Memory rides along with the system prompt rather than being stored in
   // the conversation: it is read fresh every turn, so forgetting something
   // takes effect immediately instead of lingering in old messages.
-  if (memory && sent[0]?.role === "system") {
-    sent[0] = { ...sent[0], content: sent[0].content + String.fromCharCode(10, 10) + memory }
+  const first = sent[0]
+  if (memory && first?.role === "system" && typeof first.content === "string") {
+    sent[0] = { ...first, content: first.content + String.fromCharCode(10, 10) + memory }
   }
   return sent
 }
@@ -99,6 +141,8 @@ export async function* runAgent(input: {
   messages: Message[]
   root: string
   contextWindow?: number
+  /** Whether this model can be shown a picture; see acceptsImages in providers. */
+  images?: boolean
   permissions?: Permissions
   /** What is remembered, folded into the system prompt for this request. */
   memory?: string
@@ -129,7 +173,7 @@ export async function* runAgent(input: {
       headers: { "content-type": "application/json", ...authHeaders(input.provider, input.apiKey) },
       body: JSON.stringify({
         model: input.modelId,
-        messages: wire(input.messages, input.memory),
+        messages: wire(input.messages, input.memory, input.images),
         tools: TOOL_SCHEMA,
         stream: true,
       }),

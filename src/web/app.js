@@ -74,6 +74,90 @@ document.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeModelMenu()
 })
+/**
+ * Pictures attached to the next message.
+ *
+ * Three ways in, because people reach for all three: the + button, a paste
+ * from the clipboard, and a drop onto the thread. A path typed as @shot.png
+ * is a fourth, handled on the server with the other mentions.
+ */
+const attachedRow = document.getElementById("attached")
+const filePicker = document.getElementById("picker")
+const attachBtn = document.getElementById("attach")
+let attachments = []
+
+/** Matches the server's cap, so nothing is accepted here that is refused there. */
+const MAX_IMAGE_BYTES = 5_000_000
+const MAX_IMAGES = 10
+
+function renderAttached() {
+  attachedRow.innerHTML = ""
+  attachedRow.hidden = attachments.length === 0
+  attachments.forEach((image, index) => {
+    const cell = document.createElement("div")
+    cell.className = "shot"
+    const thumb = document.createElement("img")
+    thumb.src = image.dataUrl
+    thumb.alt = image.name
+    cell.title = image.name
+    cell.appendChild(thumb)
+    const drop = document.createElement("button")
+    drop.type = "button"
+    drop.textContent = "×"
+    drop.title = "Remove " + image.name
+    drop.onclick = () => { attachments.splice(index, 1); renderAttached() }
+    cell.appendChild(drop)
+    attachedRow.appendChild(cell)
+  })
+  sendBtn.disabled = busy || (!input.value.trim() && attachments.length === 0)
+}
+
+/** Whether the model on the picker can actually be shown one. */
+function modelSees() {
+  const option = modelOptions.find((each) => each.value === currentModel)
+  return Boolean(option && option.vision)
+}
+
+function addFiles(files) {
+  for (const file of files) {
+    if (attachments.length >= MAX_IMAGES) { note("at most " + MAX_IMAGES + " images per message"); break }
+    if (!file.type.startsWith("image/")) { note(file.name + " is not an image"); continue }
+    if (file.size > MAX_IMAGE_BYTES) {
+      note(file.name + " is " + Math.round(file.size / 1024) + " KB, over the " + (MAX_IMAGE_BYTES / 1e6) + " MB limit")
+      continue
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      attachments.push({ name: file.name, dataUrl: String(reader.result) })
+      renderAttached()
+      // Said once, when the picture is added, rather than after it is sent.
+      if (!modelSees()) note("the selected model cannot see images - pick a vision model before sending")
+    }
+    reader.readAsDataURL(file)
+  }
+}
+
+attachBtn.onclick = () => filePicker.click()
+filePicker.onchange = () => { addFiles([...filePicker.files]); filePicker.value = "" }
+
+input.addEventListener("paste", (event) => {
+  const files = [...(event.clipboardData?.items ?? [])]
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter(Boolean)
+  // Only swallow the paste when it really was a picture; pasted text still
+  // has to reach the composer.
+  if (files.length) { event.preventDefault(); addFiles(files) }
+})
+
+for (const name of ["dragover", "drop"]) {
+  thread.addEventListener(name, (event) => {
+    if (![...(event.dataTransfer?.types ?? [])].includes("Files")) return
+    event.preventDefault()
+    if (name === "drop") addFiles([...(event.dataTransfer?.files ?? [])])
+  })
+}
+
 const hint = document.getElementById("hint")
 const sessionList = document.getElementById("session-list")
 
@@ -205,7 +289,7 @@ function emptyState() {
   thread.innerHTML = '<div class="empty-hint"><h1>What should we work on?</h1><p>Ask about your code, or try <code>/help</code> in the TUI.</p></div>'
 }
 
-function turn(kind, text) {
+function turn(kind, text, images) {
   if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
   const wrap = document.createElement("div")
   wrap.className = "turn " + (kind === "user" ? "user" : "agent")
@@ -213,6 +297,23 @@ function turn(kind, text) {
   const body = wrap.querySelector(".body")
   if (kind === "user") body.textContent = text
   else body.innerHTML = markdown(text)
+  // The transcript shows what was sent, so a question about a picture still
+  // makes sense when the conversation is read back later.
+  if (images && images.length) {
+    const row = document.createElement("div")
+    row.className = "attached"
+    for (const image of images) {
+      const cell = document.createElement("div")
+      cell.className = "shot"
+      cell.title = image.name
+      const thumb = document.createElement("img")
+      thumb.src = image.dataUrl
+      thumb.alt = image.name
+      cell.appendChild(thumb)
+      row.appendChild(cell)
+    }
+    body.appendChild(row)
+  }
   thread.appendChild(wrap)
   scrollDown()
   return body
@@ -762,7 +863,7 @@ function note(text) {
 
 async function submit() {
   const text = input.value.trim()
-  if (!text || busy) return
+  if ((!text && !attachments.length) || busy) return
 
   // Commands never reach the model.
   if (text.startsWith("/")) {
@@ -790,7 +891,11 @@ async function submit() {
   }
 
   setBusy(true)
-  turn("user", text)
+  // Taken now, so removing one mid-flight cannot change what was sent.
+  const sending = attachments
+  attachments = []
+  renderAttached()
+  turn("user", text, sending)
 
   let body = null
   let raw = ""
@@ -803,7 +908,7 @@ async function submit() {
     response = await fetch("/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, sessionId, provider: currentModel }),
+      body: JSON.stringify({ text, sessionId, provider: currentModel, images: sending }),
       signal: controller.signal,
     })
   } catch {
@@ -923,7 +1028,7 @@ async function stopTurn() {
   if (controller) controller.abort()
 }
 stopBtn.onclick = stopTurn
-input.oninput = () => { sendBtn.disabled = busy || !input.value.trim() }
+input.oninput = () => { sendBtn.disabled = busy || (!input.value.trim() && !attachments.length) }
 input.onkeydown = (e) => {
   // The palette owns enter while it is open, otherwise this would submit the
   // half-typed command the palette was about to complete.
@@ -943,6 +1048,7 @@ fetch("/api/providers").then((r) => r.json()).then((data) => {
     kind: p.kind,
     section: p.section,
     ready: p.ready,
+    vision: p.vision,
   }))
   // Open on something that can actually answer, rather than on whichever text
   // model happens to be first and may have no key behind it.

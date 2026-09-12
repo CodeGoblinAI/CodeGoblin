@@ -81,6 +81,69 @@ describe("expanding mentions", () => {
     const result = await expandMentions("no mentions here", root)
     expect(result.content).toBe("no mentions here")
     expect(result.files).toEqual([])
+    expect(result.images).toEqual([])
+  })
+})
+
+describe("mentioning a picture", () => {
+  const root = path.join(os.tmpdir(), "cg-mention-img-" + Math.random().toString(36).slice(2))
+
+  /** The smallest real PNG: 1x1, so these stay about the plumbing. */
+  const PNG = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  )
+
+  test("an image is attached as an image, not read as text", async () => {
+    await fs.mkdir(root, { recursive: true })
+    await fs.writeFile(path.join(root, "shot.png"), PNG)
+
+    const result = await expandMentions("what is in @shot.png", root)
+
+    expect(result.images).toHaveLength(1)
+    expect(result.images[0]!.name).toBe("shot.png")
+    expect(result.images[0]!.dataUrl.startsWith("data:image/png;base64,")).toBe(true)
+    // It counts as attached, and its bytes never land in the prompt.
+    expect(result.files).toEqual(["shot.png"])
+    expect(result.content).toBe("what is in @shot.png")
+  })
+
+  test("the type comes from the extension, whatever its case", async () => {
+    await fs.mkdir(root, { recursive: true })
+    await fs.writeFile(path.join(root, "Photo.JPG"), PNG)
+
+    const result = await expandMentions("describe @Photo.JPG", root)
+    expect(result.images[0]!.dataUrl.startsWith("data:image/jpeg;base64,")).toBe(true)
+  })
+
+  test("text and pictures in one message each go where they belong", async () => {
+    await fs.mkdir(root, { recursive: true })
+    await fs.writeFile(path.join(root, "notes.txt"), "some notes", "utf8")
+    await fs.writeFile(path.join(root, "shot.png"), PNG)
+
+    const result = await expandMentions("compare @notes.txt and @shot.png", root)
+    expect(result.content).toContain("some notes")
+    expect(result.images.map((image) => image.name)).toEqual(["shot.png"])
+  })
+
+  test("an image too large to send says so instead of being dropped", async () => {
+    await fs.mkdir(root, { recursive: true })
+    await fs.writeFile(path.join(root, "huge.png"), Buffer.alloc(6_000_000))
+
+    const result = await expandMentions("look at @huge.png", root)
+    expect(result.images).toEqual([])
+    // Silence would read as "there is nothing here", which is a different fact.
+    expect(result.content).toContain("huge.png")
+    expect(result.content).toContain("over the limit")
+  })
+
+  test("a file that only looks like a picture is not forced into one", async () => {
+    await fs.mkdir(root, { recursive: true })
+    await fs.writeFile(path.join(root, "readme.md"), "# not a picture", "utf8")
+
+    const result = await expandMentions("read @readme.md", root)
+    expect(result.images).toEqual([])
+    expect(result.content).toContain("# not a picture")
   })
 })
 

@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url"
 import { runAgent, type Message } from "../core/agent"
 import {
   resolveSelection,
+  acceptsImages,
   allSelections,
   defaultSelection,
   selectionsByKind,
@@ -142,6 +143,8 @@ async function handle(request: Request): Promise<Response> {
         label: s.provider.label + " " + s.model.label,
         reasoning: Boolean(s.model.reasoning),
         ready: Boolean(apiKey(s.provider.id)),
+        /** Can be shown a picture, as distinct from one that draws them. */
+        vision: acceptsImages(s),
       })),
     })
   }
@@ -437,7 +440,13 @@ async function projectFiles(): Promise<string[]> {
   }
 
   if (url.pathname === "/api/chat" && request.method === "POST") {
-    const body = (await request.json()) as { text?: string; sessionId?: string; provider?: string }
+    const body = (await request.json()) as {
+      text?: string
+      sessionId?: string
+      provider?: string
+      /** Pictures the page attached, already data URLs. */
+      images?: { name?: string; dataUrl?: string }[]
+    }
     const text = (body.text ?? "").trim()
     if (!text) return json({ error: "empty prompt" }, 400)
 
@@ -460,8 +469,19 @@ async function projectFiles(): Promise<string[]> {
     // Mentions are read here, so the stored message carries its files and a
     // resumed conversation still has the context it was answered with.
     const mentioned = await expandMentions(text, root)
+
+    // Pictures arrive two ways and mean the same thing once they are here:
+    // attached in the page, or @mentioned by path like any other file.
+    const pasted = (body.images ?? [])
+      .filter((image) => typeof image?.dataUrl === "string" && image.dataUrl.startsWith("data:image/"))
+      .slice(0, 10)
+      .map((image) => ({ name: String(image.name ?? "image"), dataUrl: String(image.dataUrl) }))
+    const images = [...pasted, ...mentioned.images]
+
     session.messages.push(
-      mentioned.files.length ? { role: "user", content: mentioned.content, display: text } : { role: "user", content: text },
+      mentioned.files.length || images.length
+        ? { role: "user", content: mentioned.content, display: text, images }
+        : { role: "user", content: text },
     )
 
     // Server-sent events: the browser gets the same event stream the TUI sees.
@@ -500,6 +520,7 @@ async function projectFiles(): Promise<string[]> {
             messages: session.messages as Message[],
             root,
             contextWindow: model.contextWindow,
+            images: acceptsImages(selection),
             permissions: permissionsFor(session.id, send),
             memory: await memory.recall({ project: root, session: session.id }),
             history: edits,

@@ -51,7 +51,7 @@ import { exportSession } from "../core/export"
 import { runMedia, describeMedia, type MediaKind } from "../core/media"
 import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
-import { defaultSelection, resolveSelection, type Selection, kindOf } from "../core/providers"
+import { defaultSelection, resolveSelection, acceptsImages, type Selection, kindOf } from "../core/providers"
 import { apiKey, connect, disconnect, connections, storePath, envVariable } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
 import { isCommand, runCommand } from "../core/commands"
@@ -1225,13 +1225,24 @@ async function send() {
   // What was folded away goes back before anything sees it.
   const whole = unfoldPastes(text)
   const mentioned = await expandMentions(whole, process.cwd())
+  const seeing = acceptsImages(selection)
   messages.push(
     mentioned.files.length || whole !== text
-      ? { role: "user", content: mentioned.content, display: text }
+      ? { role: "user", content: mentioned.content, display: text, images: mentioned.images }
       : { role: "user", content: text },
   )
   transcript.push({ kind: "user", text })
   if (mentioned.files.length) transcript.push({ kind: "tool", text: "attached " + mentioned.files.join(", ") })
+  // Attaching a picture to a model that cannot see one is a mistake worth
+  // catching here, where the model is named, rather than leaving it to be
+  // inferred from an answer that does not mention the image.
+  if (mentioned.images.length && !seeing) {
+    transcript.push({
+      kind: "tool",
+      text: selection.model.label + " cannot see images - pick a vision model to send " +
+        mentioned.images.map((image) => image.name).join(", "),
+    })
+  }
   streaming = true
   status = ""
   startSpinner()
@@ -1250,6 +1261,7 @@ async function send() {
       messages,
       root: process.cwd(),
       contextWindow: selection.model.contextWindow,
+      images: seeing,
       permissions,
       history: edits,
       signal: turn.signal,
