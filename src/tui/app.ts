@@ -51,7 +51,7 @@ import { exportSession } from "../core/export"
 import { runMedia, describeMedia, type MediaKind } from "../core/media"
 import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
-import { defaultSelection, resolveSelection, acceptsImages, type Selection, kindOf } from "../core/providers"
+import { defaultSelection, resolveSelection, acceptsImages, effortFor, type Selection, kindOf } from "../core/providers"
 import { apiKey, connect, disconnect, connections, storePath, envVariable } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
 import { isCommand, runCommand } from "../core/commands"
@@ -482,7 +482,22 @@ function render() {
   const promptHeight = input && !secret && !streaming && !pending
     ? Math.min(COMPOSER_MAX_LINES, wrapToWidth(input, Math.max(10, cols - 8)).length)
     : 1
-  const composerHeight = 3 + promptHeight + paletteLines.length + planLines.length
+  /**
+   * Everything drawn below the conversation, counted before the conversation
+   * is measured against it.
+   *
+   * The palette and the plan were counted; the popups were not. So opening
+   * one made the frame taller than the terminal, and the terminal answered
+   * the only way it can - by scrolling, which pushed the top of the screen
+   * away. /status was the clearest case: ten rows of panel, ten rows of frame
+   * gone off the top.
+   *
+   * Both boxes are title, rows, and two borders.
+   */
+  const overlayHeight = overlay ? overlay.rows.length + 3 : 0
+  const pendingHeight = pending ? DECISIONS.length + 3 : 0
+  const composerHeight =
+    3 + promptHeight + paletteLines.length + planLines.length + overlayHeight + pendingHeight
   const room = Math.max(1, rows - composerHeight - 1)
 
   const maxScroll = Math.max(0, lines.length - room)
@@ -821,6 +836,31 @@ async function openSessions() {
   )
 }
 
+/**
+ * Which key to forget.
+ *
+ * /disconnect used to demand the provider id typed from memory, and the id is
+ * not the label - "zai" is GLM, "google" is Gemini. The list already existed
+ * for /connect; this makes it something you can choose from.
+ */
+function openDisconnect() {
+  const stored = connections().filter((item) => item.source === "file")
+  if (!stored.length) {
+    status = "no stored keys to remove"
+    return
+  }
+  dialog = Dialogs.open(
+    "disconnect",
+    "Remove a stored key",
+    stored.map((item) => ({
+      label: item.id,
+      hint: item.type + (item.hint ? "  " + item.hint : ""),
+      value: item.id,
+    })),
+    { footer: "enter twice removes this key . esc closes", size: "medium" },
+  )
+}
+
 /** How generation comes out. A popup, because a settings screen should be one. */
 function openSettings() {
   dialog = Dialogs.open("settings", "Generation settings", settingsRows(), {
@@ -920,6 +960,24 @@ async function chooseInDialog() {
     scroll = 0
     edits.reset()
     status = "opened " + session.title
+    closeDialog()
+    render()
+    return
+  }
+
+  if (dialog.kind === "disconnect") {
+    // Two presses, like deleting a conversation. A key is not recoverable
+    // from here - once it is gone the only way back is finding it again
+    // wherever it came from - and one keystroke is not enough of a gap
+    // between "which one is this?" and "that one is gone".
+    if (dialog.armed !== row.value) {
+      dialog = { ...dialog, armed: row.value }
+      render()
+      return
+    }
+    const gone = await disconnect(row.value)
+    refreshConnected()
+    status = gone ? "disconnected " + row.value : "no stored key for " + row.value
     closeDialog()
     render()
     return
@@ -1046,6 +1104,16 @@ async function send() {
       void settingsStore.save(settings)
       status = "theme: " + result.name
     }
+    if (result.kind === "effort") {
+      settings = { ...settings, effort: result.level }
+      void settingsStore.save(settings)
+      status =
+        result.level === "auto"
+          ? "effort: auto - the provider decides"
+          : selection.model.reasoning
+            ? "effort: " + result.level
+            : "effort: " + result.level + " (saved; " + selection.model.label + " does not reason)"
+    }
     if (result.kind === "mouse") {
       settings = { ...settings, mouse: !settings.mouse }
       void settingsStore.save(settings)
@@ -1118,9 +1186,13 @@ async function send() {
       }
     }
     if (result.kind === "disconnect") {
-      const gone = await disconnect(result.provider)
-      refreshConnected()
-      status = gone ? "disconnected " + result.provider : "no stored key for " + result.provider
+      if (!result.provider) {
+        openDisconnect()
+      } else {
+        const gone = await disconnect(result.provider)
+        refreshConnected()
+        status = gone ? "disconnected " + result.provider : "no stored key for " + result.provider
+      }
     }
     if (result.kind === "status") {
       const context = usage(messages, selection.model.contextWindow)
@@ -1137,6 +1209,12 @@ async function send() {
         ],
         ["theme", settings.theme],
         ["thinking", settings.thinking ? "shown" : "hidden"],
+        [
+          "effort",
+          settings.effort === "auto"
+            ? "auto"
+            : settings.effort + (selection.model.reasoning ? "" : "  (not sent - this model does not reason)"),
+        ],
         ["approved", approved.length ? approved.join(", ") : "nothing yet"],
         ["undo", edits.canUndo() ? "available" : "nothing to take back"],
         ["working in", process.cwd()],
@@ -1264,6 +1342,7 @@ async function send() {
       images: seeing,
       permissions,
       history: edits,
+      effort: effortFor(selection.model, settings.effort),
       signal: turn.signal,
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
     })) {

@@ -25,11 +25,34 @@ export type Settings = {
    * still selects in most terminals when it is on.
    */
   mouse: boolean
+  /**
+   * How hard a reasoning model should think.
+   *
+   * "auto" sends nothing and lets the provider pick, which is the right
+   * default: an effort we chose is a guess about a model we did not train.
+   * The other three ride along as reasoning_effort, and only on models that
+   * declare themselves reasoning models - sending it to one that does not
+   * understand it is how a provider starts rejecting whole requests.
+   */
+  effort: Effort
 }
+
+/** Sent as reasoning_effort, except for "auto", which is sent as nothing. */
+export type Effort = "auto" | "low" | "medium" | "high"
+
+export const EFFORTS: Effort[] = ["auto", "low", "medium", "high"]
+
+export const isEffort = (value: unknown): value is Effort =>
+  typeof value === "string" && (EFFORTS as string[]).includes(value)
 
 const file = path.join(Global.Path.state, "settings.json")
 
-export const defaults = (): Settings => ({ theme: DEFAULT_THEME, thinking: true, mouse: false })
+export const defaults = (): Settings => ({
+  theme: DEFAULT_THEME,
+  thinking: true,
+  mouse: false,
+  effort: "auto",
+})
 
 export function normalise(raw: unknown): Settings {
   const base = defaults()
@@ -39,6 +62,7 @@ export function normalise(raw: unknown): Settings {
     theme: typeof value.theme === "string" && isTheme(value.theme) ? value.theme : base.theme,
     thinking: typeof value.thinking === "boolean" ? value.thinking : base.thinking,
     mouse: typeof value.mouse === "boolean" ? value.mouse : base.mouse,
+    effort: isEffort(value.effort) ? value.effort : base.effort,
   }
 }
 

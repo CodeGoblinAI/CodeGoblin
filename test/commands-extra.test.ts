@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { runCommand, COMMANDS } from "../src/core/commands"
 import { THEMES, themeNames, paletteOf, isTheme, DEFAULT_THEME } from "../src/core/theme"
 import { normalise, defaults } from "../src/core/settings"
+import { effortFor } from "../src/core/providers"
 import { toMarkdown, slug } from "../src/core/export"
 import type { Session } from "../src/core/sessions"
 
@@ -84,11 +85,23 @@ describe("settings", () => {
       theme: "midnight",
       thinking: false,
       mouse: false,
+      effort: "auto",
     })
     expect(normalise({ theme: "not-a-theme", thinking: "yes" })).toEqual(defaults())
     expect(normalise(null)).toEqual(defaults())
     expect(normalise("garbage")).toEqual(defaults())
     expect(normalise({})).toEqual(defaults())
+  })
+
+  test("an effort it does not recognise falls back rather than reaching the wire", () => {
+    expect(normalise({ effort: "maximum" }).effort).toBe("auto")
+    expect(normalise({ effort: 3 }).effort).toBe("auto")
+    expect(normalise({ effort: "high" }).effort).toBe("high")
+  })
+
+  test("settings written before effort existed still load", () => {
+    // A file from an older build has no effort key at all.
+    expect(normalise({ theme: "ember", thinking: true, mouse: true }).effort).toBe("auto")
   })
 })
 
@@ -228,5 +241,66 @@ describe("who gets the mouse", () => {
   test("/mouse is a command that toggles it", () => {
     expect(runCommand("/mouse")).toEqual({ kind: "mouse" })
     expect(COMMANDS.some((c) => c.name === "/mouse")).toBe(true)
+  })
+})
+
+/**
+ * Effort only reaches models that reason.
+ *
+ * A provider handed a reasoning_effort it does not understand can reject the
+ * whole request, so a preference must never be able to break a model it was
+ * not about.
+ */
+describe("choosing how hard a model thinks", () => {
+  const reasoner = { id: "r", label: "Reasoner", reasoning: true, contextWindow: 128000 }
+  const plain = { id: "p", label: "Plain", contextWindow: 128000 }
+
+  test("auto sends nothing at all", () => {
+    expect(effortFor(reasoner, "auto")).toBeUndefined()
+    expect(effortFor(plain, "auto")).toBeUndefined()
+  })
+
+  test("a level reaches a reasoning model", () => {
+    expect(effortFor(reasoner, "low")).toBe("low")
+    expect(effortFor(reasoner, "medium")).toBe("medium")
+    expect(effortFor(reasoner, "high")).toBe("high")
+  })
+
+  test("and never reaches one that does not reason", () => {
+    for (const level of ["low", "medium", "high"]) {
+      expect(effortFor(plain, level)).toBeUndefined()
+    }
+  })
+
+  test("nonsense is not forwarded either", () => {
+    expect(effortFor(reasoner, "maximum")).toBeUndefined()
+    expect(effortFor(reasoner, "")).toBeUndefined()
+  })
+
+  test("/effort refuses a level nobody has", () => {
+    const result = runCommand("/effort maximum")
+    expect(result.kind).toBe("message")
+    expect(result.kind === "message" && result.text).toContain("unknown effort")
+  })
+
+  test("/effort with a real level asks for it", () => {
+    expect(runCommand("/effort high")).toEqual({ kind: "effort", level: "high" })
+    expect(runCommand("/effort auto")).toEqual({ kind: "effort", level: "auto" })
+  })
+
+  test("bare /effort explains rather than guessing", () => {
+    const result = runCommand("/effort")
+    expect(result.kind).toBe("message")
+    expect(result.kind === "message" && result.text).toContain("auto|low|medium|high")
+  })
+})
+
+describe("removing a key without typing its id", () => {
+  test("bare /disconnect asks for the picker instead of printing usage", () => {
+    expect(runCommand("/disconnect")).toEqual({ kind: "disconnect", provider: undefined })
+  })
+
+  test("naming one still works", () => {
+    expect(runCommand("/disconnect tripo")).toEqual({ kind: "disconnect", provider: "tripo" })
   })
 })

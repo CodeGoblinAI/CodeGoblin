@@ -48,6 +48,14 @@ export const THEMES: Record<string, { label: string; palette: Palette }> = {
       green: "#ffa447", greenBright: "#ffc178", gold: "#e8c17a", red: "#ff7a6b", orange: "#ffd48a",
     },
   },
+  dracula: {
+    label: "the classic purple dark",
+    palette: {
+      step1: "#282a36", step2: "#2d3040", step3: "#343746", step5: "#44475a", step7: "#6272a4",
+      step11: "#9aa4d0", step12: "#f8f8f2",
+      green: "#50fa7b", greenBright: "#8affa5", gold: "#f1fa8c", red: "#ff5555", orange: "#ffb86c",
+    },
+  },
   paper: {
     label: "light, for a bright room",
     palette: {

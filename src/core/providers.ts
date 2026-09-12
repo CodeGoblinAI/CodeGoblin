@@ -73,6 +73,20 @@ export function authHeaders(provider: Provider, key: string): Record<string, str
   return provider.auth ? provider.auth(key) : { authorization: `Bearer ${key}` }
 }
 
+/**
+ * The reasoning effort to send for this model, or nothing at all.
+ *
+ * "auto" means the provider decides, which is the honest default - an effort
+ * we picked is a guess about a model we did not train. And a model that does
+ * not reason gets nothing regardless of the setting: providers reject the
+ * whole request over a field they do not know, so a preference must never be
+ * able to break a model it was not about.
+ */
+export function effortFor(model: Model, setting: string): "low" | "medium" | "high" | undefined {
+  if (setting !== "low" && setting !== "medium" && setting !== "high") return undefined
+  return model.reasoning ? setting : undefined
+}
+
 export const PROVIDERS: Record<string, Provider> = {
   deepseek: {
     id: "deepseek",

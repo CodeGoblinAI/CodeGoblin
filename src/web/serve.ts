@@ -16,6 +16,7 @@ import {
   defaultSelection,
   selectionsByKind,
   kindOf,
+  effortFor,
   KIND_LABEL,
   CONNECTABLE,
 } from "../core/providers"
@@ -185,13 +186,14 @@ async function projectFiles(): Promise<string[]> {
         { value: "/redo", hint: "reapply what /undo took back" },
         { value: "/memory", hint: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
         { value: "/connect", hint: "connect a provider - pick one, paste its key", expands: true },
-        { value: "/disconnect", hint: "remove a stored key: /disconnect tripo" },
+        { value: "/disconnect", hint: "remove a stored key - pick one", expands: true },
         { value: "/status", hint: "what this session is using right now" },
         { value: "/export", hint: "save the conversation as markdown" },
         { value: "/rename", hint: "retitle this conversation" },
         { value: "/theme", hint: "change colours", expands: true },
         { value: "/thinking", hint: "show or hide the model's reasoning" },
-      { value: "/set", hint: "how generation comes out: /set 3d.topology quad", expands: true },
+        { value: "/effort", hint: "how hard a reasoning model thinks: /effort high", expands: true },
+        { value: "/settings", hint: "how generation comes out: /settings 3d.topology quad", expands: true },
       ],
       models,
       sessions: saved.map((entry) => ({ value: "/resume " + entry.id, hint: entry.title })),
@@ -524,6 +526,7 @@ async function projectFiles(): Promise<string[]> {
             permissions: permissionsFor(session.id, send),
             memory: await memory.recall({ project: root, session: session.id }),
             history: edits,
+            effort: effortFor(model, (await settingsStore.load()).effort),
             signal: turn.signal,
           })) {
             send(event)

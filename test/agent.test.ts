@@ -434,6 +434,47 @@ describe("which models can be shown one", () => {
   })
 })
 
+describe("reasoning effort on the wire", () => {
+  /** What the loop actually posted. */
+  async function bodySentWith(effort?: "low" | "medium" | "high"): Promise<Record<string, unknown>> {
+    let sent: Record<string, unknown> = {}
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      sent = JSON.parse(String(init.body))
+      return answers("ok")
+    }) as unknown as typeof fetch
+
+    for await (const _ of runAgent({
+      provider,
+      modelId: "test-model",
+      apiKey: "k",
+      messages: [{ role: "user", content: "go" }],
+      root: process.cwd(),
+      maxTurns: 1,
+      effort,
+    })) {
+      // drained
+    }
+    return sent
+  }
+
+  test("a level given reaches the request", async () => {
+    expect((await bodySentWith("high")).reasoning_effort).toBe("high")
+    expect((await bodySentWith("low")).reasoning_effort).toBe("low")
+  })
+
+  test("no level means the field is absent, not empty", async () => {
+    const body = await bodySentWith(undefined)
+    expect("reasoning_effort" in body).toBe(false)
+  })
+
+  test("the rest of the request is unchanged either way", async () => {
+    const body = await bodySentWith("medium")
+    expect(body.model).toBe("test-model")
+    expect(body.stream).toBe(true)
+    expect(Array.isArray(body.tools)).toBe(true)
+  })
+})
+
 describe("the loop itself", () => {
   test("a refusal from the provider is raised, not swallowed", async () => {
     globalThis.fetch = (async () => new Response("no key for you", { status: 401 })) as typeof fetch

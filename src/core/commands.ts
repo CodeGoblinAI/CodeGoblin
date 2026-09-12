@@ -1,5 +1,6 @@
 import { PROVIDERS, allSelections, resolveSelection, selectionsOfKind, KIND_LABEL, KIND_ORDER } from "./providers"
 import { THEMES, isTheme } from "./theme"
+import { isEffort, type Effort } from "./settings"
 import { MEDIA_KINDS, type MediaKind } from "./media"
 
 /**
@@ -22,13 +23,14 @@ export type CommandResult =
   | { kind: "rename"; title: string }
   | { kind: "theme"; name: string }
   | { kind: "thinking" }
+  | { kind: "effort"; level: Effort }
   | { kind: "mouse" }
   | { kind: "settings" }
   | { kind: "diff" }
   | { kind: "media"; media: MediaKind; line: string }
   | { kind: "memory"; action: "list" | "add" | "forget" | "clear"; text?: string }
   | { kind: "connect"; provider?: string }
-  | { kind: "disconnect"; provider: string }
+  | { kind: "disconnect"; provider?: string }
   | { kind: "none" }
 
 export const COMMANDS = [
@@ -40,13 +42,14 @@ export const COMMANDS = [
   { name: "/undo", description: "put back the files the last turn changed" },
   { name: "/redo", description: "reapply what /undo took back" },
   { name: "/connect", description: "connect a provider - pick one, paste its key" },
-  { name: "/disconnect", description: "remove a stored key: /disconnect tripo" },
+  { name: "/disconnect", description: "remove a stored key - pick one, or /disconnect tripo" },
   { name: "/memory", description: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
   { name: "/status", description: "what this session is using right now" },
   { name: "/export", description: "save as markdown: /export, or /export notes/chat.md" },
   { name: "/rename", description: "retitle this conversation: /rename plan review" },
   { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
+  { name: "/effort", description: "how hard a reasoning model thinks: /effort high" },
   { name: "/mouse", description: "wheel and clicks, or the terminal's own text selection" },
   { name: "/settings", description: "how generation comes out - opens a panel" },
   { name: "/diff", description: "what this session changed, file by file" },
@@ -115,10 +118,11 @@ export function runCommand(text: string): CommandResult {
     }
     case "/connect":
       return { kind: "connect", provider: argument || undefined }
-    case "/disconnect": {
-      if (!argument) return { kind: "message", text: "usage: /disconnect <provider>" }
-      return { kind: "disconnect", provider: argument }
-    }
+    // Bare opens the picker, the way /connect already does. Naming the
+    // provider from memory was the only way in, and the id is not always the
+    // label - "zai" for GLM, "google" for Gemini.
+    case "/disconnect":
+      return { kind: "disconnect", provider: argument || undefined }
     case "/status":
       return { kind: "status" }
     case "/export":
@@ -134,6 +138,21 @@ export function runCommand(text: string): CommandResult {
       return { kind: "diff" }
     case "/thinking":
       return { kind: "thinking" }
+    case "/effort": {
+      if (!argument) {
+        return {
+          kind: "message",
+          text:
+            "usage: /effort auto|low|medium|high" +
+            String.fromCharCode(10) +
+            "auto lets the provider decide. The rest only reach reasoning models.",
+        }
+      }
+      if (!isEffort(argument)) {
+        return { kind: "message", text: `unknown effort: ${argument}  (auto, low, medium, high)` }
+      }
+      return { kind: "effort", level: argument }
+    }
     case "/mouse":
       return { kind: "mouse" }
     case "/rename": {

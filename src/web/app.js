@@ -706,6 +706,32 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/effort") {
+    const EFFORTS = ["auto", "low", "medium", "high"]
+    if (!argument) {
+      note("usage: /effort auto|low|medium|high" + String.fromCharCode(10) +
+        "auto lets the provider decide. The rest only reach reasoning models." + String.fromCharCode(10) +
+        "now: " + (webSettings.effort || "auto"))
+      return true
+    }
+    if (!EFFORTS.includes(argument)) {
+      note("unknown effort: " + argument + "  (auto, low, medium, high)")
+      return true
+    }
+    const result = await saveSettings({ effort: argument })
+    const level = result ? result.settings.effort : argument
+    const model = modelOptions.find((option) => option.value === currentModel)
+    const reasons = model && /reasoning/.test(model.label)
+    note(
+      level === "auto"
+        ? "effort: auto - the provider decides"
+        : reasons
+          ? "effort: " + level
+          : "effort: " + level + " (saved; this model does not reason, so it is not sent)",
+    )
+    return true
+  }
+
   if (name === "/rename") {
     if (!argument) { note("usage: /rename a shorter title"); return true }
     if (!sessionId) { note("nothing to rename yet - say something first"); return true }
@@ -741,7 +767,7 @@ async function runCommand(text) {
     return true
   }
 
-  if (name === "/set") {
+  if (name === "/settings" || name === "/set") {
     const NEWLINE = String.fromCharCode(10)
     const [id, ...rest] = argument.split(/\s+/).filter(Boolean)
     const options = paletteData.mediaOptions || []
@@ -804,7 +830,15 @@ async function runCommand(text) {
   }
 
   if (name === "/disconnect") {
-    if (!argument) { note("usage: /disconnect <provider>"); return true }
+    if (!argument) {
+      const stored = (paletteData.connectable || []).filter((entry) => entry.connected)
+      note(
+        stored.length
+          ? "which key? " + stored.map((entry) => entry.id).join(", ")
+          : "no stored keys to remove",
+      )
+      return true
+    }
     const result = await fetch("/api/connect?provider=" + encodeURIComponent(argument), { method: "DELETE" })
       .then((r) => r.json())
       .catch(() => ({ message: "could not reach the server" }))
@@ -1202,7 +1236,7 @@ function itemsFor(text, cursor) {
       .filter((item) => !q || item.value.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q))
       .slice(0, 9)
   }
-  if (head === "/set" && hasArgument) {
+  if ((head === "/settings" || head === "/set") && hasArgument) {
     const options = paletteData.mediaOptions || []
     const rest = text.slice(text.indexOf(" ") + 1)
     const [word, ...tail] = rest.split(/\s+/)

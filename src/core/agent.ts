@@ -148,6 +148,14 @@ export async function* runAgent(input: {
   memory?: string
   /** Given a turn, keeps the previous state of every file the turn writes. */
   history?: History
+  /**
+   * How hard the model should think, for models that take it.
+   *
+   * The caller decides whether this model understands the field - a provider
+   * handed a reasoning_effort it does not know can reject the whole request,
+   * so the loop only forwards what it is given.
+   */
+  effort?: "low" | "medium" | "high"
   maxTurns?: number
   signal?: AbortSignal
 }): AsyncGenerator<AgentEvent, void, unknown> {
@@ -176,6 +184,7 @@ export async function* runAgent(input: {
         messages: wire(input.messages, input.memory, input.images),
         tools: TOOL_SCHEMA,
         stream: true,
+        ...(input.effort ? { reasoning_effort: input.effort } : {}),
       }),
       signal: input.signal,
     })
