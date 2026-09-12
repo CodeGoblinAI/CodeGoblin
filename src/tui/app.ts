@@ -8,6 +8,8 @@
  */
 import { ansi, theme, dim, invert, noInvert, applyTheme } from "./ansi"
 import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
+import { THEMES } from "../core/theme"
+import { EFFORTS } from "../core/settings"
 import { createKeyReader } from "./keys"
 import * as Dialogs from "./dialog"
 import { changesIn, summarise, countsOf, statusLetter, type Changes } from "../core/changes"
@@ -51,7 +53,7 @@ import { exportSession } from "../core/export"
 import { runMedia, describeMedia, type MediaKind } from "../core/media"
 import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
-import { defaultSelection, resolveSelection, acceptsImages, effortFor, type Selection, kindOf } from "../core/providers"
+import { defaultSelection, resolveSelection, acceptsImages, effortFor, takesEffort, type Selection, kindOf } from "../core/providers"
 import { apiKey, connect, disconnect, connections, storePath, envVariable } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
 import { isCommand, runCommand } from "../core/commands"
@@ -690,7 +692,7 @@ function render() {
   const showCaret = caretAt && !dialog
 
   out.write(
-    ansi.hideCursor + ansi.clear + painted.join(String.fromCharCode(10)) +
+    theme.ground + ansi.hideCursor + ansi.clear + painted.join(String.fromCharCode(10)) +
       (showCaret ? ansi.moveTo(caretAt!.row, caretAt!.col) + ansi.showCursor : ""),
   )
 }
@@ -861,6 +863,53 @@ function openDisconnect() {
   )
 }
 
+/**
+ * Which colours.
+ *
+ * Five schemes is a list to look at, not a set of names to memorise, and
+ * typing one from a printed list is the interaction a picker exists to
+ * replace. Each row carries its own description, so the choice is made on
+ * what the theme is rather than on what it is called.
+ */
+function openThemePicker() {
+  dialog = Dialogs.open(
+    "theme",
+    "Colours",
+    Object.entries(THEMES).map(([name, entry]) => ({
+      label: (name === settings.theme ? "• " : "  ") + name,
+      hint: entry.label,
+      value: name,
+    })),
+    { footer: "enter applies . esc closes", size: "medium" },
+  )
+}
+
+/**
+ * How hard the model should think.
+ *
+ * Says up front whether the model on the picker takes it at all, because
+ * "high" on a model that does not reason is a preference with no effect, and
+ * finding that out from the status line afterwards is finding it out late.
+ */
+function openEffortPicker() {
+  const takes = takesEffort(selection.model)
+  dialog = Dialogs.open(
+    "effort",
+    takes ? "Effort  ·  " + selection.model.label : "Effort  ·  " + selection.model.label + " does not reason",
+    EFFORTS.map((level) => ({
+      label: (level === settings.effort ? "• " : "  ") + level,
+      hint:
+        level === "auto"
+          ? "let the provider decide"
+          : takes
+            ? "sent as reasoning_effort"
+            : "saved, but not sent to this model",
+      value: level,
+    })),
+    { footer: "enter applies . esc closes", size: "medium" },
+  )
+}
+
 /** How generation comes out. A popup, because a settings screen should be one. */
 function openSettings() {
   dialog = Dialogs.open("settings", "Generation settings", settingsRows(), {
@@ -983,6 +1032,30 @@ async function chooseInDialog() {
     return
   }
 
+  if (dialog.kind === "theme") {
+    settings = { ...settings, theme: row.value }
+    applyTheme(row.value)
+    void settingsStore.save(settings)
+    status = "theme: " + row.value
+    closeDialog()
+    render()
+    return
+  }
+
+  if (dialog.kind === "effort") {
+    settings = { ...settings, effort: row.value as settingsStore.Effort }
+    void settingsStore.save(settings)
+    status =
+      row.value === "auto"
+        ? "effort: auto - the provider decides"
+        : selection.model.reasoning
+          ? "effort: " + row.value
+          : "effort: " + row.value + " (saved; " + selection.model.label + " does not reason)"
+    closeDialog()
+    render()
+    return
+  }
+
   if (dialog.kind === "settings") {
     openSettingValues(row.value)
     render()
@@ -1099,18 +1172,20 @@ async function send() {
     }
     if (result.kind === "message") transcript.push({ kind: "tool", text: result.text })
     if (result.kind === "theme") {
+      if (!result.name) { openThemePicker(); render(); return }
       settings = { ...settings, theme: result.name }
       applyTheme(result.name)
       void settingsStore.save(settings)
       status = "theme: " + result.name
     }
     if (result.kind === "effort") {
+      if (!result.level) { openEffortPicker(); render(); return }
       settings = { ...settings, effort: result.level }
       void settingsStore.save(settings)
       status =
         result.level === "auto"
           ? "effort: auto - the provider decides"
-          : selection.model.reasoning
+          : takesEffort(selection.model)
             ? "effort: " + result.level
             : "effort: " + result.level + " (saved; " + selection.model.label + " does not reason)"
     }
@@ -1213,7 +1288,7 @@ async function send() {
           "effort",
           settings.effort === "auto"
             ? "auto"
-            : settings.effort + (selection.model.reasoning ? "" : "  (not sent - this model does not reason)"),
+            : settings.effort + (takesEffort(selection.model) ? "" : "  (not sent - this model does not take it)"),
         ],
         ["approved", approved.length ? approved.join(", ") : "nothing yet"],
         ["undo", edits.canUndo() ? "available" : "nothing to take back"],
@@ -1436,7 +1511,7 @@ async function send() {
 }
 
 function shutdown() {
-  out.write(ansi.pasteOff + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
+  out.write("[0m" + ansi.pasteOff + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
   process.exit(0)
 }
 

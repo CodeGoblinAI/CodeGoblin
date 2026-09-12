@@ -47,18 +47,22 @@ export const ansi = {
 
 /** 24-bit colour. Every modern terminal supports it. */
 export const rgb = (r: number, g: number, b: number) => `${ESC}38;2;${r};${g};${b}m`
+/** The same, as a background. */
+export const rgbOn = (r: number, g: number, b: number) => `${ESC}48;2;${r};${g};${b}m`
 export const bold = `${ESC}1m`
 export const dim = `${ESC}2m`
 /** Reverse video, for a selected span in the composer. */
 export const invert = `${ESC}7m`
 export const noInvert = `${ESC}27m`
 
-const hex = (value: string) =>
-  rgb(
-    parseInt(value.slice(1, 3), 16),
-    parseInt(value.slice(3, 5), 16),
-    parseInt(value.slice(5, 7), 16),
-  )
+const channels = (value: string): [number, number, number] => [
+  parseInt(value.slice(1, 3), 16),
+  parseInt(value.slice(3, 5), 16),
+  parseInt(value.slice(5, 7), 16),
+]
+
+const hex = (value: string) => rgb(...channels(value))
+const hexOn = (value: string) => rgbOn(...channels(value))
 
 /**
  * The colours in use, as ready-made escape sequences.
@@ -77,6 +81,17 @@ export const theme = {
   borderStrong: "",
   error: "",
   warning: "",
+  /**
+   * The ground everything is drawn on.
+   *
+   * Themes used to set foregrounds only, so switching one changed a few
+   * accents and left the dominant surface - the whole screen - exactly as it
+   * was. Every palette's greens are green and its golds are gold, so the
+   * honest report was that /theme did nothing. Painting step1 is what makes
+   * the difference visible, and it is the difference the palette was
+   * describing all along.
+   */
+  ground: "",
 }
 
 export function applyTheme(name: string) {
@@ -90,6 +105,12 @@ export function applyTheme(name: string) {
   theme.borderStrong = hex(palette.step7)
   theme.error = hex(palette.red)
   theme.warning = hex(palette.orange)
+  theme.ground = hexOn(palette.step1)
+
+  // Reset has to put the ground back. ESC[0m clears the background along with
+  // everything else, and there are ninety-odd resets in a frame - without
+  // this the theme would survive only until the first coloured word ended.
+  ansi.reset = `${ESC}0m` + theme.ground
 }
 
 applyTheme(DEFAULT_THEME)

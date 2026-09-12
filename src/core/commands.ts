@@ -21,9 +21,9 @@ export type CommandResult =
   | { kind: "status" }
   | { kind: "export"; path?: string }
   | { kind: "rename"; title: string }
-  | { kind: "theme"; name: string }
+  | { kind: "theme"; name?: string }
   | { kind: "thinking" }
-  | { kind: "effort"; level: Effort }
+  | { kind: "effort"; level?: Effort }
   | { kind: "mouse" }
   | { kind: "settings" }
   | { kind: "diff" }
@@ -139,15 +139,7 @@ export function runCommand(text: string): CommandResult {
     case "/thinking":
       return { kind: "thinking" }
     case "/effort": {
-      if (!argument) {
-        return {
-          kind: "message",
-          text:
-            "usage: /effort auto|low|medium|high" +
-            String.fromCharCode(10) +
-            "auto lets the provider decide. The rest only reach reasoning models.",
-        }
-      }
+      if (!argument) return { kind: "effort" }
       if (!isEffort(argument)) {
         return { kind: "message", text: `unknown effort: ${argument}  (auto, low, medium, high)` }
       }
@@ -159,13 +151,11 @@ export function runCommand(text: string): CommandResult {
       if (!argument) return { kind: "message", text: "usage: /rename a shorter title" }
       return { kind: "rename", title: argument }
     }
+    // Bare opens the picker. Printing the list and asking for it to be typed
+    // back made the names something to memorise, which is what a list of five
+    // colour schemes should never be.
     case "/theme": {
-      if (!argument) {
-        const available = Object.entries(THEMES)
-          .map(([name, theme]) => name.padEnd(12) + theme.label)
-          .join(String.fromCharCode(10))
-        return { kind: "message", text: "usage: /theme <name>" + String.fromCharCode(10) + available }
-      }
+      if (!argument) return { kind: "theme" }
       if (!isTheme(argument)) return { kind: "message", text: `unknown theme: ${argument}  (try /theme)` }
       return { kind: "theme", name: argument }
     }

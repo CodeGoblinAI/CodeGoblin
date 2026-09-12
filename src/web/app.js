@@ -643,7 +643,7 @@ function connectForm(provider) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ provider, key }),
     }).then((r) => r.json()).catch(() => ({ message: "could not reach the server" }))
-    await loadCommands()
+    await Promise.all([loadCommands(), loadProviders()])
     box.querySelector(".pactions").innerHTML = '<span class="presolved"></span>'
     box.querySelector(".presolved").textContent = result.message
   }
@@ -842,6 +842,7 @@ async function runCommand(text) {
     const result = await fetch("/api/connect?provider=" + encodeURIComponent(argument), { method: "DELETE" })
       .then((r) => r.json())
       .catch(() => ({ message: "could not reach the server" }))
+    await Promise.all([loadCommands(), loadProviders()])
     note(result.message)
     return true
   }
@@ -1075,7 +1076,18 @@ document.getElementById("new-session").onclick = () => {
   refreshSessions()
 }
 
-fetch("/api/providers").then((r) => r.json()).then((data) => {
+/**
+ * The model list, and whether each one has a key behind it.
+ *
+ * Refetchable, because "ready" goes stale the moment a key is added or
+ * removed. It was fetched once at page load, so connecting a provider left
+ * its models still labelled "no key" - you could generate an image with a
+ * key the picker was insisting you did not have.
+ */
+async function loadProviders() {
+  const data = await fetch("/api/providers").then((r) => r.json()).catch(() => null)
+  if (!data) return
+  const previous = currentModel
   modelOptions = data.providers.map((p) => ({
     value: p.id,
     label: p.label + (p.reasoning ? " (reasoning)" : ""),
@@ -1086,13 +1098,18 @@ fetch("/api/providers").then((r) => r.json()).then((data) => {
   }))
   // Open on something that can actually answer, rather than on whichever text
   // model happens to be first and may have no key behind it.
+  // Keep what is chosen across a refresh; only fall back on the first load.
   const firstChat =
     modelOptions.find((option) => option.kind === "text" && option.ready) ||
     modelOptions.find((option) => option.kind === "text")
-  if (firstChat || modelOptions.length) setModel((firstChat || modelOptions[0]).value)
+  const keep = previous && modelOptions.some((option) => option.value === previous) ? previous : null
+  if (keep) setModel(keep)
+  else if (firstChat || modelOptions.length) setModel((firstChat || modelOptions[0]).value)
   const ready = data.providers.filter((p) => p.ready).length
   hint.textContent = ready ? "" : "no API keys found"
-})
+}
+
+loadProviders()
 
 emptyState()
 setBusy(false)

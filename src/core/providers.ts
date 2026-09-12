@@ -28,6 +28,16 @@ export type Model = {
   /** Context window in tokens; drives when a conversation is compacted. */
   contextWindow: number
   /**
+   * Whether this model accepts a reasoning_effort.
+   *
+   * There is no way to ask a provider this - nothing in /models reports it -
+   * so it has to be declared. Defaults to `reasoning`, which is the right
+   * guess and not the same claim: a model can stream a thinking channel
+   * without taking direction on how long to spend in it. When one of those
+   * turns up, say `effort: false` on it rather than lying about `reasoning`.
+   */
+  effort?: boolean
+  /**
    * US dollars per million tokens, in and out.
    *
    * Absent means unpriced rather than free - a spend of nothing and a spend
@@ -84,8 +94,11 @@ export function authHeaders(provider: Provider, key: string): Record<string, str
  */
 export function effortFor(model: Model, setting: string): "low" | "medium" | "high" | undefined {
   if (setting !== "low" && setting !== "medium" && setting !== "high") return undefined
-  return model.reasoning ? setting : undefined
+  return takesEffort(model) ? setting : undefined
 }
+
+/** Declared if it says so, otherwise assumed from whether it reasons at all. */
+export const takesEffort = (model: Model): boolean => model.effort ?? model.reasoning === true
 
 export const PROVIDERS: Record<string, Provider> = {
   deepseek: {

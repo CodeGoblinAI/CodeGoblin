@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { runCommand, COMMANDS } from "../src/core/commands"
 import { THEMES, themeNames, paletteOf, isTheme, DEFAULT_THEME } from "../src/core/theme"
 import { normalise, defaults } from "../src/core/settings"
-import { effortFor } from "../src/core/providers"
+import { effortFor, takesEffort } from "../src/core/providers"
 import { toMarkdown, slug } from "../src/core/export"
 import type { Session } from "../src/core/sessions"
 
@@ -33,11 +33,13 @@ describe("the new commands", () => {
     expect(unknown.kind === "message" && unknown.text).toContain("unknown theme: neon")
   })
 
-  test("/theme on its own lists what there is", () => {
-    const listed = runCommand("/theme")
-    expect(listed.kind).toBe("message")
+  test("/theme on its own asks for the picker, rather than printing names to retype", () => {
+    expect(runCommand("/theme")).toEqual({ kind: "theme", name: undefined })
+  })
+
+  test("every theme is still reachable by name, for anyone who knows it", () => {
     for (const name of themeNames()) {
-      expect(listed.kind === "message" && listed.text).toContain(name)
+      expect(runCommand("/theme " + name)).toEqual({ kind: "theme", name })
     }
   })
 
@@ -288,10 +290,17 @@ describe("choosing how hard a model thinks", () => {
     expect(runCommand("/effort auto")).toEqual({ kind: "effort", level: "auto" })
   })
 
-  test("bare /effort explains rather than guessing", () => {
-    const result = runCommand("/effort")
-    expect(result.kind).toBe("message")
-    expect(result.kind === "message" && result.text).toContain("auto|low|medium|high")
+  test("bare /effort asks for the picker too", () => {
+    expect(runCommand("/effort")).toEqual({ kind: "effort", level: undefined })
+  })
+
+  test("a model says whether it takes effort, and reasoning is only the default guess", () => {
+    // Declared wins, so a model that streams thinking but takes no direction
+    // on it can say so without lying about reasoning.
+    expect(takesEffort({ id: "a", label: "A", contextWindow: 1, reasoning: true })).toBe(true)
+    expect(takesEffort({ id: "b", label: "B", contextWindow: 1 })).toBe(false)
+    expect(takesEffort({ id: "c", label: "C", contextWindow: 1, reasoning: true, effort: false })).toBe(false)
+    expect(takesEffort({ id: "d", label: "D", contextWindow: 1, effort: true })).toBe(true)
   })
 })
 
