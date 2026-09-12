@@ -137,7 +137,12 @@ const SYSTEM: Message = {
 }
 
 let messages: Message[] = [SYSTEM]
-type Entry = { kind: "user" | "agent" | "tool" | "thinking"; text: string }
+/**
+ * `call` is the model's tool-call id on a tool row, so a result lands on the
+ * row that asked for it. Rows used to be matched by being last, which stopped
+ * being true once reads in a turn started overlapping.
+ */
+type Entry = { kind: "user" | "agent" | "tool" | "thinking"; text: string; call?: string }
 let transcript: Entry[] = []
 /** Named for what it holds, since "history" here is the prompt recall list. */
 /**
@@ -1266,7 +1271,7 @@ async function send() {
       }
       if (event.type === "tool_start") {
         current = undefined
-        transcript.push({ kind: "tool", text: event.name + " " + event.args.slice(0, 60) })
+        transcript.push({ kind: "tool", call: event.id, text: event.name + " " + event.args.slice(0, 60) })
       }
       if (event.type === "spend") {
         spend = addSpend(spend, {
@@ -1292,15 +1297,20 @@ async function send() {
         })
         status = "hit the turn limit"
       }
+      // Found by call id rather than by being last: several tools can be open
+      // at once now, so "the most recent row" is no longer the right one.
+      const rowFor = (id: string) =>
+        [...transcript].reverse().find((entry) => entry.kind === "tool" && entry.call === id)
+
       if (event.type === "tool_denied") {
-        const last = transcript[transcript.length - 1]
-        if (last && last.kind === "tool") last.text += "  (refused)"
+        const row = rowFor(event.id)
+        if (row) row.text += "  (refused)"
       }
       if (event.type === "tool_end") {
-        const last = transcript[transcript.length - 1]
-        if (last && last.kind === "tool") {
+        const row = rowFor(event.id)
+        if (row) {
           const firstLine = event.result.split(String.fromCharCode(10))[0] ?? ""
-          last.text += "  ->  " + firstLine.slice(0, 50)
+          row.text += "  ->  " + firstLine.slice(0, 50)
         }
       }
       render()

@@ -1,5 +1,5 @@
 import type { Provider } from "./providers"
-import { TOOL_SCHEMA, runTool } from "./tools"
+import { TOOL_SCHEMA, runTool, isConcurrent } from "./tools"
 import type { Permissions } from "./permission"
 import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT } from "./context"
 import { parseTodos, type Todo } from "./todo"
@@ -20,9 +20,15 @@ export type Message = {
 export type AgentEvent =
   | { type: "text"; delta: string }
   | { type: "thinking"; delta: string }
-  | { type: "tool_start"; name: string; args: string }
-  | { type: "tool_end"; name: string; result: string }
-  | { type: "tool_denied"; name: string }
+  /**
+   * `id` is the model's own tool-call id, carried through so a surface can
+   * match a result to the row that asked for it. Without it a surface has to
+   * assume the end of one tool follows the start of it, which only held while
+   * tools ran strictly one after another.
+   */
+  | { type: "tool_start"; id: string; name: string; args: string }
+  | { type: "tool_end"; id: string; name: string; result: string }
+  | { type: "tool_denied"; id: string; name: string }
   | { type: "compacted"; before: number; after: number }
   | { type: "plan"; todos: Todo[] }
   | { type: "spend"; input: number; output: number }
@@ -215,40 +221,74 @@ export async function* runAgent(input: {
       })),
     })
 
+    // Consent runs first, in the order asked, one at a time. A permission
+    // prompt is a question put to a person; two of them arriving at once is
+    // not something a person can answer. Only the work afterwards overlaps.
+    const decided: { call: ToolCall; args: unknown; allowed: boolean }[] = []
     for (const call of pending) {
       if (input.signal?.aborted) return
-      yield { type: "tool_start", name: call.name, args: call.args }
       let args: unknown = {}
       try {
         args = JSON.parse(call.args || "{}")
       } catch {
         // Leave args empty; the tool reports the failure itself.
       }
-
       // Consent happens here rather than inside the tool, so every surface
       // gets the same prompt and the model still receives a normal tool
       // result when it is refused.
-      if (input.permissions && !(await input.permissions.check(call.name, call.args))) {
+      const allowed = !input.permissions || (await input.permissions.check(call.name, call.args))
+      decided.push({ call, args, allowed })
+    }
+
+    // Every chip opens at once, so a turn that asked for four reads looks like
+    // four reads rather than one that keeps changing its name.
+    for (const { call } of decided) {
+      yield { type: "tool_start", id: call.id, name: call.name, args: call.args }
+    }
+
+    const run = (entry: { call: ToolCall; args: unknown }) =>
+      runTool(entry.call.name, entry.args, input.root, async (relative) => {
+        await input.history?.record(input.root, relative)
+      })
+
+    // Reads overlap; everything else keeps its order. Four file reads used to
+    // cost four round trips end to end for no reason - they do not touch each
+    // other, and nothing about them depends on which finishes first.
+    const results = new Map<string, string>()
+    const runnable = decided.filter((entry) => entry.allowed)
+    await Promise.all(
+      runnable
+        .filter((entry) => isConcurrent(entry.call.name))
+        .map(async (entry) => {
+          results.set(entry.call.id, await run(entry))
+        }),
+    )
+    for (const entry of runnable.filter((each) => !isConcurrent(each.call.name))) {
+      if (input.signal?.aborted) return
+      results.set(entry.call.id, await run(entry))
+    }
+
+    // Reported in the order the model asked for them, whatever order they
+    // finished in, so a transcript reads the same way twice.
+    for (const { call, args, allowed } of decided) {
+      if (!allowed) {
         const refusal =
           input.permissions?.mode === "plan"
             ? "not run: plan mode is on, so nothing that changes files or runs commands is executed"
             : "refused by the user"
         input.messages.push({ role: "tool", tool_call_id: call.id, content: refusal })
-        yield { type: "tool_denied", name: call.name }
-        yield { type: "tool_end", name: call.name, result: refusal }
+        yield { type: "tool_denied", id: call.id, name: call.name }
+        yield { type: "tool_end", id: call.id, name: call.name, result: refusal }
         continue
       }
 
-      const result = await runTool(call.name, args, input.root, async (relative) => {
-        await input.history?.record(input.root, relative)
-      })
-
+      const result = results.get(call.id) ?? "not run"
       // The plan is state the surfaces render, not just a tool result.
       if (call.name === "todo_write") {
         yield { type: "plan", todos: parseTodos((args as Record<string, unknown>)?.todos) }
       }
       input.messages.push({ role: "tool", tool_call_id: call.id, content: result })
-      yield { type: "tool_end", name: call.name, result }
+      yield { type: "tool_end", id: call.id, name: call.name, result }
     }
   }
 

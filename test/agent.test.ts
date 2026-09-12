@@ -49,6 +49,24 @@ const asksForATool = () =>
 
 const answers = (text: string) => stream({ choices: [{ delta: { content: text } }] })
 
+/** One assistant turn asking for several tools at once, the way the wire allows. */
+const asksForMany = (...calls: { id: string; name: string; args: string }[]) => () =>
+  stream({
+    choices: [
+      {
+        delta: {
+          tool_calls: calls.map((call, index) => ({
+            index,
+            id: call.id,
+            function: { name: call.name, arguments: call.args },
+          })),
+        },
+      },
+    ],
+  })
+
+const reads = (path: string, id: string) => ({ id, name: "read_file", args: JSON.stringify({ path }) })
+
 const realFetch = globalThis.fetch
 afterEach(() => {
   globalThis.fetch = realFetch
@@ -116,6 +134,138 @@ describe("the turn limit", () => {
     expect(events.some((event) => event.type === "tool_start")).toBe(true)
     expect(events.some((event) => event.type === "tool_end")).toBe(true)
     expect(events.some((event) => event.type === "limit")).toBe(false)
+  })
+})
+
+describe("several tools in one turn", () => {
+  const threeReads = asksForMany(
+    reads("package.json", "a"),
+    reads("tsconfig.json", "b"),
+    reads(".gitignore", "c"),
+  )
+
+  test("every row gets its own id, and every result names the row it belongs to", async () => {
+    serve(threeReads, () => answers("done"))
+    const events = await collect(8)
+
+    const started = events.filter((e) => e.type === "tool_start") as { id: string }[]
+    const ended = events.filter((e) => e.type === "tool_end") as { id: string }[]
+
+    expect(started.map((e) => e.id)).toEqual(["a", "b", "c"])
+    expect(new Set(started.map((e) => e.id)).size).toBe(3)
+    // Matching a result to a row by id is the whole point; being last is not
+    // a safe way to guess once these can overlap.
+    expect(ended.map((e) => e.id)).toEqual(["a", "b", "c"])
+  })
+
+  test("results are reported in the order asked, not the order they finished", async () => {
+    serve(threeReads, () => answers("done"))
+    const events = await collect(8)
+
+    const order = events.filter((e) => e.type === "tool_end").map((e) => ("id" in e ? e.id : ""))
+    expect(order).toEqual(["a", "b", "c"])
+  })
+
+  test("all the rows open before any of them closes", async () => {
+    serve(threeReads, () => answers("done"))
+    const types = (await collect(8)).map((e) => e.type)
+    const lastStart = types.lastIndexOf("tool_start")
+    const firstEnd = types.indexOf("tool_end")
+    expect(lastStart).toBeLessThan(firstEnd)
+  })
+
+  test("each result reaches the model against its own tool_call_id", async () => {
+    serve(threeReads, () => answers("done"))
+    const messages: { role: string; content: string; tool_call_id?: string }[] = [
+      { role: "user", content: "go" },
+    ]
+    for await (const _ of runAgent({
+      provider,
+      modelId: "test-model",
+      apiKey: "not-a-real-key",
+      messages: messages as never,
+      root: process.cwd(),
+      maxTurns: 8,
+    })) {
+      // drained
+    }
+    const toolReplies = messages.filter((message) => message.role === "tool")
+    expect(toolReplies.map((message) => message.tool_call_id)).toEqual(["a", "b", "c"])
+    // package.json really was read, so these are results and not placeholders.
+    expect(toolReplies[0]!.content).toContain("codegoblin")
+  })
+
+  test("consent is asked for every call before any of them runs", async () => {
+    serve(threeReads, () => answers("done"))
+    const asked: string[] = []
+    const events: AgentEvent[] = []
+
+    for await (const event of runAgent({
+      provider,
+      modelId: "test-model",
+      apiKey: "not-a-real-key",
+      messages: [{ role: "user", content: "go" }],
+      root: process.cwd(),
+      maxTurns: 8,
+      permissions: {
+        mode: "ask",
+        check: async (name: string) => {
+          // Nothing may have started while a question is still outstanding.
+          expect(events.some((e) => e.type === "tool_start")).toBe(false)
+          asked.push(name)
+          return true
+        },
+      } as never,
+    })) {
+      events.push(event)
+    }
+
+    expect(asked).toEqual(["read_file", "read_file", "read_file"])
+  })
+
+  test("a refused call still answers the model, and the others still run", async () => {
+    serve(threeReads, () => answers("done"))
+    let seen = 0
+    const events: AgentEvent[] = []
+
+    for await (const event of runAgent({
+      provider,
+      modelId: "test-model",
+      apiKey: "not-a-real-key",
+      messages: [{ role: "user", content: "go" }],
+      root: process.cwd(),
+      maxTurns: 8,
+      permissions: { mode: "ask", check: async () => ++seen !== 2 } as never,
+    })) {
+      events.push(event)
+    }
+
+    const denied = events.filter((e) => e.type === "tool_denied") as { id: string }[]
+    expect(denied.map((e) => e.id)).toEqual(["b"])
+
+    const ended = events.filter((e) => e.type === "tool_end") as { id: string; result: string }[]
+    expect(ended.map((e) => e.id)).toEqual(["a", "b", "c"])
+    expect(ended[1]!.result).toContain("refused")
+    expect(ended[0]!.result).not.toContain("refused")
+  })
+})
+
+describe("which tools may overlap", () => {
+  test("reads may, and everything that changes something may not", async () => {
+    const { isConcurrent } = await import("../src/core/tools")
+    for (const name of ["read_file", "list_files", "grep", "glob"]) {
+      expect(isConcurrent(name)).toBe(true)
+    }
+    // A write can contend for a path, shell can do anything, todo_write moves
+    // shared state, and webfetch asks about each new host.
+    for (const name of ["write_file", "edit_file", "shell", "todo_write", "webfetch"]) {
+      expect(isConcurrent(name)).toBe(false)
+    }
+  })
+
+  test("a name nobody knows is not assumed safe", async () => {
+    const { isConcurrent } = await import("../src/core/tools")
+    expect(isConcurrent("rm_minus_rf")).toBe(false)
   })
 })
 

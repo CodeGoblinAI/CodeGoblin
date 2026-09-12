@@ -235,10 +235,28 @@ function thinkingBlock() {
   return wrap.querySelector(".tbody")
 }
 
-function toolChip(name, args) {
+/**
+ * The chip a tool-call id belongs to.
+ *
+ * Falls back to the last one still running, for the case where an id never
+ * arrived - better a stale guess than a result that lands nowhere.
+ */
+function chipFor(id) {
+  return (
+    (id && thread.querySelector('.tool[data-call="' + id + '"]')) ||
+    thread.querySelector(".tool.running:last-of-type") ||
+    [...thread.querySelectorAll(".tool.running")].pop()
+  )
+}
+
+function toolChip(name, args, id) {
   if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
   const chip = document.createElement("div")
   chip.className = "tool running"
+  // Tagged with the model's tool-call id so a result can find its own row.
+  // Several tools can be running at once, so "the last running chip" was no
+  // longer a safe way to guess which one had just finished.
+  if (id) chip.dataset.call = id
   chip.innerHTML = '<span class="spin"></span><span class="tname"></span><span class="targs"></span>'
   chip.querySelector(".tname").textContent = name
   chip.querySelector(".targs").textContent = (args || "").slice(0, 70)
@@ -839,7 +857,7 @@ async function submit() {
         if (event.type === "tool_start") {
           body = null
           thinking = null
-          toolChip(event.name, event.args)
+          toolChip(event.name, event.args, event.id)
           lastToolArgs = event.args
           runningTools.push(event.name)
           renderActivity()
@@ -848,7 +866,7 @@ async function submit() {
         if (event.type === "plan") { planItems = event.todos; renderActivity() }
         if (event.type === "permission") { body = null; permissionPrompt(event) }
         if (event.type === "tool_denied") {
-          const chip = [...thread.querySelectorAll(".tool.running")].pop()
+          const chip = chipFor(event.id)
           if (chip) { chip.classList.remove("running"); chip.classList.add("failed"); chip.querySelector(".spin").textContent = "✗" }
         }
         if (event.type === "tool_end") {
@@ -859,7 +877,7 @@ async function submit() {
           renderActivity()
         }
         if (event.type === "tool_end") {
-          const chip = thread.querySelector(".tool.running:last-of-type") || [...thread.querySelectorAll(".tool.running")].pop()
+          const chip = chipFor(event.id)
           if (chip) {
             chip.classList.remove("running")
             chip.classList.add(event.result.startsWith("error:") ? "failed" : "done")

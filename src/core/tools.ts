@@ -15,6 +15,17 @@ export type Tool = {
   run: (args: any, root: string) => Promise<string>
   /** Changes the file at args.path, so its previous state is worth keeping. */
   writes?: boolean
+  /**
+   * Safe to run at the same time as the other tools in a turn.
+   *
+   * Opt-in, and only for tools that read. Anything that writes a file, runs a
+   * command or moves the plan stays in order: two writes can contend for the
+   * same path, the undo history records a file just before it is overwritten,
+   * and a shell command can do any of that without saying so. webfetch is
+   * left out too - it asks about each new host, and those questions would
+   * arrive on top of each other.
+   */
+  concurrent?: boolean
 }
 
 const MAX_OUTPUT = 24_000
@@ -58,6 +69,7 @@ export const clip = (text: string) =>
 export const TOOLS: Tool[] = [
   {
     name: "read_file",
+    concurrent: true,
     description: "Read a UTF-8 text file, relative to the working directory.",
     parameters: {
       type: "object",
@@ -68,6 +80,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_files",
+    concurrent: true,
     description: "List entries in a directory, relative to the working directory.",
     parameters: {
       type: "object",
@@ -219,6 +232,7 @@ export const EXTRA_TOOLS: Tool[] = [
   },
   {
     name: "grep",
+    concurrent: true,
     description:
       "Search file contents by regular expression. Returns file:line: match. " +
       "Prefer this over reading directories to find where something lives.",
@@ -239,6 +253,7 @@ export const EXTRA_TOOLS: Tool[] = [
   },
   {
     name: "glob",
+    concurrent: true,
     description:
       "Find files by name pattern, newest first. Supports *, ** across directories, ?, " +
       "and {a,b} alternation.",
@@ -320,6 +335,15 @@ async function runShell(command: string, root: string, timeoutMs: number): Promi
 
 
 export const ALL_TOOLS: Tool[] = [...TOOLS, ...EXTRA_TOOLS]
+
+/**
+ * Whether this tool may run alongside the others in the same turn.
+ *
+ * Unknown names answer false, so a tool that has not said it is safe is
+ * treated as though it is not.
+ */
+export const isConcurrent = (name: string): boolean =>
+  ALL_TOOLS.find((tool) => tool.name === name)?.concurrent === true
 
 export const TOOL_SCHEMA = ALL_TOOLS.map((tool) => ({
   type: "function",
