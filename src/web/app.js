@@ -862,6 +862,11 @@ async function submit() {
           thread.appendChild(note)
           scrollDown()
         }
+        // The loop ran out of turns with the model still working, so the
+        // answer above is unfinished. Saying so beats letting it read as done.
+        if (event.type === "limit") {
+          note("stopped after " + event.turns + " tool turns - the answer may be unfinished. Ask it to continue.")
+        }
         if (event.type === "error") turn("agent", "**Error:** " + event.message)
         if (event.type === "saved") refreshSessions()
       }

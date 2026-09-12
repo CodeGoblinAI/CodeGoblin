@@ -1281,6 +1281,17 @@ async function send() {
       if (event.type === "compacted") {
         transcript.push({ kind: "tool", text: "compacted context: " + event.before + " -> " + event.after + " messages" })
       }
+      // The loop ran out of turns while the model was still calling tools, so
+      // whatever is above is unfinished. It used to end exactly like a
+      // finished answer, which made a half-done turn impossible to spot.
+      if (event.type === "limit") {
+        current = undefined
+        transcript.push({
+          kind: "tool",
+          text: "stopped after " + event.turns + " tool turns - the answer may be unfinished, ask it to continue",
+        })
+        status = "hit the turn limit"
+      }
       if (event.type === "tool_denied") {
         const last = transcript[transcript.length - 1]
         if (last && last.kind === "tool") last.text += "  (refused)"

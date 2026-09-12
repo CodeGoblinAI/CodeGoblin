@@ -26,6 +26,15 @@ export type AgentEvent =
   | { type: "compacted"; before: number; after: number }
   | { type: "plan"; todos: Todo[] }
   | { type: "spend"; input: number; output: number }
+  /**
+   * The loop ran out of turns with the model still calling tools.
+   *
+   * Without this the surfaces could not tell a finished answer from an
+   * abandoned one: the loop fell out of its bounds and emitted the same
+   * turn_end a normal reply ends with, so work that stopped half-done looked
+   * exactly like work that was complete.
+   */
+  | { type: "limit"; turns: number }
   | { type: "turn_end" }
 
 /**
@@ -243,6 +252,9 @@ export async function* runAgent(input: {
     }
   }
 
+  // Falling out of the loop means the last turn still asked for tools. Every
+  // other way out returns, so this is the only path that reaches here.
+  yield { type: "limit", turns: maxTurns }
   yield { type: "turn_end" }
 }
 
