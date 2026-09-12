@@ -49,6 +49,16 @@
   code { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 12.5px; }
   pre.code { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 11px 13px; overflow-x: auto; margin: 9px 0; }
   pre.code code { background: none; border: 0; padding: 0; font-size: 12.5px; line-height: 1.5; }
+  /* A wide table scrolls inside its own box. Letting it widen the thread
+     instead would push the composer sideways and scroll the whole column. */
+  .tablewrap { overflow-x: auto; margin: 10px 0; }
+  .body table { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+  /* The thread breaks anywhere so a long path cannot widen it, but inside a
+     table that split "typecheck" across two lines. Cells wrap between words
+     and the table scrolls sideways instead. */
+  .body th, .body td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; overflow-wrap: normal; word-break: normal; }
+  .body th { background: var(--panel); font-weight: 600; white-space: nowrap; color: var(--text); }
+  .body tbody tr:nth-child(even) td { background: rgba(255, 255, 255, .02); }
 
   .tool { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 7px 11px; margin-left: 68px; font-family: var(--mono); }
   .tool .tname { color: var(--text); }

@@ -73,9 +73,88 @@ let lastToolArgs = ""
 const escapeHtml = (s) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
+const TABLE_ROW = /^\s*\|.*\|\s*$/
+const TABLE_RULE = /^\s*\|(?:\s*:?-+:?\s*\|)+\s*$/
+
 /**
- * Small markdown renderer: fenced code, inline code, bold, headings, lists.
- * Agents answer in markdown, so showing it raw makes every reply look broken.
+ * Inline code and bold, on text that is already HTML-escaped.
+ *
+ * Shared with the table builder. Cells are escaped and lifted out before the
+ * line-level passes run, so without this a cell holding `tsc --noEmit` kept
+ * its backticks while the same words in a sentence became code.
+ */
+function inlineMarkdown(escaped) {
+  return escaped
+    .replace(/`([^`\n]+)`/g, (_, code) => "<code>" + code + "</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+}
+
+/** Cells of one row; an escaped pipe is content, not a boundary. */
+function tableCells(line) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split(/(?<!\\)\|/)
+    .map((cell) => cell.trim().split("\\|").join("|"))
+}
+
+/**
+ * Pull markdown tables out as real <table> elements.
+ *
+ * Models answer with tables constantly and this renderer had no case for
+ * them, so they arrived as rows of literal pipes and dashes - the reader
+ * doing the aligning that the markup exists to do. They are lifted into the
+ * same placeholder list the code fences use, so the line-level passes that
+ * follow never see their newlines.
+ */
+function extractTables(text, blocks) {
+  const lines = text.split("\n")
+  const out = []
+
+  for (let i = 0; i < lines.length; i++) {
+    // A table only starts where the alignment rule sits under the header,
+    // otherwise a sentence with two pipes in it would become a grid.
+    if (!TABLE_ROW.test(lines[i]) || !TABLE_RULE.test(lines[i + 1] || "")) {
+      out.push(lines[i])
+      continue
+    }
+
+    let end = i
+    while (end < lines.length && TABLE_ROW.test(lines[end])) end++
+
+    const header = tableCells(lines[i])
+    const align = tableCells(lines[i + 1]).map((spec) =>
+      spec.startsWith(":") && spec.endsWith(":") ? "center" : spec.endsWith(":") ? "right" : "left",
+    )
+    const body = lines.slice(i + 2, end).map(tableCells)
+    const columns = Math.max(header.length, ...body.map((row) => row.length), 1)
+    const at = (row, column) => inlineMarkdown(escapeHtml(row[column] === undefined ? "" : row[column]))
+    const styled = (column) => (align[column] && align[column] !== "left" ? ' style="text-align:' + align[column] + '"' : "")
+
+    let table = '<div class="tablewrap"><table>'
+    table += "<thead><tr>"
+    for (let c = 0; c < columns; c++) table += "<th" + styled(c) + ">" + at(header, c) + "</th>"
+    table += "</tr></thead><tbody>"
+    for (const row of body) {
+      table += "<tr>"
+      for (let c = 0; c < columns; c++) table += "<td" + styled(c) + ">" + at(row, c) + "</td>"
+      table += "</tr>"
+    }
+    table += "</tbody></table></div>"
+
+    blocks.push(table)
+    out.push("\u0000BLOCK" + (blocks.length - 1) + "\u0000")
+    i = end - 1
+  }
+
+  return out.join("\n")
+}
+
+/**
+ * Small markdown renderer: fenced code, tables, inline code, bold, headings,
+ * lists. Agents answer in markdown, so showing it raw makes every reply look
+ * broken.
  */
 function markdown(text) {
   const blocks = []
@@ -84,14 +163,24 @@ function markdown(text) {
     return "\u0000BLOCK" + (blocks.length - 1) + "\u0000"
   })
 
-  html = escapeHtml(html)
-  html = html.replace(/`([^`\n]+)`/g, (_, code) => "<code>" + code + "</code>")
-  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+  // Tables come out before the line-level passes, because those turn every
+  // newline into a <br> and a table's newlines are structure, not spacing.
+  // After the fences, so a table drawn inside a code block stays code.
+  html = extractTables(html, blocks)
+
+  html = inlineMarkdown(escapeHtml(html))
   html = html.replace(/^### (.+)$/gm, "<h4>$1</h4>")
   html = html.replace(/^## (.+)$/gm, "<h3>$1</h3>")
   html = html.replace(/^[-*] (.+)$/gm, "<li>$1</li>")
   html = html.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, "<ul>$1</ul>")
-  html = html.split("\n\n").map((p) => (p.trim().startsWith("<") ? p : "<p>" + p + "</p>")).join("")
+  // A lifted block is already block-level, so wrapping it in <p> would put a
+  // <pre> or a <table> inside a paragraph; the browser then closes the <p>
+  // early and leaves a stray one behind.
+  const lifted = /^\u0000BLOCK\d+\u0000$/
+  html = html
+    .split("\n\n")
+    .map((p) => (p.trim().startsWith("<") || lifted.test(p.trim()) ? p : "<p>" + p + "</p>"))
+    .join("")
   html = html.replace(/\n/g, "<br>")
 
   return html.replace(/\u0000BLOCK(\d+)\u0000/g, (_, i) => blocks[Number(i)])
