@@ -14,3 +14,9 @@ model_test/
 
 # Generated images, audio and 3D models are output, not source.
 codegoblin-output/
+
+# Files carved off the lost drive. Mostly NUL bytes and pieces of unrelated
+# files, so they must never reach a commit - and bun test runs whatever it
+# finds, which is why the test script skips them too.
+_RECOVERED_LOCAL_*/
+_RECOVERED_LOCAL_*.txt
