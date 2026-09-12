@@ -1,23 +1,22 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { beforeEach, describe, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Global } from "../src/platform/paths"
 import { add, list, get, remove, archive, clear, status, recall, MemoryError, MAX_CONTENT } from "../src/core/memory"
+import { requireSandbox } from "./sandbox"
 
 const file = path.join(Global.Path.state, "memory.json")
 
-// The store is one file, so each test starts from an empty one and the file is
-// put back afterwards - these run against the real state directory.
-const saved = await fs.readFile(file, "utf8").catch(() => undefined)
+// The store is one file, so each test starts from an empty one. This used to
+// run against the real state directory on purpose, saving the file and putting
+// it back after each test - then emptying it straight afterwards, so every run
+// that reached the real profile cleared the real memories. It now refuses to
+// start unless the store is inside the sandbox test/preload.ts made.
+requireSandbox(file, "the memory tests")
 const reset = () => fs.writeFile(file, "[]", "utf8")
 await fs.mkdir(path.dirname(file), { recursive: true })
-await reset()
 
-afterEach(async () => {
-  if (saved === undefined) await fs.rm(file, { force: true })
-  else await fs.writeFile(file, saved, "utf8")
-  await reset()
-})
+beforeEach(reset)
 
 describe("remembering", () => {
   test("keeps what it is given, and hands it back", async () => {

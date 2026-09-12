@@ -1,0 +1,4 @@
+# Every test run gets its own CODEGOBLIN_DIR before any test file loads.
+# This is not optional - see test/preload.ts for what happened without it.
+[test]
+preload = ["./test/preload.ts"]

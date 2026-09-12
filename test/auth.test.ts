@@ -1,18 +1,18 @@
 import { describe, expect, test } from "bun:test"
 import fs from "node:fs/promises"
-import os from "node:os"
 import path from "node:path"
+import * as auth from "../src/core/auth"
+import * as connected from "../src/domain/connected-auth"
+import { requireSandbox } from "./sandbox"
 
-// Point the store at a scratch home before the module is loaded, so none of
-// this can see or touch the real auth.json. The import is dynamic for exactly
-// that reason: a static one is hoisted and would read the real path first.
-const home = path.join(os.tmpdir(), "cg-auth-" + Math.random().toString(36).slice(2))
-process.env.CODEGOBLIN_TEST_HOME = home
-delete process.env.XDG_DATA_HOME
-await fs.mkdir(path.join(home, ".local", "share", "codegoblin"), { recursive: true })
-
-const auth = await import("../src/core/auth")
-const connected = await import("../src/domain/connected-auth")
+// These tests connect keys, corrupt the store on purpose and repair it. This
+// file used to point the store at a scratch home of its own, which quietly
+// stopped working once another test had imported the paths first - and on
+// 2026-09-12 that is how a run wiped the real key store. test/preload.ts now
+// sandboxes the whole run before any file loads, and nothing below writes a
+// key unless the store is inside that sandbox.
+const home = requireSandbox(auth.storePath(), "the auth tests")
+await fs.mkdir(path.dirname(auth.storePath()), { recursive: true })
 
 const FAKE = "sk-fake-not-a-real-key-0000"
 
