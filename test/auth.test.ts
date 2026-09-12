@@ -12,6 +12,7 @@ delete process.env.XDG_DATA_HOME
 await fs.mkdir(path.join(home, ".local", "share", "codegoblin"), { recursive: true })
 
 const auth = await import("../src/core/auth")
+const connected = await import("../src/domain/connected-auth")
 
 const FAKE = "sk-fake-not-a-real-key-0000"
 
@@ -105,5 +106,41 @@ describe("a store that has been damaged", () => {
   test("and writing again repairs it instead of failing forever", async () => {
     await auth.connect("recovered", "eeee5555")
     expect(auth.apiKey("recovered")).toBe("eeee5555")
+  })
+})
+
+/**
+ * The generators resolve keys through connected-auth, which used to parse
+ * auth.json on its own. That made TRIPO_API_KEY work for a conversation and
+ * not for a generation - the same key, two answers, no way to tell why.
+ */
+describe("the generators resolve keys the same way everything else does", () => {
+  test("a stored key reaches the generators", async () => {
+    await auth.connect("tripo", "tripo-stored-key")
+    expect(await connected.readConnectedProviderKey("tripo")).toBe("tripo-stored-key")
+  })
+
+  test("an environment key reaches them too, which it did not before", async () => {
+    process.env.ALIBABA_API_KEY = "from-the-environment"
+    try {
+      expect(await connected.readConnectedProviderKey("alibaba")).toBe("from-the-environment")
+    } finally {
+      delete process.env.ALIBABA_API_KEY
+    }
+  })
+
+  test("the environment still wins over the file, in both paths", async () => {
+    await auth.connect("google", "google-stored")
+    process.env.GOOGLE_API_KEY = "google-from-env"
+    try {
+      expect(auth.apiKey("google")).toBe("google-from-env")
+      expect(await connected.readConnectedProviderKey("google")).toBe("google-from-env")
+    } finally {
+      delete process.env.GOOGLE_API_KEY
+    }
+  })
+
+  test("a provider nobody connected has no key rather than an empty string", async () => {
+    expect(await connected.readConnectedProviderKey("nobody")).toBeUndefined()
   })
 })
