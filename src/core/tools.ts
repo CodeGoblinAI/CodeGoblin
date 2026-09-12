@@ -239,16 +239,22 @@ export const EXTRA_TOOLS: Tool[] = [
   },
   {
     name: "glob",
-    description: "Find files by name pattern, newest first. Supports * and ** and ?.",
+    description:
+      "Find files by name pattern, newest first. Supports *, ** across directories, ?, " +
+      "and {a,b} alternation.",
     parameters: {
       type: "object",
-      properties: { pattern: { type: "string", description: "e.g. src/**/*.ts" } },
+      properties: { pattern: { type: "string", description: "e.g. src/**/*.ts or src/{tui,web}/*.ts" } },
       required: ["pattern"],
     },
     run: async (args, root) => {
       const { globFiles } = await import("./search")
-      const files = await globFiles(root, String(args.pattern ?? "*"))
-      return files.length ? clip(files.join(NEWLINE)) : "no files matched"
+      const pattern = String(args.pattern ?? "*")
+      const files = await globFiles(root, pattern)
+      // Naming the pattern back is the difference between "these files are not
+      // here" and "this pattern found nothing". A bare "no files matched" reads
+      // as the first, and a model that believes it stops looking.
+      return files.length ? clip(files.join(NEWLINE)) : `no files matched ${pattern}`
     },
   },
   {

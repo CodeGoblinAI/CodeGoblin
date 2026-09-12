@@ -17,6 +17,37 @@ describe("glob patterns", () => {
   test("a dot is literal, not any-character", () => {
     expect(globToRegExp("*.ts").test("ats")).toBe(false)
   })
+
+  test("{a,b} matches either, and nothing else", () => {
+    const matcher = globToRegExp("src/{tui,web,cli}/*.ts")
+    expect(matcher.test("src/tui/app.ts")).toBe(true)
+    expect(matcher.test("src/web/serve.ts")).toBe(true)
+    expect(matcher.test("src/cli/prompt.ts")).toBe(true)
+    expect(matcher.test("src/core/agent.ts")).toBe(false)
+  })
+
+  test("alternatives can hold their own wildcards", () => {
+    const matcher = globToRegExp("{src/**/*.ts,*.json}")
+    expect(matcher.test("src/core/deep/agent.ts")).toBe(true)
+    expect(matcher.test("package.json")).toBe(true)
+    expect(matcher.test("README.md")).toBe(false)
+  })
+
+  test("braces nest, and the inner commas stay inside", () => {
+    const matcher = globToRegExp("src/{core,{tui,web}}/*.ts")
+    expect(matcher.test("src/core/agent.ts")).toBe(true)
+    expect(matcher.test("src/web/serve.ts")).toBe(true)
+    expect(matcher.test("src/domain/brand.ts")).toBe(false)
+  })
+
+  test("a comma outside braces is just a comma", () => {
+    expect(globToRegExp("a,b.ts").test("a,b.ts")).toBe(true)
+    expect(globToRegExp("a,b.ts").test("a.ts")).toBe(false)
+  })
+
+  test("a brace nobody closed is a literal brace, not a broken pattern", () => {
+    expect(globToRegExp("weird{name.ts").test("weird{name.ts")).toBe(true)
+  })
 })
 
 describe("search", () => {
@@ -28,6 +59,19 @@ describe("search", () => {
   test("glob never returns node_modules", async () => {
     const files = await globFiles(root, "**/*.json")
     expect(files.some((f) => f.includes("node_modules"))).toBe(false)
+  })
+
+  test("an alternation reaches every directory it names", async () => {
+    const files = await globFiles(root, "src/{tui,web,cli}/*.ts")
+    expect(files).toContain("src/tui/app.ts")
+    expect(files).toContain("src/web/serve.ts")
+    expect(files).toContain("src/cli/prompt.ts")
+    expect(files.some((file) => file.startsWith("src/core/"))).toBe(false)
+  })
+
+  test("a pattern that finds nothing says which pattern that was", async () => {
+    const result = await runTool("glob", { pattern: "src/nowhere/*.zzz" }, root)
+    expect(result).toContain("src/nowhere/*.zzz")
   })
 
   test("grep finds a known string with file and line", async () => {

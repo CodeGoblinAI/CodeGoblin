@@ -22,6 +22,21 @@ const escapeRegExp = (text: string) =>
   [...text].map((c) => (SPECIAL.has(c) ? BACKSLASH + c : c)).join("")
 
 export function globToRegExp(pattern: string): RegExp {
+  return new RegExp("^" + globBody(pattern) + "$", "i")
+}
+
+/**
+ * The conversion itself, separate so brace alternatives can reuse it.
+ *
+ * Alternation is here because models reach for it constantly:
+ * `src/{tui,web,cli}/*.ts` is the obvious way to ask about three directories
+ * at once. Without it the braces were escaped into the pattern as literal
+ * characters, so the glob matched nothing - and said so in exactly the words
+ * it uses for a pattern whose files genuinely are not there. Nothing could
+ * tell those two apart, and the first model to hit it concluded the files did
+ * not exist, answered on that, and had to retract the answer a turn later.
+ */
+function globBody(pattern: string): string {
   let out = ""
   let i = 0
   while (i < pattern.length) {
@@ -38,10 +53,49 @@ export function globToRegExp(pattern: string): RegExp {
       continue
     }
     if (char === "?") { out += "[^/]"; i++; continue }
+    if (char === "{") {
+      const end = closingBrace(pattern, i)
+      if (end !== -1) {
+        out += "(?:" + splitAlternatives(pattern.slice(i + 1, end)).map(globBody).join("|") + ")"
+        i = end + 1
+        continue
+      }
+      // An unmatched brace is a literal brace rather than a syntax error.
+      // Refusing the whole pattern would be worse than matching the file that
+      // happens to have one in its name.
+    }
     out += escapeRegExp(char)
     i++
   }
-  return new RegExp("^" + out + "$", "i")
+  return out
+}
+
+/** Where the `}` closing the `{` at `from` is, or -1 when it is never closed. */
+function closingBrace(pattern: string, from: number): number {
+  let depth = 0
+  for (let i = from; i < pattern.length; i++) {
+    if (pattern[i] === "{") depth++
+    else if (pattern[i] === "}" && --depth === 0) return i
+  }
+  return -1
+}
+
+/** Split on the commas belonging to this brace, not to one nested inside it. */
+function splitAlternatives(body: string): string[] {
+  const parts: string[] = []
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < body.length; i++) {
+    const char = body[i]
+    if (char === "{") depth++
+    else if (char === "}") depth--
+    else if (char === "," && depth === 0) {
+      parts.push(body.slice(start, i))
+      start = i + 1
+    }
+  }
+  parts.push(body.slice(start))
+  return parts
 }
 
 async function* walk(root: string, dir: string): AsyncGenerator<string> {
