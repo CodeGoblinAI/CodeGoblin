@@ -92,9 +92,14 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
     const kind = kindFromWord(query)
     const pool = kind ? selectionsOfKind(kind) : selectionsByKind()
     return pool
+      // Whether a model can actually run is the first thing worth knowing
+      // about it. Without this every model read as available and the only way
+      // to find out otherwise was to pick one and send a prompt.
       .map((s) => ({
         value: `/model ${s.provider.id}/${s.model.id}`,
-        hint: `${KIND_LABEL[kindOf(s.model)]} \u00b7 ${s.provider.label} ${s.model.label}`,
+        hint:
+          `${KIND_LABEL[kindOf(s.model)]} \u00b7 ${s.provider.label} ${s.model.label}` +
+          (connectedIds.has(s.provider.id) ? "" : "  \u00b7 no key"),
       }))
       .filter(
         (item) =>

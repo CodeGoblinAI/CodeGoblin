@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { paletteFor } from "../src/tui/palette"
+import { afterEach, describe, expect, test } from "bun:test"
+import { paletteFor, setConnectedProviders } from "../src/tui/palette"
 
 /**
  * The rule the TUI applies on enter:
@@ -47,6 +47,35 @@ describe("palette expansion", () => {
 
   test("plain text opens nothing", () => {
     expect(paletteFor("hello")).toBeUndefined()
+  })
+})
+
+describe("the model list says which models can actually run", () => {
+  afterEach(() => setConnectedProviders([]))
+
+  test("a provider with no key is marked", () => {
+    setConnectedProviders(["deepseek"])
+    const glm = paletteFor("/model glm")!
+    expect(glm.every((item) => item.hint.includes("no key"))).toBe(true)
+  })
+
+  test("a provider with a key is not", () => {
+    setConnectedProviders(["deepseek"])
+    const deepseek = paletteFor("/model deepseek")!
+    expect(deepseek.some((item) => item.hint.includes("no key"))).toBe(false)
+  })
+
+  test("connecting a provider changes what the list says about it", () => {
+    setConnectedProviders([])
+    expect(paletteFor("/model glm")!.every((item) => item.hint.includes("no key"))).toBe(true)
+    setConnectedProviders(["zai"])
+    expect(paletteFor("/model glm")!.some((item) => item.hint.includes("no key"))).toBe(false)
+  })
+
+  test("the marking never eats the model's own name", () => {
+    setConnectedProviders([])
+    const glm = paletteFor("/model glm-5.3")!
+    expect(glm[0]!.hint).toContain("GLM 5.3")
   })
 })
 

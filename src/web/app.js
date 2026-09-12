@@ -29,9 +29,21 @@ function renderModelMenu() {
       providerMenu.appendChild(head)
     }
     const row = document.createElement("div")
-    row.className = "picker-item" + (option.value === currentModel ? " chosen" : "")
+    // A model with no key is still selectable - the /connect flow is how you
+    // fix that - but it should not look identical to one that works. Every
+    // model used to, and you found out which was which by sending a prompt
+    // and getting "No API key for GLM." back.
+    row.className =
+      "picker-item" + (option.value === currentModel ? " chosen" : "") + (option.ready ? "" : " unready")
     row.setAttribute("role", "option")
     row.textContent = option.label
+    if (!option.ready) {
+      const tag = document.createElement("span")
+      tag.className = "picker-tag"
+      tag.textContent = "no key"
+      row.appendChild(tag)
+      row.title = "No API key for this provider yet - add one with /connect"
+    }
     row.onclick = () => { setModel(option.value); closeModelMenu() }
     providerMenu.appendChild(row)
   }
@@ -912,8 +924,13 @@ fetch("/api/providers").then((r) => r.json()).then((data) => {
     label: p.label + (p.reasoning ? " (reasoning)" : ""),
     kind: p.kind,
     section: p.section,
+    ready: p.ready,
   }))
-  const firstChat = modelOptions.find((option) => option.kind === "text")
+  // Open on something that can actually answer, rather than on whichever text
+  // model happens to be first and may have no key behind it.
+  const firstChat =
+    modelOptions.find((option) => option.kind === "text" && option.ready) ||
+    modelOptions.find((option) => option.kind === "text")
   if (firstChat || modelOptions.length) setModel((firstChat || modelOptions[0]).value)
   const ready = data.providers.filter((p) => p.ready).length
   hint.textContent = ready ? "" : "no API keys found"
