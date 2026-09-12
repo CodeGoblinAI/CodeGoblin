@@ -49,7 +49,28 @@ export type Provider = {
    * hidden one per medium.
    */
   baseUrl?: string
+  /**
+   * How this provider wants its key presented.
+   *
+   * Every provider in the catalogue today takes a bearer token, which is why
+   * the header was written inline in two files and a third. That made "speaks
+   * OpenAI chat-completions" and "takes an Authorization: Bearer" the same
+   * assumption, and they are not: Anthropic wants x-api-key and a version
+   * header, Google wants its own. Adding one of those should be a line in
+   * this catalogue, not an edit to the agent loop.
+   */
+  auth?: (key: string) => Record<string, string>
   models: Model[]
+}
+
+/**
+ * The headers that carry the key, defaulting to a bearer token.
+ *
+ * One place, so the loop, the summariser and the plain chat client cannot
+ * drift apart about how a provider is authenticated.
+ */
+export function authHeaders(provider: Provider, key: string): Record<string, string> {
+  return provider.auth ? provider.auth(key) : { authorization: `Bearer ${key}` }
 }
 
 export const PROVIDERS: Record<string, Provider> = {

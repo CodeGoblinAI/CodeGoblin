@@ -269,6 +269,52 @@ describe("which tools may overlap", () => {
   })
 })
 
+describe("how a provider's key is presented", () => {
+  /** Capture what the loop actually put on the wire. */
+  async function headersSentBy(which: Provider): Promise<Record<string, string>> {
+    let sent: Record<string, string> = {}
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      sent = init.headers as Record<string, string>
+      return answers("ok")
+    }) as unknown as typeof fetch
+
+    for await (const _ of runAgent({
+      provider: which,
+      modelId: "test-model",
+      apiKey: "sk-secret",
+      messages: [{ role: "user", content: "go" }],
+      root: process.cwd(),
+      maxTurns: 1,
+    })) {
+      // drained
+    }
+    return sent
+  }
+
+  test("a provider that says nothing gets a bearer token", async () => {
+    const sent = await headersSentBy(provider)
+    expect(sent.authorization).toBe("Bearer sk-secret")
+  })
+
+  test("a provider can ask for its key somewhere else entirely", async () => {
+    const sent = await headersSentBy({
+      ...provider,
+      auth: (key) => ({ "x-api-key": key, "anthropic-version": "2023-06-01" }),
+    })
+
+    expect(sent["x-api-key"]).toBe("sk-secret")
+    expect(sent["anthropic-version"]).toBe("2023-06-01")
+    // And the bearer header is gone, not merely joined - a provider that
+    // rejects unknown auth headers would fail on the leftover.
+    expect(sent.authorization).toBeUndefined()
+  })
+
+  test("the content type survives whatever the provider asks for", async () => {
+    const sent = await headersSentBy({ ...provider, auth: (key) => ({ "x-api-key": key }) })
+    expect(sent["content-type"]).toBe("application/json")
+  })
+})
+
 describe("the loop itself", () => {
   test("a refusal from the provider is raised, not swallowed", async () => {
     globalThis.fetch = (async () => new Response("no key for you", { status: 401 })) as typeof fetch

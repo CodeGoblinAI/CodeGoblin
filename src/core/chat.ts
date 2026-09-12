@@ -1,4 +1,4 @@
-import type { Provider } from "./providers"
+import { authHeaders, type Provider } from "./providers"
 
 export type Role = "user" | "assistant" | "system"
 export type Message = { role: Role; content: string }
@@ -25,7 +25,7 @@ export async function* streamChat(input: {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${input.apiKey}`,
+      ...authHeaders(input.provider, input.apiKey),
     },
     body: JSON.stringify({
       model: input.modelId,

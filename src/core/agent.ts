@@ -1,4 +1,4 @@
-import type { Provider } from "./providers"
+import { authHeaders, type Provider } from "./providers"
 import { TOOL_SCHEMA, runTool, isConcurrent } from "./tools"
 import type { Permissions } from "./permission"
 import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT } from "./context"
@@ -126,7 +126,7 @@ export async function* runAgent(input: {
 
     const response = await fetch(chatEndpoint(input.provider), {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
+      headers: { "content-type": "application/json", ...authHeaders(input.provider, input.apiKey) },
       body: JSON.stringify({
         model: input.modelId,
         messages: wire(input.messages, input.memory),
@@ -310,7 +310,7 @@ async function summarise(
   try {
     const response = await fetch(chatEndpoint(input.provider), {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
+      headers: { "content-type": "application/json", ...authHeaders(input.provider, input.apiKey) },
       body: JSON.stringify({
         model: input.modelId,
         messages: wire([...messages, { role: "user", content: SUMMARY_PROMPT }]),
