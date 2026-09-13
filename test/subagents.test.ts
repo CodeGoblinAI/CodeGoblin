@@ -142,6 +142,14 @@ describe("starting a subagent", () => {
     expect(subTools).not.toContain("task")
   })
 
+  test("the task tool tells the model most tasks do not need a subagent", () => {
+    // Subagents cost a second conversation's tokens; they are for big or
+    // parallel work, not the default way to get something done.
+    const task = manager().schema().find((tool) => tool.function.name === "task")!
+    expect(task.function.description).toContain("Most tasks do not need one")
+    expect(task.function.description).toContain("do the work yourself")
+  })
+
   test("an agent name nobody defined is an error that lists the real ones", async () => {
     const result = await manager().call("task", { agent: "wizard", description: "x", prompt: "x" })
     expect(result).toContain('no agent named "wizard"')
