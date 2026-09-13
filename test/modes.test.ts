@@ -26,7 +26,7 @@ describe("/plan and /approvals", () => {
  */
 describe("what counts as only looking", () => {
   test("commands that cannot change anything", () => {
-    for (const command of ["git status", "git diff HEAD~1", "git log --oneline -5", "ls -la", "dir", "rg TODO src", "cat a.txt | wc -l", "echo hello", "pwd && git show HEAD"]) {
+    for (const command of ["git status", "git diff HEAD~1", "git log --oneline -5", "ls -la", "dir", "rg TODO src", "cat a.txt | wc -l", "echo hello", "pwd && git show HEAD", "git log --oneline -10 2>&1 | head -20", "git status 2>nul", "ls 2>/dev/null"]) {
       expect([command, isReadOnlyCommand(command)]).toEqual([command, true])
     }
   })
@@ -45,6 +45,8 @@ describe("what counts as only looking", () => {
       "bash -c ls",
       "rg --pre=cat pattern",
       "ls && rm notes.txt",
+      "git log > out.txt 2>&1",
+      "echo x >nul.txt",
       "",
     ]
     for (const command of risky) {

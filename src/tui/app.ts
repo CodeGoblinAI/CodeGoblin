@@ -74,6 +74,7 @@ import { McpManager } from "../core/mcp"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
 import { setInvocations } from "./palette"
+import { systemPrompt } from "../core/system-prompt"
 import { configPath } from "../core/config"
 
 const argv = process.argv.slice(2)
@@ -112,32 +113,7 @@ const out = process.stdout
  * so the model guessed at paths, re-read files it had just written, and
  * asked permission for things it could simply do.
  */
-const SYSTEM: Message = {
-  role: "system",
-  content: [
-    "You are CodeGoblin, a coding agent working in a terminal.",
-    "",
-    "Tools: read_file, list_files, grep and glob to look around; write_file and",
-    "edit_file to change things; shell to run commands; webfetch to read a page;",
-    "todo_write to keep a plan the user can see; skill to load one of the skills listed below.",
-    "",
-    "Everything is confined to the working directory - paths outside it are",
-    "refused, so use relative paths. Read a file before editing it, and prefer",
-    "edit_file over write_file: it changes only what you name and fails loudly",
-    "rather than silently rewriting the whole file.",
-    "",
-    "Use todo_write for anything that takes more than a couple of steps, and",
-    "keep it updated as you go - it is how the user follows along.",
-    "",
-    "Writing, running commands and fetching pages ask the user for permission.",
-    "A refusal is an answer: say what you would have done and stop, rather than",
-    "trying another way around it.",
-    "",
-    "Be concise. Answer in prose, not headings, unless the answer really is a",
-    "list. Do not narrate what you are about to do; do it, then say what",
-    "happened.",
-  ].join(String.fromCharCode(10)),
-}
+const SYSTEM: Message = { role: "system", content: systemPrompt("terminal") }
 
 let messages: Message[] = [SYSTEM]
 /**

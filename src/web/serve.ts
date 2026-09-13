@@ -30,6 +30,7 @@ import { McpManager } from "../core/mcp"
 import { configPath } from "../core/config"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
+import { systemPrompt } from "../core/system-prompt"
 import { expandMentions } from "../core/mention"
 import { globFiles } from "../core/search"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
@@ -517,9 +518,7 @@ async function projectFiles(): Promise<string[]> {
     if (session.messages.length === 0) {
       session.messages.push({
         role: "system",
-        content:
-          "You are CodeGoblin, a coding agent. You have tools to read, list and write files " +
-          "in the user's working directory. Prefer reading before editing. Be concise.",
+        content: systemPrompt("browser"),
       })
     }
     // Mentions are read here, so the stored message carries its files and a

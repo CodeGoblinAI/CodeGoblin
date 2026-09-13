@@ -342,7 +342,13 @@ const READ_ONLY_PROGRAMS = new Set(["ls", "dir", "pwd", "cat", "type", "head", "
 const READ_ONLY_GIT = new Set(["status", "log", "diff", "show", "rev-parse", "ls-files", "blame"])
 
 export function isReadOnlyCommand(command: string): boolean {
-  if (command.includes(">") || command.includes("`") || command.includes("$(")) return false
+  // Joining one output stream to another (2>&1) or throwing output away
+  // (>nul, 2>/dev/null) writes no file, so neither disqualifies the line. A
+  // real model reached for git log ... 2>&1 while planning and was refused.
+  const writesNothing = command
+    .replace(/\d?>&\d/g, "")
+    .replace(/\d?>\s*(nul|\/dev\/null)(?=\s|$|[&|;])/gi, "")
+  if (writesNothing.includes(">") || command.includes("`") || command.includes("$(")) return false
   const segments = segmentsOf(command)
   if (!segments.length) return false
   return segments.every((segment) => {
