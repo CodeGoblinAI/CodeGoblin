@@ -63,6 +63,7 @@
   .tool { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 7px 11px; margin-left: 68px; font-family: var(--mono); }
   .tool .tname { color: var(--text); }
   .tool .targs { opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool .tdenied { color: var(--red); white-space: nowrap; }
   .tool.done .spin { color: var(--goblin); } .tool.failed .spin { color: var(--red); }
   .tool.running .spin { width: 9px; height: 9px; border: 1.5px solid var(--line); border-top-color: var(--goblin); border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -150,6 +151,7 @@
   .permission strong { color: var(--gold); }
   .permission .pkey { background: var(--bg); color: var(--text); border: 1px solid var(--line-strong); border-radius: 6px; padding: 5px 9px; font: inherit; font-family: var(--mono); font-size: 12px; min-width: 240px; }
   .permission .pdetail { display: block; color: var(--muted); font-family: var(--mono); font-size: 11.5px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .permission .pcover { display: block; color: var(--muted); font-size: 11.5px; margin-top: 4px; }
   .pactions { display: flex; gap: 7px; flex-shrink: 0; }
   .pallow, .pdeny { border: 1px solid var(--line); background: var(--panel2); color: var(--text); border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; }
   .pallow:hover { border-color: var(--goblin); color: var(--goblin); }

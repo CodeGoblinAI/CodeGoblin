@@ -377,13 +377,26 @@ function permissionPrompt(event) {
   // because the least committal choice should be the easiest to reach.
   const choices = paletteData.decisions || [
     { id: "once", label: "Allow once", hint: "just this one call" },
-    { id: "always", label: "Allow for this session", hint: "stop asking about this tool" },
+    { id: "always", label: "Allow for this session", hint: "stop asking about calls like this" },
     { id: "reject", label: "Reject", hint: "refuse, and tell the model so" },
   ]
   box.innerHTML =
-    '<div class="ptext">Allow <strong></strong>?<span class="pdetail"></span></div><div class="pactions"></div>'
+    '<div class="ptext">Allow <strong></strong>?<span class="pdetail"></span><span class="pcover"></span></div><div class="pactions"></div>'
   box.querySelector("strong").textContent = event.tool
-  box.querySelector(".pdetail").textContent = (event.detail || "").slice(0, 120)
+  // A shell call is shown as its command rather than the JSON it arrived in.
+  let asked = event.detail || ""
+  try {
+    const parsed = JSON.parse(asked)
+    if (parsed && typeof parsed.command === "string") asked = parsed.command
+  } catch {
+    // Not JSON, so it is shown as it came.
+  }
+  box.querySelector(".pdetail").textContent = asked.slice(0, 160)
+  // What "Allow for this session" would approve. It covers one command now,
+  // not the whole tool, so the choice has to say which.
+  const always = choices.find((c) => c.id === "always")
+  const cover = event.cover ? "stop asking about " + event.cover : ""
+  if (always && event.cover) box.querySelector(".pcover").textContent = always.label + " covers " + event.cover
 
   const actions = box.querySelector(".pactions")
   const answer = async (decision) => {
@@ -404,7 +417,7 @@ function permissionPrompt(event) {
     const button = document.createElement("button")
     button.className = choice.id === "reject" ? "pdeny" : "pallow"
     button.textContent = choice.label
-    button.title = choice.hint
+    button.title = choice.id === "always" && cover ? cover : choice.hint
     button.onclick = () => answer(choice.id)
     actions.appendChild(button)
   }
@@ -1018,19 +1031,35 @@ async function submit() {
         if (event.type === "plan") { planItems = event.todos; renderActivity() }
         if (event.type === "permission") { body = null; permissionPrompt(event) }
         if (event.type === "tool_denied") {
+          deniedCalls.add(event.id)
           const chip = chipFor(event.id)
-          if (chip) { chip.classList.remove("running"); chip.classList.add("failed"); chip.querySelector(".spin").textContent = "✗" }
+          if (chip) {
+            chip.classList.remove("running")
+            chip.classList.add("failed")
+            chip.querySelector(".spin").textContent = "✗"
+            // Whose decision it was. Without it, a command a rule stopped looked
+            // like one you had turned down.
+            const why = document.createElement("span")
+            why.className = "tdenied"
+            why.textContent = event.label || "refused"
+            chip.appendChild(why)
+          }
         }
         if (event.type === "tool_end") {
           runningTools = runningTools.filter((n) => n !== event.name)
-          const ok = !String(event.result || "").startsWith("error:")
+          const denied = deniedCalls.has(event.id)
+          const ok = !denied && !String(event.result || "").startsWith("error:")
           feedItems.push({ label: event.name, ok })
-          noteChange(event.name, lastToolArgs, event.result)
+          // A refused write changed nothing, so there is nothing to note.
+          if (!denied) noteChange(event.name, lastToolArgs, event.result)
           renderActivity()
         }
         if (event.type === "tool_end") {
           const chip = chipFor(event.id)
-          if (chip) {
+          // A refused call was marked when it was refused. Its tool_end carries
+          // the refusal text, which does not start with "error:" - so this used
+          // to turn a blocked command into a green tick.
+          if (chip && !deniedCalls.has(event.id)) {
             chip.classList.remove("running")
             chip.classList.add(event.result.startsWith("error:") ? "failed" : "done")
             chip.querySelector(".spin").textContent = event.result.startsWith("error:") ? "\u2717" : "\u2713"
@@ -1479,6 +1508,8 @@ let planItems = []
 let runningTools = []
 let feedItems = []
 let changedFiles = new Map()
+/** Calls that were refused, so their tool_end cannot mark them done. */
+const deniedCalls = new Set()
 
 const MARK = { pending: "\u25cb", in_progress: "\u25b8", completed: "\u2713" }
 

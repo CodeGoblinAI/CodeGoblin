@@ -24,7 +24,8 @@ import {
 import { apiKey } from "../core/auth"
 import * as auth from "../core/auth"
 import * as sessions from "../core/sessions"
-import { Permissions, DECISIONS, type Decision } from "../core/permission"
+import { DECISIONS, refusalLabel, type Decision } from "../core/permission"
+import { BrowserConsent } from "./consent"
 import { expandMentions } from "../core/mention"
 import { globFiles } from "../core/search"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
@@ -50,14 +51,8 @@ import { resolveInside } from "../core/tools"
 const page = fileURLToPath(new URL("./index.html", import.meta.url))
 const root = process.cwd()
 
-/**
- * Consent, per browser session.
- *
- * The browser answers over a second request rather than the stream, because
- * the stream is one-way. A pending question is held here until it is
- * answered or the turn is abandoned.
- */
-const pendingDecisions = new Map<string, (decision: Decision) => void>()
+/** Consent for every browser conversation; web/consent.ts says why it lives there. */
+const consent = new BrowserConsent()
 
 /**
  * Turns that can be cancelled.
@@ -66,7 +61,6 @@ const pendingDecisions = new Map<string, (decision: Decision) => void>()
  * kept running server-side, spending tokens on a turn nobody would see.
  */
 const activeTurns = new Map<string, AbortController>()
-const permissionsBySession = new Map<string, Permissions>()
 
 /**
  * What each session has written, so /undo can put it back.
@@ -80,21 +74,6 @@ function editsFor(sessionId: string): History {
   if (existing) return existing
   const created = new History()
   editsBySession.set(sessionId, created)
-  return created
-}
-
-function permissionsFor(sessionId: string, send: (event: unknown) => void): Permissions {
-  const existing = permissionsBySession.get(sessionId)
-  if (existing) return existing
-  const created = new Permissions(
-    (tool, detail) =>
-      new Promise<Decision>((resolve) => {
-        const id = sessionId + ":" + tool
-        pendingDecisions.set(id, resolve)
-        send({ type: "permission", id, tool, detail })
-      }),
-  )
-  permissionsBySession.set(sessionId, created)
   return created
 }
 
@@ -451,9 +430,7 @@ async function projectFiles(): Promise<string[]> {
       controller.abort()
       activeTurns.delete(body.sessionId ?? "")
       // Unblock a turn waiting on consent, or it will hang forever.
-      for (const [id, resolve] of pendingDecisions) {
-        if (id.startsWith((body.sessionId ?? "") + ":")) { resolve("reject"); pendingDecisions.delete(id) }
-      }
+      consent.abandon(body.sessionId ?? "")
       return json({ ok: true })
     }
     return json({ ok: false, error: "no turn running" }, 404)
@@ -461,12 +438,11 @@ async function projectFiles(): Promise<string[]> {
 
   if (url.pathname === "/api/permission" && request.method === "POST") {
     const body = (await request.json()) as { id?: string; decision?: Decision }
-    const resolve = pendingDecisions.get(body.id ?? "")
-    if (!resolve) return json({ ok: false, error: "no pending request" }, 404)
-    pendingDecisions.delete(body.id!)
-    // Anything unrecognised is a refusal: a malformed answer must never be
-    // read as consent.
-    resolve(DECISIONS.some((d) => d.id === body.decision) ? body.decision! : "reject")
+    // answer() refuses anything unrecognised, so a malformed answer can never
+    // be read as consent.
+    if (!consent.answer(body.id ?? "", body.decision)) {
+      return json({ ok: false, error: "no pending request" }, 404)
+    }
     return json({ ok: true })
   }
 
@@ -552,13 +528,15 @@ async function projectFiles(): Promise<string[]> {
             root,
             contextWindow: model.contextWindow,
             images: acceptsImages(selection),
-            permissions: permissionsFor(session.id, send),
+            permissions: consent.forSession(session.id, send),
             memory: await memory.recall({ project: root, session: session.id }),
             history: edits,
             effort: effortFor(model, (await settingsStore.load()).effort),
             signal: turn.signal,
           })) {
-            send(event)
+            // A refused call carries who refused it; the label is composed here
+            // so the browser and the terminal say the same words about it.
+            send(event.type === "tool_denied" ? { ...event, label: refusalLabel(event) } : event)
           }
           await sessions.save(session)
           send({ type: "saved", id: session.id, title: session.title })

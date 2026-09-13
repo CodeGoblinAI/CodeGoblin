@@ -207,13 +207,16 @@ describe("several tools in one turn", () => {
       messages: [{ role: "user", content: "go" }],
       root: process.cwd(),
       maxTurns: 8,
+      // A stand-in rather than the real Permissions, which waves reads through
+      // without consulting anything. This is about the loop asking whatever it
+      // was given, in order, before anything starts.
       permissions: {
         mode: "ask",
-        check: async (name: string) => {
+        decide: async (name: string) => {
           // Nothing may have started while a question is still outstanding.
           expect(events.some((e) => e.type === "tool_start")).toBe(false)
           asked.push(name)
-          return true
+          return { allowed: true }
         },
       } as never,
     })) {
@@ -235,18 +238,58 @@ describe("several tools in one turn", () => {
       messages: [{ role: "user", content: "go" }],
       root: process.cwd(),
       maxTurns: 8,
-      permissions: { mode: "ask", check: async () => ++seen !== 2 } as never,
+      permissions: {
+        mode: "ask",
+        decide: async () =>
+          ++seen !== 2 ? { allowed: true } : { allowed: false, by: "user", reason: "refused by the user" },
+      } as never,
     })) {
       events.push(event)
     }
 
-    const denied = events.filter((e) => e.type === "tool_denied") as { id: string }[]
+    const denied = events.filter((e) => e.type === "tool_denied") as { id: string; by: string }[]
     expect(denied.map((e) => e.id)).toEqual(["b"])
+    // Whose decision it was travels with the event, so a surface can say so.
+    expect(denied[0]!.by).toBe("user")
 
     const ended = events.filter((e) => e.type === "tool_end") as { id: string; result: string }[]
     expect(ended.map((e) => e.id)).toEqual(["a", "b", "c"])
     expect(ended[1]!.result).toContain("refused")
     expect(ended[0]!.result).not.toContain("refused")
+  })
+
+  test("a command a rule stops tells the model which rule, and never runs", async () => {
+    // The real Permissions and a real deny rule, end to end. Telling the model
+    // the user refused - when nobody was asked - sends it looking for the wrong
+    // fix, and a blocked command must not have run at all.
+    const { Permissions } = await import("../src/core/permission")
+    const command = JSON.stringify({ command: "echo rm -rf nothing" })
+    serve(asksForMany({ id: "x", name: "shell", args: command }), () => answers("ok"))
+    const permissions = new Permissions(async () => "always", () => ({ "*rm -rf*": "deny" }))
+    permissions.mode = "auto"
+    const messages: { role: string; content: string; tool_call_id?: string }[] = [{ role: "user", content: "go" }]
+
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider,
+      modelId: "test-model",
+      apiKey: "not-a-real-key",
+      messages: messages as never,
+      root: process.cwd(),
+      maxTurns: 8,
+      permissions,
+    })) {
+      events.push(event)
+    }
+
+    // The surfaces label a blocked call from this event, so the rule rides on it.
+    expect(events.find((event) => event.type === "tool_denied")).toMatchObject({ id: "x", by: "rule", rule: "*rm -rf*" })
+
+    const reply = messages.find((message) => message.tool_call_id === "x")?.content ?? ""
+    expect(reply).toContain('"*rm -rf*"')
+    expect(reply).not.toContain("refused by the user")
+    // echo would have printed its words; a blocked call has no output at all.
+    expect(reply).not.toContain("rm -rf nothing")
   })
 })
 

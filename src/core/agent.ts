@@ -40,7 +40,12 @@ export type AgentEvent =
    */
   | { type: "tool_start"; id: string; name: string; args: string }
   | { type: "tool_end"; id: string; name: string; result: string }
-  | { type: "tool_denied"; id: string; name: string }
+  /**
+   * `by` says whose decision it was - a rule in codegoblin.jsonc, plan mode, or
+   * the person asked - so a surface never labels a command a rule stopped as
+   * one somebody refused. `rule` is the pattern, when it was a rule.
+   */
+  | { type: "tool_denied"; id: string; name: string; by: "rule" | "plan" | "user"; rule?: string }
   | { type: "compacted"; before: number; after: number }
   | { type: "plan"; todos: Todo[] }
   | { type: "spend"; input: number; output: number }
@@ -277,7 +282,12 @@ export async function* runAgent(input: {
     // Consent runs first, in the order asked, one at a time. A permission
     // prompt is a question put to a person; two of them arriving at once is
     // not something a person can answer. Only the work afterwards overlaps.
-    const decided: { call: ToolCall; args: unknown; allowed: boolean }[] = []
+    const decided: {
+      call: ToolCall
+      args: unknown
+      allowed: boolean
+      refusal?: { reason: string; by: "rule" | "plan" | "user"; rule?: string }
+    }[] = []
     for (const call of pending) {
       if (input.signal?.aborted) return
       let args: unknown = {}
@@ -288,9 +298,12 @@ export async function* runAgent(input: {
       }
       // Consent happens here rather than inside the tool, so every surface
       // gets the same prompt and the model still receives a normal tool
-      // result when it is refused.
-      const allowed = !input.permissions || (await input.permissions.check(call.name, call.args))
-      decided.push({ call, args, allowed })
+      // result when it is refused. The verdict carries its reason, so a call
+      // stopped by a rule in codegoblin.jsonc says which rule rather than
+      // telling the model the user refused something they were never asked.
+      const verdict = input.permissions ? await input.permissions.decide(call.name, call.args) : undefined
+      if (!verdict || verdict.allowed) decided.push({ call, args, allowed: true })
+      else decided.push({ call, args, allowed: false, refusal: verdict })
     }
 
     // Every chip opens at once, so a turn that asked for four reads looks like
@@ -323,15 +336,18 @@ export async function* runAgent(input: {
 
     // Reported in the order the model asked for them, whatever order they
     // finished in, so a transcript reads the same way twice.
-    for (const { call, args, allowed } of decided) {
+    for (const { call, args, allowed, refusal } of decided) {
       if (!allowed) {
-        const refusal =
-          input.permissions?.mode === "plan"
-            ? "not run: plan mode is on, so nothing that changes files or runs commands is executed"
-            : "refused by the user"
-        input.messages.push({ role: "tool", tool_call_id: call.id, content: refusal })
-        yield { type: "tool_denied", id: call.id, name: call.name }
-        yield { type: "tool_end", id: call.id, name: call.name, result: refusal }
+        const reason = refusal?.reason ?? "refused by the user"
+        input.messages.push({ role: "tool", tool_call_id: call.id, content: reason })
+        yield {
+          type: "tool_denied",
+          id: call.id,
+          name: call.name,
+          by: refusal?.by ?? "user",
+          ...(refusal?.rule ? { rule: refusal.rule } : {}),
+        }
+        yield { type: "tool_end", id: call.id, name: call.name, result: reason }
         continue
       }
 

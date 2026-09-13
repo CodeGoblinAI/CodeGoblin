@@ -69,7 +69,7 @@ import {
   type Spend,
 } from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
-import { Permissions, DECISIONS, MODES, nextMode, type Decision } from "../core/permission"
+import { Permissions, DECISIONS, MODES, nextMode, commandOf, refusalLabel, type Decision } from "../core/permission"
 
 const argv = process.argv.slice(2)
 
@@ -278,7 +278,8 @@ function stopSpinner() {
 }
 let status = key ? "" : "no key for " + selection.provider.label
 
-let pending: { tool: string; detail: string; resolve: (d: Decision) => void } | undefined
+/** A question waiting on an answer. `cover` is what "Allow for this session" would approve, in words. */
+let pending: { tool: string; detail: string; cover: string; resolve: (d: Decision) => void } | undefined
 /** Which answer is highlighted. Starts on "allow once", the least committal. */
 let pendingChoice = 0
 
@@ -307,10 +308,13 @@ const diffOpen = new Set<string>()
 let lastChanges: Changes | undefined
 /** Which setting is having its value chosen. */
 let settingBeing: string | undefined
-const permissions = new Permissions(
-  (tool, detail) =>
+// withConfig rather than new: the deny rules in codegoblin.jsonc have to reach
+// the agent this terminal drives, and a test fails if a surface builds one
+// without them.
+const permissions = Permissions.withConfig(
+  (tool, detail, cover) =>
     new Promise<Decision>((resolve) => {
-      pending = { tool, detail, resolve }
+      pending = { tool, detail, cover, resolve }
       pendingChoice = 0
       render()
     }),
@@ -536,23 +540,32 @@ function render() {
   // Consent is a list you move through, not a letter you have to know. It
   // sits where the palette does, so the answer is next to the question.
   if (pending) {
+    // The box names what is being asked and what "for this session" would
+    // cover. It used to say only "allow this?", with the command down in the
+    // input line, and the session hint said "calls like this" - which told you
+    // nothing once an approval covered one command rather than the whole tool.
+    const asked = (pending.tool === "shell" ? commandOf(pending.detail) : pending.detail).replace(/\s+/g, " ")
+    const title = " allow " + pending.tool + ": " + asked + "?"
+    const hints = DECISIONS.map((d) => (d.id === "always" ? "stop asking about " + pending!.cover : d.hint))
     // One width for every row, padded after colouring - displayWidth skips
-    // escape sequences, so the box lines up whatever colour the text is.
+    // escape sequences, so the box lines up whatever colour the text is. As
+    // wide as the words need, but never wider than the terminal.
     const labelWidth = Math.max(...DECISIONS.map((d) => displayWidth(d.label))) + 2
-    const hintWidth = Math.max(...DECISIONS.map((d) => displayWidth(d.hint)))
-    const inner = 3 + labelWidth + hintWidth + 1
+    const wanted = Math.max(3 + labelWidth + Math.max(...hints.map((hint) => displayWidth(hint))), displayWidth(title)) + 1
+    const inner = Math.max(24, Math.min(wanted, cols - 6))
 
     body.push(theme.border + "  " + "╭" + "─".repeat(inner) + "╮" + ansi.reset)
     body.push(
       theme.border + "  │" + ansi.reset +
-        theme.gold + padToWidth(" allow this?", inner) + ansi.reset +
+        theme.gold + padToWidth(truncateToWidth(title, inner), inner) + ansi.reset +
         theme.border + "│" + ansi.reset,
     )
     for (const [index, choice] of DECISIONS.entries()) {
       const active = index === pendingChoice
       const marker = active ? theme.goblin + " ❯ " + ansi.reset : "   "
       const label = (active ? theme.text : theme.muted) + padToWidth(choice.label, labelWidth) + ansi.reset
-      const row = marker + label + dim + choice.hint + ansi.reset
+      const hint = truncateToWidth(hints[index]!, Math.max(0, inner - 3 - labelWidth))
+      const row = marker + label + dim + hint + ansi.reset
       body.push(
         theme.border + "  │" + ansi.reset + padToWidth(row, inner) + theme.border + "│" + ansi.reset,
       )
@@ -1475,7 +1488,9 @@ async function send() {
 
       if (event.type === "tool_denied") {
         const row = rowFor(event.id)
-        if (row) row.text += "  (refused)"
+        // Whose decision it was: a rule, plan mode, or you. It said "refused"
+        // for all three, so a command a rule stopped read as one you declined.
+        if (row) row.text += "  (" + refusalLabel(event) + ")"
       }
       if (event.type === "tool_end") {
         const row = rowFor(event.id)
