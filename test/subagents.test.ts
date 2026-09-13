@@ -142,12 +142,18 @@ describe("starting a subagent", () => {
     expect(subTools).not.toContain("task")
   })
 
-  test("the task tool tells the model most tasks do not need a subagent", () => {
-    // Subagents cost a second conversation's tokens; they are for big or
-    // parallel work, not the default way to get something done.
-    const task = manager().schema().find((tool) => tool.function.name === "task")!
-    expect(task.function.description).toContain("Most tasks do not need one")
-    expect(task.function.description).toContain("do the work yourself")
+  test("a conversation that was not given subagents is not offered them", async () => {
+    // Subagents are opt-in with /boost: without it the surfaces pass none, and
+    // the model never sees task at all.
+    script({ main: () => say("done"), sub: () => say("never") })
+    const messages: Message[] = [
+      { role: "system", content: "main" },
+      { role: "user", content: "go" },
+    ]
+    for await (const _ of runAgent({ provider, modelId: "test-model", apiKey: "not-a-real-key", messages, root: project })) {
+      // drained
+    }
+    expect(bodies[0]!.tools.map((tool) => tool.function.name)).not.toContain("task")
   })
 
   test("an agent name nobody defined is an error that lists the real ones", async () => {

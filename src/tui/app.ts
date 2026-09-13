@@ -153,6 +153,14 @@ const mcp = McpManager.fromConfig()
 void mcp.start()
 
 /**
+ * /boost. Subagents cost a second conversation's tokens and most tasks do not
+ * need them, so the model is not offered them at all unless asked: bare /boost
+ * switches them on for the session, /boost <request> for that one request.
+ */
+let boost = false
+let boostOnce = false
+
+/**
  * Background subagents the model starts with the task tool. They work under
  * this conversation's model and permissions, read when each starts; their tool
  * calls show in the transcript under the agent's name, and their spend counts.
@@ -680,6 +688,7 @@ function render() {
   const modeTag =
     (permissions.mode === "ask" ? "" : "  [" + MODES.find((entry) => entry.id === permissions.mode)!.label.toLowerCase() + "]") +
     (permissions.planning ? "  [planning]" : "") +
+    (boost || boostOnce ? "  [boost]" : "") +
     (subagents.running().length ? "  [" + subagents.running().length + " subagent" + (subagents.running().length === 1 ? "" : "s") + " running]" : "")
   const spendTag = spend.input + spend.output > 0 ? "  " + formatSpend(spend) : ""
   const left =
@@ -1403,6 +1412,20 @@ async function send() {
         status = gone ? "disconnected " + result.provider : "no stored key for " + result.provider
       }
     }
+    if (result.kind === "boost") {
+      if (!result.text) {
+        boost = !boost
+        status = boost ? "boost on - the model can hand work to subagents" : "boost off"
+        render()
+        return
+      }
+      boostOnce = true
+      input = result.text
+      cursor = input.length
+      render()
+      void send()
+      return
+    }
     if (result.kind === "approvals") {
       openApprovalsPicker()
       render()
@@ -1613,7 +1636,8 @@ async function send() {
       permissions,
       history: edits,
       extraTools: mcp,
-      subagents,
+      // Offered only with /boost - or while subagents started under it are still out.
+      subagents: boost || boostOnce || subagents.running().length ? subagents : undefined,
       effort: effortFor(selection.model, settings.effort),
       signal: turn.signal,
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
@@ -1696,6 +1720,8 @@ async function send() {
     edits.commit()
     session.messages = messages
     void sessions.save(session).then(refreshSessionCache).catch(() => {})
+
+    boostOnce = false
 
     // A planned answer ends with the choice of what happens next, so agreeing
     // to a plan is one keystroke rather than a sentence.

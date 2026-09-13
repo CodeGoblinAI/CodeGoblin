@@ -83,6 +83,7 @@ document.addEventListener("keydown", (event) => {
 const modeBtn = document.getElementById("mode-btn")
 const modeMenu = document.getElementById("mode-menu")
 const planTag = document.getElementById("plan-tag")
+const boostTag = document.getElementById("boost-tag")
 const MODE_CHOICES = [
   { id: "ask", label: "Ask for approval", hint: "ask before changing files, running commands or using the internet" },
   { id: "approve", label: "Approve for me", hint: "only ask for actions that could be unsafe" },
@@ -90,6 +91,9 @@ const MODE_CHOICES = [
 ]
 let currentMode = "ask"
 let planning = false
+/** /boost: subagents are offered only when asked for - for the session, or once for one request. */
+let boost = false
+let boostOnce = false
 
 function modeChoices() {
   return paletteData.modes && paletteData.modes.length ? paletteData.modes : MODE_CHOICES
@@ -123,6 +127,11 @@ function setMode(id) {
 function setPlanning(on) {
   planning = on
   planTag.hidden = !on
+}
+
+function setBoost(on) {
+  boost = on
+  boostTag.hidden = !(boost || boostOnce)
 }
 
 function closeModeMenu() {
@@ -885,6 +894,19 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/boost") {
+    if (!argument) {
+      setBoost(!boost)
+      note(boost ? "boost on - the model can hand work to subagents" : "boost off")
+      return true
+    }
+    boostOnce = true
+    boostTag.hidden = false
+    // Sent once this command has finished clearing the composer.
+    setTimeout(() => sendText(argument), 0)
+    return true
+  }
+
   if (name === "/plan") {
     if (!argument) {
       setPlanning(!planning)
@@ -1127,7 +1149,7 @@ async function submit() {
     response = await fetch("/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, sessionId, provider: currentModel, images: sending, mode: currentMode, planning }),
+      body: JSON.stringify({ text, sessionId, provider: currentModel, images: sending, mode: currentMode, planning, boost: boost || boostOnce }),
       signal: controller.signal,
     })
   } catch {
@@ -1281,6 +1303,8 @@ async function submit() {
         if (event.type === "error") turn("agent", "**Error:** " + event.message)
         if (event.type === "saved") {
           refreshSessions()
+          boostOnce = false
+          boostTag.hidden = !boost
           // A planned answer ends with the choice of what happens next.
           if (planning && raw.trim()) planPrompt()
         }

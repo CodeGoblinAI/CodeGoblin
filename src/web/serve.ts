@@ -213,6 +213,7 @@ async function projectFiles(): Promise<string[]> {
         { value: "/skills", hint: "skills and custom commands, and where each comes from" },
         { value: "/plan", hint: "plan before changing anything: /plan add dark mode" },
         { value: "/approvals", hint: "how much to ask before acting" },
+        { value: "/boost", hint: "let the model use subagents: /boost a hard task" },
         { value: "/export", hint: "save the conversation as markdown" },
         { value: "/rename", hint: "retitle this conversation" },
         { value: "/theme", hint: "change colours", expands: true },
@@ -514,6 +515,8 @@ async function projectFiles(): Promise<string[]> {
       /** Ask for approval, Approve for me or Full access - ask when missing. */
       mode?: string
       planning?: boolean
+      /** Subagents are offered only when the page asks for them with /boost. */
+      boost?: boolean
     }
     const text = (body.text ?? "").trim()
     if (!text) return json({ error: "empty prompt" }, 400)
@@ -618,7 +621,8 @@ async function projectFiles(): Promise<string[]> {
             contextWindow: model.contextWindow,
             images: acceptsImages(selection),
             permissions,
-            subagents,
+            // Offered only with /boost - or while subagents started under it are still out.
+            subagents: body.boost === true || subagents.running().length ? subagents : undefined,
             extraTools: mcp,
             memory: await memory.recall({ project: root, session: session.id }),
             instructions: skillIndex(listSkills(root)),

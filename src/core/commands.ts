@@ -23,6 +23,7 @@ export type CommandResult =
   | { kind: "skills" }
   | { kind: "plan"; text?: string }
   | { kind: "approvals" }
+  | { kind: "boost"; text?: string }
   | { kind: "export"; path?: string }
   | { kind: "rename"; title: string }
   | { kind: "theme"; name?: string }
@@ -53,6 +54,7 @@ export const COMMANDS = [
   { name: "/skills", description: "skills and custom commands, and where each comes from" },
   { name: "/plan", description: "plan before changing anything: /plan add dark mode, or /plan to switch it" },
   { name: "/approvals", description: "how much to ask before acting - opens a picker" },
+  { name: "/boost", description: "let the model use subagents: /boost a hard task, or /boost to switch it on" },
   { name: "/export", description: "save as markdown: /export, or /export notes/chat.md" },
   { name: "/rename", description: "retitle this conversation: /rename plan review" },
   { name: "/theme", description: "change colours: /theme midnight" },
@@ -142,6 +144,8 @@ export function runCommand(text: string): CommandResult {
     case "/approvals":
     case "/mode":
       return { kind: "approvals" }
+    case "/boost":
+      return { kind: "boost", text: argument || undefined }
     case "/export":
       return { kind: "export", path: argument || undefined }
     // A panel, not a grammar. This was two commands where one had to know

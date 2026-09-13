@@ -215,14 +215,11 @@ export class SubagentManager implements Subagents {
         function: {
           name: "task",
           description: [
-            // Worded against reaching for one by default: a subagent is a whole
-            // second conversation's worth of tokens, and most tasks are done
-            // faster and cheaper by the main agent with its own tools.
-            "Start a subagent on a task in the background. Most tasks do not need one - do the work yourself",
-            "with your own tools. Use a subagent only when a task is big enough to justify the extra tokens: a",
-            "wide search across a large codebase, or separate pieces of work that can go on at the same time.",
-            "Give it everything it needs in the prompt - it starts with no context. Collect its result with",
-            "task_result; results you have not collected are handed to you before you finish. Agents:",
+            // Only offered when the user asks for subagents with /boost, so the
+            // description does not need to argue against using them.
+            "Start a subagent on a task in the background, and keep working while it runs. Give it everything",
+            "it needs in the prompt - it starts with no context. Collect its result with task_result; results",
+            "you have not collected are handed to you before you finish. Agents:",
             ...agents.map((agent) => `- ${agent.name}: ${agent.description}`),
           ].join(NEWLINE),
           parameters: {
