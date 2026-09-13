@@ -273,6 +273,25 @@ export const EXTRA_TOOLS: Tool[] = [
     },
   },
   {
+    name: "skill",
+    description:
+      "Load one of the skills listed in the system prompt: its instructions, and the files that come " +
+      "with it. Pass file to read one of those files, by the path the skill lists.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "The skill's name, as listed." },
+        file: { type: "string", description: "Optional. A file inside the skill's folder, relative to it." },
+      },
+      required: ["name"],
+    },
+    concurrent: true,
+    run: async (args, root) => {
+      const { runSkillTool } = await import("./skills")
+      return runSkillTool(String(args.name ?? ""), typeof args.file === "string" ? args.file : undefined, root)
+    },
+  },
+  {
     name: "webfetch",
     description:
       "Fetch a public http or https URL and return its readable text. Refuses private and " +

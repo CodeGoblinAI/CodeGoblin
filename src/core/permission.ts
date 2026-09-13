@@ -49,7 +49,7 @@ export type Ask = (tool: string, detail: string, cover: string) => Promise<Decis
  * only records the plan the user is already watching, so asking permission
  * for it is friction with nothing behind it.
  */
-const HARMLESS = new Set(["read_file", "list_files", "grep", "glob", "todo_write"])
+const HARMLESS = new Set(["read_file", "list_files", "grep", "glob", "todo_write", "skill"])
 
 const NEWLINE = String.fromCharCode(10)
 const RETURN = String.fromCharCode(13)

@@ -93,7 +93,7 @@ function chatEndpoint(provider: Provider): string {
  * Messages carry a display copy for the UI, and providers that validate their
  * input reject unknown keys outright - so the wire gets the wire fields.
  */
-const wire = (messages: Message[], memory?: string, images = false) => {
+const wire = (messages: Message[], memory?: string, images = false, instructions?: string) => {
   const sent = messages.map(({ role, content, images: attached, tool_calls, tool_call_id }) => {
     // A message with pictures becomes the multimodal shape, which is the only
     // form a vision model reads them in. Without this the attachment simply
@@ -133,8 +133,9 @@ const wire = (messages: Message[], memory?: string, images = false) => {
   // the conversation: it is read fresh every turn, so forgetting something
   // takes effect immediately instead of lingering in old messages.
   const first = sent[0]
-  if (memory && first?.role === "system" && typeof first.content === "string") {
-    sent[0] = { ...first, content: first.content + String.fromCharCode(10, 10) + memory }
+  const extra = [instructions, memory].filter(Boolean).join(String.fromCharCode(10, 10))
+  if (extra && first?.role === "system" && typeof first.content === "string") {
+    sent[0] = { ...first, content: first.content + String.fromCharCode(10, 10) + extra }
   }
   return sent
 }
@@ -161,6 +162,8 @@ export async function* runAgent(input: {
   permissions?: Permissions
   /** What is remembered, folded into the system prompt for this request. */
   memory?: string
+  /** More for the system prompt, read fresh each request - the index of skills today. */
+  instructions?: string
   /** Given a turn, keeps the previous state of every file the turn writes. */
   history?: History
   /** MCP tools, offered next to the built-in ones and asked about the same way. */
@@ -198,7 +201,7 @@ export async function* runAgent(input: {
       headers: { "content-type": "application/json", ...authHeaders(input.provider, input.apiKey) },
       body: JSON.stringify({
         model: input.modelId,
-        messages: wire(input.messages, input.memory, input.images),
+        messages: wire(input.messages, input.memory, input.images, input.instructions),
         tools: [...TOOL_SCHEMA, ...(input.extraTools?.schema() ?? [])],
         stream: true,
         ...(input.effort ? { reasoning_effort: input.effort } : {}),

@@ -28,6 +28,8 @@ import { DECISIONS, refusalLabel, type Decision } from "../core/permission"
 import { BrowserConsent } from "./consent"
 import { McpManager } from "../core/mcp"
 import { configPath } from "../core/config"
+import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
+import { listSkills, skillIndex } from "../core/skills"
 import { expandMentions } from "../core/mention"
 import { globFiles } from "../core/search"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
@@ -186,12 +188,15 @@ async function projectFiles(): Promise<string[]> {
         { value: "/disconnect", hint: "remove a stored key - pick one", expands: true },
         { value: "/status", hint: "what this session is using right now" },
         { value: "/mcp", hint: "MCP servers from codegoblin.jsonc, and their tools" },
+        { value: "/skills", hint: "skills and custom commands, and where each comes from" },
         { value: "/export", hint: "save the conversation as markdown" },
         { value: "/rename", hint: "retitle this conversation" },
         { value: "/theme", hint: "change colours", expands: true },
         { value: "/thinking", hint: "show or hide the model's reasoning" },
         { value: "/effort", hint: "how hard a reasoning model thinks: /effort high", expands: true },
         { value: "/settings", hint: "how generation comes out: /settings 3d.topology quad", expands: true },
+        // Marked, so the page sends them to the model rather than calling them unknown.
+        ...invocationItems(root).map((item) => ({ ...item, invocation: true })),
       ],
       models,
       sessions: saved.map((entry) => ({ value: "/resume " + entry.id, hint: entry.title })),
@@ -209,6 +214,19 @@ async function projectFiles(): Promise<string[]> {
         ...entry,
         connected: auth.isConnected(entry.id),
       })),
+    })
+  }
+
+  if (url.pathname === "/api/skills") {
+    return json({
+      skills: listSkills(root).map(({ name, description, scope, modelInvocable, userInvocable }) => ({
+        name,
+        description,
+        scope,
+        modelInvocable,
+        userInvocable,
+      })),
+      commands: customCommands(root).map(({ name, description, scope }) => ({ name, description, scope })),
     })
   }
 
@@ -489,7 +507,9 @@ async function projectFiles(): Promise<string[]> {
     }
     // Mentions are read here, so the stored message carries its files and a
     // resumed conversation still has the context it was answered with.
-    const mentioned = await expandMentions(text, root)
+    // A custom command or a skill is sent as its text; the line typed is what is shown.
+    const invoked = text.startsWith("/") ? resolveInvocation(text, root) : undefined
+    const mentioned = await expandMentions(invoked ? invoked.content : text, root)
 
     // Pictures arrive two ways and mean the same thing once they are here:
     // attached in the page, or @mentioned by path like any other file.
@@ -500,7 +520,7 @@ async function projectFiles(): Promise<string[]> {
     const images = [...pasted, ...mentioned.images]
 
     session.messages.push(
-      mentioned.files.length || images.length
+      mentioned.files.length || images.length || invoked
         ? { role: "user", content: mentioned.content, display: text, images }
         : { role: "user", content: text },
     )
@@ -547,6 +567,7 @@ async function projectFiles(): Promise<string[]> {
             permissions: consent.forSession(session.id, send),
             extraTools: mcp,
             memory: await memory.recall({ project: root, session: session.id }),
+            instructions: skillIndex(listSkills(root)),
             history: edits,
             effort: effortFor(model, (await settingsStore.load()).effort),
             signal: turn.signal,

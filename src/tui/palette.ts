@@ -38,6 +38,12 @@ export function setFileCache(files: string[]) {
   fileCache = files
 }
 
+/** Custom commands and skills, offered after the built-ins. Filled by the app, like the file list. */
+let invocations: PaletteItem[] = []
+export function setInvocations(items: PaletteItem[]) {
+  invocations = items
+}
+
 
 /** Basename matches first, then the shortest path: what gets typed is usually a filename. */
 function rankFiles(query: string): string[] {
@@ -132,7 +138,8 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
     value: command.name,
     hint: command.description,
   }))
-  return matches.length ? matches : undefined
+  for (const item of invocations) if (item.value.toLowerCase().startsWith(query)) matches.push(item)
+  return matches.length ? matches.slice(0, LIST_LIMIT) : undefined
 }
 
 /**

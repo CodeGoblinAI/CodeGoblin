@@ -71,6 +71,9 @@ import {
 import { marker, counts, type Todo } from "../core/todo"
 import { Permissions, DECISIONS, MODES, nextMode, commandOf, refusalLabel, type Decision } from "../core/permission"
 import { McpManager } from "../core/mcp"
+import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
+import { listSkills, skillIndex } from "../core/skills"
+import { setInvocations } from "./palette"
 import { configPath } from "../core/config"
 
 const argv = process.argv.slice(2)
@@ -116,7 +119,7 @@ const SYSTEM: Message = {
     "",
     "Tools: read_file, list_files, grep and glob to look around; write_file and",
     "edit_file to change things; shell to run commands; webfetch to read a page;",
-    "todo_write to keep a plan the user can see.",
+    "todo_write to keep a plan the user can see; skill to load one of the skills listed below.",
     "",
     "Everything is confined to the working directory - paths outside it are",
     "refused, so use relative paths. Read a file before editing it, and prefer",
@@ -171,6 +174,10 @@ const edits = new History()
  */
 const mcp = McpManager.fromConfig()
 void mcp.start()
+
+// Custom commands and skills join the slash picker. Read once here for the
+// picker; a message reads them fresh, so one written mid-session still runs.
+setInvocations(invocationItems(process.cwd()))
 
 /**
  * Text that was pasted rather than typed.
@@ -1179,7 +1186,11 @@ async function send() {
   const text = input.trim()
   if (!text || streaming) return
 
-  if (isCommand(text)) {
+  // A custom command or a skill reads like a command but is a message: its
+  // text is what the model gets, and the line typed is what the transcript shows.
+  const invoked = isCommand(text) ? resolveInvocation(text, process.cwd()) : undefined
+
+  if (isCommand(text) && !invoked) {
     input = ""
     cursor = 0
     palette = undefined
@@ -1295,6 +1306,26 @@ async function send() {
         refreshConnected()
         status = gone ? "disconnected " + result.provider : "no stored key for " + result.provider
       }
+    }
+    if (result.kind === "skills") {
+      // Into the transcript rather than a panel: there can be dozens, and the
+      // transcript scrolls.
+      const skills = listSkills(process.cwd())
+      const commands = customCommands(process.cwd())
+      const lines = [
+        ...commands.map((command) => "/" + command.name + "  command (" + command.scope + ")" + (command.description ? " - " + command.description : "")),
+        ...skills.map(
+          (skill) =>
+            "/" + skill.name + "  skill (" + skill.scope + (skill.modelInvocable ? "" : ", only you can start it") +
+            (skill.userInvocable ? "" : ", only the model can start it") + ")",
+        ),
+      ]
+      transcript.push({
+        kind: "tool",
+        text: lines.length
+          ? skills.length + " skills, " + commands.length + " custom commands" + String.fromCharCode(10) + lines.join(String.fromCharCode(10))
+          : "no skills or custom commands yet - a skill is a folder with a SKILL.md in ~/.claude/skills",
+      })
     }
     if (result.kind === "mcp") {
       const servers = mcp.statuses()
@@ -1416,7 +1447,7 @@ async function send() {
   // Mentions are read here rather than in the agent so the stored message
   // carries the files with it: a resumed conversation keeps its context.
   // What was folded away goes back before anything sees it.
-  const whole = unfoldPastes(text)
+  const whole = invoked ? invoked.content : unfoldPastes(text)
   const mentioned = await expandMentions(whole, process.cwd())
   const seeing = acceptsImages(selection)
   messages.push(
@@ -1469,6 +1500,7 @@ async function send() {
       effort: effortFor(selection.model, settings.effort),
       signal: turn.signal,
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
+      instructions: skillIndex(listSkills(process.cwd())),
     })) {
       if (event.type === "thinking") {
         if (!current || current.kind !== "thinking") {

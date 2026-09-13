@@ -768,6 +768,20 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/skills") {
+    const result = await fetch("/api/skills").then((r) => r.json()).catch(() => null)
+    if (!result) { note("could not reach the server"); return true }
+    const lines = [
+      ...result.commands.map((c) => "/" + c.name + "  command (" + c.scope + ")" + (c.description ? " - " + c.description : "")),
+      ...result.skills.map((s) =>
+        "/" + s.name + "  skill (" + s.scope + (s.modelInvocable ? "" : ", only you can start it") + (s.userInvocable ? "" : ", only the model can start it") + ")"),
+    ]
+    note(lines.length
+      ? result.skills.length + " skills, " + result.commands.length + " custom commands" + String.fromCharCode(10) + lines.join(String.fromCharCode(10))
+      : "no skills or custom commands yet - a skill is a folder with a SKILL.md in ~/.claude/skills")
+    return true
+  }
+
   if (name === "/mcp") {
     const result = await fetch("/api/mcp").then((r) => r.json()).catch(() => null)
     if (!result) { note("could not reach the server"); return true }
@@ -910,6 +924,9 @@ async function runCommand(text) {
     note("compaction runs automatically when the conversation nears the context limit")
     return true
   }
+
+  // A custom command or a skill is a message, so it goes to the model.
+  if ((paletteData.commands || []).some((c) => c.invocation && c.value === name)) return false
 
   if (name.startsWith("/")) {
     note("unknown command: " + name)
