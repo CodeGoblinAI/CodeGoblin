@@ -116,39 +116,63 @@ describe("how much to ask", () => {
     expect(permissions.mode).toBe("ask")
   })
 
-  test("auto approves without asking at all", async () => {
+  test("full access approves without asking at all", async () => {
     let asked = 0
     const permissions = new Permissions(async () => { asked++; return "reject" })
-    permissions.mode = "auto"
+    permissions.mode = "full"
     expect(await permissions.check("shell", JSON.stringify({ command: "ls" }))).toBe(true)
     expect(await permissions.check("write_file", JSON.stringify({ path: "a" }))).toBe(true)
     expect(asked).toBe(0)
   })
 
-  test("plan refuses anything that changes something, without asking", async () => {
+  test("approve for me lets edits and read-only commands through, and asks about the rest", async () => {
+    const asked: string[] = []
+    const permissions = new Permissions(async (tool) => { asked.push(tool); return "reject" })
+    permissions.mode = "approve"
+    const cmd = (command: string) => JSON.stringify({ command })
+    expect(await permissions.check("write_file", JSON.stringify({ path: "a.ts" }))).toBe(true)
+    expect(await permissions.check("edit_file", JSON.stringify({ path: "a.ts" }))).toBe(true)
+    expect(await permissions.check("shell", cmd("git status --short"))).toBe(true)
+    expect(await permissions.check("shell", cmd("ls && git log -1"))).toBe(true)
+    expect(asked).toEqual([])
+
+    const risky = ["npm test", "git push", "git branch -D main", "echo hi > out.txt", "rg --pre ./x foo", "git -c core.pager=evil log", 'node -e "1"']
+    for (const command of risky) {
+      expect([command, await permissions.check("shell", cmd(command))]).toEqual([command, false])
+    }
+    expect(await permissions.check("webfetch", JSON.stringify({ url: "https://example.com" }))).toBe(false)
+    expect(await permissions.check("mcp__github__create_issue", "{}")).toBe(false)
+    expect(asked.length).toBe(risky.length + 2)
+  })
+
+  test("planning refuses anything that changes something, without asking, whatever the mode", async () => {
     let asked = 0
     const permissions = new Permissions(async () => { asked++; return "always" })
-    permissions.mode = "plan"
-    for (const tool of ["write_file", "edit_file", "shell", "webfetch"]) {
+    permissions.planning = true
+    permissions.mode = "full"
+    for (const tool of ["write_file", "edit_file", "mcp__github__create_issue"]) {
       expect([tool, await permissions.check(tool, "{}")]).toEqual([tool, false])
     }
+    expect(await permissions.check("shell", JSON.stringify({ command: "npm install" }))).toBe(false)
     // The point is that nothing changes, not that you are asked whether it may.
     expect(asked).toBe(0)
   })
 
-  test("plan still lets the model read and search", async () => {
-    const permissions = new Permissions(async () => "reject")
-    permissions.mode = "plan"
-    for (const tool of ["read_file", "list_files", "grep", "glob", "todo_write"]) {
+  test("planning still lets the model look: reading, searching, read-only commands, pages", async () => {
+    const permissions = new Permissions(async () => "once")
+    permissions.planning = true
+    for (const tool of ["read_file", "list_files", "grep", "glob", "todo_write", "skill"]) {
       expect([tool, await permissions.check(tool, "{}")]).toEqual([tool, true])
     }
+    expect(await permissions.check("shell", JSON.stringify({ command: "git log -5" }))).toBe(true)
+    expect(await permissions.check("webfetch", JSON.stringify({ url: "https://example.com" }))).toBe(true)
   })
 
   test("the modes cycle, and come back round", () => {
-    expect(MODES.map((m) => m.id)).toEqual(["ask", "auto", "plan"])
-    expect(nextMode("ask")).toBe("auto")
-    expect(nextMode("auto")).toBe("plan")
-    expect(nextMode("plan")).toBe("ask")
+    expect(MODES.map((m) => m.id)).toEqual(["ask", "approve", "full"])
+    expect(nextMode("ask")).toBe("approve")
+    expect(nextMode("approve")).toBe("full")
+    expect(nextMode("full")).toBe("ask")
   })
 
   test("every mode says what it does", () => {

@@ -74,6 +74,114 @@ document.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeModelMenu()
 })
+
+/**
+ * How much to ask before acting - Codex's three choices. Sent with every
+ * message, and the server keeps nothing between them. It starts at Ask for
+ * approval on every load, so Full access never quietly outlives a reload.
+ */
+const modeBtn = document.getElementById("mode-btn")
+const modeMenu = document.getElementById("mode-menu")
+const planTag = document.getElementById("plan-tag")
+const MODE_CHOICES = [
+  { id: "ask", label: "Ask for approval", hint: "ask before changing files, running commands or using the internet" },
+  { id: "approve", label: "Approve for me", hint: "only ask for actions that could be unsafe" },
+  { id: "full", label: "Full access", hint: "never ask - only the rules in codegoblin.jsonc stop anything" },
+]
+let currentMode = "ask"
+let planning = false
+
+function modeChoices() {
+  return paletteData.modes && paletteData.modes.length ? paletteData.modes : MODE_CHOICES
+}
+
+function renderModeMenu() {
+  modeMenu.innerHTML = ""
+  for (const choice of modeChoices()) {
+    const row = document.createElement("div")
+    row.className = "picker-item" + (choice.id === currentMode ? " chosen" : "")
+    row.setAttribute("role", "option")
+    row.textContent = choice.label
+    const hint = document.createElement("span")
+    hint.className = "picker-hint"
+    hint.textContent = choice.hint
+    row.appendChild(hint)
+    row.onclick = () => { setMode(choice.id); closeModeMenu() }
+    modeMenu.appendChild(row)
+  }
+}
+
+function setMode(id) {
+  const choice = modeChoices().find((c) => c.id === id)
+  if (!choice) return
+  currentMode = id
+  modeBtn.querySelector(".picker-label").textContent = choice.label
+  modeBtn.classList.toggle("full", id === "full")
+  renderModeMenu()
+}
+
+function setPlanning(on) {
+  planning = on
+  planTag.hidden = !on
+}
+
+function closeModeMenu() {
+  modeMenu.hidden = true
+  modeBtn.setAttribute("aria-expanded", "false")
+}
+
+function openModeMenu() {
+  renderModeMenu()
+  modeMenu.hidden = false
+  modeBtn.setAttribute("aria-expanded", "true")
+}
+
+modeBtn.onclick = (event) => {
+  event.stopPropagation()
+  if (modeMenu.hidden) openModeMenu()
+  else closeModeMenu()
+}
+document.addEventListener("click", (event) => {
+  if (!modeMenu.hidden && !modeMenu.contains(event.target)) closeModeMenu()
+})
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeModeMenu()
+})
+
+/** After a planned answer: carry it out, keep planning, or stop. Inline, like a permission prompt. */
+function planPrompt() {
+  const box = document.createElement("div")
+  box.className = "plan-box"
+  box.innerHTML = '<div class="ptext">Carry out this plan?</div><div class="pactions"></div>'
+  const actions = box.querySelector(".pactions")
+  const resolve = (label) => {
+    actions.innerHTML = ""
+    const done = document.createElement("span")
+    done.className = "presolved"
+    done.textContent = label
+    actions.appendChild(done)
+  }
+  const choices = [
+    { label: "Yes, carry it out", kind: "pallow", act: () => { setPlanning(false); resolve("carrying it out"); sendText("Go ahead and carry out the plan.") } },
+    { label: "Keep planning", kind: "pallow", act: () => { resolve("still planning - say what to change"); input.focus() } },
+    { label: "Stop planning", kind: "pdeny", act: () => { setPlanning(false); resolve("planning off") } },
+  ]
+  for (const choice of choices) {
+    const button = document.createElement("button")
+    button.className = choice.kind
+    button.textContent = choice.label
+    button.onclick = choice.act
+    actions.appendChild(button)
+  }
+  thread.appendChild(box)
+  scrollDown()
+}
+
+/** Sends text as though it had been typed. */
+function sendText(text) {
+  input.value = text
+  submit()
+}
 /**
  * Pictures attached to the next message.
  *
@@ -768,6 +876,25 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/approvals" || name === "/mode") {
+    // After this click or keypress has finished, or the click that sent the
+    // command would close the menu straight away.
+    setTimeout(openModeMenu, 0)
+    return true
+  }
+
+  if (name === "/plan") {
+    if (!argument) {
+      setPlanning(!planning)
+      note(planning ? "planning on - nothing changes until you agree a plan" : "planning off")
+      return true
+    }
+    setPlanning(true)
+    // Sent once this command has finished clearing the composer.
+    setTimeout(() => sendText(argument), 0)
+    return true
+  }
+
   if (name === "/skills") {
     const result = await fetch("/api/skills").then((r) => r.json()).catch(() => null)
     if (!result) { note("could not reach the server"); return true }
@@ -998,7 +1125,7 @@ async function submit() {
     response = await fetch("/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, sessionId, provider: currentModel, images: sending }),
+      body: JSON.stringify({ text, sessionId, provider: currentModel, images: sending, mode: currentMode, planning }),
       signal: controller.signal,
     })
   } catch {
@@ -1109,7 +1236,11 @@ async function submit() {
           note("stopped after " + event.turns + " tool turns - the answer may be unfinished. Ask it to continue.")
         }
         if (event.type === "error") turn("agent", "**Error:** " + event.message)
-        if (event.type === "saved") refreshSessions()
+        if (event.type === "saved") {
+          refreshSessions()
+          // A planned answer ends with the choice of what happens next.
+          if (planning && raw.trim()) planPrompt()
+        }
       }
     }
   } catch {

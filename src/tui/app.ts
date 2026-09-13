@@ -69,7 +69,7 @@ import {
   type Spend,
 } from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
-import { Permissions, DECISIONS, MODES, nextMode, commandOf, refusalLabel, type Decision } from "../core/permission"
+import { Permissions, DECISIONS, MODES, nextMode, commandOf, refusalLabel, type Decision, type PermissionMode } from "../core/permission"
 import { McpManager } from "../core/mcp"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
@@ -672,7 +672,9 @@ function render() {
   body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
 
   const context = usage(messages, selection.model.contextWindow)
-  const modeTag = permissions.mode === "ask" ? "" : "  [" + permissions.mode + "]"
+  const modeTag =
+    (permissions.mode === "ask" ? "" : "  [" + MODES.find((entry) => entry.id === permissions.mode)!.label.toLowerCase() + "]") +
+    (permissions.planning ? "  [planning]" : "")
   const spendTag = spend.input + spend.output > 0 ? "  " + formatSpend(spend) : ""
   const left =
     status ||
@@ -896,6 +898,35 @@ function openDisconnect() {
  * replace. Each row carries its own description, so the choice is made on
  * what the theme is rather than on what it is called.
  */
+/** Ask for approval, Approve for me, Full access - the same three Shift+Tab cycles through. */
+function openApprovalsPicker() {
+  dialog = Dialogs.open(
+    "approvals",
+    "How much to ask",
+    MODES.map((mode) => ({
+      label: (mode.id === permissions.mode ? "• " : "  ") + mode.label,
+      hint: mode.hint,
+      value: mode.id,
+    })),
+    { footer: "enter chooses . esc closes . shift+tab cycles", size: "medium" },
+  )
+}
+
+/** After a planned answer: carry the plan out, keep planning, or stop. */
+function openPlanPicker() {
+  const mode = MODES.find((entry) => entry.id === permissions.mode)!
+  dialog = Dialogs.open(
+    "plan",
+    "Carry out this plan?",
+    [
+      { label: "Yes, carry it out", hint: "planning ends, and " + mode.label.toLowerCase() + " applies", value: "go" },
+      { label: "Keep planning", hint: "say what to change about the plan", value: "stay" },
+      { label: "Stop planning", hint: "planning ends and nothing is sent", value: "stop" },
+    ],
+    { footer: "enter chooses . esc keeps planning", size: "medium" },
+  )
+}
+
 function openThemePicker() {
   dialog = Dialogs.open(
     "theme",
@@ -1063,6 +1094,35 @@ async function chooseInDialog() {
     status = gone ? "disconnected " + row.value : "no stored key for " + row.value
     closeDialog()
     render()
+    return
+  }
+
+  if (dialog.kind === "approvals") {
+    permissions.mode = row.value as PermissionMode
+    const mode = MODES.find((entry) => entry.id === permissions.mode)!
+    status = "mode: " + mode.label + " - " + mode.hint
+    closeDialog()
+    render()
+    return
+  }
+
+  if (dialog.kind === "plan") {
+    closeDialog()
+    if (row.value === "stay") {
+      status = "still planning - say what to change"
+      render()
+      return
+    }
+    permissions.planning = false
+    if (row.value === "stop") {
+      status = "planning off"
+      render()
+      return
+    }
+    input = "Go ahead and carry out the plan."
+    cursor = input.length
+    render()
+    void send()
     return
   }
 
@@ -1306,6 +1366,26 @@ async function send() {
         refreshConnected()
         status = gone ? "disconnected " + result.provider : "no stored key for " + result.provider
       }
+    }
+    if (result.kind === "approvals") {
+      openApprovalsPicker()
+      render()
+      return
+    }
+    if (result.kind === "plan") {
+      if (!result.text) {
+        permissions.planning = !permissions.planning
+        status = permissions.planning ? "planning on - nothing changes until you agree a plan" : "planning off"
+        render()
+        return
+      }
+      // The request goes out as an ordinary message, with planning on.
+      permissions.planning = true
+      input = result.text
+      cursor = input.length
+      render()
+      void send()
+      return
     }
     if (result.kind === "skills") {
       // Into the transcript rather than a panel: there can be dozens, and the
@@ -1579,6 +1659,13 @@ async function send() {
     edits.commit()
     session.messages = messages
     void sessions.save(session).then(refreshSessionCache).catch(() => {})
+
+    // A planned answer ends with the choice of what happens next, so agreeing
+    // to a plan is one keystroke rather than a sentence.
+    const answered = messages.at(-1)
+    if (permissions.planning && !queued && status !== "stopped" && answered?.role === "assistant" && answered.content.trim()) {
+      openPlanPicker()
+    }
 
     // Anything typed mid-turn goes now, without a keystroke to remind it.
     if (queued) {

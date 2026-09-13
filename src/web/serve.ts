@@ -24,7 +24,7 @@ import {
 import { apiKey } from "../core/auth"
 import * as auth from "../core/auth"
 import * as sessions from "../core/sessions"
-import { DECISIONS, refusalLabel, type Decision } from "../core/permission"
+import { DECISIONS, MODES, refusalLabel, type Decision, type PermissionMode, type Permissions } from "../core/permission"
 import { BrowserConsent } from "./consent"
 import { McpManager } from "../core/mcp"
 import { configPath } from "../core/config"
@@ -57,6 +57,17 @@ const root = process.cwd()
 
 /** Consent for every browser conversation; web/consent.ts says why it lives there. */
 const consent = new BrowserConsent()
+
+/**
+ * The page sends its mode, and whether it is planning, with every message;
+ * neither is kept between messages here. Anything unrecognised is Ask for
+ * approval, never something that asks less.
+ */
+function withMode(permissions: Permissions, body: { mode?: string; planning?: boolean }): Permissions {
+  permissions.mode = MODES.some((entry) => entry.id === body.mode) ? (body.mode as PermissionMode) : "ask"
+  permissions.planning = body.planning === true
+  return permissions
+}
 
 /**
  * MCP servers from codegoblin.jsonc, one set for every browser conversation,
@@ -189,6 +200,8 @@ async function projectFiles(): Promise<string[]> {
         { value: "/status", hint: "what this session is using right now" },
         { value: "/mcp", hint: "MCP servers from codegoblin.jsonc, and their tools" },
         { value: "/skills", hint: "skills and custom commands, and where each comes from" },
+        { value: "/plan", hint: "plan before changing anything: /plan add dark mode" },
+        { value: "/approvals", hint: "how much to ask before acting" },
         { value: "/export", hint: "save the conversation as markdown" },
         { value: "/rename", hint: "retitle this conversation" },
         { value: "/theme", hint: "change colours", expands: true },
@@ -210,6 +223,7 @@ async function projectFiles(): Promise<string[]> {
       mediaOptions: MEDIA_OPTIONS,
       media: await loadMedia(),
       decisions: DECISIONS,
+      modes: MODES,
       connectable: CONNECTABLE.map((entry) => ({
         ...entry,
         connected: auth.isConnected(entry.id),
@@ -485,6 +499,9 @@ async function projectFiles(): Promise<string[]> {
       provider?: string
       /** Pictures the page attached, already data URLs. */
       images?: { name?: string; dataUrl?: string }[]
+      /** Ask for approval, Approve for me or Full access - ask when missing. */
+      mode?: string
+      planning?: boolean
     }
     const text = (body.text ?? "").trim()
     if (!text) return json({ error: "empty prompt" }, 400)
@@ -564,7 +581,7 @@ async function projectFiles(): Promise<string[]> {
             root,
             contextWindow: model.contextWindow,
             images: acceptsImages(selection),
-            permissions: consent.forSession(session.id, send),
+            permissions: withMode(consent.forSession(session.id, send), body),
             extraTools: mcp,
             memory: await memory.recall({ project: root, session: session.id }),
             instructions: skillIndex(listSkills(root)),

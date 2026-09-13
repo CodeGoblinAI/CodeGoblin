@@ -266,7 +266,7 @@ describe("several tools in one turn", () => {
     const command = JSON.stringify({ command: "echo rm -rf nothing" })
     serve(asksForMany({ id: "x", name: "shell", args: command }), () => answers("ok"))
     const permissions = new Permissions(async () => "always", () => ({ "*rm -rf*": "deny" }))
-    permissions.mode = "auto"
+    permissions.mode = "full"
     const messages: { role: string; content: string; tool_call_id?: string }[] = [{ role: "user", content: "go" }]
 
     const events: AgentEvent[] = []
@@ -627,5 +627,47 @@ describe("tools from outside the built-in table", () => {
       // drained
     }
     expect(called).toEqual([])
+  })
+})
+
+describe("planning", () => {
+  test("offers no tool that changes files, no MCP tools, and tells the model it is planning", async () => {
+    const bodies: { tools: { function: { name: string } }[]; messages: { role: string; content: unknown }[] }[] = []
+    globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")))
+      return answers("1. do the thing")
+    }) as unknown as typeof fetch
+    const { Permissions } = await import("../src/core/permission")
+    const permissions = new Permissions(async () => "once")
+    permissions.planning = true
+    const extraTools = {
+      schema: () => [{ type: "function" as const, function: { name: "mcp__x__y", description: "", parameters: {} } }],
+      has: () => false,
+      call: async () => "",
+    }
+
+    for await (const _ of runAgent({
+      provider,
+      modelId: "test-model",
+      apiKey: "not-a-real-key",
+      messages: [
+        { role: "system", content: "base" },
+        { role: "user", content: "plan it" },
+      ],
+      root: process.cwd(),
+      maxTurns: 2,
+      permissions,
+      extraTools,
+    })) {
+      // drained
+    }
+
+    const offered = bodies[0]!.tools.map((tool) => tool.function.name)
+    expect(offered).toContain("read_file")
+    expect(offered).toContain("shell")
+    expect(offered).not.toContain("write_file")
+    expect(offered).not.toContain("edit_file")
+    expect(offered).not.toContain("mcp__x__y")
+    expect(String(bodies[0]!.messages[0]!.content)).toContain("Planning is on")
   })
 })

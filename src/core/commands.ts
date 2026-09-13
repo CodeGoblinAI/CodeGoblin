@@ -21,6 +21,8 @@ export type CommandResult =
   | { kind: "status" }
   | { kind: "mcp" }
   | { kind: "skills" }
+  | { kind: "plan"; text?: string }
+  | { kind: "approvals" }
   | { kind: "export"; path?: string }
   | { kind: "rename"; title: string }
   | { kind: "theme"; name?: string }
@@ -49,6 +51,8 @@ export const COMMANDS = [
   { name: "/status", description: "what this session is using right now" },
   { name: "/mcp", description: "MCP servers from codegoblin.jsonc, and the tools each offers" },
   { name: "/skills", description: "skills and custom commands, and where each comes from" },
+  { name: "/plan", description: "plan before changing anything: /plan add dark mode, or /plan to switch it" },
+  { name: "/approvals", description: "how much to ask before acting - opens a picker" },
   { name: "/export", description: "save as markdown: /export, or /export notes/chat.md" },
   { name: "/rename", description: "retitle this conversation: /rename plan review" },
   { name: "/theme", description: "change colours: /theme midnight" },
@@ -133,6 +137,11 @@ export function runCommand(text: string): CommandResult {
       return { kind: "mcp" }
     case "/skills":
       return { kind: "skills" }
+    case "/plan":
+      return { kind: "plan", text: argument || undefined }
+    case "/approvals":
+    case "/mode":
+      return { kind: "approvals" }
     case "/export":
       return { kind: "export", path: argument || undefined }
     // A panel, not a grammar. This was two commands where one had to know

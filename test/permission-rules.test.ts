@@ -35,9 +35,9 @@ function counting(answer: "once" | "always" | "reject", rules: Rules = {}) {
 }
 
 describe("a deny rule", () => {
-  test("refuses in auto mode, without asking, and names the rule", async () => {
+  test("refuses in full access, without asking, and names the rule", async () => {
     const { permissions, asked } = counting("always", SHAWN)
-    permissions.mode = "auto"
+    permissions.mode = "full"
     // Harmless if the guard ever failed: it only prints the words.
     const verdict = await permissions.decide("shell", shell("echo rm -rf nothing"))
     expect(verdict.allowed).toBe(false)
@@ -51,23 +51,23 @@ describe("a deny rule", () => {
     expect(await permissions.check("shell", shell("rd /s /q build"))).toBe(false)
   })
 
-  test("beats plan mode's reason with its own, since it is the more specific one", async () => {
+  test("beats planning's reason with its own, since it is the more specific one", async () => {
     const { permissions } = counting("always", SHAWN)
-    permissions.mode = "plan"
+    permissions.planning = true
     const verdict = await permissions.decide("shell", shell("rm -rf x"))
     expect(!verdict.allowed && verdict.reason).toContain("codegoblin.jsonc")
   })
 
   test("catches the command wherever it sits in a chain", async () => {
     const { permissions } = counting("always", SHAWN)
-    permissions.mode = "auto"
+    permissions.mode = "full"
     expect(await permissions.check("shell", shell("git status & rd /s /q dist"))).toBe(false)
     expect(await permissions.check("shell", shell("bun test && Remove-Item -Recurse out"))).toBe(false)
   })
 
   test("every one of the eight rules blocks what it names", async () => {
     const { permissions } = counting("always", SHAWN)
-    permissions.mode = "auto"
+    permissions.mode = "full"
     const commands = ["rm -rf x", "rm --recursive x", "rmdir x", "rd /s x", "del x.txt", "erase x.txt", "Remove-Item x", "npx rimraf x"]
     for (const command of commands) {
       expect([command, await permissions.check("shell", shell(command))]).toEqual([command, false])
@@ -76,14 +76,14 @@ describe("a deny rule", () => {
 
   test.skipIf(process.platform !== "win32")("on Windows a lower-case remove-item is still caught", async () => {
     const { permissions } = counting("always", SHAWN)
-    permissions.mode = "auto"
+    permissions.mode = "full"
     expect(await permissions.check("shell", shell("powershell -c remove-item -recurse x"))).toBe(false)
   })
 
   test("reads the rules fresh, so one added mid-session applies to the next call", async () => {
     let rules: Rules = {}
     const permissions = new Permissions(async () => "once", () => rules)
-    permissions.mode = "auto"
+    permissions.mode = "full"
     expect(await permissions.check("shell", shell("rimraf dist"))).toBe(true)
     rules = { "*rimraf*": "deny" }
     expect(await permissions.check("shell", shell("rimraf dist"))).toBe(false)
@@ -91,13 +91,13 @@ describe("a deny rule", () => {
 
   test("only governs shell - a file named like a command is still a file", async () => {
     const { permissions } = counting("always", SHAWN)
-    permissions.mode = "auto"
+    permissions.mode = "full"
     expect(await permissions.check("write_file", JSON.stringify({ path: "notes/rm -rf.md", content: "" }))).toBe(true)
   })
 
   test("a plain-text detail is matched as the command itself", async () => {
     const { permissions } = counting("always", SHAWN)
-    permissions.mode = "auto"
+    permissions.mode = "full"
     expect(await permissions.check("shell", "rm -rf /")).toBe(false)
   })
 
@@ -105,15 +105,15 @@ describe("a deny rule", () => {
     // Recorded, not endorsed: this is what the rule does as written, because
     // "model " contains "del ".
     const { permissions } = counting("always", SHAWN)
-    permissions.mode = "auto"
+    permissions.mode = "full"
     expect(await permissions.check("shell", shell("bun src/cli/prompt.ts --model deepseek/deepseek-v4-flash hi"))).toBe(false)
   })
 })
 
 describe("an ask rule", () => {
-  test("asks even in auto mode", async () => {
+  test("asks even in full access", async () => {
     const { permissions, asked } = counting("once", { "git push*": "ask" })
-    permissions.mode = "auto"
+    permissions.mode = "full"
     expect(await permissions.check("shell", shell("git push origin main"))).toBe(true)
     expect(asked()).toBe(1)
   })
@@ -231,11 +231,11 @@ describe("reading a shell call", () => {
 })
 
 describe("a refusal says why", () => {
-  test("plan mode says plan mode", async () => {
+  test("planning says planning", async () => {
     const permissions = new Permissions(async () => "always")
-    permissions.mode = "plan"
+    permissions.planning = true
     const verdict = await permissions.decide("write_file", "{}")
-    expect(!verdict.allowed && verdict.reason).toContain("plan mode")
+    expect(!verdict.allowed && verdict.reason).toContain("planning is on")
     expect(!verdict.allowed && verdict.by).toBe("plan")
   })
 
@@ -259,7 +259,7 @@ describe("what a refused call is labelled", () => {
   test("each kind of refusal says whose decision it was", async () => {
     const { refusalLabel } = await import("../src/core/permission")
     expect(refusalLabel({ by: "rule", rule: "*rm -rf*" })).toBe('blocked by "*rm -rf*"')
-    expect(refusalLabel({ by: "plan" })).toBe("not run in plan mode")
+    expect(refusalLabel({ by: "plan" })).toBe("not run while planning")
     expect(refusalLabel({ by: "user" })).toBe("refused")
   })
 

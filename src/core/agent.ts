@@ -140,6 +140,23 @@ const wire = (messages: Message[], memory?: string, images = false, instructions
   return sent
 }
 
+/** What the model is told while planning, next to the other instructions. */
+const PLANNING = [
+  "Planning is on. Look around as much as you need - read files, search, run read-only commands -",
+  "then reply with a concrete, numbered plan: what you would change, where, and how you would",
+  "check it. Do not change anything yet; the user decides when the plan is carried out.",
+].join(" ")
+
+/** Tools that change files. Planning does not offer them, so the model never tries one and gets refused. */
+const CHANGES_FILES = new Set(["write_file", "edit_file"])
+
+function offeredTools(input: { permissions?: Permissions; extraTools?: ExtraTools }) {
+  const planning = input.permissions?.planning === true
+  const own = planning ? TOOL_SCHEMA.filter((tool) => !CHANGES_FILES.has(tool.function.name)) : TOOL_SCHEMA
+  // MCP tools can do anything, and nothing says which of them only read.
+  return [...own, ...(planning ? [] : (input.extraTools?.schema() ?? []))]
+}
+
 /**
  * The agent loop.
  *
@@ -201,8 +218,14 @@ export async function* runAgent(input: {
       headers: { "content-type": "application/json", ...authHeaders(input.provider, input.apiKey) },
       body: JSON.stringify({
         model: input.modelId,
-        messages: wire(input.messages, input.memory, input.images, input.instructions),
-        tools: [...TOOL_SCHEMA, ...(input.extraTools?.schema() ?? [])],
+        messages: wire(
+          input.messages,
+          input.memory,
+          input.images,
+          [input.instructions, input.permissions?.planning ? PLANNING : undefined].filter(Boolean).join(String.fromCharCode(10, 10)) ||
+            undefined,
+        ),
+        tools: offeredTools(input),
         stream: true,
         ...(input.effort ? { reasoning_effort: input.effort } : {}),
       }),

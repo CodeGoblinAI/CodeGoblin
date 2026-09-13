@@ -304,7 +304,7 @@ export function coverOf(tool: string, detail: string): string {
  */
 export function refusalLabel(refusal: { by?: RefusedBy; rule?: string }): string {
   if (refusal.by === "rule") return refusal.rule ? `blocked by "${refusal.rule}"` : "blocked by a rule"
-  if (refusal.by === "plan") return "not run in plan mode"
+  if (refusal.by === "plan") return "not run while planning"
   return "refused"
 }
 
@@ -331,23 +331,60 @@ function ruleFor(command: string, rules: Rules): Match | undefined {
 }
 
 /**
- * How much to ask.
+ * Commands that only look, which Approve for me runs without asking.
  *
- * ask   - the default; the first call of each kind asks.
- * auto  - approve everything a rule does not stop, without asking.
- * plan  - refuse everything that changes anything, so the model can read,
- *         search and think out loud but cannot act.
- *
- * Per session and never persisted. Auto-approval that quietly survived a
- * restart would be a nasty surprise, and it is the kind of setting people
- * turn on for one task and forget.
+ * Deliberately short. A command earns its place by being unable to change
+ * anything however it is called. Anything that can - git branch -D, find
+ * -delete, a test runner, which runs project code - still asks. Output sent to
+ * a file, or a command run inside another, disqualifies the whole line.
  */
-export type PermissionMode = "ask" | "auto" | "plan"
+const READ_ONLY_PROGRAMS = new Set(["ls", "dir", "pwd", "cat", "type", "head", "tail", "wc", "rg", "grep", "findstr", "where", "which", "echo", "tree"])
+const READ_ONLY_GIT = new Set(["status", "log", "diff", "show", "rev-parse", "ls-files", "blame"])
+
+export function isReadOnlyCommand(command: string): boolean {
+  if (command.includes(">") || command.includes("`") || command.includes("$(")) return false
+  const segments = segmentsOf(command)
+  if (!segments.length) return false
+  return segments.every((segment) => {
+    const tokens = tokensOf(segment)
+    if (!tokens.length || runsInlineCode(tokens)) return false
+    const program = programName(tokens[0]!)
+    if (program === "git") {
+      // The first word that is not a flag is the subcommand; git -c can set a
+      // pager or an alias, and its value is not a subcommand this list knows.
+      const sub = tokens.slice(1).find((token) => !token.startsWith("-"))
+      const unsafeFlag = tokens.some((token) => token.startsWith("--output") || token === "--ext-diff" || token === "-c")
+      return sub !== undefined && READ_ONLY_GIT.has(sub) && !unsafeFlag
+    }
+    // rg --pre runs a program on every file it searches.
+    if (program === "rg" && tokens.some((token) => token.startsWith("--pre"))) return false
+    return READ_ONLY_PROGRAMS.has(program)
+  })
+}
+
+/**
+ * How much to ask - the three choices Codex offers.
+ *
+ * ask      Ask for approval: changes, commands and fetches all ask, and "Allow
+ *          for this session" covers calls like the one approved.
+ * approve  Approve for me: edits inside the working directory and plainly
+ *          read-only commands go through; anything that could do harm asks.
+ * full     Full access: nothing asks. The rules in codegoblin.jsonc still stop
+ *          what they deny and ask about what they ask about.
+ *
+ * Planning is not a mode but a flag beside it, set by /plan: while it is on
+ * nothing that changes anything runs, whichever mode is chosen.
+ *
+ * Per session and never persisted. Full access that quietly survived a
+ * restart would be a nasty surprise, and it is the kind of setting people turn
+ * on for one task and forget.
+ */
+export type PermissionMode = "ask" | "approve" | "full"
 
 export const MODES: { id: PermissionMode; label: string; hint: string }[] = [
-  { id: "ask", label: "ask", hint: "approve each kind of call once" },
-  { id: "auto", label: "auto", hint: "approve everything, no prompts" },
-  { id: "plan", label: "plan", hint: "read and think only, change nothing" },
+  { id: "ask", label: "Ask for approval", hint: "ask before changing files, running commands or using the internet" },
+  { id: "approve", label: "Approve for me", hint: "only ask for actions that could be unsafe" },
+  { id: "full", label: "Full access", hint: "never ask - only the rules in codegoblin.jsonc stop anything" },
 ]
 
 export function nextMode(mode: PermissionMode): PermissionMode {
@@ -358,6 +395,8 @@ export function nextMode(mode: PermissionMode): PermissionMode {
 export class Permissions {
   private granted = new Set<string>()
   mode: PermissionMode = "ask"
+  /** Set by /plan: nothing that changes anything runs until the plan is agreed. */
+  planning = false
 
   /**
    * `rules` is where deny and ask patterns come from. Nothing by default, so a
@@ -394,19 +433,23 @@ export class Permissions {
       }
     }
 
-    // Plan mode refuses before anything is asked: the point is that nothing
-    // changes, not that you are asked whether it may.
-    if (this.mode === "plan") {
+    // Planning refuses before anything is asked: the point is that nothing
+    // changes until the plan is agreed. Looking still works - a read-only
+    // command, or a page - so the plan can rest on what is actually there.
+    const onlyLooks = tool === "webfetch" || (tool === "shell" && isReadOnlyCommand(commandOf(detail)))
+    if (this.planning && !onlyLooks) {
       return {
         allowed: false,
         by: "plan",
-        reason: "not run: plan mode is on, so nothing that changes files or runs commands is executed",
+        reason: "not run: planning is on, so nothing that changes files or runs commands is executed until the plan is agreed",
       }
     }
 
-    // An ask rule means ask - even in auto, and even after an approval.
+    // An ask rule means ask - in every mode, and even after an approval.
     const forced = rule?.action === "ask"
-    if (!forced && this.mode === "auto") return { allowed: true }
+    if (!forced && this.mode === "full") return { allowed: true }
+    const harmless = tool === "write_file" || tool === "edit_file" || (tool === "shell" && isReadOnlyCommand(commandOf(detail)))
+    if (!forced && this.mode === "approve" && harmless) return { allowed: true }
 
     const scopes = scopesFor(tool, detail)
     if (!forced && scopes.every((scope) => this.granted.has(scope.key))) return { allowed: true }
