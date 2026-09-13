@@ -50,6 +50,21 @@ describe("a read-only command that reaches outside the project asks", () => {
     expect(await permissions.check("shell", shell("type C:\\Windows\\win.ini"))).toBe(false)
     expect(asked.length).toBe(1)
   })
+
+  test("approving a read for the session never covers a read outside the project", async () => {
+    // Seen on the real page: the prompt for type C:\Windows\win.ini offered to
+    // cover "type", which in Ask mode would then have let any type run unasked.
+    let asked = 0
+    const permissions = new Permissions(async () => {
+      asked++
+      return "always"
+    })
+    await permissions.check("shell", shell("type src\\math.js"))
+    await permissions.check("shell", shell("type src\\other.js"))
+    await permissions.check("shell", shell("type C:\\Windows\\win.ini"))
+    expect(asked).toBe(2)
+    expect(coverOf("shell", shell("type C:\\Windows\\win.ini"))).toBe("this exact type command")
+  })
 })
 
 describe("an interpreter given flags before its script is approved exactly", () => {

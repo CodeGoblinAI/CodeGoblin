@@ -265,7 +265,13 @@ function scopesFor(tool: string, detail: string): Scope[] {
     let scope: Scope
     if (!tokens.length) {
       scope = { key: tool, words: "an empty command" }
-    } else if (runsInlineCode(tokens) || (INLINE_RUNNERS.has(programName(tokens[0]!)) && (tokens[1] ?? "").startsWith("-"))) {
+    } else if (
+      runsInlineCode(tokens) ||
+      (INLINE_RUNNERS.has(programName(tokens[0]!)) && (tokens[1] ?? "").startsWith("-")) ||
+      // Reaching outside the project is approved exactly as well: an approval
+      // for "type" given to type src\math.js used to cover type C:\anything.
+      tokens.slice(1).some(leavesTheProject)
+    ) {
       // An interpreter given flags before its script - powershell -NoProfile
       // -File x.ps1 - is approved exactly too. By its first two words, one
       // approved script covered every "powershell -NoProfile" command after it.
