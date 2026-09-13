@@ -135,6 +135,26 @@ describe("the turn limit", () => {
     expect(events.some((event) => event.type === "tool_end")).toBe(true)
     expect(events.some((event) => event.type === "limit")).toBe(false)
   })
+
+  test("with no limit set, a long run goes on until the model answers", async () => {
+    // Real work stopped at eight turns, part way through checking a fix. There
+    // is no default limit now: the model finishes by answering.
+    const requests = serve(...Array.from({ length: 20 }, () => asksForATool), () => answers("finished"))
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider,
+      modelId: "test-model",
+      apiKey: "not-a-real-key",
+      messages: [{ role: "user", content: "go" }],
+      root: process.cwd(),
+    })) {
+      events.push(event)
+    }
+    expect(requests()).toBe(21)
+    expect(events.filter((event) => event.type === "tool_end").length).toBe(20)
+    expect(events.some((event) => event.type === "limit")).toBe(false)
+    expect(events[events.length - 1]!.type).toBe("turn_end")
+  })
 })
 
 describe("several tools in one turn", () => {

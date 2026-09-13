@@ -19,6 +19,8 @@ export class BrowserConsent {
   private permissions = new Map<string, Permissions>()
   private streams = new Map<string, (event: unknown) => void>()
   private waiting = new Map<string, (decision: Decision) => void>()
+  /** Makes every question's id its own: a subagent and the main agent can ask about the same tool at once. */
+  private asked = 0
 
   /**
    * The conversation's permissions, asking down the stream of the message that
@@ -33,11 +35,11 @@ export class BrowserConsent {
     const existing = this.permissions.get(sessionId)
     if (existing) return existing
     const created = Permissions.withConfig(
-      (tool, detail, cover) =>
+      (tool, detail, cover, from) =>
         new Promise<Decision>((resolve) => {
-          const id = sessionId + ":" + tool
+          const id = sessionId + ":" + tool + ":" + ++this.asked
           this.waiting.set(id, resolve)
-          this.streams.get(sessionId)?.({ type: "permission", id, tool, detail, cover })
+          this.streams.get(sessionId)?.({ type: "permission", id, tool, detail, cover, ...(from ? { from } : {}) })
         }),
     )
     this.permissions.set(sessionId, created)

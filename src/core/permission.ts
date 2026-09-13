@@ -40,7 +40,7 @@ export type Verdict = { allowed: true } | { allowed: false; reason: string; by: 
  * How a person is asked. `cover` is what "Allow for this session" would
  * approve, in words: `"git status"`, `github.com`, `every write_file call`.
  */
-export type Ask = (tool: string, detail: string, cover: string) => Promise<Decision>
+export type Ask = (tool: string, detail: string, cover: string, from?: string) => Promise<Decision>
 
 /**
  * Tools that change nothing outside the conversation never prompt.
@@ -49,7 +49,9 @@ export type Ask = (tool: string, detail: string, cover: string) => Promise<Decis
  * only records the plan the user is already watching, so asking permission
  * for it is friction with nothing behind it.
  */
-const HARMLESS = new Set(["read_file", "list_files", "grep", "glob", "todo_write", "skill"])
+// Starting a subagent and collecting its result change nothing themselves; what
+// a subagent then does is asked about call by call, the same as anything else.
+const HARMLESS = new Set(["read_file", "list_files", "grep", "glob", "todo_write", "skill", "task", "task_result"])
 
 const NEWLINE = String.fromCharCode(10)
 const RETURN = String.fromCharCode(13)
@@ -417,6 +419,22 @@ export class Permissions {
   /** The rules in codegoblin.jsonc, read fresh on every call so an edit applies to the next command. */
   static withConfig(ask: Ask): Permissions {
     return new Permissions(ask, () => loadConfig().permission.bash)
+  }
+
+  /**
+   * The permissions a subagent works under: this conversation's rules, and its
+   * mode, planning and approvals read live - switching mode mid-task applies to
+   * the subagent's next call too, and an approval either of them gets holds for
+   * both. Its questions carry its name, because a person can no longer tell
+   * from the conversation which agent is asking.
+   */
+  forSubagent(name: string): Permissions {
+    const parent = this
+    const child = new Permissions((tool, detail, cover) => parent.ask(tool, detail, cover, name), this.rules)
+    child.granted = this.granted
+    Object.defineProperty(child, "mode", { get: () => parent.mode, set: (value: PermissionMode) => (parent.mode = value) })
+    Object.defineProperty(child, "planning", { get: () => parent.planning, set: (value: boolean) => (parent.planning = value) })
+    return child
   }
 
   needsConsent(tool: string): boolean {

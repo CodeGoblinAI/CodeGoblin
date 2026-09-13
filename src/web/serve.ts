@@ -27,6 +27,7 @@ import * as sessions from "../core/sessions"
 import { DECISIONS, MODES, refusalLabel, type Decision, type PermissionMode, type Permissions } from "../core/permission"
 import { BrowserConsent } from "./consent"
 import { McpManager } from "../core/mcp"
+import { SubagentManager, type SubagentContext } from "../core/subagents"
 import { configPath } from "../core/config"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
@@ -76,6 +77,15 @@ function withMode(permissions: Permissions, body: { mode?: string; planning?: bo
  */
 const mcp = McpManager.fromConfig()
 void mcp.start()
+
+/**
+ * Background subagents, one manager per browser conversation. Each message
+ * refreshes what they work under - model, permissions, the stream to send on -
+ * and a turn waits for its subagents before it ends, so there is always a
+ * stream open for their events.
+ */
+const subagentsBySession = new Map<string, SubagentManager>()
+const subagentContexts = new Map<string, SubagentContext>()
 
 /**
  * Turns that can be cancelled.
@@ -475,6 +485,7 @@ async function projectFiles(): Promise<string[]> {
     const controller = activeTurns.get(body.sessionId ?? "")
     if (controller) {
       controller.abort()
+      subagentsBySession.get(body.sessionId ?? "")?.stopAll()
       activeTurns.delete(body.sessionId ?? "")
       // Unblock a turn waiting on consent, or it will hang forever.
       consent.abandon(body.sessionId ?? "")
@@ -571,6 +582,32 @@ async function projectFiles(): Promise<string[]> {
         if (mentioned.files.length) send({ type: "attached", files: mentioned.files })
         // Servers still starting get a moment, so a first message can use their tools.
         await mcp.settled(10_000)
+        const permissions = withMode(consent.forSession(session.id, send), body)
+        subagentContexts.set(session.id, {
+          provider,
+          modelId: model.id,
+          apiKey: key,
+          root,
+          where: "browser",
+          contextWindow: model.contextWindow,
+          permissions,
+          history: edits,
+          mcp,
+          instructions: skillIndex(listSkills(root)),
+          effort: effortFor(model, (await settingsStore.load()).effort),
+        })
+        let subagents = subagentsBySession.get(session.id)
+        if (!subagents) {
+          const id = session.id
+          subagents = new SubagentManager(() => subagentContexts.get(id)!)
+          subagentsBySession.set(id, subagents)
+        }
+        subagents.onEvent = (event) =>
+          send(
+            event.type === "subagent_event" && event.event.type === "tool_denied"
+              ? { ...event, event: { ...event.event, label: refusalLabel(event.event) } }
+              : event,
+          )
         try {
           for await (const event of runAgent({
             provider,
@@ -580,7 +617,8 @@ async function projectFiles(): Promise<string[]> {
             root,
             contextWindow: model.contextWindow,
             images: acceptsImages(selection),
-            permissions: withMode(consent.forSession(session.id, send), body),
+            permissions,
+            subagents,
             extraTools: mcp,
             memory: await memory.recall({ project: root, session: session.id }),
             instructions: skillIndex(listSkills(root)),

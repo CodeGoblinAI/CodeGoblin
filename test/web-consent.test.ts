@@ -75,7 +75,7 @@ describe("asking the browser for consent", () => {
     const consent = new BrowserConsent()
     const permissions = consent.forSession("s5", () => {})
     const asked = permissions.decide("write_file", "{}")
-    expect(consent.pending()).toEqual(["s5:write_file"])
+    expect(consent.pending()).toEqual(["s5:write_file:1"])
 
     consent.abandon("s5")
     expect((await asked).allowed).toBe(false)

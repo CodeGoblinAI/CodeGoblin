@@ -491,6 +491,8 @@ function permissionPrompt(event) {
   box.innerHTML =
     '<div class="ptext">Allow <strong></strong>?<span class="pdetail"></span><span class="pcover"></span></div><div class="pactions"></div>'
   box.querySelector("strong").textContent = event.tool
+  // A subagent's question says so: from the conversation alone a person cannot tell which agent is asking.
+  if (event.from) box.querySelector(".ptext").insertAdjacentText("afterbegin", event.from + " subagent: ")
   // A shell call is shown as its command rather than the JSON it arrived in.
   let asked = event.detail || ""
   try {
@@ -1176,6 +1178,47 @@ async function submit() {
           body.innerHTML = markdown(raw)
           if (stick) scrollDown()
         }
+        if (event.type === "subagent_start") {
+          body = null
+          note(event.agent + " subagent started: " + event.description)
+          runningTools.push(event.agent + " subagent")
+          renderActivity()
+        }
+        if (event.type === "subagent_event") {
+          const inner = event.event
+          const id = event.task + ":" + inner.id
+          if (inner.type === "tool_start") toolChip(event.agent + " > " + inner.name, inner.args, id)
+          if (inner.type === "tool_denied") {
+            deniedCalls.add(id)
+            const chip = chipFor(id)
+            if (chip) {
+              chip.classList.remove("running")
+              chip.classList.add("failed")
+              chip.querySelector(".spin").textContent = "✗"
+              const why = document.createElement("span")
+              why.className = "tdenied"
+              why.textContent = inner.label || "refused"
+              chip.appendChild(why)
+            }
+          }
+          if (inner.type === "tool_end" && !deniedCalls.has(id)) {
+            const chip = chipFor(id)
+            if (chip) {
+              const failed = String(inner.result || "").startsWith("error:")
+              chip.classList.remove("running")
+              chip.classList.add(failed ? "failed" : "done")
+              chip.querySelector(".spin").textContent = failed ? "✗" : "✓"
+            }
+          }
+        }
+        if (event.type === "subagent_end") {
+          runningTools = runningTools.filter((name) => name !== event.agent + " subagent")
+          const first = String(event.result || "").split(String.fromCharCode(10)).find((line) => line.trim()) || ""
+          note(event.agent + " subagent " + (event.status === "done" ? "finished" : event.status) + ": " + first.slice(0, 160))
+          renderActivity()
+        }
+        // The model carries on with what its subagents found, as a new answer.
+        if (event.type === "subagents_collected") { body = null; thinking = null }
         if (event.type === "tool_start") {
           body = null
           thinking = null

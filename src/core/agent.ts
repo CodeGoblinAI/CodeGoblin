@@ -15,6 +15,12 @@ export type ExtraTools = {
   call(name: string, args: unknown): Promise<string>
 }
 
+/** Background subagents: tools to start and collect them, and a wait for any still out. */
+export type Subagents = ExtraTools & {
+  /** Waits for subagents not yet reported, and returns their results - or nothing when there are none. */
+  settle(signal?: AbortSignal): Promise<string | undefined>
+}
+
 export type Role = "user" | "assistant" | "system" | "tool"
 export type ToolCall = { id: string; name: string; args: string }
 
@@ -68,6 +74,8 @@ export type AgentEvent =
    * exactly like work that was complete.
    */
   | { type: "limit"; turns: number }
+  /** Subagents finished and their results were handed to the model, which carries on. */
+  | { type: "subagents_collected" }
   | { type: "turn_end" }
 
 /**
@@ -150,11 +158,13 @@ const PLANNING = [
 /** Tools that change files. Planning does not offer them, so the model never tries one and gets refused. */
 const CHANGES_FILES = new Set(["write_file", "edit_file"])
 
-function offeredTools(input: { permissions?: Permissions; extraTools?: ExtraTools }) {
+function offeredTools(input: { permissions?: Permissions; extraTools?: ExtraTools; subagents?: Subagents; tools?: string[] }) {
   const planning = input.permissions?.planning === true
-  const own = planning ? TOOL_SCHEMA.filter((tool) => !CHANGES_FILES.has(tool.function.name)) : TOOL_SCHEMA
+  const listed = (name: string) => !input.tools || input.tools.includes(name)
+  const own = TOOL_SCHEMA.filter((tool) => listed(tool.function.name) && !(planning && CHANGES_FILES.has(tool.function.name)))
   // MCP tools can do anything, and nothing says which of them only read.
-  return [...own, ...(planning ? [] : (input.extraTools?.schema() ?? []))]
+  const mcp = planning || !listed("mcp") ? [] : (input.extraTools?.schema() ?? [])
+  return [...own, ...mcp, ...(input.subagents?.schema() ?? [])]
 }
 
 /**
@@ -162,7 +172,7 @@ function offeredTools(input: { permissions?: Permissions; extraTools?: ExtraTool
  *
  * Streams a completion; if the model asked for tools, runs them, appends the
  * results, and streams again. Repeats until it answers without calling a tool,
- * bounded by maxTurns so a model that keeps calling tools cannot spin forever.
+ * until the model answers without calling a tool - or until maxTurns, when a caller sets one.
  *
  * Tool calls arrive in fragments like text does - the name in one chunk, the
  * arguments across several - so they are accumulated by index before running.
@@ -185,6 +195,10 @@ export async function* runAgent(input: {
   history?: History
   /** MCP tools, offered next to the built-in ones and asked about the same way. */
   extraTools?: ExtraTools
+  /** Subagents this conversation can start in the background - offered even while planning. */
+  subagents?: Subagents
+  /** The built-in tools this agent may use, by name; "mcp" allows MCP tools. Everything when unset. */
+  tools?: string[]
   /**
    * How hard the model should think, for models that take it.
    *
@@ -196,7 +210,19 @@ export async function* runAgent(input: {
   maxTurns?: number
   signal?: AbortSignal
 }): AsyncGenerator<AgentEvent, void, unknown> {
-  const maxTurns = input.maxTurns ?? 8
+  // No limit unless a caller sets one. A fixed cap stopped real work part way
+  // - a plan carried out, checked, and then cut off before the model could say
+  // so - and a model that has finished says so by answering without a tool.
+  // A person stops a turn that is going nowhere; that is what stop is for.
+  const maxTurns = input.maxTurns ?? Number.POSITIVE_INFINITY
+
+  // A tool outside this agent's list is refused without being run or asked
+  // about. A model can name a tool it was never offered.
+  const usable = (name: string) =>
+    !input.tools ||
+    input.tools.includes(name) ||
+    (name.startsWith("mcp__") && input.tools.includes("mcp")) ||
+    Boolean(input.subagents?.has(name))
 
   // Compact before the first request rather than after a failure: the
   // provider rejects an oversized conversation outright.
@@ -302,6 +328,15 @@ export async function* runAgent(input: {
 
     if (calls.size === 0) {
       input.messages.push({ role: "assistant", content: text })
+      // Subagents still working, or finished with results the model never
+      // collected, are waited for and handed over, and the model carries on
+      // with them - so an answer never ends with its own work still out.
+      const collected = await input.subagents?.settle(input.signal)
+      if (collected && !input.signal?.aborted) {
+        input.messages.push({ role: "user", content: collected, display: "results from background subagents" })
+        yield { type: "subagents_collected" }
+        continue
+      }
       yield { type: "turn_end" }
       return
     }
@@ -339,7 +374,7 @@ export async function* runAgent(input: {
       // result when it is refused. The verdict carries its reason, so a call
       // stopped by a rule in codegoblin.jsonc says which rule rather than
       // telling the model the user refused something they were never asked.
-      const verdict = input.permissions ? await input.permissions.decide(call.name, call.args) : undefined
+      const verdict = input.permissions && usable(call.name) ? await input.permissions.decide(call.name, call.args) : undefined
       if (!verdict || verdict.allowed) decided.push({ call, args, allowed: true })
       else decided.push({ call, args, allowed: false, refusal: verdict })
     }
@@ -353,11 +388,15 @@ export async function* runAgent(input: {
     // An MCP tool is not concurrent - nothing says what it touches - and it is
     // outside undo, because what it changes is not a file this loop can see.
     const run = (entry: { call: ToolCall; args: unknown }) =>
-      input.extraTools?.has(entry.call.name)
-        ? input.extraTools.call(entry.call.name, entry.args)
-        : runTool(entry.call.name, entry.args, input.root, async (relative) => {
-            await input.history?.record(input.root, relative)
-          })
+      !usable(entry.call.name)
+        ? Promise.resolve(`error: ${entry.call.name} is not available to this agent`)
+        : input.subagents?.has(entry.call.name)
+          ? input.subagents.call(entry.call.name, entry.args)
+          : input.extraTools?.has(entry.call.name)
+            ? input.extraTools.call(entry.call.name, entry.args)
+            : runTool(entry.call.name, entry.args, input.root, async (relative) => {
+                await input.history?.record(input.root, relative)
+              })
 
     // Reads overlap; everything else keeps its order. Four file reads used to
     // cost four round trips end to end for no reason - they do not touch each

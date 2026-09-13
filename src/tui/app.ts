@@ -71,6 +71,7 @@ import {
 import { marker, counts, type Todo } from "../core/todo"
 import { Permissions, DECISIONS, MODES, nextMode, commandOf, refusalLabel, type Decision, type PermissionMode } from "../core/permission"
 import { McpManager } from "../core/mcp"
+import { SubagentManager, type SubagentEvent } from "../core/subagents"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
 import { setInvocations } from "./palette"
@@ -150,6 +151,28 @@ const edits = new History()
  */
 const mcp = McpManager.fromConfig()
 void mcp.start()
+
+/**
+ * Background subagents the model starts with the task tool. They work under
+ * this conversation's model and permissions, read when each starts; their tool
+ * calls show in the transcript under the agent's name, and their spend counts.
+ */
+const subagents = new SubagentManager(
+  () => ({
+    provider: selection.provider,
+    modelId: selection.model.id,
+    apiKey: key ?? "",
+    root: process.cwd(),
+    where: "terminal",
+    contextWindow: selection.model.contextWindow,
+    permissions,
+    history: edits,
+    mcp,
+    instructions: skillIndex(listSkills(process.cwd())),
+    effort: effortFor(selection.model, settings.effort),
+  }),
+  (event) => onSubagent(event),
+)
 
 // Custom commands and skills join the slash picker. Read once here for the
 // picker; a message reads them fresh, so one written mid-session still runs.
@@ -271,7 +294,9 @@ function stopSpinner() {
 let status = key ? "" : "no key for " + selection.provider.label
 
 /** A question waiting on an answer. `cover` is what "Allow for this session" would approve, in words. */
-let pending: { tool: string; detail: string; cover: string; resolve: (d: Decision) => void } | undefined
+let pending: { tool: string; detail: string; cover: string; from?: string; resolve: (d: Decision) => void } | undefined
+/** Questions that arrived while another was on screen - a subagent can ask while the main agent is waiting on one. */
+const waitingAsks: NonNullable<typeof pending>[] = []
 /** Which answer is highlighted. Starts on "allow once", the least committal. */
 let pendingChoice = 0
 
@@ -304,10 +329,14 @@ let settingBeing: string | undefined
 // the agent this terminal drives, and a test fails if a surface builds one
 // without them.
 const permissions = Permissions.withConfig(
-  (tool, detail, cover) =>
+  (tool, detail, cover, from) =>
     new Promise<Decision>((resolve) => {
-      pending = { tool, detail, cover, resolve }
-      pendingChoice = 0
+      const ask = { tool, detail, cover, from, resolve }
+      if (pending) waitingAsks.push(ask)
+      else {
+        pending = ask
+        pendingChoice = 0
+      }
       render()
     }),
 )
@@ -537,7 +566,7 @@ function render() {
     // input line, and the session hint said "calls like this" - which told you
     // nothing once an approval covered one command rather than the whole tool.
     const asked = (pending.tool === "shell" ? commandOf(pending.detail) : pending.detail).replace(/\s+/g, " ")
-    const title = " allow " + pending.tool + ": " + asked + "?"
+    const title = " " + (pending.from ? pending.from + " subagent: " : "") + "allow " + pending.tool + ": " + asked + "?"
     const hints = DECISIONS.map((d) => (d.id === "always" ? "stop asking about " + pending!.cover : d.hint))
     // One width for every row, padded after colouring - displayWidth skips
     // escape sequences, so the box lines up whatever colour the text is. As
@@ -650,7 +679,8 @@ function render() {
   const context = usage(messages, selection.model.contextWindow)
   const modeTag =
     (permissions.mode === "ask" ? "" : "  [" + MODES.find((entry) => entry.id === permissions.mode)!.label.toLowerCase() + "]") +
-    (permissions.planning ? "  [planning]" : "")
+    (permissions.planning ? "  [planning]" : "") +
+    (subagents.running().length ? "  [" + subagents.running().length + " subagent" + (subagents.running().length === 1 ? "" : "s") + " running]" : "")
   const spendTag = spend.input + spend.output > 0 ? "  " + formatSpend(spend) : ""
   const left =
     status ||
@@ -874,6 +904,35 @@ function openDisconnect() {
  * replace. Each row carries its own description, so the choice is made on
  * what the theme is rather than on what it is called.
  */
+/** A subagent's progress, into the transcript under its name. */
+function onSubagent(event: SubagentEvent) {
+  const rowFor = (id: string) => [...transcript].reverse().find((entry) => entry.kind === "tool" && entry.call === id)
+  if (event.type === "subagent_start") {
+    transcript.push({ kind: "tool", text: event.agent + " subagent started: " + event.description })
+  } else if (event.type === "subagent_end") {
+    const first = event.result.split(String.fromCharCode(10)).find((line) => line.trim()) ?? ""
+    transcript.push({
+      kind: "tool",
+      text: event.agent + " subagent " + (event.status === "done" ? "finished" : event.status) + ": " + first.slice(0, 90),
+    })
+  } else {
+    const inner = event.event
+    const id = event.task + ":" + ("id" in inner ? inner.id : "")
+    if (inner.type === "tool_start") {
+      transcript.push({ kind: "tool", call: id, text: "  " + event.agent + " > " + inner.name + " " + inner.args.slice(0, 50) })
+    } else if (inner.type === "tool_denied") {
+      const row = rowFor(id)
+      if (row) row.text += "  (" + refusalLabel(inner) + ")"
+    } else if (inner.type === "tool_end") {
+      const row = rowFor(id)
+      if (row) row.text += "  ->  " + (inner.result.split(String.fromCharCode(10))[0] ?? "").slice(0, 50)
+    } else if (inner.type === "spend") {
+      spend = addSpend(spend, { input: inner.input, output: inner.output, dollars: priceOf(inner, selection.model.price) })
+    }
+  }
+  render()
+}
+
 /** Ask for approval, Approve for me, Full access - the same three Shift+Tab cycles through. */
 function openApprovalsPicker() {
   dialog = Dialogs.open(
@@ -1238,6 +1297,7 @@ async function send() {
       plan = []
       session = sessions.create(selection.provider.id)
       permissions.reset()
+      subagents.reset()
       edits.reset()
       pastes = []
       spend = { input: 0, output: 0 }
@@ -1553,6 +1613,7 @@ async function send() {
       permissions,
       history: edits,
       extraTools: mcp,
+      subagents,
       effort: effortFor(selection.model, settings.effort),
       signal: turn.signal,
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
@@ -1761,7 +1822,8 @@ process.stdin.on("data", (chunk) => {
     if (pending) {
       const answer = (decision: Decision) => {
         const ask = pending!
-        pending = undefined
+        pending = waitingAsks.shift()
+        pendingChoice = 0
         ask.resolve(decision)
         render()
       }
@@ -1787,6 +1849,7 @@ process.stdin.on("data", (chunk) => {
           continue
         }
         turn?.abort()
+        subagents.stopAll()
         status = "stopped"
         render()
       }
