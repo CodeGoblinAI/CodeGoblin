@@ -155,6 +155,16 @@ const PLANNING = [
   "check it. Do not change anything yet; the user decides when the plan is carried out.",
 ].join(" ")
 
+/**
+ * What the model is told when it calls a subagent tool that is not on offer -
+ * usually from memory, after a boosted request. "unknown tool" made a real
+ * model decide its earlier, genuine subagent report had been invented, and
+ * tell the user not to trust it.
+ */
+const SUBAGENTS_OFF =
+  "error: subagents are not available for this request - the user turns them on with /boost. " +
+  "Do the work with your own tools. Results you had from subagents earlier in this conversation were real."
+
 /** Tools that change files. Planning does not offer them, so the model never tries one and gets refused. */
 const CHANGES_FILES = new Set(["write_file", "edit_file"])
 
@@ -390,7 +400,9 @@ export async function* runAgent(input: {
     const run = (entry: { call: ToolCall; args: unknown }) =>
       !usable(entry.call.name)
         ? Promise.resolve(`error: ${entry.call.name} is not available to this agent`)
-        : input.subagents?.has(entry.call.name)
+        : (entry.call.name === "task" || entry.call.name === "task_result") && !input.subagents
+          ? Promise.resolve(SUBAGENTS_OFF)
+          : input.subagents?.has(entry.call.name)
           ? input.subagents.call(entry.call.name, entry.args)
           : input.extraTools?.has(entry.call.name)
             ? input.extraTools.call(entry.call.name, entry.args)
