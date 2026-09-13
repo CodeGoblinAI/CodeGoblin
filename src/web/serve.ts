@@ -26,6 +26,8 @@ import * as auth from "../core/auth"
 import * as sessions from "../core/sessions"
 import { DECISIONS, refusalLabel, type Decision } from "../core/permission"
 import { BrowserConsent } from "./consent"
+import { McpManager } from "../core/mcp"
+import { configPath } from "../core/config"
 import { expandMentions } from "../core/mention"
 import { globFiles } from "../core/search"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
@@ -53,6 +55,13 @@ const root = process.cwd()
 
 /** Consent for every browser conversation; web/consent.ts says why it lives there. */
 const consent = new BrowserConsent()
+
+/**
+ * MCP servers from codegoblin.jsonc, one set for every browser conversation,
+ * connected in the background from startup. /mcp says how each is doing.
+ */
+const mcp = McpManager.fromConfig()
+void mcp.start()
 
 /**
  * Turns that can be cancelled.
@@ -176,6 +185,7 @@ async function projectFiles(): Promise<string[]> {
         { value: "/connect", hint: "connect a provider - pick one, paste its key", expands: true },
         { value: "/disconnect", hint: "remove a stored key - pick one", expands: true },
         { value: "/status", hint: "what this session is using right now" },
+        { value: "/mcp", hint: "MCP servers from codegoblin.jsonc, and their tools" },
         { value: "/export", hint: "save the conversation as markdown" },
         { value: "/rename", hint: "retitle this conversation" },
         { value: "/theme", hint: "change colours", expands: true },
@@ -200,6 +210,10 @@ async function projectFiles(): Promise<string[]> {
         connected: auth.isConnected(entry.id),
       })),
     })
+  }
+
+  if (url.pathname === "/api/mcp") {
+    return json({ servers: mcp.statuses(), config: configPath() })
   }
 
   if (url.pathname === "/api/sessions") {
@@ -519,6 +533,8 @@ async function projectFiles(): Promise<string[]> {
         // Say what was attached: a mention that silently did nothing and a
         // mention that worked would otherwise look exactly the same.
         if (mentioned.files.length) send({ type: "attached", files: mentioned.files })
+        // Servers still starting get a moment, so a first message can use their tools.
+        await mcp.settled(10_000)
         try {
           for await (const event of runAgent({
             provider,
@@ -529,6 +545,7 @@ async function projectFiles(): Promise<string[]> {
             contextWindow: model.contextWindow,
             images: acceptsImages(selection),
             permissions: consent.forSession(session.id, send),
+            extraTools: mcp,
             memory: await memory.recall({ project: root, session: session.id }),
             history: edits,
             effort: effortFor(model, (await settingsStore.load()).effort),
@@ -585,3 +602,10 @@ if (!server) {
 }
 
 console.log(`CodeGoblin web -> http://localhost:${server.port}  (loopback only)`)
+
+// MCP servers started as child processes go when this server does.
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    void mcp.close().finally(() => process.exit(0))
+  })
+}

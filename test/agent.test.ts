@@ -546,3 +546,86 @@ describe("the loop itself", () => {
     expect(events.some((event) => event.type === "limit")).toBe(false)
   })
 })
+
+describe("tools from outside the built-in table", () => {
+  const echo = () => {
+    const called: unknown[] = []
+    return {
+      called,
+      tools: {
+        schema: () => [
+          {
+            type: "function" as const,
+            function: { name: "mcp__fixture__echo", description: "Say it back.", parameters: { type: "object", properties: {} } },
+          },
+        ],
+        has: (name: string) => name === "mcp__fixture__echo",
+        call: async (_name: string, args: unknown) => {
+          called.push(args)
+          return "echo: hi"
+        },
+      },
+    }
+  }
+
+  function scripted(bodies: { tools: { function: { name: string } }[] }[]) {
+    let turn = 0
+    globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")))
+      turn++
+      return turn === 1 ? asksForMany({ id: "m1", name: "mcp__fixture__echo", args: JSON.stringify({ text: "hi" }) })() : answers("done")
+    }) as unknown as typeof fetch
+  }
+
+  test("are offered to the model, asked about, and a call reaches them", async () => {
+    const bodies: { tools: { function: { name: string } }[] }[] = []
+    scripted(bodies)
+    const { called, tools } = echo()
+    const asked: string[] = []
+    const { Permissions } = await import("../src/core/permission")
+    const permissions = new Permissions(async (tool) => {
+      asked.push(tool)
+      return "once"
+    })
+
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider,
+      modelId: "test-model",
+      apiKey: "not-a-real-key",
+      messages: [{ role: "user", content: "go" }],
+      root: process.cwd(),
+      maxTurns: 4,
+      permissions,
+      extraTools: tools,
+    })) {
+      events.push(event)
+    }
+
+    const offered = bodies[0]!.tools.map((tool) => tool.function.name)
+    expect(offered).toContain("mcp__fixture__echo")
+    expect(offered).toContain("read_file")
+    expect(asked).toEqual(["mcp__fixture__echo"])
+    expect(called).toEqual([{ text: "hi" }])
+    expect(events.find((event) => event.type === "tool_end")).toMatchObject({ name: "mcp__fixture__echo", result: "echo: hi" })
+  })
+
+  test("a refused call never reaches the server", async () => {
+    scripted([])
+    const { called, tools } = echo()
+    const { Permissions } = await import("../src/core/permission")
+    for await (const _ of runAgent({
+      provider,
+      modelId: "test-model",
+      apiKey: "not-a-real-key",
+      messages: [{ role: "user", content: "go" }],
+      root: process.cwd(),
+      maxTurns: 4,
+      permissions: new Permissions(async () => "reject"),
+      extraTools: tools,
+    })) {
+      // drained
+    }
+    expect(called).toEqual([])
+  })
+})

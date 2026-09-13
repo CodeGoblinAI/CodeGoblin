@@ -768,6 +768,19 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/mcp") {
+    const result = await fetch("/api/mcp").then((r) => r.json()).catch(() => null)
+    if (!result) { note("could not reach the server"); return true }
+    if (!result.servers.length) { note('no MCP servers - add them under "mcp" in ' + result.config); return true }
+    note(result.servers.map((server) =>
+      server.name.padEnd(14) +
+      (server.status === "connected"
+        ? server.tools.length + " tool" + (server.tools.length === 1 ? "" : "s") + (server.tools.length ? ": " + server.tools.join(", ") : "")
+        : server.status + (server.error ? " - " + server.error : ""))
+    ).join(String.fromCharCode(10)))
+    return true
+  }
+
   if (name === "/status") {
     const model = modelOptions.find((o) => o.value === currentModel)
     note([

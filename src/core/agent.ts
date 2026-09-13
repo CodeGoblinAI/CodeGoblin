@@ -5,6 +5,16 @@ import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT } from "
 import { parseTodos, type Todo } from "./todo"
 import type { History } from "./undo"
 
+/**
+ * Tools from outside the built-in table - MCP servers today. The loop offers
+ * them next to its own and routes a call back; consent is the same for both.
+ */
+export type ExtraTools = {
+  schema(): { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }[]
+  has(name: string): boolean
+  call(name: string, args: unknown): Promise<string>
+}
+
 export type Role = "user" | "assistant" | "system" | "tool"
 export type ToolCall = { id: string; name: string; args: string }
 
@@ -153,6 +163,8 @@ export async function* runAgent(input: {
   memory?: string
   /** Given a turn, keeps the previous state of every file the turn writes. */
   history?: History
+  /** MCP tools, offered next to the built-in ones and asked about the same way. */
+  extraTools?: ExtraTools
   /**
    * How hard the model should think, for models that take it.
    *
@@ -187,7 +199,7 @@ export async function* runAgent(input: {
       body: JSON.stringify({
         model: input.modelId,
         messages: wire(input.messages, input.memory, input.images),
-        tools: TOOL_SCHEMA,
+        tools: [...TOOL_SCHEMA, ...(input.extraTools?.schema() ?? [])],
         stream: true,
         ...(input.effort ? { reasoning_effort: input.effort } : {}),
       }),
@@ -312,10 +324,14 @@ export async function* runAgent(input: {
       yield { type: "tool_start", id: call.id, name: call.name, args: call.args }
     }
 
+    // An MCP tool is not concurrent - nothing says what it touches - and it is
+    // outside undo, because what it changes is not a file this loop can see.
     const run = (entry: { call: ToolCall; args: unknown }) =>
-      runTool(entry.call.name, entry.args, input.root, async (relative) => {
-        await input.history?.record(input.root, relative)
-      })
+      input.extraTools?.has(entry.call.name)
+        ? input.extraTools.call(entry.call.name, entry.args)
+        : runTool(entry.call.name, entry.args, input.root, async (relative) => {
+            await input.history?.record(input.root, relative)
+          })
 
     // Reads overlap; everything else keeps its order. Four file reads used to
     // cost four round trips end to end for no reason - they do not touch each

@@ -70,6 +70,8 @@ import {
 } from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
 import { Permissions, DECISIONS, MODES, nextMode, commandOf, refusalLabel, type Decision } from "../core/permission"
+import { McpManager } from "../core/mcp"
+import { configPath } from "../core/config"
 
 const argv = process.argv.slice(2)
 
@@ -162,6 +164,13 @@ function applyComposer(next: Composer, remember = false) {
   anchor = next.anchor
 }
 const edits = new History()
+
+/**
+ * MCP servers from codegoblin.jsonc, connected in the background so a slow one
+ * never holds up the first screen. /mcp says how each is doing.
+ */
+const mcp = McpManager.fromConfig()
+void mcp.start()
 
 /**
  * Text that was pasted rather than typed.
@@ -1287,6 +1296,19 @@ async function send() {
         status = gone ? "disconnected " + result.provider : "no stored key for " + result.provider
       }
     }
+    if (result.kind === "mcp") {
+      const servers = mcp.statuses()
+      const rows: [string, string][] = servers.length
+        ? servers.map((server): [string, string] => [
+            server.name,
+            server.status === "connected"
+              ? server.tools.length + " tool" + (server.tools.length === 1 ? "" : "s") +
+                (server.tools.length ? ": " + server.tools.join(", ") : "")
+              : server.status + (server.error ? " - " + server.error : ""),
+          ])
+        : [["none yet", 'add servers under "mcp" in ' + configPath()]]
+      overlay = { title: "mcp servers", rows }
+    }
     if (result.kind === "status") {
       const context = usage(messages, selection.model.contextWindow)
       const approved = permissions.summary()
@@ -1425,6 +1447,14 @@ async function send() {
   // takes back the whole answer rather than its last file.
   edits.begin(text)
   try {
+    // Servers still starting get a moment, so a first message can use their tools.
+    const starting = mcp.connecting()
+    if (starting.length) {
+      status = "waiting for MCP servers: " + starting.join(", ")
+      render()
+    }
+    await mcp.settled(10_000)
+    if (starting.length) status = ""
     for await (const event of runAgent({
       provider: selection.provider,
       modelId: selection.model.id,
@@ -1435,6 +1465,7 @@ async function send() {
       images: seeing,
       permissions,
       history: edits,
+      extraTools: mcp,
       effort: effortFor(selection.model, settings.effort),
       signal: turn.signal,
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
@@ -1532,7 +1563,9 @@ async function send() {
 
 function shutdown() {
   out.write("[0m" + ansi.pasteOff + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
-  process.exit(0)
+  // MCP servers started as child processes go with the app, but one that will
+  // not close is not allowed to keep the terminal waiting.
+  void Promise.race([mcp.close(), new Promise((done) => setTimeout(done, 1500))]).finally(() => process.exit(0))
 }
 
 async function refreshSessionCache() {
