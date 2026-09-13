@@ -265,7 +265,10 @@ function scopesFor(tool: string, detail: string): Scope[] {
     let scope: Scope
     if (!tokens.length) {
       scope = { key: tool, words: "an empty command" }
-    } else if (runsInlineCode(tokens)) {
+    } else if (runsInlineCode(tokens) || (INLINE_RUNNERS.has(programName(tokens[0]!)) && (tokens[1] ?? "").startsWith("-"))) {
+      // An interpreter given flags before its script - powershell -NoProfile
+      // -File x.ps1 - is approved exactly too. By its first two words, one
+      // approved script covered every "powershell -NoProfile" command after it.
       scope = { key: tool + ":" + segment, words: "this exact " + programName(tokens[0]!) + " command" }
     } else {
       const prefix = prefixOf(tokens).join(" ")
@@ -340,7 +343,22 @@ function ruleFor(command: string, rules: Rules): Match | undefined {
  * -delete, a test runner, which runs project code - still asks. Output sent to
  * a file, or a command run inside another, disqualifies the whole line.
  */
-const READ_ONLY_PROGRAMS = new Set(["ls", "dir", "pwd", "cat", "type", "head", "tail", "wc", "rg", "grep", "findstr", "where", "which", "echo", "tree"])
+const READ_ONLY_PROGRAMS = new Set(["ls", "dir", "pwd", "cd", "cat", "type", "head", "tail", "wc", "rg", "grep", "findstr", "where", "which", "echo", "tree"])
+
+/**
+ * Whether an argument points outside the working directory: a drive, a share,
+ * the home directory, an environment variable, a way up, or an absolute path.
+ * Short Windows switches such as /s and /a:h are not paths.
+ */
+function leavesTheProject(token: string): boolean {
+  const value = token.startsWith("-") && token.includes("=") ? token.slice(token.indexOf("=") + 1) : token
+  if (/^[A-Za-z]:/.test(value)) return true
+  if (value.startsWith(BACKSLASH + BACKSLASH) || value.startsWith("~")) return true
+  if (value.includes("%") || value.includes("$")) return true
+  if (value.split(BACKSLASH).join("/").split("/").includes("..")) return true
+  if (value.startsWith("/") && !/^\/[A-Za-z?]{1,2}(:\S*)?$/.test(value)) return true
+  return false
+}
 const READ_ONLY_GIT = new Set(["status", "log", "diff", "show", "rev-parse", "ls-files", "blame"])
 
 export function isReadOnlyCommand(command: string): boolean {
@@ -357,11 +375,20 @@ export function isReadOnlyCommand(command: string): boolean {
     const tokens = tokensOf(segment)
     if (!tokens.length || runsInlineCode(tokens)) return false
     const program = programName(tokens[0]!)
+    // A read-only command still reads, and outside the project that can be
+    // the key store or ~/.ssh - cat of either would have run unasked. Only
+    // arguments that stay in the working directory go through; anywhere else asks.
+    if (tokens.slice(1).some(leavesTheProject)) return false
     if (program === "git") {
       // The first word that is not a flag is the subcommand; git -c can set a
       // pager or an alias, and its value is not a subcommand this list knows.
       const sub = tokens.slice(1).find((token) => !token.startsWith("-"))
-      const unsafeFlag = tokens.some((token) => token.startsWith("--output") || token === "--ext-diff" || token === "-c")
+      // -C, --git-dir and --work-tree point git at another repository.
+      const unsafeFlag = tokens.some(
+        (token) =>
+          token.startsWith("--output") || token === "--ext-diff" || token === "-c" || token === "-C" ||
+          token.startsWith("--git-dir") || token.startsWith("--work-tree"),
+      )
       return sub !== undefined && READ_ONLY_GIT.has(sub) && !unsafeFlag
     }
     // rg --pre runs a program on every file it searches.
