@@ -15,6 +15,8 @@ import { parseLaunch } from "./args"
 import * as Dialogs from "./dialog"
 import { changesIn, summarise, countsOf, statusLetter, type Changes } from "../core/changes"
 import {
+  charAfter,
+  charBefore,
   ComposerHistory,
   deleteRange,
   insert as insertText,
@@ -56,7 +58,7 @@ import { globFiles } from "../core/search"
 import { defaultSelection, resolveSelection, acceptsImages, effortFor, takesEffort, type Selection, kindOf } from "../core/providers"
 import { apiKey, connect, disconnect, connections, storePath, envVariable } from "../core/auth"
 import { runAgent, type Message } from "../core/agent"
-import { isCommand, runCommand } from "../core/commands"
+import { COMMANDS, isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
 import {
   usage,
@@ -1151,6 +1153,17 @@ async function chooseInDialog() {
     return
   }
 
+  // /help and /skills: the chosen command goes into the prompt, ready for its
+  // argument, rather than running with none.
+  if (dialog.kind === "invoke") {
+    closeDialog()
+    input = row.value + " "
+    cursor = input.length
+    refreshPalette()
+    render()
+    return
+  }
+
   if (dialog.kind === "approvals") {
     permissions.mode = row.value as PermissionMode
     const mode = MODES.find((entry) => entry.id === permissions.mode)!
@@ -1323,6 +1336,18 @@ async function send() {
       overlay = undefined
       status = "new conversation"
     }
+    // /help is a picker too. Printed, it was twenty-five lines that stayed in
+    // the conversation for good.
+    if (result.kind === "message" && text.trim() === "/help") {
+      dialog = Dialogs.open(
+        "invoke",
+        "Commands",
+        COMMANDS.map((command) => ({ label: command.name, hint: command.description, value: command.name })),
+        { footer: "enter puts it in the prompt . wheel or pgup/pgdn scroll . esc closes", size: "large" },
+      )
+      render()
+      return
+    }
     if (result.kind === "message") transcript.push({ kind: "tool", text: result.text })
     if (result.kind === "theme") {
       if (!result.name) { openThemePicker(); render(); return }
@@ -1457,24 +1482,35 @@ async function send() {
       return
     }
     if (result.kind === "skills") {
-      // Into the transcript rather than a panel: there can be dozens, and the
-      // transcript scrolls.
+      // A picker, like every other list. Printed into the transcript it was
+      // ninety lines that stayed in the conversation for good and pushed
+      // everything else off the screen.
       const skills = listSkills(process.cwd())
       const commands = customCommands(process.cwd())
-      const lines = [
-        ...commands.map((command) => "/" + command.name + "  command (" + command.scope + ")" + (command.description ? " - " + command.description : "")),
-        ...skills.map(
-          (skill) =>
-            "/" + skill.name + "  skill (" + skill.scope + (skill.modelInvocable ? "" : ", only you can start it") +
-            (skill.userInvocable ? "" : ", only the model can start it") + ")",
-        ),
-      ]
-      transcript.push({
-        kind: "tool",
-        text: lines.length
-          ? skills.length + " skills, " + commands.length + " custom commands" + String.fromCharCode(10) + lines.join(String.fromCharCode(10))
-          : "no skills or custom commands yet - a skill is a folder with a SKILL.md in ~/.claude/skills",
-      })
+      if (!skills.length && !commands.length) {
+        status = "no skills or custom commands yet - a skill is a folder with a SKILL.md in ~/.claude/skills"
+      } else {
+        const heading = (label: string): Dialogs.DialogRow => ({ label, tone: "heading", inert: true })
+        dialog = Dialogs.open(
+          "invoke",
+          skills.length + " skills, " + commands.length + " custom commands",
+          [
+            ...(commands.length ? [heading("custom commands")] : []),
+            ...[...commands]
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((command) => ({ label: "/" + command.name, hint: command.scope + (command.description ? " - " + command.description : ""), value: "/" + command.name })),
+            ...(skills.length ? [heading("skills")] : []),
+            ...[...skills]
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((skill) => ({
+                label: "/" + skill.name,
+                hint: skill.scope + (skill.modelInvocable ? "" : ", only you can start it") + (skill.userInvocable ? "" : ", only the model can start it"),
+                value: "/" + skill.name,
+              })),
+          ],
+          { footer: "enter puts it in the prompt . wheel or pgup/pgdn scroll . esc closes", size: "large" },
+        )
+      }
     }
     if (result.kind === "mcp") {
       const servers = mcp.statuses()
@@ -1926,12 +1962,12 @@ process.stdin.on("data", (chunk) => {
         continue
       }
       if (pressed.type === "backspace") {
-        if (cursor > 0) { input = input.slice(0, cursor - 1) + input.slice(cursor); cursor-- }
+        if (cursor > 0) { const at = charBefore(input, cursor); input = input.slice(0, at) + input.slice(cursor); cursor = at }
         render()
         continue
       }
-      if (pressed.type === "left") { cursor = Math.max(0, cursor - 1); render(); continue }
-      if (pressed.type === "right") { cursor = Math.min(input.length, cursor + 1); render(); continue }
+      if (pressed.type === "left") { cursor = charBefore(input, cursor); render(); continue }
+      if (pressed.type === "right") { cursor = charAfter(input, cursor); render(); continue }
       // Scrolling has to keep working while the model writes.
       if (pressed.type === "pageup") { scroll += 5; render() }
       if (pressed.type === "pagedown") { scroll = Math.max(0, scroll - 5); render() }
@@ -1947,6 +1983,12 @@ process.stdin.on("data", (chunk) => {
       if (pressed.type === "up") { paletteIndex = Math.max(0, paletteIndex - 1); dirty = true; continue }
       if (pressed.type === "down") { paletteIndex = Math.min(palette.length - 1, paletteIndex + 1); dirty = true; continue }
       if (pressed.type === "escape") { palette = undefined; render(); continue }
+      // The wheel moves through the list. It used to fall through and scroll
+      // the conversation behind the menu, which looked like the menu was stuck.
+      if (pressed.type === "wheelup") { paletteIndex = Math.max(0, paletteIndex - 1); dirty = true; continue }
+      if (pressed.type === "wheeldown") { paletteIndex = Math.min(palette.length - 1, paletteIndex + 1); dirty = true; continue }
+      if (pressed.type === "pageup") { paletteIndex = Math.max(0, paletteIndex - 8); dirty = true; continue }
+      if (pressed.type === "pagedown") { paletteIndex = Math.min(palette.length - 1, paletteIndex + 8); dirty = true; continue }
       if (pressed.type === "enter") {
         // The list can change between keystrokes; never trust the index.
         const selected = palette[paletteIndex]
@@ -2031,14 +2073,14 @@ process.stdin.on("data", (chunk) => {
         break
       case "left": {
         const state = composerState()
-        const to = pressed.ctrl ? wordStart(input, cursor) : cursor - 1
+        const to = pressed.ctrl ? wordStart(input, cursor) : charBefore(input, cursor)
         applyComposer(moveTo(state, { to, select: Boolean(pressed.shift) }))
         dirty = true
         break
       }
       case "right": {
         const state = composerState()
-        const to = pressed.ctrl ? wordEnd(input, cursor) : cursor + 1
+        const to = pressed.ctrl ? wordEnd(input, cursor) : charAfter(input, cursor)
         applyComposer(moveTo(state, { to, select: Boolean(pressed.shift) }))
         dirty = true
         break

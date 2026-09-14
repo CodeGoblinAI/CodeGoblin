@@ -183,11 +183,15 @@ export function box(dialog: Dialog, cols: number, rows: number): string[] {
     // no acknowledgement is how a second press becomes a surprise.
     const armed = dialog.armed !== undefined && dialog.armed === row.value
     const hint = armed ? "press again to delete" : (row.hint ?? "")
-    const hintWidth = hint ? Math.min(displayWidth(hint), Math.max(0, inner - 8)) : 0
-    const labelWidth = Math.max(0, inner - 2 - hintWidth - (hint ? 2 : 0))
+    // The label is measured first and the hint takes what is left. It was the
+    // other way round in the code, whatever the comment said: /approvals showed
+    // "As", "Appro" and "Fu" beside hints that ran the full width.
+    const hintRoom = Math.max(0, inner - 2 - displayWidth(row.label) - 2)
+    const hintWidth = hint ? Math.min(displayWidth(hint), hintRoom) : 0
+    const labelWidth = Math.max(0, inner - 2 - hintWidth - (hintWidth ? 2 : 0))
     const label = padToWidth(truncateToWidth(row.label, labelWidth), labelWidth)
     const tone = armed ? theme.error : dim
-    const tail = hint ? "  " + tone + padToWidth(truncateToWidth(hint, hintWidth), hintWidth) + ansi.reset : ""
+    const tail = hintWidth ? "  " + tone + padToWidth(truncateToWidth(hint, hintWidth), hintWidth) + ansi.reset : ""
 
     lines.push(
       theme.borderStrong + "│" + ansi.reset +

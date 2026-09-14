@@ -84,6 +84,25 @@ export function insert(state: Composer, value: string): Composer {
 }
 
 /**
+ * Where the character before or after the cursor starts, whole. An emoji is two
+ * UTF-16 units, and stepping by one split it: backspace over 🧌 left half of it
+ * behind as a broken character.
+ */
+export function charBefore(text: string, cursor: number): number {
+  if (cursor <= 0) return 0
+  const low = text.charCodeAt(cursor - 1)
+  const high = text.charCodeAt(cursor - 2)
+  return low >= 0xdc00 && low <= 0xdfff && high >= 0xd800 && high <= 0xdbff ? cursor - 2 : cursor - 1
+}
+
+export function charAfter(text: string, cursor: number): number {
+  if (cursor >= text.length) return text.length
+  const high = text.charCodeAt(cursor)
+  const low = text.charCodeAt(cursor + 1)
+  return high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff ? cursor + 2 : cursor + 1
+}
+
+/**
  * Delete.
  *
  * A selection goes first, whichever key was pressed - which is the behaviour
@@ -99,11 +118,12 @@ export function deleteRange(state: Composer, kind: "back" | "forward" | "wordBac
   const { text, cursor } = state
   if (kind === "back") {
     if (cursor === 0) return state
-    return { text: text.slice(0, cursor - 1) + text.slice(cursor), cursor: cursor - 1 }
+    const at = charBefore(text, cursor)
+    return { text: text.slice(0, at) + text.slice(cursor), cursor: at }
   }
   if (kind === "forward") {
     if (cursor >= text.length) return state
-    return { text: text.slice(0, cursor) + text.slice(cursor + 1), cursor }
+    return { text: text.slice(0, cursor) + text.slice(charAfter(text, cursor)), cursor }
   }
   if (kind === "wordBack") {
     const at = wordStart(text, cursor)
