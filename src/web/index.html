@@ -41,7 +41,10 @@
   .turn { display: flex; gap: 12px; }
   .turn .who { width: 56px; flex-shrink: 0; font-size: 12px; color: var(--muted); padding-top: 2px; }
   .turn .body { flex: 1; min-width: 0; line-height: 1.65; border-left: 2px solid transparent; padding-left: 13px; overflow-wrap: anywhere; }
-  .turn.user .body { border-left-color: var(--gold); }
+  /* Yours on the right, the goblin's on the left. */
+  .turn.user { flex-direction: row-reverse; }
+  .turn.user .who { text-align: right; }
+  .turn.user .body { flex: 0 1 auto; max-width: 75%; margin-left: auto; border-left: none; border-right: 2px solid var(--gold); padding-left: 0; padding-right: 13px; text-align: left; white-space: pre-wrap; }
   .turn.agent .body { border-left-color: var(--goblin); }
   .body p { margin: 0 0 9px; } .body p:last-child { margin-bottom: 0; }
   .body h3, .body h4 { margin: 12px 0 6px; font-size: 14px; }
@@ -164,7 +167,9 @@
   .presolved { color: var(--muted); font-size: 12px; }
 
   .composer { position: relative; }
-  .palette { position: absolute; bottom: calc(100% + 6px); left: 20px; right: 20px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,.45); z-index: 20; }
+  /* A quarter of the window, scrolling: with every skill listed it used to cover the page and could not scroll. */
+  .palette { position: absolute; bottom: calc(100% + 6px); left: 20px; right: 20px; max-height: 28vh; overflow-y: auto; overscroll-behavior: contain; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.45); z-index: 20; }
+  .psection { position: sticky; top: 0; padding: 5px 13px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--panel); border-bottom: 1px solid var(--line); z-index: 1; }
   .prow { display: flex; gap: 14px; padding: 8px 13px; cursor: pointer; font-size: 13px; }
   .prow .pvalue { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
   .prow .phint { color: var(--muted); opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -25,7 +25,7 @@ import {
   wordStart,
   type Composer,
 } from "./composer"
-import { displayWidth, truncateToWidth, padToWidth } from "./width"
+import { displayWidth, truncateToWidth, padToWidth, padStartToWidth, wrapToWidth as wrapWords } from "./width"
 import { renderMarkdown } from "./markdown"
 import {
   paletteFor,
@@ -487,11 +487,19 @@ function render() {
       }
       const isUser = entry.kind === "user"
       const accent = isUser ? theme.gold : theme.goblin
-      lines.push(accent + "  " + (isUser ? "you" : selection.provider.label.toLowerCase()) + ansi.reset)
-      const rendered = isUser
-        ? entry.text.split(String.fromCharCode(10)).map((l) => theme.text + l + ansi.reset)
-        : renderMarkdown(entry.text, width)
-      for (const line of rendered) lines.push(accent + "  | " + ansi.reset + line)
+      if (isUser) {
+        // Yours on the right, the goblin's on the left, as in a chat.
+        const room = Math.max(10, width - 6)
+        const wrapped = entry.text.split(String.fromCharCode(10)).flatMap((line) => wrapWords(line, Math.floor(room * 0.75)))
+        const block = Math.max(3, ...wrapped.map((line) => displayWidth(line)))
+        const indent = " ".repeat(Math.max(2, width - block - 4))
+        lines.push(accent + indent + padStartToWidth("you", block + 2) + ansi.reset)
+        for (const line of wrapped) lines.push(indent + theme.text + padToWidth(line, block) + ansi.reset + accent + " |" + ansi.reset)
+        lines.push("")
+        continue
+      }
+      lines.push(accent + "  " + selection.provider.label.toLowerCase() + ansi.reset)
+      for (const line of renderMarkdown(entry.text, width)) lines.push(accent + "  | " + ansi.reset + line)
       lines.push("")
     }
   }

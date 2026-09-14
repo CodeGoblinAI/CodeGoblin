@@ -41,7 +41,8 @@ export function setFileCache(files: string[]) {
 /** Custom commands and skills, offered after the built-ins. Filled by the app, like the file list. */
 let invocations: PaletteItem[] = []
 export function setInvocations(items: PaletteItem[]) {
-  invocations = items
+  // A to Z, so a skill is found where its name says it will be.
+  invocations = [...items].sort((a, b) => a.value.localeCompare(b.value))
 }
 
 

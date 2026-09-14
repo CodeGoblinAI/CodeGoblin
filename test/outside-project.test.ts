@@ -63,7 +63,37 @@ describe("a read-only command that reaches outside the project asks", () => {
     await permissions.check("shell", shell("type src\\other.js"))
     await permissions.check("shell", shell("type C:\\Windows\\win.ini"))
     expect(asked).toBe(2)
-    expect(coverOf("shell", shell("type C:\\Windows\\win.ini"))).toBe("this exact type command")
+    expect(coverOf("shell", shell("type C:\\Windows\\win.ini"))).toBe('"type" in C:\\Windows')
+  })
+})
+
+describe("Allow for this session, outside the project, holds for that folder", () => {
+  // Seen on the real page: a write to Downloads was allowed for the session,
+  // and the next command in Downloads asked again.
+  test("the same program in the same folder, however the folder is spelled, does not ask again", async () => {
+    let asked = 0
+    const permissions = new Permissions(async () => {
+      asked++
+      return "always"
+    })
+    permissions.mode = "approve"
+    const downloads = process.env.USERPROFILE ? process.env.USERPROFILE + "\\Downloads" : "C:\\Users\\me\\Downloads"
+    await permissions.check("shell", shell('echo one > "%USERPROFILE%\\Downloads\\test.txt"'))
+    await permissions.check("shell", shell("echo two > " + downloads + "\\test.txt"))
+    await permissions.check("shell", shell("echo three > " + downloads + "\\other.txt"))
+    expect(asked).toBe(process.env.USERPROFILE ? 1 : 2)
+  })
+
+  test("but not another folder, and not another program", async () => {
+    let asked = 0
+    const permissions = new Permissions(async () => {
+      asked++
+      return "always"
+    })
+    await permissions.check("shell", shell("type C:\\Windows\\win.ini"))
+    await permissions.check("shell", shell("type C:\\Windows\\System32\\drivers\\etc\\hosts"))
+    await permissions.check("shell", shell("more C:\\Windows\\win.ini"))
+    expect(asked).toBe(3)
   })
 })
 

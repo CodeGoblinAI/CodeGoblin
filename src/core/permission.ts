@@ -1,3 +1,5 @@
+import { homedir } from "node:os"
+import path from "node:path"
 import { loadConfig, type RuleAction } from "./config"
 import { mostSpecific } from "./wildcard"
 
@@ -265,13 +267,16 @@ function scopesFor(tool: string, detail: string): Scope[] {
     let scope: Scope
     if (!tokens.length) {
       scope = { key: tool, words: "an empty command" }
-    } else if (
-      runsInlineCode(tokens) ||
-      (INLINE_RUNNERS.has(programName(tokens[0]!)) && (tokens[1] ?? "").startsWith("-")) ||
-      // Reaching outside the project is approved exactly as well: an approval
-      // for "type" given to type src\math.js used to cover type C:\anything.
-      tokens.slice(1).some(leavesTheProject)
-    ) {
+    } else if (!runsInlineCode(tokens) && !(INLINE_RUNNERS.has(programName(tokens[0]!)) && (tokens[1] ?? "").startsWith("-")) && tokens.slice(1).some(leavesTheProject)) {
+      // Reaching outside the project is approved for that program in those
+      // folders. It used to be the exact command, so "Allow for this session"
+      // on a write to Downloads asked again for the next command in Downloads.
+      // It never widens to the program everywhere: approving type src\math.js
+      // once covered type C:\anything.
+      const prefix = prefixOf(tokens).join(" ")
+      const folders = [...new Set(tokens.slice(1).filter(leavesTheProject).map(folderOf))].sort()
+      scope = { key: tool + ":" + prefix + "@" + folders.join("|").toLowerCase(), words: '"' + prefix + '" in ' + folders.join(" and ") }
+    } else if (runsInlineCode(tokens) || (INLINE_RUNNERS.has(programName(tokens[0]!)) && (tokens[1] ?? "").startsWith("-"))) {
       // An interpreter given flags before its script - powershell -NoProfile
       // -File x.ps1 - is approved exactly too. By its first two words, one
       // approved script covered every "powershell -NoProfile" command after it.
@@ -365,6 +370,23 @@ function leavesTheProject(token: string): boolean {
   if (value.startsWith("/") && !/^\/[A-Za-z?]{1,2}(:\S*)?$/.test(value)) return true
   return false
 }
+/**
+ * The folder an outside argument names, spelled one way: %USERPROFILE%\Downloads
+ * and C:\Users\me\Downloads are the same place, and a file stands for its folder.
+ */
+function folderOf(token: string): string {
+  let value = token.startsWith("-") && token.includes("=") ? token.slice(token.indexOf("=") + 1) : token
+  value = value.replace(/%([^%]+)%/g, (whole, name: string) => {
+    const found = Object.keys(process.env).find((key) => key.toLowerCase() === name.toLowerCase())
+    return found ? process.env[found]! : whole
+  })
+  value = value.replace(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g, (whole, name: string) => process.env[name] ?? whole)
+  if (value.startsWith("~")) value = homedir() + value.slice(1)
+  const normal = path.resolve(value)
+  const last = normal.split(/[\\/]/).pop() ?? ""
+  return last.includes(".") ? path.dirname(normal) : normal
+}
+
 const READ_ONLY_GIT = new Set(["status", "log", "diff", "show", "rev-parse", "ls-files", "blame"])
 
 export function isReadOnlyCommand(command: string): boolean {

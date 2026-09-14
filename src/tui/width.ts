@@ -90,3 +90,34 @@ export function padToWidth(text: string, target: number): string {
   const gap = target - displayWidth(text)
   return gap > 0 ? text + " ".repeat(gap) : text
 }
+
+/** Pad on the left to a display width, for text that sits against the right edge. */
+export function padStartToWidth(text: string, target: number): string {
+  const gap = target - displayWidth(text)
+  return gap > 0 ? " ".repeat(gap) + text : text
+}
+
+/** Plain text broken into lines of at most max columns, at spaces where it can be. */
+export function wrapToWidth(text: string, max: number): string[] {
+  if (max < 1 || displayWidth(text) <= max) return [text]
+  const lines: string[] = []
+  let line = ""
+  for (const word of text.split(" ")) {
+    const candidate = line ? line + " " + word : word
+    if (displayWidth(candidate) <= max) {
+      line = candidate
+      continue
+    }
+    if (line) lines.push(line)
+    // A word longer than the line is cut, since there is no space to break it at.
+    let rest = word
+    while (displayWidth(rest) > max) {
+      const piece = truncateToWidth(rest, max)
+      lines.push(piece)
+      rest = rest.slice(piece.length)
+    }
+    line = rest
+  }
+  if (line) lines.push(line)
+  return lines
+}

@@ -1585,7 +1585,13 @@ function itemsFor(text, cursor) {
   // Matching only the first word kept the palette open after "/rename a new
   // title", and enter then picked the bare "/rename" item and submitted that
   // instead - so the title the user typed was silently thrown away.
-  return paletteData.commands.filter((c) => c.value.startsWith(text))
+  // The app's own commands first, then skills and custom commands A to Z - the
+  // way the terminal lists them. They used to come in whatever order they were
+  // found, dozens of skills mixed in with the commands.
+  const matching = paletteData.commands.filter((c) => c.value.startsWith(text))
+  const own = matching.filter((c) => !c.invocation)
+  const invoked = matching.filter((c) => c.invocation).sort((a, b) => a.value.localeCompare(b.value))
+  return [...own, ...invoked]
 }
 
 function renderPalette() {
@@ -1594,6 +1600,13 @@ function renderPalette() {
   paletteEl.hidden = false
 
   paletteItems.forEach((item, index) => {
+    // A heading where the skills start, so the two groups read as two.
+    if (item.invocation && (index === 0 || !paletteItems[index - 1].invocation)) {
+      const heading = document.createElement("div")
+      heading.className = "psection"
+      heading.textContent = "skills and custom commands"
+      paletteEl.appendChild(heading)
+    }
     const row = document.createElement("div")
     row.className = "prow" + (index === paletteIndex ? " active" : "")
     row.innerHTML = '<span class="pvalue"></span><span class="phint"></span>'
@@ -1604,11 +1617,13 @@ function renderPalette() {
       // Update the class directly rather than re-rendering: rebuilding the
       // list under the pointer re-fires mouseenter and flickers.
       paletteIndex = index
-      for (const [at, el] of [...paletteEl.children].entries()) el.classList.toggle("active", at === index)
+      for (const [at, el] of [...paletteEl.querySelectorAll(".prow")].entries()) el.classList.toggle("active", at === index)
       previewTheme(item)
     }
     paletteEl.appendChild(row)
   })
+  // The list scrolls now, so the row the arrow keys moved to is kept in sight.
+  paletteEl.querySelector(".prow.active")?.scrollIntoView({ block: "nearest" })
 }
 
 let paletteSignature = ""
