@@ -469,10 +469,25 @@ export class McpClient {
       this.waiting.delete(id)
     }
     if (this.status === "connected" || this.status === "connecting") {
+      // A server that was working and then went away can be started again; one
+      // that never connected - a wrong command - would only fail the same way.
+      if (this.status === "connected") this.dropped = true
       this.status = "failed"
       this.error = reason
       this.onToolsChanged?.()
     }
+  }
+
+  /** Whether this server was working and then went away underneath us. */
+  dropped = false
+  restarts = 0
+
+  /** Starts a dropped server again, from scratch. */
+  async restart(): Promise<void> {
+    this.dropped = false
+    this.restarts++
+    await this.shutdown()
+    await this.connect()
   }
 
   request(method: string, params?: unknown, timeout: number = this.timeout): Promise<unknown> {
@@ -551,6 +566,9 @@ export class McpClient {
 
 export type McpToolEntry = { name: string; server: string; tool: McpToolInfo; client: McpClient }
 
+/** How many times a server that dropped out is started again in one session. */
+const MAX_RESTARTS = 3
+
 export type McpServerStatus = {
   name: string
   type: "local" | "remote"
@@ -599,8 +617,37 @@ export class McpManager {
   /** Waits for the servers, but never longer than `limit` - a slow server must not hold up a message. */
   async settled(limit: number): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined
-    await Promise.race([this.start(), new Promise<void>((done) => (timer = setTimeout(done, limit)))])
+    await Promise.race([this.start().then(() => this.revive()), new Promise<void>((done) => (timer = setTimeout(done, limit)))])
     clearTimeout(timer)
+  }
+
+  /**
+   * Starts again any server that dropped out mid-session, a few times at most.
+   * Killed mid-session, the fixture server simply vanished: its tools were gone,
+   * nothing brought it back, and the model reached for an unrelated tool instead.
+   */
+  async revive(): Promise<void> {
+    const dropped = this.clients.filter((client) => client.dropped && client.restarts < MAX_RESTARTS)
+    await Promise.all(
+      dropped.map(async (client) => {
+        await client.restart()
+        this.onChange?.()
+      }),
+    )
+  }
+
+  /**
+   * What the model is told about servers that are configured but not working,
+   * so it says so rather than using some other tool in their place.
+   */
+  notice(): string | undefined {
+    const down = this.clients.filter((client) => client.status === "failed" || client.status === "closed")
+    if (!down.length) return undefined
+    return [
+      "These MCP servers are configured but not running, so their tools are not available:",
+      ...down.map((client) => `- ${client.name}: ${client.status}${client.error ? " - " + client.error.slice(0, 200) : ""}`),
+      "If the user asks for one of them, say it is not running and why. Do not use a different tool in its place.",
+    ].join("\n")
   }
 
   entries(): McpToolEntry[] {

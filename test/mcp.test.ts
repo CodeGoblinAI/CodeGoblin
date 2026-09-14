@@ -154,6 +154,48 @@ describe("every server's tools as one list", () => {
     expect(manager.schema().every((entry) => entry.function.name.startsWith("mcp__good__"))).toBe(true)
   })
 
+  test("a server that drops out mid-session is started again before the next message", async () => {
+    // Seen in the terminal: the fixture server was killed, its tools vanished,
+    // and nothing brought it back.
+    const manager = new McpManager({ fixture: local() })
+    open.push(manager)
+    await manager.start()
+    const client = manager.clients[0]!
+    ;(client as unknown as { lost(reason: string): void }).lost("bun exited with code 1")
+    expect(client.status).toBe("failed")
+    expect(manager.has("mcp__fixture__echo")).toBe(false)
+
+    await manager.settled(10_000)
+    expect(client.status).toBe("connected")
+    expect(await manager.call("mcp__fixture__echo", { text: "back" })).toBe("echo: back")
+  })
+
+  test("a server that never started is not retried, and the model is told it is down", async () => {
+    // Seen in the terminal: with the servers down and nothing said, the model
+    // called an unrelated DeepWiki tool in their place and said "broken" was not configured.
+    const manager = new McpManager({
+      good: local(),
+      broken: { type: "local", command: ["cg-no-such-program-xyz"], environment: {}, enabled: true },
+    })
+    open.push(manager)
+    await manager.settled(10_000)
+    const broken = manager.clients.find((client) => client.name === "broken")!
+    expect(broken.dropped).toBe(false)
+    expect(broken.restarts).toBe(0)
+    const notice = manager.notice()!
+    expect(notice).toContain("broken")
+    expect(notice).toContain("cg-no-such-program-xyz")
+    expect(notice).toContain("not running")
+    expect(notice).not.toContain("- good")
+  })
+
+  test("with every server working there is nothing to tell the model", async () => {
+    const manager = new McpManager({ fixture: local() })
+    open.push(manager)
+    await manager.start()
+    expect(manager.notice()).toBeUndefined()
+  })
+
   test("waiting for servers has a limit", async () => {
     const manager = new McpManager({ slow: local({}, { timeout: 5000 }) })
     open.push(manager)

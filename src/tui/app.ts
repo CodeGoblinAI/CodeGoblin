@@ -124,7 +124,14 @@ let messages: Message[] = [SYSTEM]
  * row that asked for it. Rows used to be matched by being last, which stopped
  * being true once reads in a turn started overlapping.
  */
-type Entry = { kind: "user" | "agent" | "tool" | "thinking"; text: string; call?: string; state?: "running" | "done" | "failed" }
+type Entry = {
+  kind: "user" | "agent" | "tool" | "thinking"
+  text: string
+  call?: string
+  state?: "running" | "done" | "failed"
+  /** Who wrote an answer. Every answer used to take the current model's name, so switching relabelled the past. */
+  by?: string
+}
 let transcript: Entry[] = []
 /** Named for what it holds, since "history" here is the prompt recall list. */
 /**
@@ -301,7 +308,7 @@ function stopSpinner() {
   if (spinnerTimer) clearInterval(spinnerTimer)
   spinnerTimer = undefined
 }
-let status = key ? "" : "no key for " + selection.provider.label
+let status = key ? "" : "no key for " + selection.provider.label + " - /connect " + selection.provider.id
 
 /** A question waiting on an answer. `cover` is what "Allow for this session" would approve, in words. */
 let pending: { tool: string; detail: string; cover: string; from?: string; resolve: (d: Decision) => void } | undefined
@@ -500,7 +507,7 @@ function render() {
         lines.push("")
         continue
       }
-      lines.push(accent + "  " + selection.provider.label.toLowerCase() + ansi.reset)
+      lines.push(accent + "  " + (entry.by ?? selection.provider.label.toLowerCase()) + ansi.reset)
       for (const line of renderMarkdown(entry.text, width)) lines.push(accent + "  | " + ansi.reset + line)
       lines.push("")
     }
@@ -723,7 +730,10 @@ function render() {
       : palette
         ? "tab complete . up/down pick"
         : "pgup/dn scroll . shift+tab mode . ctrl+c quit"
-  const plain = "  " + left
+  // A long status gives way to the key hints rather than pushing them off the
+  // edge: "mode: Full access - never ask - only the rules..." ran into them.
+  const statusRoom = Math.max(10, cols - displayWidth(right) - 4)
+  const plain = "  " + (displayWidth(left) > statusRoom - 2 ? truncateToWidth(left, statusRoom - 3) + "…" : left)
   const padded = padToWidth(plain, Math.max(displayWidth(plain) + 1, cols - displayWidth(right) - 2))
   body.push(dim + padded + ansi.reset + theme.muted + right + ansi.reset)
 
@@ -1574,7 +1584,9 @@ async function send() {
     if (result.kind === "compact") {
       const window = selection.model.contextWindow
       const plan = planCompaction(messages, window)
-      if (!plan.summarise.length) status = "nothing to compact yet"
+      // Says why: the most recent quarter of the window is always kept word for
+      // word, so a short conversation has nothing older to summarise.
+      if (!plan.summarise.length) status = "nothing to compact yet - the whole conversation still fits in the recent part that is kept as it is"
       else {
         const summary = plan.summarise
           .filter((m) => m.role === "user")
@@ -1621,7 +1633,8 @@ async function send() {
     return
   }
 
-  if (!key) { status = "no key for " + selection.provider.label; render(); return }
+  // Says how to fix it, not only what is wrong.
+  if (!key) { status = "no key for " + selection.provider.label + " - /connect " + selection.provider.id + " to add one"; render(); return }
 
   input = ""
   cursor = 0
@@ -1687,7 +1700,7 @@ async function send() {
       effort: effortFor(selection.model, settings.effort),
       signal: turn.signal,
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
-      instructions: skillIndex(listSkills(process.cwd())),
+      instructions: [skillIndex(listSkills(process.cwd())), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
     })) {
       if (event.type === "thinking") {
         if (!current || current.kind !== "thinking") {
@@ -1698,7 +1711,7 @@ async function send() {
       }
       if (event.type === "text") {
         if (!current || current.kind !== "agent") {
-          current = { kind: "agent", text: "" }
+          current = { kind: "agent", text: "", by: selection.provider.label.toLowerCase() }
           transcript.push(current)
         }
         current.text += event.delta

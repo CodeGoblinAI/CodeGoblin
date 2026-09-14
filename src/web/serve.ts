@@ -596,7 +596,7 @@ async function projectFiles(): Promise<string[]> {
           permissions,
           history: edits,
           mcp,
-          instructions: skillIndex(listSkills(root)),
+          instructions: [skillIndex(listSkills(root)), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
           effort: effortFor(model, (await settingsStore.load()).effort),
         })
         let subagents = subagentsBySession.get(session.id)
@@ -625,7 +625,9 @@ async function projectFiles(): Promise<string[]> {
             subagents: body.boost === true || subagents.running().length ? subagents : undefined,
             extraTools: mcp,
             memory: await memory.recall({ project: root, session: session.id }),
-            instructions: skillIndex(listSkills(root)),
+            // Servers that are configured but down are named, so the model says so
+            // rather than reaching for an unrelated tool in their place.
+            instructions: [skillIndex(listSkills(root)), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
             history: edits,
             effort: effortFor(model, (await settingsStore.load()).effort),
             signal: turn.signal,
