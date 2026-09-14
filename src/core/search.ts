@@ -137,7 +137,7 @@ export async function grepFiles(
   root: string,
   query: string,
   include?: string,
-): Promise<{ matches: string[]; truncated: boolean; skipped: string[] }> {
+): Promise<{ matches: string[]; truncated: boolean; skipped: string[]; total: number }> {
   let pattern: RegExp
   try {
     pattern = new RegExp(query, "i")
@@ -149,6 +149,7 @@ export async function grepFiles(
   const filter = include ? globToRegExp(include) : undefined
   const matches: string[] = []
   const skipped: string[] = []
+  let total = 0
 
   for await (const relative of walk(root, root)) {
     if (filter && !filter.test(relative)) continue
@@ -173,12 +174,15 @@ export async function grepFiles(
     const lines = content.split(String.fromCharCode(10))
     for (let index = 0; index < lines.length; index++) {
       if (!pattern.test(lines[index]!)) continue
-      matches.push(`${relative}:${index + 1}: ${lines[index]!.trim().slice(0, 200)}`)
-      if (matches.length >= MAX_MATCHES) return { matches, truncated: true, skipped }
+      total++
+      // Past the cap, lines are counted rather than kept. Stopping at the cap
+      // left "how many lines match?" unanswerable: a real model spent four
+      // turns inferring 60,000 from which line did not match.
+      if (matches.length < MAX_MATCHES) matches.push(`${relative}:${index + 1}: ${lines[index]!.trim().slice(0, 200)}`)
     }
   }
 
-  return { matches, truncated: false, skipped }
+  return { matches, truncated: total > matches.length, skipped, total }
 }
 
 /** Kept here so the search tools share the sandbox check with the file tools. */

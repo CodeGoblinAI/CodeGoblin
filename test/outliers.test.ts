@@ -23,6 +23,8 @@ describe("grep on a big file", () => {
     expect(fs.statSync(path.join(project, "server.log")).size).toBeGreaterThan(3_000_000)
     const result = await runTool("grep", { query: "status=200", include: "server.log" }, project)
     expect(result).toContain("server.log:1:")
+    // Past the first hundred, the count is still given, so "how many?" has an answer.
+    expect(result).toContain("80000 matching lines in all")
   })
 })
 

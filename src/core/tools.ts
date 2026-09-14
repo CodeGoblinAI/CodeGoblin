@@ -275,10 +275,11 @@ export const EXTRA_TOOLS: Tool[] = [
     },
     run: async (args, root) => {
       const { grepFiles } = await import("./search")
-      const { matches, truncated, skipped } = await grepFiles(root, String(args.query ?? ""), args.include)
+      const { matches, truncated, skipped, total } = await grepFiles(root, String(args.query ?? ""), args.include)
       const notSearched = skipped.length ? NEWLINE + "not searched, too large: " + skipped.slice(0, 10).join(", ") : ""
       if (!matches.length) return "no matches" + notSearched
-      return clip(matches.join(NEWLINE) + (truncated ? NEWLINE + "... more matches not shown" : "") + notSearched)
+      const more = truncated ? NEWLINE + `... ${total} matching lines in all; the first ${matches.length} are shown` : ""
+      return clip(matches.join(NEWLINE) + more + notSearched)
     },
   },
   {
