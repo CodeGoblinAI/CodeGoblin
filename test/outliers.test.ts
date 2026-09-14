@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { closeOpenCalls, type Message } from "../src/core/agent"
+import { systemPrompt } from "../src/core/system-prompt"
 import { runTool } from "../src/core/tools"
 import { Global } from "../src/platform/paths"
 import { requireSandbox } from "./sandbox"
@@ -25,6 +26,14 @@ describe("grep on a big file", () => {
     expect(result).toContain("server.log:1:")
     // Past the first hundred, the count is still given, so "how many?" has an answer.
     expect(result).toContain("80000 matching lines in all")
+  })
+})
+
+describe("what the model is told about the working directory", () => {
+  test("matches the real rule: file tools stay inside, a shell command outside asks the user", () => {
+    const prompt = systemPrompt("terminal", "win32")
+    expect(prompt).not.toContain("Everything is confined")
+    expect(prompt).toContain("the user is asked first")
   })
 })
 

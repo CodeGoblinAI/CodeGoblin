@@ -32,9 +32,13 @@ export function systemPrompt(where: Where, platform: string = process.platform):
     "see; skill to load one of the skills listed below. Tools from MCP servers are named",
     "mcp__server__tool.",
     "",
-    "Everything is confined to the working directory - paths outside it are refused, so use relative",
-    "paths. Read a file before editing it, and prefer edit_file over write_file: it changes only what",
-    "you name and fails loudly rather than silently rewriting the whole file.",
+    // This used to say everything outside was refused. Models believed it: GLM declined to run a
+    // command the user asked for, when the real rule is that the user is asked.
+    "The file tools work inside the working directory only, so use relative paths. A shell command",
+    "that reaches outside it is not refused - the user is asked first - so when the user wants",
+    "something done outside, run it and let them decide. Read a file before editing it, and prefer",
+    "edit_file over write_file: it changes only what you name and fails loudly rather than silently",
+    "rewriting the whole file.",
     "",
     shellGuidance(platform),
     "",
