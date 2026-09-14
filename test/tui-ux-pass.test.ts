@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { charAfter, charBefore, deleteRange } from "../src/tui/composer"
 import * as Dialogs from "../src/tui/dialog"
+import { skillName } from "../src/core/skills"
 
 /** Found by driving the real terminal: every slash command, picker, paste and resize. */
 describe("the composer with an emoji in it", () => {
@@ -21,6 +22,17 @@ describe("the composer with an emoji in it", () => {
 
   test("delete forward takes the whole emoji too", () => {
     expect(deleteRange({ text: "🧌x", cursor: 0 }, "forward").text).toBe("x")
+  })
+})
+
+describe("a skill whose name is unusable", () => {
+  test("is named after its folder, so it can still be typed as a command", () => {
+    // A SKILL.md with broken frontmatter was listed as "/[unclosed".
+    expect(skillName("[unclosed", "/skills/broken-front")).toBe("broken-front")
+    expect(skillName("has spaces in it", "/skills/spaced")).toBe("spaced")
+    expect(skillName(undefined, "/skills/unnamed")).toBe("unnamed")
+    expect(skillName("goblin-haiku", "/skills/whatever")).toBe("goblin-haiku")
+    expect(skillName("pdf_tools.v2", "/skills/x")).toBe("pdf_tools.v2")
   })
 })
 

@@ -97,9 +97,10 @@ function readSkill(file: string, scope: Skill["scope"]): Skill | undefined {
   const { data, body } = parseFrontmatter(text)
   const dir = path.dirname(file)
   const text_ = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)
+  // skillName is below: a broken or unusable name falls back to the folder.
   return {
     // A skill without a name is named after its folder, the way Claude Code reads it.
-    name: text_(data.name) ?? path.basename(dir),
+    name: skillName(text_(data.name), dir),
     ...(text_(data.description) ? { description: text_(data.description) } : {}),
     ...(text_(data["argument-hint"]) ? { argumentHint: text_(data["argument-hint"]) } : {}),
     location: file,
@@ -109,6 +110,15 @@ function readSkill(file: string, scope: Skill["scope"]): Skill | undefined {
     userInvocable: data["user-invocable"] !== false,
     body: body.trim(),
   }
+}
+
+/**
+ * The name a skill is called by. One that could not be typed as a command -
+ * broken frontmatter, spaces, brackets - is replaced by the folder's name.
+ * A SKILL.md whose header did not parse was listed as "/[unclosed".
+ */
+export function skillName(given: string | undefined, dir: string): string {
+  return given && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(given) ? given : path.basename(dir)
 }
 
 export function listSkills(cwd: string = process.cwd()): Skill[] {

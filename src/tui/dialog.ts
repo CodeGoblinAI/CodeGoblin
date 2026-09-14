@@ -61,7 +61,9 @@ export function dialogWidth(dialog: Dialog, cols: number): number {
 /** How many rows of content fit, leaving room for the frame and the footer. */
 export function dialogHeight(dialog: Dialog, rows: number): number {
   const chrome = dialog.footer ? 5 : 4
-  return Math.max(1, Math.min(dialog.rows.length, rows - chrome - 4))
+  // Room is left for the prompt and the status bar beneath: a long list such
+  // as /help or /skills used to draw its bottom edge over both.
+  return Math.max(1, Math.min(dialog.rows.length, rows - chrome - 9))
 }
 
 function selectable(rows: DialogRow[]): number[] {
@@ -186,16 +188,17 @@ export function box(dialog: Dialog, cols: number, rows: number): string[] {
     // The label is measured first and the hint takes what is left. It was the
     // other way round in the code, whatever the comment said: /approvals showed
     // "As", "Appro" and "Fu" beside hints that ran the full width.
-    const hintRoom = Math.max(0, inner - 2 - displayWidth(row.label) - 2)
+    // One column is kept clear before the right border, so a hint never touches it.
+    const hintRoom = Math.max(0, inner - 3 - displayWidth(row.label) - 2)
     const hintWidth = hint ? Math.min(displayWidth(hint), hintRoom) : 0
-    const labelWidth = Math.max(0, inner - 2 - hintWidth - (hintWidth ? 2 : 0))
+    const labelWidth = Math.max(0, inner - 3 - hintWidth - (hintWidth ? 2 : 0))
     const label = padToWidth(truncateToWidth(row.label, labelWidth), labelWidth)
     const tone = armed ? theme.error : dim
     const tail = hintWidth ? "  " + tone + padToWidth(truncateToWidth(hint, hintWidth), hintWidth) + ansi.reset : ""
 
     lines.push(
       theme.borderStrong + "│" + ansi.reset +
-        marker + colourFor(row.tone, active) + label + ansi.reset + tail +
+        marker + colourFor(row.tone, active) + label + ansi.reset + tail + " " +
         theme.borderStrong + "│" + ansi.reset,
     )
   }
