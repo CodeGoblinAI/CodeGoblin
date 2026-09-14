@@ -1,3 +1,5 @@
+import { spawnSync as nodeSpawnSync } from "node:child_process"
+import { realpathSync } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 
@@ -12,7 +14,8 @@ export type Tool = {
   name: string
   description: string
   parameters: Record<string, unknown>
-  run: (args: any, root: string) => Promise<string>
+  /** signal is the turn's: a tool that can take long ends when the person stops it. */
+  run: (args: any, root: string, signal?: AbortSignal) => Promise<string>
   /** Changes the file at args.path, so its previous state is worth keeping. */
   writes?: boolean
   /**
@@ -35,11 +38,37 @@ export const SKIP_DIRS = new Set(["node_modules", ".git", "dist", ".next", "buil
 
 export function resolveInside(root: string, target: string): string {
   const absolute = path.resolve(root, target)
-  const relative = path.relative(root, absolute)
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (escapes(root, absolute)) {
     throw new Error(`path escapes the working directory: ${target}`)
   }
+  // A link inside the project can point anywhere. Seen with a real model: a
+  // junction named "linked" let read_file return a file from outside the
+  // project, because the check above only looks at the name. So where the
+  // path really lands is checked too.
+  const real = realLocation(absolute)
+  if (real && escapes(realLocation(root) ?? root, real)) {
+    throw new Error(`path escapes the working directory through a link: ${target}`)
+  }
   return absolute
+}
+
+function escapes(root: string, absolute: string): boolean {
+  const relative = path.relative(root, absolute)
+  return relative.startsWith("..") || path.isAbsolute(relative)
+}
+
+/** The real location of a path, found through its deepest part that exists - a file about to be written does not yet. */
+function realLocation(absolute: string): string | undefined {
+  let at = absolute
+  for (;;) {
+    try {
+      return path.join(realpathSync.native(at), path.relative(at, absolute))
+    } catch {
+      const up = path.dirname(at)
+      if (up === at) return undefined
+      at = up
+    }
+  }
 }
 
 /**
@@ -197,7 +226,7 @@ export const EXTRA_TOOLS: Tool[] = [
       },
       required: ["command"],
     },
-    run: async (args, root) => runShell(String(args.command ?? ""), root, Number(args.timeout_ms) || 30_000),
+    run: async (args, root, signal) => runShell(String(args.command ?? ""), root, Number(args.timeout_ms) || 30_000, signal),
   },
   {
     name: "todo_write",
@@ -246,9 +275,10 @@ export const EXTRA_TOOLS: Tool[] = [
     },
     run: async (args, root) => {
       const { grepFiles } = await import("./search")
-      const { matches, truncated } = await grepFiles(root, String(args.query ?? ""), args.include)
-      if (!matches.length) return "no matches"
-      return clip(matches.join(NEWLINE) + (truncated ? NEWLINE + "... more matches not shown" : ""))
+      const { matches, truncated, skipped } = await grepFiles(root, String(args.query ?? ""), args.include)
+      const notSearched = skipped.length ? NEWLINE + "not searched, too large: " + skipped.slice(0, 10).join(", ") : ""
+      if (!matches.length) return "no matches" + notSearched
+      return clip(matches.join(NEWLINE) + (truncated ? NEWLINE + "... more matches not shown" : "") + notSearched)
     },
   },
   {
@@ -319,27 +349,63 @@ const NEWLINE = String.fromCharCode(10)
  * window on Windows, which is invisible on CI and Unix and cost real
  * debugging time in the previous codebase.
  */
-async function runShell(command: string, root: string, timeoutMs: number): Promise<string> {
+/**
+ * The environment a command the model runs gets: everything but variables
+ * whose names say they hold a key, a secret, a token or a password - Codex's
+ * default. Seen with a real model: asked for "my DeepSeek key", it ran a
+ * command that printed DEEPSEEK_API_KEY in full into the conversation, and a
+ * file with instructions planted in it could ask for the same thing.
+ */
+const SECRET_NAME = /KEY|SECRET|TOKEN|PASSWORD/i
+
+export function shellEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !SECRET_NAME.test(name)))
+}
+
+/**
+ * Ends a command and everything it started. Killing only the shell left the
+ * program it ran behind: a real model's `ping -t` kept pinging after its
+ * timeout, with nothing left that could stop it.
+ */
+function killTree(child: { pid?: number; kill: () => boolean }) {
+  try {
+    if (!child.pid) child.kill()
+    else if (process.platform === "win32") {
+      nodeSpawnSync("taskkill", ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true })
+    } else process.kill(-child.pid, "SIGKILL")
+  } catch {
+    try { child.kill() } catch {}
+  }
+}
+
+async function runShell(command: string, root: string, timeoutMs: number, signal?: AbortSignal): Promise<string> {
   if (!command.trim()) return "error: empty command"
+  if (signal?.aborted) return "stopped by the user before it ran"
 
   const { spawn } = await import("../platform/process")
   const isWindows = process.platform === "win32"
   const argv = isWindows ? ["cmd.exe", "/d", "/s", "/c", command] : ["/bin/sh", "-c", command]
 
   return new Promise<string>((resolve) => {
-    const child = spawn(argv, { cwd: root, stdio: ["ignore", "pipe", "pipe"] })
+    // Its own process group off Windows, so a timeout can end everything it started.
+    const child = spawn(argv, { cwd: root, stdio: ["ignore", "pipe", "pipe"], env: shellEnvironment(), detached: !isWindows })
     let output = ""
     let settled = false
 
-    const finish = (text: string) => {
+    const finish = (text: string, kill = false) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      try { child.kill() } catch {}
+      signal?.removeEventListener("abort", onStop)
+      if (kill) killTree(child)
       resolve(clip(text))
     }
 
-    const timer = setTimeout(() => finish(output + NEWLINE + `... killed after ${timeoutMs}ms`), timeoutMs)
+    const timer = setTimeout(() => finish(output + NEWLINE + `... killed after ${timeoutMs}ms`, true), timeoutMs)
+    // Stopping the turn ends the command. It used to run on to its timeout -
+    // 90 seconds, when the model chose that - with the turn waiting on it.
+    const onStop = () => finish("stopped by the user" + (output.trim() ? NEWLINE + output.trim() : ""), true)
+    signal?.addEventListener("abort", onStop, { once: true })
 
     child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString() })
     child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString() })
@@ -375,6 +441,7 @@ export async function runTool(
   root: string,
   /** Called with the path a writing tool is about to change, before it changes. */
   onWrite?: (relative: string) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<string> {
   const tool = ALL_TOOLS.find((candidate) => candidate.name === name)
   if (!tool) return `unknown tool: ${name}`
@@ -383,7 +450,7 @@ export async function runTool(
       const target = (args as { path?: unknown }).path
       if (typeof target === "string") await onWrite(target)
     }
-    return await tool.run(args, root)
+    return await tool.run(args, root, signal)
   } catch (error) {
     return `error: ${error instanceof Error ? error.message : String(error)}`
   }

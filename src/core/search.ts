@@ -12,7 +12,12 @@ import { resolveInside, SKIP_DIRS } from "./tools"
  */
 
 const MAX_MATCHES = 100
-const MAX_FILE_BYTES = 2_000_000
+/**
+ * Files past this are not searched, and the result names them. It was 2 MB and
+ * skipped silently: a real model grepped a 5 MB log for a line on every row of
+ * it, was told "no matches", and spent six turns working around the tool.
+ */
+const MAX_FILE_BYTES = 50_000_000
 
 /** Glob subset that covers real use: * within a segment, ** across segments, ?. */
 /** Regex-escape without a backslash-laden regex literal. */
@@ -132,7 +137,7 @@ export async function grepFiles(
   root: string,
   query: string,
   include?: string,
-): Promise<{ matches: string[]; truncated: boolean }> {
+): Promise<{ matches: string[]; truncated: boolean; skipped: string[] }> {
   let pattern: RegExp
   try {
     pattern = new RegExp(query, "i")
@@ -143,13 +148,18 @@ export async function grepFiles(
 
   const filter = include ? globToRegExp(include) : undefined
   const matches: string[] = []
+  const skipped: string[] = []
 
   for await (const relative of walk(root, root)) {
     if (filter && !filter.test(relative)) continue
 
     const absolute = path.join(root, relative)
     const stat = await fs.stat(absolute).catch(() => undefined)
-    if (!stat || stat.size > MAX_FILE_BYTES) continue
+    if (!stat || !stat.isFile()) continue
+    if (stat.size > MAX_FILE_BYTES) {
+      skipped.push(relative)
+      continue
+    }
 
     let content: string
     try {
@@ -164,11 +174,11 @@ export async function grepFiles(
     for (let index = 0; index < lines.length; index++) {
       if (!pattern.test(lines[index]!)) continue
       matches.push(`${relative}:${index + 1}: ${lines[index]!.trim().slice(0, 200)}`)
-      if (matches.length >= MAX_MATCHES) return { matches, truncated: true }
+      if (matches.length >= MAX_MATCHES) return { matches, truncated: true, skipped }
     }
   }
 
-  return { matches, truncated: false }
+  return { matches, truncated: false, skipped }
 }
 
 /** Kept here so the search tools share the sandbox check with the file tools. */

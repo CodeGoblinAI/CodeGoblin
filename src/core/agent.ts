@@ -161,6 +161,28 @@ const PLANNING = [
  * model decide its earlier, genuine subagent report had been invented, and
  * tell the user not to trust it.
  */
+const STOPPED_BEFORE_ANSWER = "stopped by the user before this finished - it may not have run, or run only part way"
+
+/**
+ * Gives every tool call without a result one saying it was stopped. Stopping a
+ * turn while a tool ran left the call unanswered, and providers reject a
+ * conversation like that - so the message after a stop failed too.
+ */
+export function closeOpenCalls(messages: Message[]) {
+  for (let at = 0; at < messages.length; at++) {
+    const calls = messages[at]!.role === "assistant" ? (messages[at]!.tool_calls ?? []) : []
+    if (!calls.length) continue
+    let end = at + 1
+    const answered = new Set<string>()
+    while (end < messages.length && messages[end]!.role === "tool") answered.add(String(messages[end++]!.tool_call_id))
+    const missing = calls
+      .filter((call) => !answered.has(call.id))
+      .map((call): Message => ({ role: "tool", tool_call_id: call.id, content: STOPPED_BEFORE_ANSWER }))
+    messages.splice(end, 0, ...missing)
+    at = end + missing.length - 1
+  }
+}
+
 const SUBAGENTS_OFF =
   "error: subagents are not available for this request - the user turns them on with /boost. " +
   "Do the work with your own tools. Results you had from subagents earlier in this conversation were real."
@@ -225,6 +247,9 @@ export async function* runAgent(input: {
   // so - and a model that has finished says so by answering without a tool.
   // A person stops a turn that is going nowhere; that is what stop is for.
   const maxTurns = input.maxTurns ?? Number.POSITIVE_INFINITY
+
+  // A turn stopped while its tools ran left calls with no answer.
+  closeOpenCalls(input.messages)
 
   // A tool outside this agent's list is refused without being run or asked
   // about. A model can name a tool it was never offered.
@@ -406,9 +431,15 @@ export async function* runAgent(input: {
           ? input.subagents.call(entry.call.name, entry.args)
           : input.extraTools?.has(entry.call.name)
             ? input.extraTools.call(entry.call.name, entry.args)
-            : runTool(entry.call.name, entry.args, input.root, async (relative) => {
-                await input.history?.record(input.root, relative)
-              })
+            : runTool(
+                entry.call.name,
+                entry.args,
+                input.root,
+                async (relative) => {
+                  await input.history?.record(input.root, relative)
+                },
+                input.signal,
+              )
 
     // Reads overlap; everything else keeps its order. Four file reads used to
     // cost four round trips end to end for no reason - they do not touch each

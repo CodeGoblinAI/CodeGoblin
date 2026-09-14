@@ -226,7 +226,8 @@ function renderAttached() {
     cell.appendChild(drop)
     attachedRow.appendChild(cell)
   })
-  sendBtn.disabled = busy || (!input.value.trim() && attachments.length === 0)
+  // While a turn runs this button is Stop, and a disabled Stop cannot stop anything.
+  sendBtn.disabled = !busy && !input.value.trim() && attachments.length === 0
 }
 
 /** Whether the model on the picker can actually be shown one. */
@@ -1332,7 +1333,8 @@ async function stopTurn() {
   if (controller) controller.abort()
 }
 stopBtn.onclick = stopTurn
-input.oninput = () => { sendBtn.disabled = busy || (!input.value.trim() && !attachments.length) }
+// Typing while a turn runs used to disable the button - which is Stop by then.
+input.oninput = () => { sendBtn.disabled = !busy && !input.value.trim() && !attachments.length }
 input.onkeydown = (e) => {
   // The palette owns enter while it is open, otherwise this would submit the
   // half-typed command the palette was about to complete.

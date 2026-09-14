@@ -122,7 +122,7 @@ let messages: Message[] = [SYSTEM]
  * row that asked for it. Rows used to be matched by being last, which stopped
  * being true once reads in a turn started overlapping.
  */
-type Entry = { kind: "user" | "agent" | "tool" | "thinking"; text: string; call?: string }
+type Entry = { kind: "user" | "agent" | "tool" | "thinking"; text: string; call?: string; state?: "running" | "done" | "failed" }
 let transcript: Entry[] = []
 /** Named for what it holds, since "history" here is the prompt recall list. */
 /**
@@ -467,7 +467,9 @@ function render() {
     for (const entry of transcript) {
       if (entry.kind === "tool") {
         for (const [i, line] of entry.text.split(String.fromCharCode(10)).entries()) {
-          lines.push(theme.muted + (i === 0 ? "  x " : "    ") + line.slice(0, width) + ansi.reset)
+          // Every row used to start with "x", so a read that worked looked like one that failed.
+          const mark = entry.state === "done" ? "✓" : entry.state === "failed" ? "✗" : entry.state === "running" ? "…" : "·"
+          lines.push(theme.muted + (i === 0 ? "  " + mark + " " : "    ") + line.slice(0, width) + ansi.reset)
         }
         lines.push("")
         continue
@@ -1659,7 +1661,7 @@ async function send() {
       }
       if (event.type === "tool_start") {
         current = undefined
-        transcript.push({ kind: "tool", call: event.id, text: event.name + " " + event.args.slice(0, 60) })
+        transcript.push({ kind: "tool", call: event.id, text: event.name + " " + event.args.slice(0, 60), state: "running" })
       }
       if (event.type === "spend") {
         spend = addSpend(spend, {
@@ -1694,11 +1696,15 @@ async function send() {
         const row = rowFor(event.id)
         // Whose decision it was: a rule, plan mode, or you. It said "refused"
         // for all three, so a command a rule stopped read as one you declined.
-        if (row) row.text += "  (" + refusalLabel(event) + ")"
+        if (row) {
+          row.text += "  (" + refusalLabel(event) + ")"
+          row.state = "failed"
+        }
       }
       if (event.type === "tool_end") {
         const row = rowFor(event.id)
         if (row) {
+          if (row.state !== "failed") row.state = /^(error|stopped)/.test(event.result) ? "failed" : "done"
           const firstLine = event.result.split(String.fromCharCode(10))[0] ?? ""
           row.text += "  ->  " + firstLine.slice(0, 50)
         }
@@ -1713,6 +1719,12 @@ async function send() {
       : error instanceof Error
         ? error.message.slice(0, 120)
         : "request failed"
+    // A failed request is part of the conversation, not only the status bar,
+    // where the next status replaced it. Seen with a real provider: "Insufficient
+    // Balance" showed for a moment and then a message simply had no answer.
+    if (!turn?.signal.aborted) {
+      transcript.push({ kind: "tool", state: "failed", text: error instanceof Error ? error.message.slice(0, 400) : "request failed" })
+    }
   } finally {
     streaming = false
     stopSpinner()
