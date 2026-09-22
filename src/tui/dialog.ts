@@ -244,7 +244,10 @@ export function compose(base: string[], boxLines: string[], cols: number, rows: 
   const left = Math.max(0, Math.floor((cols - width) / 2))
   // A quarter down, like the original - a centred box sits low on a tall
   // terminal and the eye expects it higher than the middle.
-  const top = Math.max(0, Math.min(Math.floor(rows / 4), Math.max(0, rows - boxLines.length - 1)))
+  // Keep the composer, status and clickable toolbar visible beneath the
+  // dialog. On an 80x24 terminal a long model list otherwise occupied row 21
+  // and was composited through the controls it was meant to replace.
+  const top = Math.max(0, Math.min(Math.floor(rows / 4), Math.max(0, rows - boxLines.length - 6)))
 
   const out = [...base]
   while (out.length < top + boxLines.length) out.push("")

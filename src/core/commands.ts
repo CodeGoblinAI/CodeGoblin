@@ -39,6 +39,7 @@ export type CommandResult =
   | { kind: "none" }
 
 export const COMMANDS = [
+  { name: "/usage", description: "session tokens and estimated context; quotas and balances not wired yet" },
   { name: "/help", description: "show these commands" },
   { name: "/clear", description: "start a fresh conversation" },
   { name: "/model", description: "switch provider: /model zai" },
@@ -54,6 +55,7 @@ export const COMMANDS = [
   { name: "/skills", description: "skills and custom commands, and where each comes from" },
   { name: "/plan", description: "plan before changing anything: /plan add dark mode, or /plan to switch it" },
   { name: "/approvals", description: "how much to ask before acting - opens a picker" },
+  { name: "/mode", description: "approval mode (alias for /approvals), not named-agent selection" },
   { name: "/boost", description: "let the model use subagents: /boost a hard task, or /boost to switch it on" },
   { name: "/export", description: "save as markdown: /export, or /export notes/chat.md" },
   { name: "/rename", description: "retitle this conversation: /rename plan review" },
@@ -61,7 +63,7 @@ export const COMMANDS = [
   { name: "/thinking", description: "show or hide the model's reasoning" },
   { name: "/effort", description: "how hard a reasoning model thinks: /effort high" },
   { name: "/mouse", description: "wheel and clicks, or the terminal's own text selection" },
-  { name: "/settings", description: "how generation comes out - opens a panel" },
+  { name: "/settings", description: "interface and model settings - opens a panel" },
   { name: "/diff", description: "what this session changed, file by file" },
   { name: "/quit", description: "exit" },
 ]
@@ -70,9 +72,37 @@ export function isCommand(text: string): boolean {
   return text.trim().startsWith("/")
 }
 
+export const COMMAND_ALIASES: Record<string, string> = {
+  "/models": "/model", "/themes": "/theme", "/shortcuts": "/help", "/keys": "/help",
+  "/new": "/clear", "/reset": "/clear", "/sessions": "/resume", "/continue": "/resume",
+  "/logout": "/disconnect", "/remove-key": "/disconnect", "/memories": "/memory",
+  "/mcps": "/mcp", "/reasoning": "/effort", "/set": "/settings", "/changes": "/diff",
+  "/exit": "/quit", "/q": "/quit",
+  "/market": "/plugins", "/mcp-market": "/plugins", "/skills-market": "/plugins",
+  "/upgrade": "/update", "/version": "/update", "/orgs": "/org", "/switch-org": "/org",
+}
+export const PENDING_COMMANDS: Record<string, string> = {
+  "/agents": "Named-agent selection is not wired yet; /mode controls approvals and /boost enables subagents.",
+  "/agent": "Named-agent selection is not wired yet; /mode controls approvals and /boost enables subagents.",
+  "/variants": "Model-specific variants are not wired yet; /effort controls supported reasoning models.",
+  "/plugins": "The plugin marketplace is not wired yet; /mcp and /skills show configured integrations.",
+  "/update": "CG-Next's installer/updater is not wired yet. This is the source checkout, not the original cg installation.",
+  "/editor": "External prompt editor is not wired yet.",
+  "/warp": "Prompt warp is not wired yet.",
+  "/widget": "The native status widget is not wired into CG-Next yet.",
+  "/widget-settings": "Native widget settings are not wired yet.",
+  "/org": "Organization switching is not wired yet; account access belongs to the selected provider.",
+}
+COMMANDS.push(...Object.keys(PENDING_COMMANDS).map((name) => ({ name, description: "not wired yet — " + PENDING_COMMANDS[name] })))
+
+export function normalizeCommand(text: string): string {
+  return text.replace(/^\/[^\s]+/, (name) => COMMAND_ALIASES[name] ?? name)
+}
+
 export function runCommand(text: string): CommandResult {
-  const [name, ...rest] = text.trim().split(/\s+/)
+  const [name, ...rest] = normalizeCommand(text.trim()).split(/\s+/)
   const argument = rest.join(" ")
+  if (name && PENDING_COMMANDS[name]) return { kind: "message", text: PENDING_COMMANDS[name]! }
 
   switch (name) {
     case "/help":
@@ -134,6 +164,7 @@ export function runCommand(text: string): CommandResult {
     case "/disconnect":
       return { kind: "disconnect", provider: argument || undefined }
     case "/status":
+    case "/usage":
       return { kind: "status" }
     case "/mcp":
       return { kind: "mcp" }

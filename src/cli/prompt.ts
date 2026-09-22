@@ -58,7 +58,7 @@ if (!isChatModel(selection)) {
 }
 
 const key = apiKey(selection.provider.id)
-if (!key) {
+if (key === undefined) {
   console.error(
     `No API key for ${selection.provider.label}. ` +
       `Set ${envVariable(selection.provider.id)}, or run /connect in the TUI.`,

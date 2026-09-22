@@ -1,5 +1,6 @@
 <!doctype html>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>CodeGoblin</title>
 <style>
   :root {
@@ -204,10 +205,11 @@
   <div id="session-list"></div>
   <div class="group">Project</div>
   <div class="row">cg-next</div>
-  <footer>Settings · Help</footer>
+  <footer><button id="settings-open" class="icon">Settings</button> · <button id="help-open" class="icon">Help</button></footer>
 </aside>
 
 <main>
+  <nav class="layout-controls"><button id="sessions-toggle" class="icon" aria-expanded="true">Sessions</button><button id="activity-toggle" class="icon" aria-expanded="true">Activity</button><span id="usage-readout">Usage unavailable until a response</span></nav>
   <div class="thread" id="thread"></div>
   <div class="composer">
     <!-- What is attached, before it is sent. Above the box rather than inside
@@ -221,7 +223,7 @@
       <button class="send" id="send" title="Send">↑</button>
     </div>
     <div class="meta">
-      <span>main</span>
+      <span>Local workspace</span>
       <div class="picker" id="provider">
         <button class="picker-btn" id="provider-btn" type="button" aria-haspopup="listbox" aria-expanded="false">
           <span class="picker-label">…</span><span class="picker-caret">▾</span>
@@ -263,3 +265,20 @@
 </section>
 
 <script src="/app.js"></script>
+<style>
+  .layout-controls { padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 14px; border-bottom: 1px solid var(--line); }
+  #usage-readout { margin-left: auto; font: 11px var(--mono); color: var(--muted); }
+  body.hide-sessions > aside, body.hide-activity > .activity { display: none; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line-strong); border-radius: 12px; width: min(560px, 92vw); max-height: 80vh; overflow: auto; }
+  dialog::backdrop { background: #0009; }
+  dialog h2 { margin-top: 0; font-size: 18px; }
+  dialog label { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin: 16px 0; }
+  dialog button, dialog select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+  dialog .dialog-action { display: block; width: 100%; text-align: left; margin: 8px 0; }
+  dialog input[type="search"] { box-sizing: border-box; width: 100%; margin: 12px 0; padding: 10px; color: var(--text); background: var(--step1); border: 1px solid var(--line); border-radius: 7px; }
+  dialog .command-list { max-height: 55vh; overflow-y: auto; }
+  dialog .command-row { display: grid; grid-template-columns: minmax(110px, auto) 1fr; gap: 12px; align-items: baseline; }
+  dialog .command-row span { color: var(--muted); font-size: 12px; }
+  @media(max-width: 900px) { body > .activity { width: 210px; } aside { width: 180px; } }
+  @media(max-width: 650px) { body > .activity { position: fixed; right: 0; top: 45px; bottom: 0; z-index: 30; background: var(--panel); } aside { position: fixed; left: 0; top: 45px; bottom: 0; z-index: 30; background: var(--panel); } }
+</style>

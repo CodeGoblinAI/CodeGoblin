@@ -1,4 +1,4 @@
-import { COMMANDS } from "../core/commands"
+import { COMMANDS, normalizeCommand } from "../core/commands"
 import {
   allSelections,
   selectionsByKind,
@@ -72,7 +72,8 @@ function rankFiles(query: string): string[] {
  * app instead of simply closing the popup.
  */
 export function paletteFor(input: string, cursor = input.length): PaletteItem[] | undefined {
-  const found = paletteMatches(input, cursor)
+  const normalized = normalizeCommand(input)
+  const found = paletteMatches(normalized, cursor + normalized.length - input.length)
   return found && found.length ? found : undefined
 }
 

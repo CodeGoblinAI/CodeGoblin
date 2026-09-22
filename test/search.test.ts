@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { globToRegExp, globFiles, grepFiles } from "../src/core/search"
-import { runTool } from "../src/core/tools"
+import { runTool, SKIP_DIRS } from "../src/core/tools"
 
 const root = process.cwd()
+
+test("generated and recovered directories stay out of project search", () => {
+  expect([...SKIP_DIRS]).toEqual(expect.arrayContaining(["output", ".playwright-cli", "_RECOVERED_LOCAL_2026-08-29"]))
+})
 
 describe("glob patterns", () => {
   test("* stays inside one path segment", () => {

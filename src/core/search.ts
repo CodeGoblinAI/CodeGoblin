@@ -154,7 +154,8 @@ export async function grepFiles(
   for await (const relative of walk(root, root)) {
     if (filter && !filter.test(relative)) continue
 
-    const absolute = path.join(root, relative)
+    let absolute: string
+    try { absolute = resolveInside(root, relative) } catch { continue }
     const stat = await fs.stat(absolute).catch(() => undefined)
     if (!stat || !stat.isFile()) continue
     if (stat.size > MAX_FILE_BYTES) {

@@ -118,8 +118,10 @@ export function loadConfig(file: string = configPath()): Config {
   let text: string
   try {
     text = fs.readFileSync(file, "utf8")
-  } catch {
-    return parseConfig("{}")
+  } catch (error) {
+    const empty = parseConfig("{}")
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") empty.problems.push("Cannot read config: " + file)
+    return empty
   }
   return parseConfig(text)
 }

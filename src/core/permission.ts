@@ -362,7 +362,8 @@ const READ_ONLY_PROGRAMS = new Set(["ls", "dir", "pwd", "cd", "cat", "type", "he
  * Short Windows switches such as /s and /a:h are not paths.
  */
 function leavesTheProject(token: string): boolean {
-  const value = token.startsWith("-") && token.includes("=") ? token.slice(token.indexOf("=") + 1) : token
+  const argument = /^\/[A-Za-z?]{1,2}:/.test(token) ? token.slice(token.indexOf(":") + 1) : token
+  const value = argument.startsWith("-") && argument.includes("=") ? argument.slice(argument.indexOf("=") + 1) : argument
   if (/^[A-Za-z]:/.test(value)) return true
   if (value.startsWith(BACKSLASH + BACKSLASH) || value.startsWith("~")) return true
   if (value.includes("%") || value.includes("$")) return true
@@ -472,8 +473,12 @@ export class Permissions {
   ) {}
 
   /** The rules in codegoblin.jsonc, read fresh on every call so an edit applies to the next command. */
-  static withConfig(ask: Ask): Permissions {
-    return new Permissions(ask, () => loadConfig().permission.bash)
+  static withConfig(ask: Ask, file?: string): Permissions {
+    return new Permissions(ask, () => {
+      const config = loadConfig(file)
+      // A partial parse must never turn a broken deny policy into full access.
+      return config.problems.length ? { "*": "deny" } : config.permission.bash
+    })
   }
 
   /**
@@ -496,7 +501,8 @@ export class Permissions {
     return !HARMLESS.has(tool)
   }
 
-  async decide(tool: string, detail: string): Promise<Verdict> {
+  /** Re-evaluate a waiting request after a mode change, without prompting again. */
+  automaticVerdict(tool: string, detail: string): Verdict | undefined {
     if (!this.needsConsent(tool)) return { allowed: true }
 
     // The rules come first - before the mode, before anything approved earlier
@@ -532,7 +538,13 @@ export class Permissions {
 
     const scopes = scopesFor(tool, detail)
     if (!forced && scopes.every((scope) => this.granted.has(scope.key))) return { allowed: true }
+    return undefined
+  }
 
+  async decide(tool: string, detail: string): Promise<Verdict> {
+    const automatic = this.automaticVerdict(tool, detail)
+    if (automatic) return automatic
+    const scopes = scopesFor(tool, detail)
     const decision = await this.ask(tool, detail, inWords(scopes))
     if (decision === "reject") return { allowed: false, by: "user", reason: "refused by the user" }
     if (decision === "always") for (const scope of scopes) this.granted.add(scope.key)

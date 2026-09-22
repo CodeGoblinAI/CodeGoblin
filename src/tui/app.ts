@@ -12,6 +12,11 @@ import { THEMES } from "../core/theme"
 import { EFFORTS } from "../core/settings"
 import { createKeyReader } from "./keys"
 import { parseLaunch } from "./args"
+import { isLiveCommand } from "./live-commands"
+import { copyText, ctrlCAction, dialogRowAt } from "./interaction"
+import { allSelections } from "../core/providers"
+import { normalizeCommand } from "../core/commands"
+import { claudeAuthStatus } from "../core/claude-cli"
 import * as Dialogs from "./dialog"
 import { changesIn, summarise, countsOf, statusLetter, type Changes } from "../core/changes"
 import {
@@ -57,7 +62,7 @@ import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
 import { defaultSelection, resolveSelection, acceptsImages, effortFor, takesEffort, type Selection, kindOf } from "../core/providers"
 import { apiKey, connect, disconnect, connections, storePath, envVariable } from "../core/auth"
-import { runAgent, type Message } from "../core/agent"
+import { localChatMessages, runAgent, type Message } from "../core/agent"
 import { COMMANDS, isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
 import {
@@ -119,6 +124,10 @@ const out = process.stdout
 const SYSTEM: Message = { role: "system", content: systemPrompt("terminal") }
 
 let messages: Message[] = [SYSTEM]
+const contextUsage = () => usage(
+  selection.provider.local && !selection.provider.localTools ? localChatMessages(messages) : messages,
+  selection.model.contextWindow,
+)
 /**
  * `call` is the model's tool-call id on a tool row, so a result lands on the
  * row that asked for it. Rows used to be matched by being last, which stopped
@@ -308,7 +317,7 @@ function stopSpinner() {
   if (spinnerTimer) clearInterval(spinnerTimer)
   spinnerTimer = undefined
 }
-let status = key ? "" : "no key for " + selection.provider.label + " - /connect " + selection.provider.id
+let status = key !== undefined ? "" : "no key for " + selection.provider.label + " - /connect " + selection.provider.id
 
 /** A question waiting on an answer. `cover` is what "Allow for this session" would approve, in words. */
 let pending: { tool: string; detail: string; cover: string; from?: string; resolve: (d: Decision) => void } | undefined
@@ -459,6 +468,8 @@ function caretIn(rows: string[], cursor: number): { line: number; column: number
   const last = rows.length - 1
   return { line: last, column: displayWidth(rows[last] ?? "") }
 }
+let toolbarRow = 0
+let toolbarTargets: { from: number; to: number; command: string }[] = []
 function render() {
   const { cols, rows } = size()
   const width = Math.max(20, cols - 6)
@@ -547,7 +558,7 @@ function render() {
   const overlayHeight = overlay ? overlay.rows.length + 3 : 0
   const pendingHeight = pending ? DECISIONS.length + 3 : 0
   const composerHeight =
-    3 + promptHeight + paletteLines.length + planLines.length + overlayHeight + pendingHeight
+    4 + promptHeight + paletteLines.length + planLines.length + overlayHeight + pendingHeight
   const room = Math.max(1, rows - composerHeight - 1)
 
   const maxScroll = Math.max(0, lines.length - room)
@@ -587,7 +598,7 @@ function render() {
 
   // Consent is a list you move through, not a letter you have to know. It
   // sits where the palette does, so the answer is next to the question.
-  if (pending) {
+  if (pending && !input) {
     // The box names what is being asked and what "for this session" would
     // cover. It used to say only "allow this?", with the command down in the
     // input line, and the session hint said "calls like this" - which told you
@@ -631,7 +642,7 @@ function render() {
   let rowsBefore = 0
   let caretLine = 0
   let shown: string
-  if (pending) {
+  if (pending && !input) {
     shown =
       theme.gold + pending.tool + ansi.reset + " " +
       dim + pending.detail.slice(0, Math.max(10, visibleInput - 24)) + ansi.reset
@@ -703,7 +714,7 @@ function render() {
   }
   body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
 
-  const context = usage(messages, selection.model.contextWindow)
+  const context = contextUsage()
   const modeTag =
     (permissions.mode === "ask" ? "" : "  [" + MODES.find((entry) => entry.id === permissions.mode)!.label.toLowerCase() + "]") +
     (permissions.planning ? "  [planning]" : "") +
@@ -714,11 +725,11 @@ function render() {
     status ||
     modeTag.trim() + (modeTag ? "  " : "") +
       selection.provider.label + " . " + selection.model.id +
-      "  " + context.percent + "% ctx" + spendTag
+      "  ~" + context.percent + "% ctx" + spendTag
   const right = dialog
     ? "up/down move . enter chooses . esc closes"
     : streaming
-    ? (queued ? "queued . esc stops" : "enter queues . esc stops")
+    ? (queued ? "queued . shift+tab mode . esc stops" : "enter queues . / controls . shift+tab mode . esc stops")
     : secret
     ? "enter saves . esc cancels . nothing is echoed"
     : overlay
@@ -729,13 +740,27 @@ function render() {
       ? "scrolled " + scroll
       : palette
         ? "tab complete . up/down pick"
-        : "pgup/dn scroll . shift+tab mode . ctrl+c quit"
+        : "shift+tab mode . ctrl+c copy/clear/quit"
   // A long status gives way to the key hints rather than pushing them off the
   // edge: "mode: Full access - never ask - only the rules..." ran into them.
   const statusRoom = Math.max(10, cols - displayWidth(right) - 4)
   const plain = "  " + (displayWidth(left) > statusRoom - 2 ? truncateToWidth(left, statusRoom - 3) + "…" : left)
   const padded = padToWidth(plain, Math.max(displayWidth(plain) + 1, cols - displayWidth(right) - 2))
   body.push(dim + padded + ansi.reset + theme.muted + right + ansi.reset)
+  toolbarRow = body.length + 1
+  toolbarTargets = []
+  let toolbar = "  "
+  for (const item of [
+    { label: "[+]", command: "attach" }, { label: "[Model]", command: "model" },
+    { label: "[Settings]", command: "settings" }, { label: "[Sessions]", command: "sessions" },
+    { label: "[Usage]", command: "usage" },
+  ]) {
+    const from = displayWidth(toolbar) + 1
+    if (from + item.label.length > cols) break
+    toolbar += item.label + " "
+    toolbarTargets.push({ from, to: from + item.label.length - 1, command: item.command })
+  }
+  body.push(theme.goblin + toolbar + ansi.reset)
 
   // Clamp on display width: CJK and emoji are two columns, so a line that
   // looks short by .length can still overflow and wrap.
@@ -747,7 +772,7 @@ function render() {
   caretAt =
     caretOffset === undefined
       ? undefined
-      : { row: body.length - promptLines - 1 + caretLine, col: 5 + caretOffset }
+      : { row: body.length - promptLines - 2 + caretLine, col: 5 + caretOffset }
 
   // A dialog goes over the top, with the conversation dimmed behind it.
   // The caret is hidden while one is open: the composer is not where the
@@ -1052,6 +1077,13 @@ function settingsRows(): Dialogs.DialogRow[] {
   const provider = selection.provider.id
   const model = selection.model.id
   const options = optionsForModel(provider, model)
+  const general: Dialogs.DialogRow[] = [
+    { label: "Theme", hint: settings.theme, value: "ui:theme" },
+    { label: "Show thinking", hint: settings.thinking ? "on" : "off", value: "ui:thinking" },
+    { label: "Mouse controls", hint: settings.mouse ? "on (Shift+drag selects)" : "off (terminal selection)", value: "ui:mouse" },
+    { label: "Reasoning effort", hint: settings.effort, value: "ui:effort" },
+    { label: "Approvals", hint: permissions.mode, value: "ui:approvals" },
+  ]
   if (!options.length) {
     // Say why the list is empty - a chat model has no generation settings at
     // all, which is a different answer from a generator we send nothing to.
@@ -1059,13 +1091,13 @@ function settingsRows(): Dialogs.DialogRow[] {
       kindOf(selection.model) === "text"
         ? "a chat model has no generation settings - pick an image, voice or 3D model"
         : "nothing on this model's request can be changed from here"
-    return [{ label: "  " + why, tone: "muted", inert: true }]
+    return [...general, { label: "  " + why, tone: "muted", inert: true }]
   }
-  return options.map((option) => ({
+  return [...general, ...options.map((option) => ({
     label: "  " + option.label,
     hint: labelOf(option, valueOf(media, provider, model, option.id), voices),
     value: option.id,
-  }))
+  }))]
 }
 
 /** The values one setting takes. Replaces the list rather than stacking on it. */
@@ -1120,6 +1152,21 @@ async function chooseInDialog() {
   if (!dialog) return
   const row = Dialogs.selected(dialog)
   if (!row || !row.value) { render(); return }
+  if (dialog.kind === "attach") {
+    closeDialog()
+    applyComposer(insertText(composerState(), row.value === "file" ? "@" : "/"), true)
+    refreshPalette()
+    render()
+    return
+  }
+  if (dialog.kind === "model-picker") {
+    const next = resolveSelection(row.value)
+    if (next) {
+      if (streaming) { queued = "/model " + row.value; status = "model switch queued until this turn ends" }
+      else { selection = next; key = apiKey(next.provider.id); status = next.provider.label + " " + next.model.label }
+    }
+    closeDialog(); render(); return
+  }
 
   if (dialog.kind === "diff") {
     // Opening a file rebuilds the rows in place rather than pushing a
@@ -1135,6 +1182,7 @@ async function chooseInDialog() {
     const loaded = await sessions.load(row.value)
     if (!loaded) { status = "could not open that conversation"; closeDialog(); render(); return }
     session = loaded
+    spend = session.spend ?? { input: 0, output: 0 }
     messages = session.messages
     transcript = fromMessages(session.messages)
     scroll = 0
@@ -1175,9 +1223,7 @@ async function chooseInDialog() {
   }
 
   if (dialog.kind === "approvals") {
-    permissions.mode = row.value as PermissionMode
-    const mode = MODES.find((entry) => entry.id === permissions.mode)!
-    status = "mode: " + mode.label + " - " + mode.hint
+    changePermissionMode(row.value as PermissionMode)
     closeDialog()
     render()
     return
@@ -1228,6 +1274,19 @@ async function chooseInDialog() {
   }
 
   if (dialog.kind === "settings") {
+    if (row.value.startsWith("ui:")) {
+      const action = row.value.slice(3)
+      if (action === "theme") openThemePicker()
+      if (action === "effort") openEffortPicker()
+      if (action === "approvals") openApprovalsPicker()
+      if (action === "thinking" || action === "mouse") {
+        settings = { ...settings, [action]: !settings[action] }
+        void settingsStore.save(settings)
+        if (action === "mouse") applyMouse()
+        openSettings()
+      }
+      render(); return
+    }
     openSettingValues(row.value)
     render()
     return
@@ -1320,12 +1379,22 @@ async function send() {
     return
   }
 
-  const text = input.trim()
-  if (!text || streaming) return
+  const text = normalizeCommand(input.trim())
+  if (!text) return
 
   // A custom command or a skill reads like a command but is a message: its
   // text is what the model gets, and the line typed is what the transcript shows.
   const invoked = isCommand(text) ? resolveInvocation(text, process.cwd()) : undefined
+
+  if (streaming && (invoked || !isLiveCommand(text))) {
+    const replaced = Boolean(queued)
+    queued = text
+    applyComposer({ text: "", cursor: 0 }, true)
+    palette = undefined
+    status = replaced ? "replaced queued prompt - sending when this turn ends" : "queued - sending when this turn ends"
+    render()
+    return
+  }
 
   if (isCommand(text) && !invoked) {
     input = ""
@@ -1536,7 +1605,8 @@ async function send() {
       overlay = { title: "mcp servers", rows }
     }
     if (result.kind === "status") {
-      const context = usage(messages, selection.model.contextWindow)
+      const cli = selection.provider.cli ? await claudeAuthStatus() : undefined
+      const context = contextUsage()
       const approved = permissions.summary()
       const rows: [string, string][] = [
         ["model", selection.provider.label + " " + selection.model.label],
@@ -1561,6 +1631,7 @@ async function send() {
         ["working in", process.cwd()],
       ]
       overlay = { title: "status", rows }
+      if (cli) rows.push(["CLI", cli.detail])
     }
     if (result.kind === "undo" || result.kind === "redo") {
       const forward = result.kind === "redo"
@@ -1609,6 +1680,7 @@ async function send() {
         if (!loaded) status = "no such conversation: " + result.id
         else {
           session = loaded
+          spend = session.spend ?? { input: 0, output: 0 }
           messages = loaded.messages
           transcript = fromMessages(messages)
           status = "resumed: " + loaded.title
@@ -1634,7 +1706,7 @@ async function send() {
   }
 
   // Says how to fix it, not only what is wrong.
-  if (!key) { status = "no key for " + selection.provider.label + " - /connect " + selection.provider.id + " to add one"; render(); return }
+  if (key === undefined) { status = "no key for " + selection.provider.label + " - /connect " + selection.provider.id + " to add one"; render(); return }
 
   input = ""
   cursor = 0
@@ -1744,6 +1816,11 @@ async function send() {
         })
         status = "hit the turn limit"
       }
+      if (event.type === "output_limit") {
+        current = undefined
+        transcript.push({ kind: "tool", text: "The model reached its output-token limit. The answer is unfinished; ask it to continue or increase the server's output budget." })
+        status = "hit the output limit"
+      }
       // Found by call id rather than by being last: several tools can be open
       // at once now, so "the most recent row" is no longer the right one.
       const rowFor = (id: string) =>
@@ -1788,6 +1865,7 @@ async function send() {
     turn = undefined
     edits.commit()
     session.messages = messages
+    session.spend = spend
     void sessions.save(session).then(refreshSessionCache).catch(() => {})
 
     boostOnce = false
@@ -1803,9 +1881,15 @@ async function send() {
     if (queued) {
       const next = queued
       queued = undefined
+      const draft = composerState()
       input = next
       cursor = next.length
       void send()
+      if (!isCommand(next)) {
+        applyComposer(draft)
+        refreshPalette()
+        render()
+      }
       return
     }
     render()
@@ -1839,11 +1923,14 @@ void refreshFileCache()
  * than a choice, which is the right call - so does this.
  */
 function applyMouse() {
-  out.write(settings.mouse ? ansi.takeMouse : ansi.ownMouse)
+  out.write(settings.mouse ? ansi.takeMouse : "\x1b[?1000l\x1b[?1006l" + ansi.ownMouse)
 }
 
 function refreshConnected() {
-  setConnectedProviders(connections().map((item) => item.id))
+  setConnectedProviders([...connections().map((item) => item.id), "local"])
+  void claudeAuthStatus().then((cli) => {
+    setConnectedProviders([...connections().map((item) => item.id), "local", ...(cli.ready ? ["claude-code"] : [])])
+  }).catch(() => {})
 }
 refreshConnected()
 
@@ -1866,11 +1953,68 @@ process.stdin.resume()
 // one paste.
 const readKeys = createKeyReader()
 
+function changePermissionMode(mode: PermissionMode) {
+  permissions.mode = mode
+  const entry = MODES.find((entry) => entry.id === mode)!
+  status = "mode: " + entry.label + " - " + entry.hint
+  if (dialog?.kind === "approvals") {
+    openApprovalsPicker()
+    dialog!.index = MODES.findIndex((entry) => entry.id === mode)
+  }
+  // A mode change can release queued requests, but never overrides explicit
+  // ask/deny rules or planning restrictions.
+  const asks = pending ? [pending, ...waitingAsks] : [...waitingAsks]
+  waitingAsks.length = 0
+  pending = undefined
+  pendingChoice = 0
+  for (const ask of asks) {
+    const verdict = permissions.automaticVerdict(ask.tool, ask.detail)
+    if (verdict) ask.resolve(verdict.allowed ? "once" : "reject")
+    else if (!pending) pending = ask
+    else waitingAsks.push(ask)
+  }
+}
+
 process.stdin.on("data", (chunk) => {
   let dirty = false
 
   for (const pressed of readKeys(chunk.toString())) {
-    if (pressed.type === "ctrl" && pressed.value === "c") return shutdown()
+    if (pressed.type === "ctrl" && pressed.value === "c") {
+      const span = composerSelection(composerState())
+      const action = ctrlCAction({ selected: Boolean(span), busy: streaming, draft: Boolean(input), secret: Boolean(secret) })
+      if (action === "copy" && span) {
+        void copyText(input.slice(span.from, span.to)).then(() => { status = "selection copied"; render() }).catch((error) => { status = error.message; render() })
+      }
+      if (action === "stop") { turn?.abort(); subagents.stopAll(); status = "stopped" }
+      if (action === "clear") { applyComposer({ text: "", cursor: 0 }, true); status = "draft cleared; Ctrl+C again quits" }
+      if (action === "quit") return shutdown()
+      render(); continue
+    }
+    if (pressed.type === "click") {
+      if (dialog) {
+        const screen = size()
+        const height = Dialogs.dialogHeight(dialog, screen.rows)
+        const index = dialogRowAt({ ...pressed, ...screen, width: Dialogs.dialogWidth(dialog, screen.cols), height, boxHeight: Dialogs.box(dialog, screen.cols, screen.rows).length, first: Dialogs.firstVisible(dialog, height) })
+        if (index !== undefined && !dialog.rows[index]?.inert) { dialog.index = index; void chooseInDialog() }
+        continue
+      }
+      if (pressed.row !== toolbarRow || secret) continue
+      const target = toolbarTargets.find((item) => pressed.col >= item.from && pressed.col <= item.to)?.command
+      if (target === "attach") dialog = Dialogs.open("attach", "Add to the prompt", [{ label: "Mention a project file", value: "file" }, { label: "Run a slash command", value: "command" }])
+      if (target === "model") dialog = Dialogs.open("model-picker", "Choose model", allSelections().map((s) => ({ label: s.provider.label + " " + s.model.label, value: s.provider.id + "/" + s.model.id })), { size: "large" })
+      if (target === "settings") openSettings()
+      if (target === "sessions") {
+        if (streaming) { status = "sessions cannot change during a turn; use /resume to queue" }
+        else void openSessions().then(render)
+      }
+      if (target === "usage") overlay = { title: "Usage (context is estimated)", rows: [["context", "~" + contextUsage().used + " / " + selection.model.contextWindow], ["tokens", spend.input + " input / " + spend.output + " output"], ["cost", spend.dollars === undefined ? "unknown / subscription; not zero" : formatSpend(spend)]] }
+      render(); continue
+    }
+    if (pressed.type === "shifttab") {
+      changePermissionMode(nextMode(permissions.mode))
+      render()
+      continue
+    }
 
     // A dialog owns the keyboard while it is open. Nothing behind it moves,
     // which is the difference between a popup and a panel.
@@ -1914,7 +2058,7 @@ process.stdin.on("data", (chunk) => {
       // it does not cost the character someone was already typing.
     }
 
-    if (pending) {
+    if (pending && !input && !palette && !(pressed.type === "char" && pressed.value === "/")) {
       const answer = (decision: Decision) => {
         const ask = pending!
         pending = waitingAsks.shift()
@@ -1930,66 +2074,6 @@ process.stdin.on("data", (chunk) => {
       continue
     }
 
-    if (streaming) {
-      // Escape stops the turn. Everything already streamed stays: an
-      // interrupted answer is still worth reading, and the conversation
-      // survives, which is the whole difference from ctrl+c.
-      if (pressed.type === "escape") {
-        if (input) {
-          // A half-written steer is thrown away first; stopping the model
-          // is the second press, so neither is done by accident.
-          input = ""
-          cursor = 0
-          render()
-          continue
-        }
-        turn?.abort()
-        subagents.stopAll()
-        status = "stopped"
-        render()
-      }
-
-      // Everything else composes. Enter queues rather than sends, because
-      // the turn in flight has to finish before the next one starts.
-      if (pressed.type === "enter") {
-        if (input.trim()) {
-          queued = input
-          input = ""
-          cursor = 0
-          status = "queued - sending when this turn ends"
-        }
-        render()
-        continue
-      }
-      if (pressed.type === "char") {
-        input = input.slice(0, cursor) + pressed.value + input.slice(cursor)
-        cursor += pressed.value.length
-        render()
-        continue
-      }
-      if (pressed.type === "paste") {
-        const value = foldPaste(pressed.value.replace(/\r\n?/g, String.fromCharCode(10)))
-        input = input.slice(0, cursor) + value + input.slice(cursor)
-        cursor += value.length
-        render()
-        continue
-      }
-      if (pressed.type === "backspace") {
-        if (cursor > 0) { const at = charBefore(input, cursor); input = input.slice(0, at) + input.slice(cursor); cursor = at }
-        render()
-        continue
-      }
-      if (pressed.type === "left") { cursor = charBefore(input, cursor); render(); continue }
-      if (pressed.type === "right") { cursor = charAfter(input, cursor); render(); continue }
-      // Scrolling has to keep working while the model writes.
-      if (pressed.type === "pageup") { scroll += 5; render() }
-      if (pressed.type === "pagedown") { scroll = Math.max(0, scroll - 5); render() }
-      if (pressed.type === "shiftup") { scroll += 1; render() }
-      if (pressed.type === "shiftdown") { scroll = Math.max(0, scroll - 1); render() }
-      if (pressed.type === "wheelup") { scroll += 3; render() }
-      if (pressed.type === "wheeldown") { scroll = Math.max(0, scroll - 3); render() }
-      continue
-    }
 
     // While the palette is open it owns up, down, tab and escape.
     if (palette) {
@@ -2051,13 +2135,6 @@ process.stdin.on("data", (chunk) => {
 
     switch (pressed.type) {
       // Escape clears the line; it never exits. Quitting is ctrl+c.
-      case "shifttab": {
-        permissions.mode = nextMode(permissions.mode)
-        const mode = MODES.find((entry) => entry.id === permissions.mode)!
-        status = "mode: " + mode.label + " - " + mode.hint
-        dirty = true
-        break
-      }
       case "paste": {
         // Newlines inside a paste are content. A paste that is only one
         // short line is just typing, and goes in as it is.
@@ -2072,6 +2149,12 @@ process.stdin.on("data", (chunk) => {
         // highlight does not also lose everything you had written.
         if (anchor !== undefined) { anchor = undefined; dirty = true; break }
         if (input) { applyComposer({ text: "", cursor: 0 }, true); dirty = true }
+        else if (streaming) {
+          turn?.abort()
+          subagents.stopAll()
+          status = "stopped"
+          dirty = true
+        }
         break
       case "enter": void send(); return
       case "backspace":
@@ -2155,8 +2238,7 @@ process.stdin.on("data", (chunk) => {
         if (pressed.value === "e") { applyComposer(moveTo(composerState(), { to: input.length, select: false })); dirty = true }
         break
       case "char":
-        input = input.slice(0, cursor) + pressed.value + input.slice(cursor)
-        cursor++
+        applyComposer(insertText(composerState(), pressed.value), true)
         dirty = true
         refreshPalette()
         break

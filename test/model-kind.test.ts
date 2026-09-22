@@ -61,7 +61,7 @@ describe("only a chat model can hold a conversation", () => {
   test("every text model has somewhere to send a message", () => {
     for (const selection of selectionsOfKind("text")) {
       expect([selection.model.id, isChatModel(selection)]).toEqual([selection.model.id, true])
-      expect(typeof selection.provider.baseUrl).toBe("string")
+      expect(typeof (selection.provider.baseUrl ?? selection.provider.cli)).toBe("string")
     }
   })
 

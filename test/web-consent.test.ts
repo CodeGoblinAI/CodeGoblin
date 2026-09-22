@@ -11,6 +11,22 @@ const shell = (command: string) => JSON.stringify({ command })
 type Sent = { id: string; tool?: string; cover?: string; type?: string }
 
 describe("asking the browser for consent", () => {
+  test("changing mode releases pending requests only for that conversation", async () => {
+    const consent = new BrowserConsent()
+    const events: Sent[] = []
+    const one = consent.forSession("live-one", (event) => events.push(event as Sent))
+    const two = consent.forSession("live-two", () => {})
+    const first = one.check("write_file", "a.txt")
+    const second = two.check("write_file", "b.txt")
+    expect(consent.setMode("live-one", "full")).toBe(true)
+    expect(await first).toBe(true)
+    expect(events.some((event) => event.type === "permission_resolved")).toBe(true)
+    expect(consent.pending()).toHaveLength(1)
+    consent.abandon("live-two")
+    expect(await second).toBe(false)
+    expect(consent.setMode("missing", "full")).toBe(false)
+  })
+
   test("a question goes out on the stream of the message that is running", async () => {
     const consent = new BrowserConsent()
     const first: Sent[] = []

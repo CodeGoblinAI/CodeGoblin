@@ -40,9 +40,9 @@ function renderModelMenu() {
     if (!option.ready) {
       const tag = document.createElement("span")
       tag.className = "picker-tag"
-      tag.textContent = "no key"
+      tag.textContent = option.connectionHint ? "CLI setup" : "no key"
       row.appendChild(tag)
-      row.title = "No API key for this provider yet - add one with /connect"
+      row.title = option.connectionHint || "No API key for this provider yet - add one with /connect"
     }
     row.onclick = () => { setModel(option.value); closeModelMenu() }
     providerMenu.appendChild(row)
@@ -52,6 +52,8 @@ function renderModelMenu() {
 function setModel(value) {
   const option = modelOptions.find((o) => o.value === value)
   if (!option) return false
+  if (deferUntilIdle(() => setModel(value), "switch model")) return true
+  if (currentModel !== value) showUsage(sessionUsage ? { spend: sessionUsage.spend } : null)
   currentModel = value
   providerLabel.textContent = option.label
   renderModelMenu()
@@ -77,7 +79,7 @@ document.addEventListener("keydown", (event) => {
 
 /**
  * How much to ask before acting - Codex's three choices. Sent with every
- * message, and the server keeps nothing between them. It starts at Ask for
+ * message; changes during a turn also update its live permissions. It starts at Ask for
  * approval on every load, so Full access never quietly outlives a reload.
  */
 const modeBtn = document.getElementById("mode-btn")
@@ -115,9 +117,16 @@ function renderModeMenu() {
   }
 }
 
-function setMode(id) {
+async function setMode(id) {
   const choice = modeChoices().find((c) => c.id === id)
   if (!choice) return
+  if (busy && sessionId) {
+    const result = await fetch("/api/mode", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId, mode: id }),
+    }).then((response) => response.json()).catch(() => null)
+    if (!result?.ok) { note("Could not change the running turn's approval mode. Try again."); return }
+  }
   currentMode = id
   modeBtn.querySelector(".picker-label").textContent = choice.label
   modeBtn.classList.toggle("full", id === "full")
@@ -255,7 +264,19 @@ function addFiles(files) {
   }
 }
 
-attachBtn.onclick = () => filePicker.click()
+attachBtn.onclick = () => {
+  const modal = makeDialog("Add to the prompt")
+  for (const [label, action] of [
+    ["Attach an image", () => filePicker.click()],
+    ["Mention a project file", () => { input.value += (input.value && !input.value.endsWith(" ") ? " " : "") + "@"; input.focus(); refreshPalette() }],
+    ["Browse slash commands", () => { void runCommand("/help") }],
+  ]) {
+    const button = document.createElement("button")
+    button.className = "dialog-action"; button.textContent = label
+    button.onclick = () => { modal.close(); action() }
+    modal.appendChild(button)
+  }
+}
 filePicker.onchange = () => { addFiles([...filePicker.files]); filePicker.value = "" }
 
 input.addEventListener("paste", (event) => {
@@ -280,7 +301,26 @@ const hint = document.getElementById("hint")
 const sessionList = document.getElementById("session-list")
 
 let sessionId = null
+let sessionUsage = null
+function showUsage(value) {
+  sessionUsage = value
+  const used = value?.spend
+  const context = value?.context
+  document.getElementById("usage-readout").textContent = !value
+    ? "Usage unavailable until a response"
+    : !used
+    ? "Tokens/cost unavailable (not zero)" + (context ? " · ~" + context.percent + "% context" : "")
+    : `${used.input.toLocaleString()} in / ${used.output.toLocaleString()} out · ${used.dollars === undefined ? "cost unknown / subscription" : "$" + used.dollars.toFixed(4) + (used.unpriced ? " + unpriced usage" : " estimated")}${context ? " · ~" + context.percent + "% context" : ""}`
+}
 let busy = false
+let deferredAction
+function deferUntilIdle(action, label) {
+  if (!busy) return false
+  const replaced = Boolean(deferredAction)
+  deferredAction = action
+  note((replaced ? "Replaced queued action: " : "Queued until this turn finishes: ") + label)
+  return true
+}
 let controller = null
 let lastToolArgs = ""
 
@@ -491,6 +531,7 @@ function toolChip(name, args, id) {
 function permissionPrompt(event) {
   const box = document.createElement("div")
   box.className = "permission"
+  box.dataset.permission = event.id
   // Three answers, the same three the TUI offers. "Allow once" first,
   // because the least committal choice should be the easiest to reach.
   const choices = paletteData.decisions || [
@@ -558,6 +599,11 @@ function setBusy(state) {
   stopBtn.hidden = true
   input.placeholder = state ? "goblin is working…" : "Ask the goblin…  / for commands, @ for context"
   try { activityBusy(state) } catch { /* panel not built yet during startup */ }
+  if (!state && deferredAction) {
+    const action = deferredAction
+    deferredAction = undefined
+    queueMicrotask(action)
+  }
 }
 
 function relativeTime(ms) {
@@ -650,9 +696,11 @@ async function refreshSessions() {
 }
 
 async function openSession(id) {
-  const data = await fetch("/api/session?id=" + encodeURIComponent(id)).then((r) => r.json()).catch(() => null)
+  if (deferUntilIdle(() => openSession(id), "open conversation")) return
+  const data = await fetch("/api/session?id=" + encodeURIComponent(id) + "&model=" + encodeURIComponent(currentModel)).then((r) => r.json()).catch(() => null)
   if (!data || !data.session) return
   sessionId = id
+  showUsage({ spend: data.session.spend, context: data.context })
   thread.innerHTML = ""
   for (const m of data.session.messages) {
     if (m.role === "user") turn("user", m.display || m.content)
@@ -694,13 +742,93 @@ function applyPalette(palette) {
 
 let webSettings = { theme: "goblin", thinking: true }
 
+function makeDialog(title) {
+  document.querySelector("dialog")?.close()
+  const modal = document.createElement("dialog")
+  modal.setAttribute("aria-label", title)
+  const heading = document.createElement("h2"); heading.textContent = title; modal.appendChild(heading)
+  const close = document.createElement("button"); close.textContent = "Close"; close.onclick = () => modal.close(); modal.appendChild(close)
+  modal.addEventListener("close", () => { modal.remove(); input.focus() }, { once: true })
+  document.body.appendChild(modal); modal.showModal()
+  return modal
+}
+
+function openSettingsDialog() {
+  const modal = makeDialog("Settings")
+  const select = (label, options, current, change) => {
+    const row = document.createElement("label"); row.textContent = label
+    const field = document.createElement("select")
+    for (const [value, text] of options) { const option = document.createElement("option"); option.value = value; option.textContent = text; field.appendChild(option) }
+    field.value = current
+    field.onchange = async () => { field.disabled = true; try { await change(field.value) } finally { field.disabled = false } }
+    row.appendChild(field); modal.appendChild(row)
+  }
+  select("Theme", paletteData.themes.map((t) => [t.value.slice(7), t.hint]), webSettings.theme, (theme) => saveSettings({ theme }))
+  select("Thinking", [["on", "Shown"], ["off", "Hidden"]], webSettings.thinking ? "on" : "off", (value) => saveSettings({ thinking: value === "on" }))
+  select("Reasoning effort (supported models)", ["auto", "low", "medium", "high"].map((x) => [x, x]), webSettings.effort || "auto", (effort) => saveSettings({ effort }))
+  for (const option of modelSettings()) {
+    if (!option.choices?.length) continue
+    select(option.label, option.choices.map((c) => [c.id, c.label]), mediaValue(option.id), (value) => runCommand("/settings " + option.id + " " + value))
+  }
+}
+
+function openHelpDialog(initial = "") {
+  const modal = makeDialog("Commands")
+  const search = document.createElement("input")
+  search.type = "search"
+  search.placeholder = "Filter commands"
+  search.setAttribute("aria-label", "Filter commands")
+  search.value = initial
+  const list = document.createElement("div")
+  list.className = "command-list"
+  const aliases = Object.entries(paletteData.aliases || {}).map(([value, canonical]) => ({
+    value,
+    hint: "alias for " + canonical,
+    alias: true,
+  }))
+  const entries = [...(paletteData.commands || []), ...aliases]
+  const paint = () => {
+    list.replaceChildren()
+    const query = search.value.trim().toLowerCase()
+    for (const command of entries.filter((entry) => !query || (entry.value + " " + entry.hint).toLowerCase().includes(query))) {
+      const row = document.createElement("button")
+      row.className = "dialog-action command-row"
+      const name = document.createElement("code"); name.textContent = command.value; row.appendChild(name)
+      const hint = document.createElement("span"); hint.textContent = command.hint; row.appendChild(hint)
+      row.onclick = () => {
+        modal.close()
+        input.value = (command.alias ? paletteData.aliases[command.value] : command.value) + " "
+        input.focus()
+        refreshPalette()
+      }
+      list.appendChild(row)
+    }
+    if (!list.children.length) {
+      const empty = document.createElement("p"); empty.textContent = "No matching commands."; list.appendChild(empty)
+    }
+  }
+  search.oninput = paint
+  modal.append(search, list)
+  paint()
+  search.focus()
+}
+
+document.getElementById("settings-open").onclick = openSettingsDialog
+document.getElementById("help-open").onclick = () => openHelpDialog()
+for (const panel of ["sessions", "activity"]) {
+  const button = document.getElementById(panel + "-toggle")
+  const paint = (hidden) => { document.body.classList.toggle("hide-" + panel, hidden); button.setAttribute("aria-expanded", String(!hidden)) }
+  paint(localStorage.getItem("cg-hide-" + panel) === "true" || (innerWidth < 650 && localStorage.getItem("cg-hide-" + panel) === null))
+  button.onclick = () => { const hidden = !document.body.classList.contains("hide-" + panel); paint(hidden); localStorage.setItem("cg-hide-" + panel, String(hidden)) }
+}
+
 async function saveSettings(change) {
   const result = await fetch("/api/settings", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(change),
   }).then((r) => r.json()).catch(() => null)
-  if (!result) return null
+  if (!result?.settings) { note("Could not save settings. Please try again."); return null }
   webSettings = result.settings
   applyPalette(result.palette)
   document.body.classList.toggle("hide-thinking", !webSettings.thinking)
@@ -789,10 +917,15 @@ function connectForm(provider) {
 }
 
 async function runCommand(text) {
+  text = text.replace(/^\/[^\s]+/, (name) => paletteData.aliases?.[name] || name)
   const [name, ...rest] = text.split(" ")
   const argument = rest.join(" ").trim()
+  if (paletteData.pending?.[name]) { note(paletteData.pending[name]); return true }
+  if (name === "/quit") { note("Close this browser tab to exit the Web UI; the local server keeps running."); return true }
+  if (name === "/mouse") { note("The browser supports mouse selection and Ctrl+C natively."); return true }
 
-  if (name === "/new") {
+  if (name === "/new" || name === "/clear") {
+    showUsage(null)
     sessionId = null
     emptyState()
     activityReset()
@@ -820,7 +953,7 @@ async function runCommand(text) {
   }
 
   if (name === "/help") {
-    note(paletteData.commands.map((c) => c.value + "  -  " + c.hint).join(String.fromCharCode(10)))
+    openHelpDialog(argument)
     return true
   }
 
@@ -947,10 +1080,12 @@ async function runCommand(text) {
     return true
   }
 
-  if (name === "/status") {
+  if (name === "/status" || name === "/usage") {
+    if (name === "/usage") { note(document.getElementById("usage-readout").textContent + "\nContext is a transcript estimate, excluding extra tool schemas and injected context. Dollar figures use catalog rates, not a provider bill. Quotas/balances are not wired yet."); return true }
     const model = modelOptions.find((o) => o.value === currentModel)
     note([
       "model     " + (model ? model.label : currentModel),
+      ...(model?.connectionHint ? ["CLI       " + model.connectionHint] : []),
       "session   " + (sessionId || "not started yet"),
       "theme     " + webSettings.theme,
       "thinking  " + (webSettings.thinking ? "shown" : "hidden"),
@@ -960,6 +1095,7 @@ async function runCommand(text) {
   }
 
   if (name === "/settings" || name === "/set") {
+    if (!argument) { openSettingsDialog(); return true }
     const NEWLINE = String.fromCharCode(10)
     const [id, ...rest] = argument.split(/\s+/).filter(Boolean)
     // Only what the model on the picker takes. This used to be every setting
@@ -1077,6 +1213,11 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/diff") {
+    note("The Web UI diff viewer is not wired yet. Activity shows changed files; use /diff in the TUI for the session diff.")
+    return true
+  }
+
   // A custom command or a skill is a message, so it goes to the model.
   if ((paletteData.commands || []).some((c) => c.invocation && c.value === name)) return false
 
@@ -1104,8 +1245,33 @@ function note(text) {
 }
 
 async function submit() {
-  const text = input.value.trim()
-  if ((!text && !attachments.length) || busy) return
+  const text = input.value.trim().replace(/^\/[^\s]+/, (name) => paletteData.aliases?.[name] || name)
+  if (!text && !attachments.length) return
+  if (busy) {
+    input.value = ""
+    paletteItems = []
+    renderPalette()
+    if (/^\/(?:approvals|mode|help|status|usage|settings|theme|thinking|effort)(?:\s|$)/.test(text)) {
+      await runCommand(text)
+      return
+    }
+    const queuedImages = attachments
+    attachments = []
+    renderAttached()
+    deferUntilIdle(() => {
+      // Keep any new unsent draft in the composer after submitting the queued turn.
+      const draft = input.value
+      const draftImages = attachments
+      attachments = queuedImages
+      sendText(text)
+      if (!text.startsWith("/")) {
+        input.value = draft
+        attachments = draftImages
+        renderAttached()
+      }
+    }, text || "attached images")
+    return
+  }
 
   // Commands never reach the model.
   if (text.startsWith("/")) {
@@ -1251,8 +1417,13 @@ async function submit() {
           renderActivity()
         }
         if (event.type === "attached") note("attached " + event.files.join(", "))
+        if (event.type === "usage") showUsage(event)
         if (event.type === "plan") { planItems = event.todos; renderActivity() }
         if (event.type === "permission") { body = null; permissionPrompt(event) }
+        if (event.type === "permission_resolved") {
+          const box = [...thread.querySelectorAll(".permission")].find((box) => box.dataset.permission === event.id)
+          if (box) box.querySelector(".pactions").textContent = event.allowed ? "Allowed by the new approval mode" : "Blocked by current policy"
+        }
         if (event.type === "tool_denied") {
           deniedCalls.add(event.id)
           const chip = chipFor(event.id)
@@ -1301,6 +1472,7 @@ async function submit() {
         if (event.type === "limit") {
           note("stopped after " + event.turns + " tool turns - the answer may be unfinished. Ask it to continue.")
         }
+        if (event.type === "output_limit") note("The model reached its output-token limit. The answer is unfinished; ask it to continue or increase the server's output budget.")
         if (event.type === "error") turn("agent", "**Error:** " + event.message)
         if (event.type === "saved") {
           refreshSessions()
@@ -1342,9 +1514,7 @@ input.onkeydown = (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit() }
 }
 document.getElementById("new-session").onclick = () => {
-  sessionId = null
-  emptyState()
-  refreshSessions()
+  if (!deferUntilIdle(() => runCommand("/clear"), "new conversation")) void runCommand("/clear")
 }
 
 /**
@@ -1365,6 +1535,7 @@ async function loadProviders() {
     kind: p.kind,
     section: p.section,
     ready: p.ready,
+    connectionHint: p.connectionHint,
     settings: p.settings || [],
     vision: p.vision,
   }))

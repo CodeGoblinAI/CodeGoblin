@@ -57,6 +57,8 @@ async function writeStore(store: Record<string, StoredAuth>): Promise<void> {
  * written down at all.
  */
 export function apiKey(providerId: string): string | undefined {
+  // Local servers need no key; the CLI owns its own authentication. Never forward a stored key.
+  if (providerId === "local" || providerId === "claude-code") return ""
   const fromEnv = process.env[envName(providerId)]
   if (fromEnv) return fromEnv
 

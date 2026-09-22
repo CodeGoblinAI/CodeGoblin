@@ -20,8 +20,8 @@ export type Settings = {
    *
    * A real trade, and the original makes it a setting rather than a choice:
    * taking the mouse gets wheel scrolling and clickable things, and costs
-   * the terminal's own drag-to-select. Off here by default, because reading
-   * and copying output is the thing people miss immediately. shift+drag
+   * the terminal's own drag-to-select. On by default for clickable controls;
+   * it can be switched off in Settings or /mouse. Shift+drag
    * still selects in most terminals when it is on.
    */
   mouse: boolean
@@ -50,7 +50,7 @@ const file = path.join(Global.Path.state, "settings.json")
 export const defaults = (): Settings => ({
   theme: DEFAULT_THEME,
   thinking: true,
-  mouse: false,
+  mouse: true,
   effort: "auto",
 })
 

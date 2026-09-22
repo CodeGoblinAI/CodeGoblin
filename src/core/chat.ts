@@ -1,4 +1,6 @@
 import { authHeaders, type Provider } from "./providers"
+import { verifyLocalModel } from "./local-provider"
+import { claudeChat } from "./claude-cli"
 
 export type Role = "user" | "assistant" | "system"
 export type Message = { role: Role; content: string }
@@ -18,9 +20,14 @@ export async function* streamChat(input: {
   messages: Message[]
   signal?: AbortSignal
 }): AsyncGenerator<string, void, unknown> {
+  if (input.provider.cli === "claude-code") {
+    for await (const event of claudeChat(input)) if (event.type === "text") yield event.delta
+    return
+  }
   if (!input.provider.baseUrl) {
     throw new Error(`${input.provider.label} generates media, not conversation - pick a text model with /model`)
   }
+  await verifyLocalModel(input.provider, input.modelId, input.signal)
   const response = await fetch(input.provider.baseUrl, {
     method: "POST",
     headers: {
@@ -29,6 +36,7 @@ export async function* streamChat(input: {
     },
     body: JSON.stringify({
       model: input.modelId,
+      ...(input.provider.localThinking !== undefined ? { chat_template_kwargs: { enable_thinking: input.provider.localThinking } } : {}),
       messages: input.messages,
       stream: true,
     }),

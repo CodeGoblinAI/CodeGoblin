@@ -8,7 +8,9 @@
  */
 import { file } from "bun"
 import { fileURLToPath } from "node:url"
-import { runAgent, type Message } from "../core/agent"
+import { localChatMessages, runAgent, type Message } from "../core/agent"
+import { claudeAuthStatus } from "../core/claude-cli"
+import { addSpend, priceOf, usage } from "../core/context"
 import {
   resolveSelection,
   acceptsImages,
@@ -49,7 +51,7 @@ import {
   DEFAULT,
 } from "../core/media-settings"
 import * as memory from "../core/memory"
-import { runCommand } from "../core/commands"
+import { runCommand, COMMANDS, COMMAND_ALIASES, PENDING_COMMANDS } from "../core/commands"
 import { resolveInside } from "../core/tools"
 
 // fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..."
@@ -150,6 +152,7 @@ async function handle(request: Request): Promise<Response> {
   }
 
   if (url.pathname === "/api/providers") {
+    const claude = await claudeAuthStatus()
     return json({
       providers: selectionsByKind().map((s) => ({
         kind: kindOf(s.model),
@@ -157,7 +160,8 @@ async function handle(request: Request): Promise<Response> {
         id: s.provider.id + "/" + s.model.id,
         label: s.provider.label + " " + s.model.label,
         reasoning: Boolean(s.model.reasoning),
-        ready: Boolean(apiKey(s.provider.id)),
+        ready: s.provider.cli ? claude.ready : apiKey(s.provider.id) !== undefined,
+        connectionHint: s.provider.cli ? claude.detail : undefined,
         /** Can be shown a picture, as distinct from one that draws them. */
         vision: acceptsImages(s),
         /**
@@ -198,32 +202,13 @@ async function projectFiles(): Promise<string[]> {
     const saved = await sessions.list(20)
     return json({
       commands: [
-        { value: "/help", hint: "show these commands" },
-        { value: "/clear", hint: "start a fresh conversation" },
-        { value: "/model", hint: "switch model", expands: true },
-        { value: "/resume", hint: "reopen a saved conversation", expands: true },
-        { value: "/compact", hint: "summarise to free context" },
-        { value: "/undo", hint: "put back the files the last turn changed" },
-        { value: "/redo", hint: "reapply what /undo took back" },
-        { value: "/memory", hint: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
-        { value: "/connect", hint: "connect a provider - pick one, paste its key", expands: true },
-        { value: "/disconnect", hint: "remove a stored key - pick one", expands: true },
-        { value: "/status", hint: "what this session is using right now" },
-        { value: "/mcp", hint: "MCP servers from codegoblin.jsonc, and their tools" },
-        { value: "/skills", hint: "skills and custom commands, and where each comes from" },
-        { value: "/plan", hint: "plan before changing anything: /plan add dark mode" },
-        { value: "/approvals", hint: "how much to ask before acting" },
-        { value: "/boost", hint: "let the model use subagents: /boost a hard task" },
-        { value: "/export", hint: "save the conversation as markdown" },
-        { value: "/rename", hint: "retitle this conversation" },
-        { value: "/theme", hint: "change colours", expands: true },
-        { value: "/thinking", hint: "show or hide the model's reasoning" },
-        { value: "/effort", hint: "how hard a reasoning model thinks: /effort high", expands: true },
-        { value: "/settings", hint: "how generation comes out: /settings 3d.topology quad", expands: true },
+        ...COMMANDS.filter((c) => !["/mouse", "/quit"].includes(c.name)).map((c) => ({ value: c.name, hint: c.description, expands: ["/model", "/resume", "/connect", "/disconnect", "/theme", "/effort"].includes(c.name) })),
         // Marked, so the page sends them to the model rather than calling them unknown.
         ...invocationItems(root).map((item) => ({ ...item, invocation: true })),
       ],
       models,
+      aliases: COMMAND_ALIASES,
+      pending: PENDING_COMMANDS,
       sessions: saved.map((entry) => ({ value: "/resume " + entry.id, hint: entry.title })),
       files: await projectFiles(),
       themes: Object.entries(THEMES).map(([name, entry]) => ({
@@ -267,7 +252,11 @@ async function projectFiles(): Promise<string[]> {
 
   if (url.pathname === "/api/session" && request.method === "GET") {
     const session = await sessions.load(url.searchParams.get("id") ?? "")
-    return session ? json({ session }) : json({ error: "not found" }, 404)
+    const selected = resolveSelection(url.searchParams.get("model") ?? "")
+    return session ? json({
+      session,
+      context: selected ? usage(selected.provider.local && !selected.provider.localTools ? localChatMessages(session.messages) : session.messages, selected.model.contextWindow) : undefined,
+    }) : json({ error: "not found" }, 404)
   }
 
   if (url.pathname === "/api/session" && request.method === "DELETE") {
@@ -495,6 +484,13 @@ async function projectFiles(): Promise<string[]> {
     return json({ ok: false, error: "no turn running" }, 404)
   }
 
+  if (url.pathname === "/api/mode" && request.method === "POST") {
+    const body = await request.json() as { sessionId?: string; mode?: string }
+    if (!MODES.some((mode) => mode.id === body.mode)) return json({ ok: false, error: "invalid mode" }, 400)
+    const ok = consent.setMode(body.sessionId ?? "", body.mode as PermissionMode)
+    return json({ ok }, ok ? 200 : 404)
+  }
+
   if (url.pathname === "/api/permission" && request.method === "POST") {
     const body = (await request.json()) as { id?: string; decision?: Decision }
     // answer() refuses anything unrecognised, so a malformed answer can never
@@ -524,7 +520,7 @@ async function projectFiles(): Promise<string[]> {
     const selection = resolveSelection(body.provider) ?? defaultSelection()
     const { provider, model } = selection
     const key = apiKey(provider.id)
-    if (!key) return json({ error: `No API key for ${provider.label}.` }, 400)
+    if (key === undefined) return json({ error: `No API key for ${provider.label}.` }, 400)
 
     const session =
       (body.sessionId ? await sessions.load(body.sessionId) : undefined) ?? sessions.create(provider.id)
@@ -583,9 +579,9 @@ async function projectFiles(): Promise<string[]> {
         // Say what was attached: a mention that silently did nothing and a
         // mention that worked would otherwise look exactly the same.
         if (mentioned.files.length) send({ type: "attached", files: mentioned.files })
-        // Servers still starting get a moment, so a first message can use their tools.
-        await mcp.settled(10_000)
         const permissions = withMode(consent.forSession(session.id, send), body)
+        // Register live controls before waiting for external servers to start.
+        await mcp.settled(10_000)
         subagentContexts.set(session.id, {
           provider,
           modelId: model.id,
@@ -634,7 +630,15 @@ async function projectFiles(): Promise<string[]> {
           })) {
             // A refused call carries who refused it; the label is composed here
             // so the browser and the terminal say the same words about it.
+            if (event.type === "spend") {
+              session.spend = addSpend(session.spend ?? { input: 0, output: 0 }, { ...event, dollars: priceOf(event, model.price) })
+            }
             send(event.type === "tool_denied" ? { ...event, label: refusalLabel(event) } : event)
+            if (event.type === "spend" || event.type === "turn_end") send({
+              type: "usage",
+              spend: session.spend,
+              context: usage(provider.local && !provider.localTools ? localChatMessages(session.messages) : session.messages, model.contextWindow),
+            })
           }
           await sessions.save(session)
           send({ type: "saved", id: session.id, title: session.title })

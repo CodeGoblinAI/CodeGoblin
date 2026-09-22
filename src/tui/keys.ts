@@ -23,6 +23,7 @@ export type Key =
   | { type: "pagedown" }
   | { type: "wheelup" }
   | { type: "wheeldown" }
+  | { type: "click"; col: number; row: number }
   | { type: "shifttab" }
   | { type: "shiftup" }
   | { type: "shiftdown" }
@@ -139,6 +140,8 @@ export function parseKeys(input: string): Key[] {
         const button = Number(params.slice(1).split(";")[0])
         if (button === 64) keys.push({ type: "wheelup" })
         if (button === 65) keys.push({ type: "wheeldown" })
+        const [, col, row] = params.slice(1).split(";").map(Number)
+        if (button === 0 && final === "m" && col! > 0 && row! > 0) keys.push({ type: "click", col: col!, row: row! })
         i = j + 1
         continue
       }

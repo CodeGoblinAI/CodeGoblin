@@ -1,4 +1,4 @@
-import { Permissions, DECISIONS, type Decision } from "../core/permission"
+import { Permissions, DECISIONS, type Decision, type PermissionMode } from "../core/permission"
 
 /**
  * Consent for browser conversations.
@@ -18,7 +18,7 @@ import { Permissions, DECISIONS, type Decision } from "../core/permission"
 export class BrowserConsent {
   private permissions = new Map<string, Permissions>()
   private streams = new Map<string, (event: unknown) => void>()
-  private waiting = new Map<string, (decision: Decision) => void>()
+  private waiting = new Map<string, { sessionId: string; tool: string; detail: string; resolve: (decision: Decision) => void }>()
   /** Makes every question's id its own: a subagent and the main agent can ask about the same tool at once. */
   private asked = 0
 
@@ -38,7 +38,7 @@ export class BrowserConsent {
       (tool, detail, cover, from) =>
         new Promise<Decision>((resolve) => {
           const id = sessionId + ":" + tool + ":" + ++this.asked
-          this.waiting.set(id, resolve)
+          this.waiting.set(id, { sessionId, tool, detail, resolve })
           this.streams.get(sessionId)?.({ type: "permission", id, tool, detail, cover, ...(from ? { from } : {}) })
         }),
     )
@@ -53,18 +53,18 @@ export class BrowserConsent {
    * as consent.
    */
   answer(id: string, decision: unknown): boolean {
-    const resolve = this.waiting.get(id)
-    if (!resolve) return false
+    const waiting = this.waiting.get(id)
+    if (!waiting) return false
     this.waiting.delete(id)
-    resolve(DECISIONS.some((choice) => choice.id === decision) ? (decision as Decision) : "reject")
+    waiting.resolve(DECISIONS.some((choice) => choice.id === decision) ? (decision as Decision) : "reject")
     return true
   }
 
   /** Refuses whatever a conversation is still waiting on, so an abandoned turn cannot hang. */
   abandon(sessionId: string) {
-    for (const [id, resolve] of this.waiting) {
-      if (id.startsWith(sessionId + ":")) {
-        resolve("reject")
+    for (const [id, waiting] of this.waiting) {
+      if (waiting.sessionId === sessionId) {
+        waiting.resolve("reject")
         this.waiting.delete(id)
       }
     }
@@ -73,5 +73,20 @@ export class BrowserConsent {
   /** The questions still waiting on an answer. */
   pending(): string[] {
     return [...this.waiting.keys()]
+  }
+
+  setMode(sessionId: string, mode: PermissionMode): boolean {
+    const permissions = this.permissions.get(sessionId)
+    if (!permissions) return false
+    permissions.mode = mode
+    for (const [id, waiting] of this.waiting) {
+      if (waiting.sessionId !== sessionId) continue
+      const verdict = permissions.automaticVerdict(waiting.tool, waiting.detail)
+      if (!verdict) continue
+      this.waiting.delete(id)
+      this.streams.get(sessionId)?.({ type: "permission_resolved", id, allowed: verdict.allowed })
+      waiting.resolve(verdict.allowed ? "once" : "reject")
+    }
+    return true
   }
 }

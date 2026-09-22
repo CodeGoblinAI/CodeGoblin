@@ -1,4 +1,6 @@
 import { authHeaders, type Provider } from "./providers"
+import { verifyLocalModel } from "./local-provider"
+import { claudeChat } from "./claude-cli"
 import { TOOL_SCHEMA, runTool, isConcurrent } from "./tools"
 import type { Permissions } from "./permission"
 import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT } from "./context"
@@ -45,6 +47,18 @@ export type Message = {
   tool_call_id?: string
 }
 
+export const LOCAL_CHAT_SYSTEM = "You are CodeGoblin, a helpful assistant. Answer concisely. You cannot run tools or modify files in local chat mode."
+
+/** The exact conversation a tool-free local model receives. Shared with context metering. */
+export function localChatMessages(messages: Message[]): Message[] {
+  return [
+    { role: "system", content: LOCAL_CHAT_SYSTEM },
+    ...messages
+      .filter((message) => message.role === "user" || message.role === "assistant")
+      .map((message): Message => ({ role: message.role, content: message.content })),
+  ]
+}
+
 export type AgentEvent =
   | { type: "text"; delta: string }
   | { type: "thinking"; delta: string }
@@ -74,6 +88,7 @@ export type AgentEvent =
    * exactly like work that was complete.
    */
   | { type: "limit"; turns: number }
+  | { type: "output_limit" }
   /** Subagents finished and their results were handed to the model, which carries on. */
   | { type: "subagents_collected" }
   | { type: "turn_end" }
@@ -242,11 +257,25 @@ export async function* runAgent(input: {
   maxTurns?: number
   signal?: AbortSignal
 }): AsyncGenerator<AgentEvent, void, unknown> {
+  if (input.provider.cli === "claude-code") {
+    closeOpenCalls(input.messages)
+    let text = ""
+    for await (const event of claudeChat(input)) {
+      if (event.type === "text") text += event.delta
+      if (event.type === "output_limit") text += "\n\n[The model reached its output-token limit; this answer is unfinished.]"
+      yield event
+    }
+    input.messages.push({ role: "assistant", content: text })
+    yield { type: "turn_end" }
+    return
+  }
   // No limit unless a caller sets one. A fixed cap stopped real work part way
   // - a plan carried out, checked, and then cut off before the model could say
   // so - and a model that has finished says so by answering without a tool.
   // A person stops a turn that is going nowhere; that is what stop is for.
   const maxTurns = input.maxTurns ?? Number.POSITIVE_INFINITY
+  const localChat = input.provider.local && !input.provider.localTools
+  await verifyLocalModel(input.provider, input.modelId, input.signal)
 
   // A turn stopped while its tools ran left calls with no answer.
   closeOpenCalls(input.messages)
@@ -254,14 +283,14 @@ export async function* runAgent(input: {
   // A tool outside this agent's list is refused without being run or asked
   // about. A model can name a tool it was never offered.
   const usable = (name: string) =>
-    !input.tools ||
+    !localChat && (!input.tools ||
     input.tools.includes(name) ||
     (name.startsWith("mcp__") && input.tools.includes("mcp")) ||
-    Boolean(input.subagents?.has(name))
+    Boolean(input.subagents?.has(name)))
 
   // Compact before the first request rather than after a failure: the
   // provider rejects an oversized conversation outright.
-  if (input.contextWindow && shouldCompact(input.messages, input.contextWindow)) {
+  if (input.contextWindow && shouldCompact(localChat ? localChatMessages(input.messages) : input.messages, input.contextWindow)) {
     const before = input.messages.length
     const plan = planCompaction(input.messages, input.contextWindow)
     if (plan.summarise.length) {
@@ -273,24 +302,33 @@ export async function* runAgent(input: {
 
   for (let turn = 0; turn < maxTurns; turn++) {
     if (input.signal?.aborted) return
+    if (turn > 0) await verifyLocalModel(input.provider, input.modelId, input.signal)
 
     const response = await fetch(chatEndpoint(input.provider), {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders(input.provider, input.apiKey) },
       body: JSON.stringify({
         model: input.modelId,
-        messages: wire(
+        ...(input.provider.localThinking !== undefined ? { chat_template_kwargs: { enable_thinking: input.provider.localThinking } } : {}),
+        messages: localChat ? localChatMessages(input.messages) : wire(
           input.messages,
           input.memory,
           input.images,
           [input.instructions, input.permissions?.planning ? PLANNING : undefined].filter(Boolean).join(String.fromCharCode(10, 10)) ||
             undefined,
         ),
-        tools: offeredTools(input),
+        tools: localChat ? undefined : offeredTools(input),
         stream: true,
+        // llama.cpp omits usage on streams unless asked; without this a local
+        // turn never records spend and /usage reads "nothing yet" forever.
+        // Local-only: hosted providers get nothing they did not ask for.
+        ...(input.provider.local ? { stream_options: { include_usage: true } } : {}),
         ...(input.effort ? { reasoning_effort: input.effort } : {}),
       }),
       signal: input.signal,
+    }).catch((error: unknown) => {
+      if (!input.provider.local || input.signal?.aborted) throw error
+      throw new Error(`Cannot reach the local model server at ${input.provider.baseUrl}. Start the server, wait until it is ready, and try again. CG-Next does not start local servers automatically yet.`, { cause: error })
     })
 
     if (!response.ok || !response.body) {
@@ -302,6 +340,7 @@ export async function* runAgent(input: {
     const decoder = new TextDecoder()
     let buffer = ""
     let text = ""
+    let outputLimited = false
     const calls = new Map<number, ToolCall>()
 
     for (;;) {
@@ -337,6 +376,7 @@ export async function* runAgent(input: {
         }
 
         const delta = chunk?.choices?.[0]?.delta
+        if (chunk?.choices?.[0]?.finish_reason === "length") outputLimited = true
 
         // Reasoning models stream their thinking on a separate field. The
         // name is not standardised, so accept the variants seen in the wild.
@@ -359,6 +399,14 @@ export async function* runAgent(input: {
           calls.set(index, existing)
         }
       }
+    }
+
+    if (outputLimited) {
+      // Truncated tool arguments are not executable requests.
+      input.messages.push({ role: "assistant", content: text + "\n\n[The model reached its output-token limit; this answer is unfinished.]" })
+      yield { type: "output_limit" }
+      yield { type: "turn_end" }
+      return
     }
 
     if (calls.size === 0) {

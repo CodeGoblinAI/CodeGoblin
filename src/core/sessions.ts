@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { Global } from "../platform/paths"
 import type { Message } from "./agent"
+import type { Spend } from "./context"
 
 /**
  * Sessions on disk.
@@ -17,11 +18,15 @@ export type Session = {
   updated: number
   provider: string
   messages: Message[]
+  spend?: Spend
 }
 
 const dir = path.join(Global.Path.state, "sessions")
 
-const file = (id: string) => path.join(dir, `${id}.json`)
+const file = (id: string) => {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("Invalid session ID")
+  return path.join(dir, `${id}.json`)
+}
 
 /** Sortable and unique without pulling in a uuid dependency. */
 export function newSessionId(): string {

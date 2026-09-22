@@ -1,8 +1,8 @@
 /**
  * Providers and models.
  *
- * All of these speak the OpenAI chat-completions wire format, so one client
- * covers them. Model ids come from each provider's /models endpoint rather
+ * HTTP text providers speak the OpenAI chat-completions wire format; CLI
+ * providers use their official process protocol. Model ids come from each provider's /models endpoint rather
  * than a bundled catalog - the catalog lags, and once claimed glm-5.3 did not
  * exist when it did.
  *
@@ -16,6 +16,8 @@
  * decides whether a prompt becomes a sentence, a picture, a sound or a mesh.
  * Absent means text in, text out - the ordinary case.
  */
+import { localProvider } from "./local-provider"
+
 export type Capabilities = {
   input?: { text?: boolean; image?: boolean; audio?: boolean }
   output?: { text?: boolean; image?: boolean; audio?: boolean; model3d?: boolean }
@@ -48,6 +50,10 @@ export type Model = {
 }
 
 export type Provider = {
+  cli?: "claude-code"
+  local?: boolean
+  localTools?: boolean
+  localThinking?: boolean
   id: string
   label: string
   /**
@@ -256,6 +262,13 @@ export const PROVIDERS: Record<string, Provider> = {
   },
 }
 
+const local = localProvider()
+if (local) PROVIDERS.local = local
+PROVIDERS["claude-code"] = {
+  id: "claude-code", label: "Claude CLI (chat only)", cli: "claude-code",
+  models: ["default", "haiku", "sonnet", "opus"].map((id) => ({ id, label: id, contextWindow: 200_000 })),
+}
+
 export const DEFAULT_PROVIDER = "deepseek"
 
 export type Selection = { provider: Provider; model: Model }
@@ -273,7 +286,8 @@ function firstUsable(provider: Provider): Model | undefined {
 /** Accepts "zai", "glm-5.3", or "zai/glm-5.3". */
 export function resolveSelection(input?: string): Selection | undefined {
   if (!input) return defaultSelection()
-  const [head, tail] = input.includes("/") ? input.split("/") : [input, undefined]
+  const slash = input.indexOf("/")
+  const [head, tail] = slash >= 0 ? [input.slice(0, slash), input.slice(slash + 1)] : [input, undefined]
 
   const byProvider = PROVIDERS[head!]
   if (byProvider) {
@@ -323,7 +337,7 @@ export function kindOf(model: Model): ModelKind {
 
 /** Only a chat model can answer a question, and only it has somewhere to send one. */
 export function isChatModel(selection: Selection): boolean {
-  return kindOf(selection.model) === "text" && Boolean(selection.provider.baseUrl)
+  return kindOf(selection.model) === "text" && Boolean(selection.provider.baseUrl || selection.provider.cli)
 }
 
 /**

@@ -42,7 +42,7 @@ export function usage(messages: Message[], contextWindow: number): Usage {
 }
 
 /** What a turn used, as the provider reported it. */
-export type Spend = { input: number; output: number; dollars?: number }
+export type Spend = { input: number; output: number; dollars?: number; unpriced?: boolean }
 
 /**
  * Add up a turn.
@@ -56,6 +56,7 @@ export function addSpend(total: Spend, next: Spend): Spend {
   return {
     input: total.input + next.input,
     output: total.output + next.output,
+    ...((total.unpriced || next.unpriced || (next.dollars === undefined && next.input + next.output > 0) || (total.dollars === undefined && total.input + total.output > 0)) ? { unpriced: true } : {}),
     dollars:
       total.dollars === undefined && next.dollars === undefined
         ? undefined
@@ -74,11 +75,11 @@ export function priceOf(
 /** Cents to four places while it is pennies, then two. Never bare zero. */
 export function formatSpend(spend: Spend): string {
   if (spend.dollars === undefined) return `${(spend.input + spend.output).toLocaleString()} tok`
-  if (spend.dollars === 0) return "$0"
+  if (spend.dollars === 0) return spend.unpriced ? "$0 + unpriced usage" : "$0"
   // Built from a char code: a dollar sign next to a template placeholder has
   // been eaten by tooling here more than once, and it fails silently.
   const DOLLAR = String.fromCharCode(36)
-  return DOLLAR + (spend.dollars < 0.01 ? spend.dollars.toFixed(4) : spend.dollars.toFixed(2))
+  return DOLLAR + (spend.dollars < 0.01 ? spend.dollars.toFixed(4) : spend.dollars.toFixed(2)) + (spend.unpriced ? " + unpriced usage" : "")
 }
 
 /** Compact once the conversation passes this share of the window. */

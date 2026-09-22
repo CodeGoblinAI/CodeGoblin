@@ -34,7 +34,10 @@ export type Tool = {
 const MAX_OUTPUT = 24_000
 
 /** Shared with search, so both refuse the same paths. */
-export const SKIP_DIRS = new Set(["node_modules", ".git", "dist", ".next", "build", "coverage"])
+export const SKIP_DIRS = new Set([
+  "node_modules", ".git", "dist", ".next", "build", "coverage",
+  "output", ".playwright-cli", "_RECOVERED_LOCAL_2026-08-29",
+])
 
 export function resolveInside(root: string, target: string): string {
   const absolute = path.resolve(root, target)

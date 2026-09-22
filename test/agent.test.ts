@@ -49,6 +49,14 @@ const asksForATool = () =>
 
 const answers = (text: string) => stream({ choices: [{ delta: { content: text } }] })
 
+test("output exhaustion is surfaced and truncated tool calls never run", async () => {
+  serve(() => stream({ choices: [{ delta: { tool_calls: [{ index: 0, id: "partial", function: { name: "list_files", arguments: '{"path":' } }] }, finish_reason: "length" }] }))
+  const events = await collect(1)
+  expect(events.some((event) => event.type === "output_limit")).toBe(true)
+  expect(events.some((event) => event.type === "tool_start")).toBe(false)
+  expect(events.at(-1)?.type).toBe("turn_end")
+})
+
 /** One assistant turn asking for several tools at once, the way the wire allows. */
 const asksForMany = (...calls: { id: string; name: string; args: string }[]) => () =>
   stream({
@@ -689,5 +697,45 @@ describe("planning", () => {
     expect(offered).not.toContain("edit_file")
     expect(offered).not.toContain("mcp__x__y")
     expect(String(bodies[0]!.messages[0]!.content)).toContain("Planning is on")
+  })
+})
+
+describe("local usage", () => {
+  test("local turns ask for stream usage so spend is recorded; hosted turns send nothing extra", async () => {
+    const bodies: Record<string, unknown>[] = []
+    const local: Provider = {
+      id: "local", label: "Local", baseUrl: "http://127.0.0.1:1/v1/chat/completions", local: true,
+      auth: () => ({}),
+      models: [{ id: "fixture", label: "fixture", contextWindow: 4096, price: { input: 0, output: 0 } }],
+    }
+    globalThis.fetch = (async (url: unknown, init?: { body?: string }) => {
+      if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "fixture" }] })
+      bodies.push(JSON.parse(String(init?.body ?? "{}")))
+      return answers("done")
+    }) as unknown as typeof fetch
+    for await (const _ of runAgent({
+      provider: local, modelId: "fixture", apiKey: "",
+      messages: [{ role: "user", content: "hi" }],
+      root: process.cwd(), maxTurns: 1,
+    })) {
+      // drained
+    }
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]!.stream_options).toEqual({ include_usage: true })
+
+    bodies.length = 0
+    globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")))
+      return answers("done")
+    }) as unknown as typeof fetch
+    for await (const _ of runAgent({
+      provider, modelId: "test-model", apiKey: "not-a-real-key",
+      messages: [{ role: "user", content: "hi" }],
+      root: process.cwd(), maxTurns: 1,
+    })) {
+      // drained
+    }
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]!).not.toHaveProperty("stream_options")
   })
 })

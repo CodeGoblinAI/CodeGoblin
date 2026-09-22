@@ -86,7 +86,7 @@ describe("settings", () => {
     expect(normalise({ theme: "midnight", thinking: false })).toEqual({
       theme: "midnight",
       thinking: false,
-      mouse: false,
+      mouse: true,
       effort: "auto",
     })
     expect(normalise({ theme: "not-a-theme", thinking: "yes" })).toEqual(defaults())
@@ -225,8 +225,8 @@ describe("who gets the mouse", () => {
   // A real trade rather than a right answer, so it is a setting - which is how
   // the original has it too. Taking the mouse gets the wheel and clickable
   // things; leaving it keeps the terminal's own drag-to-select.
-  test("is off by default, so output can be selected out of the box", () => {
-    expect(defaults().mouse).toBe(false)
+  test("is on by default for clickable controls; explicit off is preserved", () => {
+    expect(defaults().mouse).toBe(true)
   })
 
   test("survives being written and read back", () => {
@@ -235,9 +235,9 @@ describe("who gets the mouse", () => {
   })
 
   test("anything that is not a boolean falls back rather than being truthy", () => {
-    expect(normalise({ mouse: "yes" }).mouse).toBe(false)
-    expect(normalise({ mouse: 1 }).mouse).toBe(false)
-    expect(normalise({}).mouse).toBe(false)
+    expect(normalise({ mouse: "yes" }).mouse).toBe(true)
+    expect(normalise({ mouse: 1 }).mouse).toBe(true)
+    expect(normalise({}).mouse).toBe(true)
   })
 
   test("/mouse is a command that toggles it", () => {

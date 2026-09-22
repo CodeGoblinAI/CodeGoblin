@@ -3,8 +3,20 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { parseConfig, loadConfig } from "../src/core/config"
+import { Permissions } from "../src/core/permission"
 
 describe("reading codegoblin.jsonc", () => {
+  test("malformed or unreadable policy blocks shell even in full access", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cg-policy-"))
+    const file = path.join(dir, "codegoblin.jsonc")
+    fs.writeFileSync(file, '{ "permission": ')
+    const permissions = Permissions.withConfig(async () => "once", file)
+    permissions.mode = "full"
+    expect((await permissions.decide("shell", "echo test")).allowed).toBe(false)
+    fs.writeFileSync(file, '{}')
+    expect((await permissions.decide("shell", "echo test")).allowed).toBe(true)
+    expect(loadConfig(dir).problems.length).toBeGreaterThan(0)
+  })
   test("rules come through as written, comments and trailing commas included", () => {
     const config = parseConfig(`{
       // the fork writes comments into this file

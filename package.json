@@ -10,7 +10,7 @@
     "tui": "bun src/tui/app.ts",
     "web": "bun src/web/serve.ts",
     "prompt": "bun src/cli/prompt.ts",
-    "test": "bun test --path-ignore-patterns=**/_RECOVERED_LOCAL_*/**"
+    "test": "bun test '--path-ignore-patterns=**/_RECOVERED_LOCAL_*/**'"
   },
   "dependencies": {
     "jsonc-parser": "^3.3.1"
