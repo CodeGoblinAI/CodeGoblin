@@ -200,11 +200,6 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     id: "help",
     label: "Help",
     items: [
-      {
-        type: "item",
-        label: "CodeGoblin UX Plan",
-        href: "https://github.com/CodeGoblinAI/CodeGoblin/blob/dev/docs/CODEGOBLIN_UX_PASS_2026-05-29.md",
-      },
       { type: "item", label: "Documentation", href: "https://github.com/CodeGoblinAI/CodeGoblin#readme" },
       { type: "item", label: "Export Logs...", command: "logs.export" },
       { type: "separator" },
