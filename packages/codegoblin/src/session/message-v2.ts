@@ -1173,7 +1173,7 @@ export function fromError(
       return new NamedError.Unknown({ message: errorMessage(e) }, { cause: e }).toObject()
     default:
       try {
-        const parsed = ProviderError.parseStreamError(e)
+        const parsed = ProviderError.parseStreamError(e, ctx.providerID)
         if (parsed) {
           if (parsed.type === "context_overflow") {
             return new ContextOverflowError(
