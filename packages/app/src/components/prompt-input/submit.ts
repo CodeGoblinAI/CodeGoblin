@@ -53,11 +53,6 @@ const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? 
 
 const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
 
-const imageIntent = (text: string) =>
-  /\b(create|generate|make|draw|render|design|edit|change|transform|paint)\b.{0,100}\b(image|picture|photo|logo|mascot|illustration|avatar|icon|cat|dog|horse|goblin|car|flames?|red|style)\b/i.test(
-    text,
-  )
-
 const imageEditIntent = (text: string) =>
   /\b(edit|change|modify|adjust|retouch|inpaint|outpaint|replace|remove|add)\b.{0,120}\b(image|picture|photo|it|this|that|last|previous|same)\b/i.test(
     text,
@@ -523,7 +518,6 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       const selectedAudioModel = audioModelSelected(currentModel)
       const selectedImageModel = imageModelSelected(currentModel)
       const selected3DModel = model3DSelected(currentModel)
-      const looksLikeImageRequest = imageIntent(trimmed)
       if (isModel3DSlash && !model3DSelected(currentModel)) {
         showToast({
           title: "Select a 3D model",
@@ -590,14 +584,6 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         showToast({
           title: "3D model selected",
           description: "Switch to a text model for casual chat, or describe the 3D model you want CodeGoblin to make.",
-        })
-        return
-      }
-      if (!selectedAudioModel && !selected3DModel && !isImageSlash && !isModel3DSlash && looksLikeImageRequest && !selectedImageModel) {
-        showToast({
-          title: "Select an image model",
-          description:
-            "That looks like an image request. Pick an image model in /models first; CodeGoblin did not send it to the text model.",
         })
         return
       }

@@ -99,7 +99,6 @@ export const CodeGoblinImageCommand = {
   parse: parseImageArgs,
   describe: describeImage,
   shouldRoutePromptToImage,
-  looksLikeImageIntent,
   looksLikeImageEditRequest,
   looksLikeCasualText,
   isImageModelSelection,
@@ -809,10 +808,6 @@ function shouldRoutePromptToImage(input: {
   outputImage?: boolean
 }) {
   return isImageModelSelection(input) && !looksLikeCasualText(input.prompt)
-}
-
-function looksLikeImageIntent(prompt: string) {
-  return /\b(create|generate|make|draw|render|design|edit|change|transform|paint)\b.{0,100}\b(image|picture|photo|logo|mascot|illustration|avatar|icon|cat|dog|horse|goblin|car|flames?|red|style)\b/i.test(prompt)
 }
 
 function looksLikeImageEditRequest(prompt: string) {

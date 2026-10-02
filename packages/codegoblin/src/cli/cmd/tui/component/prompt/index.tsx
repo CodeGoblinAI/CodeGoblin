@@ -1705,16 +1705,6 @@ export function Prompt(props: PromptProps) {
         return false
       }
     }
-    if (store.mode !== "shell" && CodeGoblinImageCommand.looksLikeImageIntent(trimmed)) {
-      toast.show({
-        variant: "warning",
-        message:
-          "That looks like an image request, but the selected model is not image-capable. Use /model to pick an image model first; I did not send it to the text model.",
-        duration: 9000,
-      })
-      return false
-    }
-
     const workspaceSession = props.sessionID ? sync.session.get(props.sessionID) : undefined
     const workspaceID = workspaceSession?.workspaceID
     const workspaceStatus = workspaceID ? (project.workspace.status(workspaceID) ?? "error") : undefined
