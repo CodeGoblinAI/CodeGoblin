@@ -1,8 +1,12 @@
-// Zen interprets the opencode token as an upstream compatibility version, not
-// the fork's release version. Keep CodeGoblin's identity explicit alongside it.
+// Zen negotiates API compatibility separately from the application version.
 const COMPATIBILITY_VERSION = "1.18.0"
 
-export function headers(input: { providerID: string; version: string; sessionID: string; parentSessionID?: string }): Record<string, string> {
+export function headers(input: {
+  providerID: string
+  version: string
+  sessionID: string
+  parentSessionID?: string
+}): Record<string, string> {
   if (input.providerID !== "opencode") return {}
   return {
     "User-Agent": `opencode/${COMPATIBILITY_VERSION} codegoblin/${input.version}`,
