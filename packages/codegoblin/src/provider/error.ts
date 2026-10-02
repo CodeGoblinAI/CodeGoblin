@@ -115,8 +115,13 @@ export type ParsedStreamError =
       responseBody: string
     }
 
-export function parseStreamError(input: unknown): ParsedStreamError | undefined {
+export function parseStreamError(input: unknown, providerID?: ProviderID): ParsedStreamError | undefined {
   const raw = json(input)
+  // Some streaming adapters expose only the provider's message string.
+  if (!raw && providerID === "opencode" && typeof input === "string") {
+    const restricted = zenFreeTierMessage(undefined, input)
+    if (restricted) return { type: "api_error", message: restricted, isRetryable: false, responseBody: input }
+  }
   const body = typeof raw?.message === "string" ? (json(raw.message) ?? raw) : raw
   if (!body) return
 

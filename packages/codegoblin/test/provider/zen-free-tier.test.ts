@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { APICallError } from "ai"
 import { ProviderError } from "@/provider/error"
 import { ProviderID } from "@/provider/schema"
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
+import { MessageV2 } from "@/session/message-v2"
 
 const body = JSON.stringify({
   type: "error",
@@ -12,6 +14,41 @@ const body = JSON.stringify({
 })
 
 describe("Zen free-tier restrictions", () => {
+  test("SDK streaming rejections reach the session with CodeGoblin guidance", async () => {
+    const model = createOpenAICompatible({
+      name: "opencode",
+      baseURL: "https://example.test/v1",
+      fetch: async () =>
+        new Response(`data: ${body}\n\ndata: [DONE]\n\n`, {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    }).chatModel("zen-test")
+    const result = await model.doStream({
+      prompt: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+    })
+    const errors: unknown[] = []
+    for await (const chunk of result.stream) {
+      if (chunk.type === "error") errors.push(chunk.error)
+    }
+    expect(errors).toHaveLength(1)
+    expect(typeof errors[0]).toBe("string")
+    const parsed = MessageV2.fromError(errors[0], { providerID: ProviderID.make("opencode") })
+    expect(parsed.name).toBe("APIError")
+    expect(parsed.data.message).toContain("CodeGoblin")
+    if (parsed.name === "APIError") {
+      expect(parsed.data.isRetryable).toBe(false)
+      expect(parsed.data.responseBody).toBe(errors[0])
+    }
+    expect(MessageV2.fromError(errors[0], { providerID: ProviderID.make("openai") }).name).toBe("UnknownError")
+  })
+
+  test("plain version rejections are rewritten only for Zen", () => {
+    const text = "Error from provider (Console): OpenCode 1.18.0 or newer is required to use the free tier"
+    expect(ProviderError.parseStreamError(text, ProviderID.make("opencode"))?.message).toContain("Update CodeGoblin")
+    expect(ProviderError.parseStreamError(text, ProviderID.make("openai"))).toBeUndefined()
+    expect(ProviderError.parseStreamError(text)).toBeUndefined()
+  })
+
   test("the actual server response gives CodeGoblin-specific guidance", () => {
     const result = ProviderError.parseStreamError(body)
     expect(result?.type).toBe("api_error")
@@ -92,7 +129,10 @@ describe("Zen free-tier restrictions", () => {
   })
 
   test("unrelated streaming errors mentioning OpenCode retain their normal handling", () => {
-    const result = ProviderError.parseStreamError({ type: "error", error: { code: "invalid_prompt", message: "Please update OpenCode" } })
+    const result = ProviderError.parseStreamError({
+      type: "error",
+      error: { code: "invalid_prompt", message: "Please update OpenCode" },
+    })
     expect(result?.message).toBe("Please update OpenCode")
   })
 })
