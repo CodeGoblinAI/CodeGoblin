@@ -24,6 +24,8 @@ const optimisticSeeded: boolean[] = []
 const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
 const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
+const sentPrompts: unknown[] = []
+let onPromptSent: (() => void) | undefined
 const syncedDirectories: string[] = []
 type TestModel = {
   id: string
@@ -69,7 +71,11 @@ const clientFor = (directory: string) => {
         return { data: undefined }
       },
       prompt: async () => ({ data: undefined }),
-      promptAsync: async () => ({ data: undefined }),
+      promptAsync: async (input: unknown) => {
+        sentPrompts.push(input)
+        onPromptSent?.()
+        return { data: undefined }
+      },
       command: async () => ({ data: undefined }),
       abort: async () => ({ data: undefined }),
     },
@@ -268,7 +274,8 @@ beforeEach(() => {
     return new Response(
       JSON.stringify({
         ok: true,
-        message: "Image generated with openai/gpt-image-1. Saved to C:\\repo\\main\\codegoblin-output\\images\\test.png.",
+        message:
+          "Image generated with openai/gpt-image-1. Saved to C:\\repo\\main\\codegoblin-output\\images\\test.png.",
       }),
       { status: 200, headers: { "content-type": "application/json" } },
     )
@@ -284,6 +291,8 @@ beforeEach(() => {
   promoted.length = 0
   params = {}
   sentShell.length = 0
+  sentPrompts.length = 0
+  onPromptSent = undefined
   syncedDirectories.length = 0
   selected = "/repo/worktree-a"
   selectedModel = { id: "model", provider: { id: "provider" } }
@@ -303,6 +312,42 @@ afterAll(() => {
 })
 
 describe("prompt submit worktree selection", () => {
+  test.each([
+    "Change the button style",
+    "Generate code for the image uploader",
+    "Make Code Goblin faster",
+    "Generate an image of a horse",
+    "no everything related to z-image and sna(sienna) i dont want to delete and likely qwen edit share things with z-image since they are both qwen. but i think that might be a good pick to remove and then replace the ones with minimax. but now that i am thinking about how much harder was it for you to just let me run the pod manually and have you view it? i guess techncially you cant access the mcp if i run it manually right? or can you? ie. can you interact with the pod without the bridge set up easily (technically you can with like playwright but i mean easily). so ya what do you think?",
+  ])("sends text unchanged without guessing image intent: %s", async (text) => {
+    const sent = Promise.withResolvers<void>()
+    onPromptSent = sent.resolve
+    params = { id: "session-1" }
+    promptValue = [{ type: "text", content: text, start: 0, end: text.length }]
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: () => text.length,
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await sent.promise
+    expect(sentPrompts).toHaveLength(1)
+    expect(sentPrompts[0]).toMatchObject({ parts: [expect.objectContaining({ type: "text", text })] })
+    expect(fetchRequests).toHaveLength(0)
+    expect(confirmPrompts).toHaveLength(0)
+    expect(promptResetCount).toBe(1)
+  })
+
   test("reads the latest worktree accessor value per submit", async () => {
     const submit = createPromptSubmit({
       info: () => undefined,
@@ -500,7 +545,9 @@ describe("prompt submit worktree selection", () => {
         modelID: "gpt-image-1",
       },
     })
-    expect(String(optimistic[1]?.parts?.[0]?.text)).toContain("CodeGoblin is generating an image with openai/gpt-image-1")
+    expect(String(optimistic[1]?.parts?.[0]?.text)).toContain(
+      "CodeGoblin is generating an image with openai/gpt-image-1",
+    )
     expect(String(optimistic[1]?.parts?.[0]?.text)).toContain("/repo/main/codegoblin-output/images/")
     expect((optimistic[1]?.parts?.[0] as any)?.metadata).toMatchObject({
       codegoblin: {
