@@ -123,6 +123,9 @@ export function parseStreamError(input: unknown): ParsedStreamError | undefined 
   const responseBody = JSON.stringify(body)
   if (body.type !== "error") return
 
+  const restricted = zenFreeTierMessage(body)
+  if (restricted) return { type: "api_error", message: restricted, isRetryable: false, responseBody }
+
   switch (body?.error?.code) {
     case "context_length_exceeded":
       return {
@@ -192,6 +195,17 @@ export function contextOverflowMessage(providerID: ProviderID, raw: string): str
 export function parseAPICallError(input: { providerID: ProviderID; error: APICallError }): ParsedAPICallError {
   const m = message(input.providerID, input.error)
   const body = json(input.error.responseBody)
+  const restricted = input.providerID === "opencode" ? zenFreeTierMessage(body, m) : undefined
+  if (restricted) {
+    return {
+      type: "api_error",
+      message: restricted,
+      statusCode: input.error.statusCode,
+      isRetryable: false,
+      responseHeaders: input.error.responseHeaders,
+      responseBody: input.error.responseBody,
+    }
+  }
   if (isOverflow(m) || input.error.statusCode === 413 || body?.error?.code === "context_length_exceeded") {
     return {
       type: "context_overflow",
@@ -210,6 +224,16 @@ export function parseAPICallError(input: { providerID: ProviderID; error: APICal
     responseBody: input.error.responseBody,
     metadata,
   }
+}
+
+function zenFreeTierMessage(body: ReturnType<typeof json>, fallback = "") {
+  if (!fallback && !["FreeTierError", "UpgradeRequiredError"].includes(body?.error?.type)) return
+  const text = typeof body?.error?.message === "string" ? body.error.message : fallback
+  if (/opencode.*(?:or newer is required|update|upgrade)|(?:update|upgrade).*opencode/i.test(text)) {
+    return "OpenCode Zen requires a newer client compatibility version for this free model. Update CodeGoblin; updating OpenCode does not update CodeGoblin. If CodeGoblin is already current, report this Zen compatibility error."
+  }
+  if (!/free tier.*(?:only.*(?:within|from).*opencode|updat.*opencode)|(?:update|upgrade).*opencode/i.test(text)) return
+  return "OpenCode Zen rejected this request under its free-tier client policy. Check that CodeGoblin is current and that tools are available for this model. Updating OpenCode does not update CodeGoblin. If the rejection persists, choose another provider/model or report this Zen compatibility error."
 }
 
 export * as ProviderError from "./error"

@@ -6,6 +6,7 @@ import type { Agent } from "@/agent/agent"
 import type { MessageV2 } from "../message-v2"
 import type { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
+import { Zen } from "@/provider/zen"
 import { SystemPrompt } from "../system"
 import { InstallationVersion } from "@codegoblin/core/installation/version"
 import { Effect, Record } from "effect"
@@ -186,6 +187,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
             ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
             "User-Agent": USER_AGENT,
           }),
+      ...Zen.headers({
+        providerID: input.model.providerID,
+        version: InstallationVersion,
+        sessionID: input.sessionID,
+        parentSessionID: input.parentSessionID,
+      }),
       ...input.model.headers,
       ...headers,
     },
