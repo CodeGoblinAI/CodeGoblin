@@ -18,28 +18,34 @@ describe("Zen free-tier restrictions", () => {
     const model = createOpenAICompatible({
       name: "opencode",
       baseURL: "https://example.test/v1",
-      fetch: async () =>
-        new Response(`data: ${body}\n\ndata: [DONE]\n\n`, {
-          headers: { "content-type": "text/event-stream" },
-        }),
+      fetch: Object.assign(
+        async () =>
+          new Response(`data: ${body}\n\ndata: [DONE]\n\n`, {
+            headers: { "content-type": "text/event-stream" },
+          }),
+        { preconnect: fetch.preconnect },
+      ),
     }).chatModel("zen-test")
     const result = await model.doStream({
       prompt: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
     })
     const errors: unknown[] = []
-    for await (const chunk of result.stream) {
-      if (chunk.type === "error") errors.push(chunk.error)
+    const reader = result.stream.getReader()
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      if (chunk.value.type === "error") errors.push(chunk.value.error)
     }
     expect(errors).toHaveLength(1)
-    expect(typeof errors[0]).toBe("string")
-    const parsed = MessageV2.fromError(errors[0], { providerID: ProviderID.make("opencode") })
+    const error = errors[0]
+    if (typeof error !== "string") throw new Error("Expected the SDK to expose the provider message string")
+    const parsed = MessageV2.fromError(error, { providerID: ProviderID.make("opencode") })
     expect(parsed.name).toBe("APIError")
+    if (parsed.name !== "APIError") throw new Error("Expected a session APIError")
     expect(parsed.data.message).toContain("CodeGoblin")
-    if (parsed.name === "APIError") {
-      expect(parsed.data.isRetryable).toBe(false)
-      expect(parsed.data.responseBody).toBe(errors[0])
-    }
-    expect(MessageV2.fromError(errors[0], { providerID: ProviderID.make("openai") }).name).toBe("UnknownError")
+    expect(parsed.data.isRetryable).toBe(false)
+    expect(parsed.data.responseBody).toBe(error)
+    expect(MessageV2.fromError(error, { providerID: ProviderID.make("openai") }).name).toBe("UnknownError")
   })
 
   test("plain version rejections are rewritten only for Zen", () => {
