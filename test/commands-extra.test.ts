@@ -240,9 +240,9 @@ describe("who gets the mouse", () => {
     expect(normalise({}).mouse).toBe(true)
   })
 
-  test("/mouse is a command that toggles it", () => {
-    expect(runCommand("/mouse")).toEqual({ kind: "mouse" })
-    expect(COMMANDS.some((c) => c.name === "/mouse")).toBe(true)
+  test("mouse is a setting, not a command", () => {
+    expect(runCommand("/mouse").kind).toBe("message")
+    expect(COMMANDS.some((c) => c.name === "/mouse")).toBe(false)
   })
 })
 

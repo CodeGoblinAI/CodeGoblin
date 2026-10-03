@@ -461,6 +461,12 @@ export class Permissions {
   mode: PermissionMode = "ask"
   /** Set by /plan: nothing that changes anything runs until the plan is agreed. */
   planning = false
+  /**
+   * Set by answering "for this session" to an autonomy checkpoint: the turn
+   * is never paused again. Per session like everything else, and cleared by
+   * reset with the standing approvals.
+   */
+  checkpointsOff = false
 
   /**
    * `rules` is where deny and ask patterns come from. Nothing by default, so a
@@ -494,6 +500,7 @@ export class Permissions {
     child.granted = this.granted
     Object.defineProperty(child, "mode", { get: () => parent.mode, set: (value: PermissionMode) => (parent.mode = value) })
     Object.defineProperty(child, "planning", { get: () => parent.planning, set: (value: boolean) => (parent.planning = value) })
+    Object.defineProperty(child, "checkpointsOff", { get: () => parent.checkpointsOff, set: (value: boolean) => (parent.checkpointsOff = value) })
     return child
   }
 
@@ -559,6 +566,25 @@ export class Permissions {
   /** A new conversation starts with no standing approvals. */
   reset() {
     this.granted.clear()
+    this.checkpointsOff = false
+  }
+
+  /**
+   * Whether a long turn may keep going after this many tool calls.
+   *
+   * Asked through the same prompt as any tool, so both surfaces render it
+   * with no new UI: "once" continues until the next window, "for this
+   * session" turns checkpoints off, and anything else stops the turn.
+   */
+  async checkpoint(toolCalls: number, every: number): Promise<"continue" | "stop"> {
+    if (this.checkpointsOff) return "continue"
+    const decision = await this.ask(
+      "autonomous run",
+      `${toolCalls} tool calls this turn - keep going`,
+      "future checkpoints",
+    )
+    if (decision === "always") this.checkpointsOff = true
+    return decision === "reject" ? "stop" : "continue"
   }
 
   summary(): string[] {

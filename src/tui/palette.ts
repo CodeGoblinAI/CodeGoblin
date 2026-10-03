@@ -90,7 +90,20 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
     }))
   }
 
-  if (!input.startsWith("/")) return undefined
+  // A / that starts a word mid-prompt completes command names too, the way @
+  // completes files there: "hi there /cl" offers /clear. Argument lists stay
+  // line-start only - a sentence is not the place for a model picker.
+  if (!input.startsWith("/")) {
+    const token = slashToken(input, cursor)
+    if (!token) return undefined
+    const query = token.toLowerCase()
+    const matches = COMMANDS.filter((command) => command.name.startsWith(query)).map((command) => ({
+      value: command.name,
+      hint: command.description,
+    }))
+    for (const item of invocations) if (item.value.toLowerCase().startsWith(query)) matches.push(item)
+    return matches.length ? matches.slice(0, LIST_LIMIT) : undefined
+  }
 
   // "/model " with an argument lists models instead of commands.
   if (/^\/model\s+/.test(input)) {
@@ -142,6 +155,28 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
   }))
   for (const item of invocations) if (item.value.toLowerCase().startsWith(query)) matches.push(item)
   return matches.length ? matches.slice(0, LIST_LIMIT) : undefined
+}
+
+/**
+ * The /word the caret sits in, if it starts a word: at the line start or
+ * after whitespace. Slashes inside paths and units ("a/b", "$5/day") are not
+ * commands and never trigger.
+ */
+export function slashToken(input: string, cursor: number): string | undefined {
+  const before = input.slice(0, cursor)
+  const slash = before.lastIndexOf("/")
+  if (slash < 0) return undefined
+  if (slash > 0 && !/\s/.test(before[slash - 1]!)) return undefined
+  const token = before.slice(slash)
+  if (!/^\/[A-Za-z0-9_-]*$/.test(token)) return undefined
+  return token
+}
+
+/** Where that token sits, so picking a row replaces the word, not the line. */
+export function slashRange(input: string, cursor: number): { start: number; end: number } | undefined {
+  const token = slashToken(input, cursor)
+  if (token === undefined) return undefined
+  return { start: cursor - token.length, end: cursor }
 }
 
 /**

@@ -30,7 +30,7 @@ import { DECISIONS, MODES, refusalLabel, type Decision, type PermissionMode, typ
 import { BrowserConsent } from "./consent"
 import { McpManager } from "../core/mcp"
 import { SubagentManager, type SubagentContext } from "../core/subagents"
-import { configPath } from "../core/config"
+import { configPath, checkpointEvery } from "../core/config"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
 import { systemPrompt } from "../core/system-prompt"
@@ -202,7 +202,7 @@ async function projectFiles(): Promise<string[]> {
     const saved = await sessions.list(20)
     return json({
       commands: [
-        ...COMMANDS.filter((c) => !["/mouse", "/quit"].includes(c.name)).map((c) => ({ value: c.name, hint: c.description, expands: ["/model", "/resume", "/connect", "/disconnect", "/theme", "/effort"].includes(c.name) })),
+        ...COMMANDS.filter((c) => !["/quit"].includes(c.name)).map((c) => ({ value: c.name, hint: c.description, expands: ["/model", "/resume", "/connect", "/disconnect", "/theme", "/effort"].includes(c.name) })),
         // Marked, so the page sends them to the model rather than calling them unknown.
         ...invocationItems(root).map((item) => ({ ...item, invocation: true })),
       ],
@@ -221,6 +221,7 @@ async function projectFiles(): Promise<string[]> {
       media: await loadMedia(),
       decisions: DECISIONS,
       modes: MODES,
+      checkpoint: checkpointEvery(),
       connectable: CONNECTABLE.map((entry) => ({
         ...entry,
         connected: auth.isConnected(entry.id),

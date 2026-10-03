@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import { readFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { findMention, mentionPaths, expandMentions } from "../src/core/mention"
+import { findMention, mentionPaths, expandMentions, droppedMentions } from "../src/core/mention"
 
 describe("finding the mention under the caret", () => {
   test("finds one being typed at the end", () => {
@@ -82,6 +82,20 @@ describe("expanding mentions", () => {
     expect(result.content).toBe("no mentions here")
     expect(result.files).toEqual([])
     expect(result.images).toEqual([])
+  })
+
+  test("a dropped file becomes a mention; code and outside paths stay text", async () => {
+    const dropped = `"${path.join(root, "src", "hello.ts")}"`
+    expect(droppedMentions(dropped, root)).toBe("@src/hello.ts ")
+    expect(droppedMentions("explain package.json", root)).toBeUndefined()
+    expect(droppedMentions('console.log("hi")', root)).toBeUndefined()
+    expect(droppedMentions('"C:\\Windows\\win.ini"', root)).toBeUndefined()
+    // Two dropped files at once both convert.
+    expect(droppedMentions(dropped + " " + dropped, root)).toBe("@src/hello.ts @src/hello.ts ")
+    // A log or snippet that merely contains a project path keeps its shape.
+    expect(droppedMentions("error in src/hello.ts\n  at line 3", root)).toBeUndefined()
+    expect(droppedMentions('import x from "src/hello.ts"', root)).toBeUndefined()
+    expect(droppedMentions("", root)).toBeUndefined()
   })
 })
 

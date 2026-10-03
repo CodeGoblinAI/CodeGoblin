@@ -1089,6 +1089,7 @@ async function runCommand(text) {
       "session   " + (sessionId || "not started yet"),
       "theme     " + webSettings.theme,
       "thinking  " + (webSettings.thinking ? "shown" : "hidden"),
+      "checkpoints  " + (paletteData.checkpoint > 0 ? "ask every " + paletteData.checkpoint + " tool calls" : "off"),
       "files     " + ((paletteData.files || []).length + " known to the @ picker"),
     ].join(String.fromCharCode(10)))
     return true
@@ -1473,6 +1474,7 @@ async function submit() {
           note("stopped after " + event.turns + " tool turns - the answer may be unfinished. Ask it to continue.")
         }
         if (event.type === "output_limit") note("The model reached its output-token limit. The answer is unfinished; ask it to continue or increase the server's output budget.")
+        if (event.type === "checkpoint") note("paused at the autonomy checkpoint (" + event.toolCalls + " tool calls) - " + (event.stopped ? "stopped; ask it to continue." : "continuing."))
         if (event.type === "error") turn("agent", "**Error:** " + event.message)
         if (event.type === "saved") {
           refreshSessions()
@@ -1593,6 +1595,17 @@ function findMention(text, cursor) {
   return { start, end, query: text.slice(start + 1, caret) }
 }
 
+/** The /word the caret sits in, if it starts a word. Slashes in paths are not commands. */
+function slashToken(text, cursor) {
+  const before = text.slice(0, cursor)
+  const slash = before.lastIndexOf("/")
+  if (slash < 0) return undefined
+  if (slash > 0 && !/\s/.test(before[slash - 1])) return undefined
+  const token = before.slice(slash)
+  if (!/^\/[A-Za-z0-9_-]*$/.test(token)) return undefined
+  return token
+}
+
 /** Basename matches first, then the shortest path. Same ranking as the TUI. */
 function rankFiles(query) {
   const files = paletteData.files || []
@@ -1687,7 +1700,14 @@ function itemsFor(text, cursor) {
     }))
   }
 
-  if (!text.startsWith("/")) return []
+  if (!text.startsWith("/")) {
+    // A / starting a word mid-prompt completes command names, the way @
+    // completes files there. Argument lists stay line-start only.
+    const token = slashToken(text, cursor)
+    if (!token) return []
+    const query = token.toLowerCase()
+    return (paletteData.commands || []).filter((c) => c.value.startsWith(query)).slice(0, 8)
+  }
   const [head] = text.split(" ")
   const hasArgument = text.includes(" ")
 
@@ -1854,6 +1874,21 @@ function choose(index) {
     input.focus()
     return
   }
+  // A command picked mid-prompt is text being written, not a command being
+  // run: it completes its own word and the sentence stays.
+  if (item.value.startsWith("/") && !input.value.startsWith("/")) {
+    const cursor = input.selectionStart ?? input.value.length
+    const token = slashToken(input.value, cursor)
+    if (token) {
+      const start = cursor - token.length
+      const caret = start + item.value.length + 1
+      input.value = input.value.slice(0, start) + item.value + " " + input.value.slice(cursor)
+      input.setSelectionRange(caret, caret)
+    }
+    refreshPalette()
+    input.focus()
+    return
+  }
   const expands = paletteData.commands.find((c) => c.value === item.value && c.expands)
   if (expands) {
     input.value = item.value + " "
@@ -1874,6 +1909,15 @@ input.addEventListener("click", refreshPalette)
 const PALETTE_KEYS = ["ArrowDown", "ArrowUp", "Escape", "Tab", "Enter"]
 
 input.addEventListener("keydown", (event) => {
+  // Ctrl+S sends the draft now instead of queueing it: stop the running turn
+  // first (and swallow the browser's save dialog, which is never what Enter's
+  // neighbour meant here). The submit below queues while stopping, and the
+  // turn end sends it as soon as the abort lands.
+  if (event.ctrlKey && event.key.toLowerCase() === "s") {
+    event.preventDefault()
+    if (busy && input.value.trim()) { void stopTurn().then(() => submit()) }
+    return
+  }
   if (!paletteItems.length || !PALETTE_KEYS.includes(event.key)) return
 
   // The palette owns these keys outright while it is open, and preventDefault

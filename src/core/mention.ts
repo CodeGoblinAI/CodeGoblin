@@ -1,4 +1,6 @@
 import fs from "node:fs/promises"
+import { statSync } from "node:fs"
+import path from "node:path"
 import { resolveInside, clip } from "./tools"
 
 /**
@@ -155,4 +157,41 @@ export async function expandMentions(
   if (!blocks.length) return { content: text, files, images }
   const attached = "Attached files:" + NEWLINE + NEWLINE + blocks.join(NEWLINE + NEWLINE)
   return { content: text + NEWLINE + NEWLINE + attached, files, images }
+}
+
+/**
+ * Files dropped from Explorer arrive as a paste of quoted paths. Turn the
+ * ones that resolve to real files into mentions, so dropping is attaching.
+ *
+ * Only a paste made of nothing but project file paths converts. One that
+ * merely contains a path - a log, a snippet, a sentence - stays exactly as
+ * pasted: converting its one path used to re-join the rest with single
+ * spaces, flattening newlines and dropping quotes. A path outside the
+ * project, not a file, or with a space in it (a mention cannot carry one)
+ * leaves the paste alone too.
+ */
+export function droppedMentions(text: string, root: string): string | undefined {
+  const tokens: string[] = []
+  const words = /"([^"]+)"|(\S+)/g
+  let match: RegExpExecArray | null
+  while ((match = words.exec(text)) !== null) tokens.push(match[1] ?? match[2]!)
+  if (!tokens.length) return undefined
+  const mentions: string[] = []
+  for (const token of tokens) {
+    const mention = /[\\/]/.test(token) ? fileMention(token, root) : undefined
+    if (!mention || /\s/.test(mention)) return undefined
+    mentions.push(mention)
+  }
+  return mentions.join(" ") + " "
+}
+
+function fileMention(token: string, root: string): string | undefined {
+  let absolute: string
+  try {
+    absolute = resolveInside(root, token)
+    if (!statSync(absolute).isFile()) return undefined
+  } catch {
+    return undefined
+  }
+  return "@" + path.relative(root, absolute).split(path.sep).join("/")
 }

@@ -180,4 +180,29 @@ describe("how much to ask", () => {
       expect([mode.id, mode.label.length > 0 && mode.hint.length > 0]).toEqual([mode.id, true])
     }
   })
+
+  test("autonomy checkpoints ask in words, and for-this-session turns them off", async () => {
+    const seen: { tool: string; detail: string; cover: string }[] = []
+    const permissions = new Permissions(async (tool, detail, cover) => {
+      seen.push({ tool, detail, cover })
+      return "once"
+    })
+    expect(await permissions.checkpoint(10, 10)).toBe("continue")
+    expect(seen).toEqual([{ tool: "autonomous run", detail: "10 tool calls this turn - keep going", cover: "future checkpoints" }])
+    expect(permissions.checkpointsOff).toBe(false)
+
+    const refusing = new Permissions(async () => "reject")
+    expect(await refusing.checkpoint(10, 10)).toBe("stop")
+
+    const disabling = new Permissions(async () => "always")
+    expect(await disabling.checkpoint(10, 10)).toBe("continue")
+    expect(disabling.checkpointsOff).toBe(true)
+    let asked = 0
+    const off = new Permissions(async () => { asked++; return "once" })
+    off.checkpointsOff = true
+    expect(await off.checkpoint(99, 10)).toBe("continue")
+    expect(asked).toBe(0)
+    off.reset()
+    expect(off.checkpointsOff).toBe(false)
+  })
 })

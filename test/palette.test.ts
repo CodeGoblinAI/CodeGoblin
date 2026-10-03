@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { paletteFor, setConnectedProviders } from "../src/tui/palette"
+import { paletteFor, setConnectedProviders, slashToken, slashRange } from "../src/tui/palette"
 
 /**
  * The rule the TUI applies on enter:
@@ -89,5 +89,25 @@ describe("resume is a picker now, not a completion", () => {
 
   test("a trailing space no longer expands into ids", () => {
     expect(paletteFor("/resume ")).toBeUndefined()
+  })
+})
+
+describe("slash mid-prompt", () => {
+  test("a word-starting / completes command names", () => {
+    expect(slashToken("hi there /", 10)).toBe("/")
+    expect(slashToken("hi there /cl", 12)).toBe("/cl")
+    expect(slashRange("hi there /cl", 12)).toEqual({ start: 9, end: 12 })
+    const items = paletteFor("hi there /cl", 12)
+    expect(items?.length).toBeGreaterThan(0)
+    expect(items?.every((i) => i.value.startsWith("/cl"))).toBe(true)
+    expect(items?.some((i) => i.value === "/clear")).toBe(true)
+  })
+
+  test("slashes inside words never trigger", () => {
+    expect(slashToken("a/b", 3)).toBeUndefined()
+    expect(slashToken("costs $5/day", 11)).toBeUndefined()
+    expect(slashToken("hi /clear and /model", 20)).toBe("/model")
+    expect(paletteFor("a/b", 3)).toBeUndefined()
+    expect(paletteFor("hi there", 8)).toBeUndefined()
   })
 })

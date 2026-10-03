@@ -81,4 +81,22 @@ describe("reading codegoblin.jsonc", () => {
     fs.writeFileSync(file, `{ "permission": { "bash": { "*rimraf*": "deny" } } }`)
     expect(loadConfig(file).permission.bash).toEqual({ "*rimraf*": "deny" })
   })
+
+  test("autonomy checkpoint is a positive integer or off", async () => {
+    const { checkpointEvery } = await import("../src/core/config")
+    expect(parseConfig(`{}`).autonomy).toEqual({ checkpoint: 0 })
+    expect(parseConfig(`{ "autonomy": { "checkpoint": 20 } }`).autonomy).toEqual({ checkpoint: 20 })
+    for (const text of [
+      `{ "autonomy": { "checkpoint": 0 } }`,
+      `{ "autonomy": { "checkpoint": -5 } }`,
+      `{ "autonomy": { "checkpoint": 2.5 } }`,
+      `{ "autonomy": { "checkpoint": "twenty" } }`,
+      `{ "autonomy": "twenty" }`,
+    ]) expect(parseConfig(text).autonomy).toEqual({ checkpoint: 0 })
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cg-config-"))
+    const file = path.join(dir, "codegoblin.jsonc")
+    fs.writeFileSync(file, `{ "autonomy": { "checkpoint": 7 } }`)
+    expect(checkpointEvery(file)).toBe(7)
+    expect(checkpointEvery(path.join(dir, "missing.jsonc"))).toBe(0)
+  })
 })

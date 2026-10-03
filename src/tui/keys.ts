@@ -24,6 +24,8 @@ export type Key =
   | { type: "wheelup" }
   | { type: "wheeldown" }
   | { type: "click"; col: number; row: number }
+  | { type: "press"; col: number; row: number }
+  | { type: "drag"; col: number; row: number }
   | { type: "shifttab" }
   | { type: "shiftup" }
   | { type: "shiftdown" }
@@ -141,6 +143,11 @@ export function parseKeys(input: string): Key[] {
         if (button === 64) keys.push({ type: "wheelup" })
         if (button === 65) keys.push({ type: "wheeldown" })
         const [, col, row] = params.slice(1).split(";").map(Number)
+        // Button 32 is motion with the left button held: a drag. A bare press
+        // only anchors; the release below finalizes, so a click without a
+        // drag lands the caret and a drag keeps its selection.
+        if (button === 32 && final === "M" && col! > 0 && row! > 0) keys.push({ type: "drag", col: col!, row: row! })
+        if (button === 0 && final === "M" && col! > 0 && row! > 0) keys.push({ type: "press", col: col!, row: row! })
         if (button === 0 && final === "m" && col! > 0 && row! > 0) keys.push({ type: "click", col: col!, row: row! })
         i = j + 1
         continue

@@ -16,6 +16,7 @@ export type CommandResult =
   | { kind: "provider"; id: string }
   | { kind: "resume"; id?: string }
   | { kind: "compact" }
+  | { kind: "usage" }
   | { kind: "undo" }
   | { kind: "redo" }
   | { kind: "status" }
@@ -29,7 +30,6 @@ export type CommandResult =
   | { kind: "theme"; name?: string }
   | { kind: "thinking" }
   | { kind: "effort"; level?: Effort }
-  | { kind: "mouse" }
   | { kind: "settings" }
   | { kind: "diff" }
   | { kind: "media"; media: MediaKind; line: string }
@@ -62,7 +62,6 @@ export const COMMANDS = [
   { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
   { name: "/effort", description: "how hard a reasoning model thinks: /effort high" },
-  { name: "/mouse", description: "wheel and clicks, or the terminal's own text selection" },
   { name: "/settings", description: "interface and model settings - opens a panel" },
   { name: "/diff", description: "what this session changed, file by file" },
   { name: "/quit", description: "exit" },
@@ -164,8 +163,9 @@ export function runCommand(text: string): CommandResult {
     case "/disconnect":
       return { kind: "disconnect", provider: argument || undefined }
     case "/status":
-    case "/usage":
       return { kind: "status" }
+    case "/usage":
+      return { kind: "usage" }
     case "/mcp":
       return { kind: "mcp" }
     case "/skills":
@@ -197,8 +197,8 @@ export function runCommand(text: string): CommandResult {
       }
       return { kind: "effort", level: argument }
     }
-    case "/mouse":
-      return { kind: "mouse" }
+    // Mouse lives in Settings, not the command list: a toggle nobody can find
+    // is bad, but a slash entry for it invited exactly the confusion it caused.
     case "/rename": {
       if (!argument) return { kind: "message", text: "usage: /rename a shorter title" }
       return { kind: "rename", title: argument }

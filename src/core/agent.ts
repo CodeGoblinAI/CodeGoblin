@@ -2,6 +2,7 @@ import { authHeaders, type Provider } from "./providers"
 import { verifyLocalModel } from "./local-provider"
 import { claudeChat } from "./claude-cli"
 import { TOOL_SCHEMA, runTool, isConcurrent } from "./tools"
+import { checkpointEvery } from "./config"
 import type { Permissions } from "./permission"
 import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT } from "./context"
 import { parseTodos, type Todo } from "./todo"
@@ -89,6 +90,13 @@ export type AgentEvent =
    */
   | { type: "limit"; turns: number }
   | { type: "output_limit" }
+  /**
+   * An autonomy checkpoint was reached: this many tool calls in one turn.
+   *
+   * `stopped` says how the person answered - the turn ended here, or it
+   * carries on and asks again after another full window of calls.
+   */
+  | { type: "checkpoint"; toolCalls: number; stopped: boolean }
   /** Subagents finished and their results were handed to the model, which carries on. */
   | { type: "subagents_collected" }
   | { type: "turn_end" }
@@ -254,6 +262,14 @@ export async function* runAgent(input: {
    * so the loop only forwards what it is given.
    */
   effort?: "low" | "medium" | "high"
+  /**
+   * Pause and ask to continue after this many tool calls in the turn.
+   *
+   * An explicit value wins (which is what tests use); otherwise the config
+   * file is read fresh, so an edit applies to the next turn. 0 or absent
+   * means never - turns run unbounded, which is the default.
+   */
+  checkpoint?: number
   maxTurns?: number
   signal?: AbortSignal
 }): AsyncGenerator<AgentEvent, void, unknown> {
@@ -290,6 +306,12 @@ export async function* runAgent(input: {
 
   // Compact before the first request rather than after a failure: the
   // provider rejects an oversized conversation outright.
+  const windowOf = () => input.checkpoint ?? checkpointEvery()
+  // Autonomy guardrail, opt-in: every tool call this turn counts - spawns too,
+  // because a task call is a tool call in this turn - and at each full window
+  // the person is asked whether the turn may keep going. 0 means never.
+  let toolCallsThisTurn = 0
+  let nextCheckpoint = windowOf()
   if (input.contextWindow && shouldCompact(localChat ? localChatMessages(input.messages) : input.messages, input.contextWindow)) {
     const before = input.messages.length
     const plan = planCompaction(input.messages, input.contextWindow)
@@ -530,6 +552,27 @@ export async function* runAgent(input: {
       }
       input.messages.push({ role: "tool", tool_call_id: call.id, content: result })
       yield { type: "tool_end", id: call.id, name: call.name, result }
+    }
+
+    // Reached a checkpoint window: ask whether this turn may keep going.
+    // Without permissions there is nobody to ask, so the turn carries on;
+    // stopping the turn ends it the way a stop does, with the work so far kept.
+    toolCallsThisTurn += pending.length
+    const every = windowOf()
+    if (every <= 0) nextCheckpoint = 0
+    else {
+      if (nextCheckpoint <= 0) nextCheckpoint = every
+      if (input.permissions && !input.permissions.checkpointsOff && toolCallsThisTurn >= nextCheckpoint) {
+        if (input.signal?.aborted) return
+        const stopped =
+          (await input.permissions.checkpoint(toolCallsThisTurn, every)) === "stop" || input.signal?.aborted === true
+        yield { type: "checkpoint", toolCalls: toolCallsThisTurn, stopped }
+        if (stopped) {
+          yield { type: "turn_end" }
+          return
+        }
+        nextCheckpoint = toolCallsThisTurn + every
+      }
     }
   }
 

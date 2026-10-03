@@ -39,6 +39,14 @@ export type Config = {
   permission: { bash: Record<string, RuleAction> }
   mcp: Record<string, McpServer>
   instructions: string[]
+  /**
+   * Pause and ask to continue after this many tool calls in a turn.
+   *
+   * 0 or absent means never - turns run unbounded, which is the default. A
+   * value of the wrong shape is dropped rather than coerced, like everything
+   * else here: a guardrail guessed into existence is worse than a missing one.
+   */
+  autonomy: { checkpoint: number }
   /** Why the file did not parse cleanly, so a broken config is reported rather than read as empty. */
   problems: string[]
 }
@@ -89,6 +97,20 @@ function servers(value: unknown): Record<string, McpServer> {
   return out
 }
 
+/** Tool calls per turn before asking to continue; anything else means never. */
+function checkpoint(value: unknown): number {
+  const found = isRecord(value) ? value.checkpoint : undefined
+  return typeof found === "number" && Number.isInteger(found) && found > 0 ? found : 0
+}
+
+/**
+ * How many tool calls per turn before asking to continue, read fresh so an
+ * edit applies to the next turn rather than the next launch. 0 means never.
+ */
+export function checkpointEvery(file?: string): number {
+  return loadConfig(file).autonomy.checkpoint
+}
+
 export function parseConfig(text: string): Config {
   const errors: ParseError[] = []
   const raw: unknown = parse(text, errors, { allowTrailingComma: true })
@@ -100,6 +122,7 @@ export function parseConfig(text: string): Config {
     instructions: Array.isArray(root.instructions)
       ? root.instructions.filter((entry): entry is string => typeof entry === "string")
       : [],
+    autonomy: { checkpoint: checkpoint(root.autonomy) },
     problems: errors.map((error) => printParseErrorCode(error.error) + " at offset " + error.offset),
   }
 }

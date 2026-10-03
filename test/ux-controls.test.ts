@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { ctrlCAction, dialogRowAt } from "../src/tui/interaction"
+import { ctrlCAction, dialogRowAt, insideDialog } from "../src/tui/interaction"
 import { parseKeys } from "../src/tui/keys"
 import { runCommand, normalizeCommand, PENDING_COMMANDS } from "../src/core/commands"
 import { addSpend, formatSpend } from "../src/core/context"
@@ -13,8 +13,12 @@ test("Ctrl+C copies selection, stops work, clears drafts, then quits", () => {
   expect(ctrlCAction({ ...state, secret: true, busy: false })).toBe("clear")
   expect(ctrlCAction({ selected: false, busy: false, draft: false, secret: false })).toBe("quit")
 })
-test("SGR left release activates once; presses and right clicks do not", () => {
-  expect(parseKeys("\x1b[<0;3;23M\x1b[<0;3;23m")).toEqual([{ type: "click", col: 3, row: 23 }])
+test("SGR press, drag and release parse; right clicks do not", () => {
+  expect(parseKeys("\x1b[<0;3;23M\x1b[<0;3;23m")).toEqual([
+    { type: "press", col: 3, row: 23 },
+    { type: "click", col: 3, row: 23 },
+  ])
+  expect(parseKeys("\x1b[<32;5;10M")).toEqual([{ type: "drag", col: 5, row: 10 }])
   expect(parseKeys("\x1b[<2;3;23m")).toEqual([])
 })
 test("dialog hit testing matches visible rows including scroll offset", () => {
@@ -23,9 +27,17 @@ test("dialog hit testing matches visible rows including scroll offset", () => {
   expect(dialogRowAt({ ...frame, row: 13 })).toBeUndefined()
   expect(dialogRowAt({ ...frame, col: 1 })).toBeUndefined()
 })
+test("a click on the dialog box itself is not a click outside it", () => {
+  const frame = { cols: 100, rows: 40, width: 60, boxHeight: 15, col: 25, row: 13 }
+  // Row 13 is the title area: no row there, but still the box.
+  expect(insideDialog(frame)).toBe(true)
+  expect(insideDialog({ ...frame, col: 1 })).toBe(false)
+  expect(insideDialog({ ...frame, row: 30 })).toBe(false)
+})
 test("slash aliases route to implemented commands; deferred commands never invoke models", () => {
   expect(runCommand("/models deepseek")).toEqual(runCommand("/model deepseek"))
-  expect(runCommand("/usage")).toEqual({ kind: "status" })
+  expect(runCommand("/usage")).toEqual({ kind: "usage" })
+  expect(runCommand("/status")).toEqual({ kind: "status" })
   expect(normalizeCommand("please /models")).toBe("please /models")
   for (const command of Object.keys(PENDING_COMMANDS)) expect(runCommand(command).kind).toBe("message")
 })

@@ -739,3 +739,68 @@ describe("local usage", () => {
     expect(bodies[0]!).not.toHaveProperty("stream_options")
   })
 })
+
+describe("autonomy checkpoints", () => {
+  const twoReads = () => asksForMany(
+    { id: "c1", name: "list_files", args: '{"path":"."}' },
+    { id: "c2", name: "list_files", args: '{"path":"."}' },
+  )()
+
+  async function run(ask: () => Promise<"once" | "always" | "reject">, turns: (() => Response)[]) {
+    const served = serve(...turns)
+    const { Permissions } = await import("../src/core/permission")
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider, modelId: "test-model", apiKey: "not-a-real-key",
+      messages: [{ role: "user", content: "go" }],
+      root: process.cwd(), maxTurns: 5,
+      permissions: new Permissions(ask),
+      checkpoint: 2,
+    })) events.push(event)
+    return { events, calls: served() }
+  }
+
+  test("a rejection stops the turn at the window", async () => {
+    const { events, calls } = await run(async () => "reject", [twoReads, () => answers("done")])
+    expect(events.filter((event) => event.type === "checkpoint")).toEqual([
+      { type: "checkpoint", toolCalls: 2, stopped: true },
+    ])
+    expect(events.at(-1)?.type).toBe("turn_end")
+    expect(calls).toBe(1)
+  })
+
+  test("continuing asks again after another full window", async () => {
+    let asked = 0
+    const { events, calls } = await run(async () => { asked++; return "once" }, [twoReads, twoReads, () => answers("done")])
+    expect(events.filter((event) => event.type === "checkpoint")).toEqual([
+      { type: "checkpoint", toolCalls: 2, stopped: false },
+      { type: "checkpoint", toolCalls: 4, stopped: false },
+    ])
+    expect(events.at(-1)?.type).toBe("turn_end")
+    expect(asked).toBe(2)
+    expect(calls).toBe(3)
+  })
+
+  test("for-this-session disables later windows", async () => {
+    let asked = 0
+    const { events, calls } = await run(async () => { asked++; return "always" }, [twoReads, twoReads, () => answers("done")])
+    expect(events.filter((event) => event.type === "checkpoint")).toEqual([
+      { type: "checkpoint", toolCalls: 2, stopped: false },
+    ])
+    expect(asked).toBe(1)
+    expect(calls).toBe(3)
+  })
+
+  test("unset means unbounded, as before", async () => {
+    const served = serve(twoReads, () => answers("done"))
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider, modelId: "test-model", apiKey: "not-a-real-key",
+      messages: [{ role: "user", content: "go" }],
+      root: process.cwd(), maxTurns: 3,
+    })) events.push(event)
+    expect(events.some((event) => event.type === "checkpoint")).toBe(false)
+    expect(events.at(-1)?.type).toBe("turn_end")
+    expect(served()).toBe(2)
+  })
+})

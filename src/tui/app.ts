@@ -13,7 +13,7 @@ import { EFFORTS } from "../core/settings"
 import { createKeyReader } from "./keys"
 import { parseLaunch } from "./args"
 import { isLiveCommand } from "./live-commands"
-import { copyText, ctrlCAction, dialogRowAt } from "./interaction"
+import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
 import { allSelections } from "../core/providers"
 import { normalizeCommand } from "../core/commands"
 import { claudeAuthStatus } from "../core/claude-cli"
@@ -39,9 +39,10 @@ import {
   renderPalette,
   setFileCache,
   setConnectedProviders,
+  slashRange,
   type PaletteItem,
 } from "./palette"
-import { findMention, expandMentions } from "../core/mention"
+import { findMention, expandMentions, droppedMentions } from "../core/mention"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
 import * as settingsStore from "../core/settings"
 import {
@@ -62,7 +63,7 @@ import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
 import { defaultSelection, resolveSelection, acceptsImages, effortFor, takesEffort, type Selection, kindOf } from "../core/providers"
 import { apiKey, connect, disconnect, connections, storePath, envVariable } from "../core/auth"
-import { localChatMessages, runAgent, type Message } from "../core/agent"
+import { localChatMessages, runAgent, type Attachment, type Message } from "../core/agent"
 import { COMMANDS, isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
 import {
@@ -83,7 +84,7 @@ import { customCommands, invocationItems, resolveInvocation } from "../core/invo
 import { listSkills, skillIndex } from "../core/skills"
 import { setInvocations } from "./palette"
 import { systemPrompt } from "../core/system-prompt"
-import { configPath } from "../core/config"
+import { configPath, checkpointEvery } from "../core/config"
 
 const argv = process.argv.slice(2)
 
@@ -214,6 +215,8 @@ setInvocations(invocationItems(process.cwd()))
  */
 type Pasted = { token: string; text: string; lines: number }
 let pastes: Pasted[] = []
+/** Clipboard pictures waiting to ride with the next message. Shown, so they never sneak in unseen. */
+let pendingImages: Attachment[] = []
 
 /** Long enough to be worth folding away; below this it just reads as typing. */
 const PASTE_FOLD_LINES = 4
@@ -384,6 +387,27 @@ let paletteIndex = 0
  */
 let caretAt: { row: number; col: number } | undefined
 
+/**
+ * The composer's visible rows on screen, for mapping mouse coordinates to
+ * text. Content starts after the "  | " gutter, so screen column 5 is offset
+ * zero; columns are clamped into the row, wide characters approximately.
+ */
+let composerMap: { first: number; rows: string[]; before: number } | undefined
+/** Whether the mouse has dragged since the press: a clean release is a caret move. */
+let dragged = false
+
+function composerOffset(col: number, row: number): number | undefined {
+  const map = composerMap
+  if (!map || !input) return undefined
+  const index = row - map.first
+  if (index < 0 || index >= map.rows.length) return undefined
+  const line = map.rows[index]!
+  const into = Math.max(0, Math.min(col - 5, line.length))
+  let at = map.before
+  for (let i = 0; i < index; i++) at += map.rows[i]!.length
+  return Math.max(0, Math.min(at + into, input.length))
+}
+
 const size = () => ({ cols: out.columns ?? 80, rows: out.rows ?? 24 })
 const charWidthOf = (char: string) => displayWidth(char)
 const centre = (text: string, width: number) => " ".repeat(Math.max(0, Math.floor(width))) + text
@@ -403,6 +427,16 @@ function completeWith(value: string) {
     if (mention) {
       input = input.slice(0, mention.start) + value + " " + input.slice(mention.end)
       cursor = mention.start + value.length + 1
+      return
+    }
+  }
+  // A command picked mid-prompt replaces its own word, the way a mention
+  // does: the rest of the sentence has to survive being completed.
+  if (value.startsWith("/")) {
+    const range = slashRange(input, cursor)
+    if (range && range.start > 0) {
+      input = input.slice(0, range.start) + value + " " + input.slice(range.end)
+      cursor = range.start + value.length + 1
       return
     }
   }
@@ -468,21 +502,32 @@ function caretIn(rows: string[], cursor: number): { line: number; column: number
   const last = rows.length - 1
   return { line: last, column: displayWidth(rows[last] ?? "") }
 }
+/** How wide the side panel is, when a wide terminal shows one. */
+const RAIL_WIDTH = 34
+/** The narrowest terminal that shows it; below this every column is the transcript. */
+const RAIL_MIN_COLS = 150
 let toolbarRow = 0
 let toolbarTargets: { from: number; to: number; command: string }[] = []
+/** The floating back-to-latest pill, when one is drawn: its screen row and span. */
+let latestPill: { row: number; from: number; to: number } | undefined
 function render() {
   const { cols, rows } = size()
-  const width = Math.max(20, cols - 6)
+  // With the side panel showing, the transcript gets the columns left of it -
+  // wrapping to the full width and cutting at the panel lost the right side,
+  // which is where your own messages sit.
+  const railShown = cols >= RAIL_MIN_COLS
+  const main = railShown ? cols - RAIL_WIDTH - 1 : cols
+  const width = Math.max(20, main - 6)
   const lines: string[] = []
 
   if (transcript.length === 0) {
-    const wide = cols >= WORDMARK_WIDTH + 4
+    const wide = main >= WORDMARK_WIDTH + 4
     const art = wide ? WORDMARK : [COMPACT]
-    const gutter = (cols - (wide ? WORDMARK_WIDTH : COMPACT.length)) / 2
+    const gutter = (main - (wide ? WORDMARK_WIDTH : COMPACT.length)) / 2
     lines.push("")
     for (const row of art) lines.push(theme.goblin + centre(row, gutter) + ansi.reset)
     lines.push("")
-    lines.push(theme.gold + centre("your local AI goblin for code, images and agents", (cols - 47) / 2) + ansi.reset)
+    lines.push(theme.gold + centre("your local AI goblin for code, images and agents", (main - 47) / 2) + ansi.reset)
   } else {
     for (const entry of transcript) {
       if (entry.kind === "tool") {
@@ -566,6 +611,19 @@ function render() {
   const cut = lines.length - room - scroll
   const body = lines.length > room ? lines.slice(Math.max(0, cut), Math.max(0, cut) + room) : lines
   while (body.length < room) body.push("")
+
+  // A side panel on wide terminals: session, spend and servers at a glance,
+  // the way the original shows them beside the conversation. Narrow screens
+  // keep every column for the transcript - it is only ever display, never
+  // clickable, so nothing below has to learn new coordinates.
+  if (railShown) {
+    const rail = railLines(room)
+    for (let index = 0; index < body.length; index++) {
+      body[index] =
+        padToWidth(truncateToWidth(body[index]!, main), main) +
+        theme.border + "│" + ansi.reset + padToWidth(truncateToWidth(rail[index] ?? "", RAIL_WIDTH), RAIL_WIDTH)
+    }
+  }
 
   for (const line of planLines) body.push(line)
   for (const line of paletteLines) body.push(line)
@@ -689,6 +747,27 @@ function render() {
   }
 
   body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
+  // Scrolled up a way: a floating way back down, Claude-style, only while
+  // scrolled - a button that is always there teaches nobody anything.
+  latestPill = undefined
+  if (scroll > 3) {
+    const label = "[ ↓ back to latest ]"
+    const from = Math.max(0, Math.floor((cols - displayWidth(label)) / 2))
+    body.push(" ".repeat(from) + theme.gold + label + ansi.reset)
+    latestPill = { row: body.length, from: from + 1, to: from + label.length }
+  }
+  // A queued prompt stays on screen in dimmer text, Claude-style: clearing
+  // the composer without showing what is waiting reads as the prompt being
+  // eaten, and Ctrl+S with an empty composer then looks broken.
+  if (queued && !secret) {
+    const preview = queued.replace(/\s+/g, " ")
+    body.push(dim + "  queued: " + truncateToWidth(preview, Math.max(0, cols - 14)) + ansi.reset)
+  }
+  // Clipboard pictures waiting to ride along. Named on screen so nothing
+  // reaches the model unseen; a new conversation lets them go.
+  if (pendingImages.length && !secret) {
+    body.push(dim + "  images: " + truncateToWidth(pendingImages.map((image) => image.name).join(", "), Math.max(0, cols - 14)) + ansi.reset)
+  }
   if (composerRows.length > 1) {
     let seen = rowsBefore
     for (const row of composerRows) {
@@ -712,6 +791,13 @@ function render() {
   } else {
     body.push(theme.goblin + "  | " + ansi.reset + shown)
   }
+
+  // Where the composer's visible rows sit, so a mouse press or drag maps to
+  // a text offset. Recorded per frame because wrapping and scroll move them.
+  composerMap =
+    input && composerRows.length
+      ? { first: body.length - composerRows.length + 1, rows: [...composerRows], before: rowsBefore }
+      : undefined
   body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
 
   const context = contextUsage()
@@ -721,15 +807,15 @@ function render() {
     (boost || boostOnce ? "  [boost]" : "") +
     (subagents.running().length ? "  [" + subagents.running().length + " subagent" + (subagents.running().length === 1 ? "" : "s") + " running]" : "")
   const spendTag = spend.input + spend.output > 0 ? "  " + formatSpend(spend) : ""
-  const left =
-    status ||
-    modeTag.trim() + (modeTag ? "  " : "") +
-      selection.provider.label + " . " + selection.model.id +
-      "  ~" + context.percent + "% ctx" + spendTag
+  // Usage stays on the bar even while a status is showing: a transient
+  // message used to replace the model, context and spend readout entirely,
+  // so "no key" also hid what you were connected to.
+  const usage = selection.provider.label + " . " + selection.model.id + "  ~" + context.percent + "% ctx" + spendTag
+  const left = status ? status + "   " + usage : modeTag.trim() + (modeTag ? "  " : "") + usage
   const right = dialog
     ? "up/down move . enter chooses . esc closes"
     : streaming
-    ? (queued ? "queued . shift+tab mode . esc stops" : "enter queues . / controls . shift+tab mode . esc stops")
+    ? (queued ? "queued . shift+tab mode . esc stops" : "enter queues . ctrl+s sends now . esc stops")
     : secret
     ? "enter saves . esc cancels . nothing is echoed"
     : overlay
@@ -989,6 +1075,60 @@ function onSubagent(event: SubagentEvent) {
   render()
 }
 
+/**
+ * What /status says about autonomy checkpoints: the configured window, or off.
+ * Read fresh like the rules, so editing codegoblin.jsonc shows up immediately.
+ */
+function checkpointStatus(): string {
+  const every = checkpointEvery()
+  if (every <= 0) return "off"
+  return "ask every " + every + " tool calls" + (permissions.checkpointsOff ? "  (off for this session)" : "")
+}
+
+/** The focused spend readout: tokens, cost, context - not session config. */
+function usageRows(): [string, string][] {
+  const context = contextUsage()
+  return [
+    ["context", "~" + context.used + " / " + selection.model.contextWindow + " (" + context.percent + "%)"],
+    ["tokens", spend.input.toLocaleString() + " input / " + spend.output.toLocaleString() + " output"],
+    ["cost", spend.dollars === undefined ? "unknown / subscription; not zero" : formatSpend(spend)],
+    ["quotas/balances", "not wired yet"],
+  ]
+}
+
+/** Session, spend and servers beside the transcript on wide terminals. */
+function railLines(height: number): string[] {
+  const context = contextUsage()
+  const every = checkpointEvery()
+  const filled = Math.max(0, Math.min(10, Math.round(context.percent / 10)))
+  const barTone = context.percent >= 90 ? theme.error : context.percent >= 70 ? theme.gold : theme.text
+  const bar = barTone + "█".repeat(filled) + "░".repeat(10 - filled) + ansi.reset
+  const servers = mcp.statuses()
+  const rows: [string, string][] = [
+    ["session", session.title],
+    ["model", selection.provider.label + " " + selection.model.label],
+    ["context", bar + " " + context.percent + "%"],
+    ["tokens", spend.input.toLocaleString() + " in / " + spend.output.toLocaleString() + " out"],
+    ["cost", spend.dollars === undefined ? "unknown" : formatSpend(spend)],
+    ["mode", permissions.mode + (permissions.planning ? " +planning" : "") + (boost || boostOnce ? " +boost" : "")],
+    ["checkpoints", every > 0 ? "every " + every + (permissions.checkpointsOff ? " (off)" : "") : "off"],
+    ["mcp", servers.length ? "" : "none yet"],
+    ...servers.slice(0, 4).map((server): [string, string] => [
+      server.name,
+      server.status === "connected" ? server.tools.length + " tools" : server.status,
+    ]),
+  ]
+  const out = [
+    theme.gold + padToWidth(" goblin", RAIL_WIDTH) + ansi.reset,
+    ...rows.map(([label, value]) => {
+      const cell = " " + label + " " + value
+      return dim + truncateToWidth(cell, RAIL_WIDTH) + ansi.reset
+    }),
+  ]
+  while (out.length < height) out.push("")
+  return out.slice(0, height)
+}
+
 /** Ask for approval, Approve for me, Full access - the same three Shift+Tab cycles through. */
 function openApprovalsPicker() {
   dialog = Dialogs.open(
@@ -1154,6 +1294,19 @@ async function chooseInDialog() {
   if (!row || !row.value) { render(); return }
   if (dialog.kind === "attach") {
     closeDialog()
+    if (row.value === "image") {
+      status = "reading the clipboard…"
+      render()
+      try {
+        const picture = await readClipboardImage()
+        pendingImages.push(picture)
+        status = "attached " + picture.name + " - sends with the next message"
+      } catch (error) {
+        status = error instanceof Error ? error.message : "could not read the clipboard"
+      }
+      render()
+      return
+    }
     applyComposer(insertText(composerState(), row.value === "file" ? "@" : "/"), true)
     refreshPalette()
     render()
@@ -1363,14 +1516,18 @@ async function deleteInDialog() {
 async function send() {
   if (secret) {
     const provider = secret.provider
-    const key = input
+    const typed = input
     // Cleared before the await, so a slow disk cannot leave it on screen.
     input = ""
     cursor = 0
     secret = undefined
     try {
-      await connect(provider, key)
+      await connect(provider, typed)
       refreshConnected()
+      // The key this terminal sends is read once at startup and on model
+      // switches - storing one without re-reading it left every later prompt
+      // answering "no key" for a provider that was just connected.
+      if (provider === selection.provider.id) key = apiKey(provider)
       status = "connected " + provider + " - stored in " + storePath()
     } catch (error) {
       status = error instanceof Error ? error.message : "could not store the key"
@@ -1391,7 +1548,9 @@ async function send() {
     queued = text
     applyComposer({ text: "", cursor: 0 }, true)
     palette = undefined
-    status = replaced ? "replaced queued prompt - sending when this turn ends" : "queued - sending when this turn ends"
+    status = replaced
+      ? "replaced queued prompt - sending when this turn ends . Ctrl+S sends now"
+      : "queued - sending when this turn ends . Ctrl+S sends now"
     render()
     return
   }
@@ -1411,6 +1570,7 @@ async function send() {
       subagents.reset()
       edits.reset()
       pastes = []
+      pendingImages = []
       spend = { input: 0, output: 0 }
       overlay = undefined
       status = "new conversation"
@@ -1445,14 +1605,6 @@ async function send() {
           : takesEffort(selection.model)
             ? "effort: " + result.level
             : "effort: " + result.level + " (saved; " + selection.model.label + " does not reason)"
-    }
-    if (result.kind === "mouse") {
-      settings = { ...settings, mouse: !settings.mouse }
-      void settingsStore.save(settings)
-      applyMouse()
-      status = settings.mouse
-        ? "mouse on - wheel scrolls, shift+drag selects"
-        : "mouse off - drag selects text, pgup/dn scrolls"
     }
     if (result.kind === "settings") { openSettings(); render(); return }
     if (result.kind === "diff") { await openDiff(); render(); return }
@@ -1627,11 +1779,17 @@ async function send() {
             : settings.effort + (takesEffort(selection.model) ? "" : "  (not sent - this model does not take it)"),
         ],
         ["approved", approved.length ? approved.join(", ") : "nothing yet"],
+        ["checkpoints", checkpointStatus()],
         ["undo", edits.canUndo() ? "available" : "nothing to take back"],
         ["working in", process.cwd()],
       ]
       overlay = { title: "status", rows }
       if (cli) rows.push(["CLI", cli.detail])
+    }
+    // /usage is the spend readout, not session config: tokens, cost and
+    // context on their own, the way the [Usage] button shows them.
+    if (result.kind === "usage") {
+      overlay = { title: "Usage (context is estimated)", rows: usageRows() }
     }
     if (result.kind === "undo" || result.kind === "redo") {
       const forward = result.kind === "redo"
@@ -1705,8 +1863,17 @@ async function send() {
     return
   }
 
-  // Says how to fix it, not only what is wrong.
-  if (key === undefined) { status = "no key for " + selection.provider.label + " - /connect " + selection.provider.id + " to add one"; render(); return }
+  // Says how to fix it, not only what is wrong - and in the transcript, not
+  // only the status bar, where the next status replaced it before it was read.
+  if (key === undefined) {
+    const missing =
+      "No key for " + selection.provider.label + " - add one with /connect " + selection.provider.id +
+      " (stored in " + storePath() + "), or set " + envVariable(selection.provider.id) + " and resend."
+    status = "no key for " + selection.provider.label + " - /connect " + selection.provider.id + " to add one"
+    transcript.push({ kind: "tool", state: "failed", text: missing })
+    render()
+    return
+  }
 
   input = ""
   cursor = 0
@@ -1720,21 +1887,25 @@ async function send() {
   const whole = invoked ? invoked.content : unfoldPastes(text)
   const mentioned = await expandMentions(whole, process.cwd())
   const seeing = acceptsImages(selection)
+  const images = [...mentioned.images, ...pendingImages]
+  const pasted = pendingImages.map((image) => image.name)
+  pendingImages = []
   messages.push(
-    mentioned.files.length || whole !== text
-      ? { role: "user", content: mentioned.content, display: text, images: mentioned.images }
+    mentioned.files.length || whole !== text || images.length
+      ? { role: "user", content: mentioned.content, display: text, images }
       : { role: "user", content: text },
   )
   transcript.push({ kind: "user", text })
   if (mentioned.files.length) transcript.push({ kind: "tool", text: "attached " + mentioned.files.join(", ") })
+  if (pasted.length) transcript.push({ kind: "tool", text: "attached " + pasted.join(", ") })
   // Attaching a picture to a model that cannot see one is a mistake worth
   // catching here, where the model is named, rather than leaving it to be
   // inferred from an answer that does not mention the image.
-  if (mentioned.images.length && !seeing) {
+  if (images.length && !seeing) {
     transcript.push({
       kind: "tool",
       text: selection.model.label + " cannot see images - pick a vision model to send " +
-        mentioned.images.map((image) => image.name).join(", "),
+        images.map((image) => image.name).join(", "),
     })
   }
   streaming = true
@@ -1821,6 +1992,17 @@ async function send() {
         transcript.push({ kind: "tool", text: "The model reached its output-token limit. The answer is unfinished; ask it to continue or increase the server's output budget." })
         status = "hit the output limit"
       }
+      // An autonomy checkpoint fired: the turn paused to ask whether it may
+      // keep going. Either way the transcript says what happened, because a
+      // turn that stopped here is unfinished work, not a finished answer.
+      if (event.type === "checkpoint") {
+        transcript.push({
+          kind: "tool",
+          text: "paused at the autonomy checkpoint (" + event.toolCalls + " tool calls) - " +
+            (event.stopped ? "stopped; ask it to continue" : "continuing"),
+        })
+        if (event.stopped) status = "stopped at the autonomy checkpoint"
+      }
       // Found by call id rather than by being last: several tools can be open
       // at once now, so "the most recent row" is no longer the right one.
       const rowFor = (id: string) =>
@@ -1881,6 +2063,7 @@ async function send() {
     if (queued) {
       const next = queued
       queued = undefined
+      status = "sending now"
       const draft = composerState()
       input = next
       cursor = next.length
@@ -1897,7 +2080,7 @@ async function send() {
 }
 
 function shutdown() {
-  out.write("[0m" + ansi.pasteOff + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
+  out.write("[0m" + ansi.pasteOff + "\x1b[?1002l\x1b[?1006l" + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
   // MCP servers started as child processes go with the app, but one that will
   // not close is not allowed to keep the terminal waiting.
   void Promise.race([mcp.close(), new Promise((done) => setTimeout(done, 1500))]).finally(() => process.exit(0))
@@ -1923,7 +2106,7 @@ void refreshFileCache()
  * than a choice, which is the right call - so does this.
  */
 function applyMouse() {
-  out.write(settings.mouse ? ansi.takeMouse : "\x1b[?1000l\x1b[?1006l" + ansi.ownMouse)
+  out.write(settings.mouse ? ansi.takeMouse : "\x1b[?1002l\x1b[?1006l" + ansi.ownMouse)
 }
 
 function refreshConnected() {
@@ -1990,24 +2173,95 @@ process.stdin.on("data", (chunk) => {
       if (action === "quit") return shutdown()
       render(); continue
     }
+    // Ctrl+S sends the draft now instead of queueing it: the running turn is
+    // stopped and the turn-end below picks the draft up as soon as the abort
+    // lands. A waiting permission question is refused so the abort is never
+    // stuck behind a prompt nobody will answer. With nothing typed but a
+    // prompt already queued, it fast-forwards that one instead of ignoring
+    // the key.
+    if (pressed.type === "ctrl" && pressed.value === "s") {
+      if (streaming && !secret && !dialog && (input.trim() || queued)) {
+        if (pending) { pending.resolve("reject"); pending = undefined; pendingChoice = 0 }
+        for (const ask of waitingAsks) ask.resolve("reject")
+        waitingAsks.length = 0
+        if (input.trim()) {
+          queued = input
+          input = ""
+          cursor = 0
+          palette = undefined
+        }
+        turn?.abort()
+        subagents.stopAll()
+        status = "interrupted - sending now"
+        render(); continue
+      }
+      if (streaming && !secret && !dialog) status = "nothing to send - type a prompt first, Enter queues, Ctrl+S sends now"
+      render()
+      continue
+    }
+    // A press or drag in the composer starts or extends a mouse selection,
+    // the way shift+arrows do from the keyboard. Backspace deletes it, typing
+    // replaces it, Ctrl+C copies it; Escape below drops it.
+    if (pressed.type === "press" || pressed.type === "drag") {
+      if (!dialog && !secret) {
+        const hit = composerOffset(pressed.col, pressed.row)
+        if (hit !== undefined) {
+          if (pressed.type === "press") {
+            applyComposer({ text: input, cursor: hit, anchor: hit })
+            dragged = false
+          } else {
+            applyComposer({ text: input, cursor: hit, anchor })
+            dragged = true
+          }
+          refreshPalette()
+          render()
+        }
+      }
+      continue
+    }
     if (pressed.type === "click") {
       if (dialog) {
         const screen = size()
         const height = Dialogs.dialogHeight(dialog, screen.rows)
-        const index = dialogRowAt({ ...pressed, ...screen, width: Dialogs.dialogWidth(dialog, screen.cols), height, boxHeight: Dialogs.box(dialog, screen.cols, screen.rows).length, first: Dialogs.firstVisible(dialog, height) })
+        const width = Dialogs.dialogWidth(dialog, screen.cols)
+        const boxHeight = Dialogs.box(dialog, screen.cols, screen.rows).length
+        const index = dialogRowAt({ ...pressed, ...screen, width, height, boxHeight, first: Dialogs.firstVisible(dialog, height) })
+        // A click outside the box goes back to the conversation: a popup you
+        // can only leave through its own rows traps the mouse. A click on the
+        // box itself - title, border, a heading - leaves it open.
         if (index !== undefined && !dialog.rows[index]?.inert) { dialog.index = index; void chooseInDialog() }
-        continue
+        else if (!insideDialog({ ...pressed, ...screen, width, boxHeight })) closeDialog()
+        render(); continue
       }
-      if (pressed.row !== toolbarRow || secret) continue
+      // The floating pill goes back to the latest output.
+      if (latestPill && pressed.row === latestPill.row && pressed.col >= latestPill.from && pressed.col <= latestPill.to) {
+        scroll = 0
+        render(); continue
+      }
+      // A release in the composer ends the gesture: dragged keeps its
+      // selection for backspace or copy, a clean click is a caret move.
+      if (!secret) {
+        const hit = composerOffset(pressed.col, pressed.row)
+        if (hit !== undefined) {
+          if (!dragged) applyComposer({ text: input, cursor: hit })
+          dragged = false
+          refreshPalette()
+          render(); continue
+        }
+      }
+      // Clicks elsewhere drop a keyboard or mouse selection.
+      anchor = undefined
+      dragged = false
+      if (pressed.row !== toolbarRow || secret) { render(); continue }
       const target = toolbarTargets.find((item) => pressed.col >= item.from && pressed.col <= item.to)?.command
-      if (target === "attach") dialog = Dialogs.open("attach", "Add to the prompt", [{ label: "Mention a project file", value: "file" }, { label: "Run a slash command", value: "command" }])
+      if (target === "attach") dialog = Dialogs.open("attach", "Add to the prompt", [{ label: "Mention a project file", value: "file" }, { label: "Paste image from clipboard", value: "image" }, { label: "Run a slash command", value: "command" }])
       if (target === "model") dialog = Dialogs.open("model-picker", "Choose model", allSelections().map((s) => ({ label: s.provider.label + " " + s.model.label, value: s.provider.id + "/" + s.model.id })), { size: "large" })
       if (target === "settings") openSettings()
       if (target === "sessions") {
         if (streaming) { status = "sessions cannot change during a turn; use /resume to queue" }
         else void openSessions().then(render)
       }
-      if (target === "usage") overlay = { title: "Usage (context is estimated)", rows: [["context", "~" + contextUsage().used + " / " + selection.model.contextWindow], ["tokens", spend.input + " input / " + spend.output + " output"], ["cost", spend.dollars === undefined ? "unknown / subscription; not zero" : formatSpend(spend)]] }
+      if (target === "usage") overlay = { title: "Usage (context is estimated)", rows: usageRows() }
       render(); continue
     }
     if (pressed.type === "shifttab") {
@@ -2101,6 +2355,15 @@ process.stdin.on("data", (chunk) => {
           continue
         }
 
+        // A command picked mid-prompt is text being written, not a command
+        // being run: it completes its own word and the sentence stays.
+        if (chosen.startsWith("/") && !input.startsWith("/")) {
+          completeWith(chosen)
+          refreshPalette()
+          render()
+          continue
+        }
+
         // A bare command that takes an argument expands rather than runs:
         // typing /model and pressing enter should offer the models, not print
         // help. An item containing a space is already a complete choice, so it
@@ -2137,8 +2400,10 @@ process.stdin.on("data", (chunk) => {
       // Escape clears the line; it never exits. Quitting is ctrl+c.
       case "paste": {
         // Newlines inside a paste are content. A paste that is only one
-        // short line is just typing, and goes in as it is.
-        const value = foldPaste(pressed.value.replace(/\r\n?/g, String.fromCharCode(10)))
+        // short line is just typing, and goes in as it is - unless it is a
+        // file dropped from Explorer, which becomes a mention instead.
+        const dropped = droppedMentions(pressed.value.replace(/\r\n?/g, String.fromCharCode(10)), process.cwd())
+        const value = dropped ?? foldPaste(pressed.value.replace(/\r\n?/g, String.fromCharCode(10)))
         applyComposer(insertText(composerState(), value), true)
         dirty = true
         break
@@ -2147,7 +2412,7 @@ process.stdin.on("data", (chunk) => {
         if (secret) { secret = undefined; input = ""; cursor = 0; anchor = undefined; status = "cancelled"; dirty = true; break }
         // Escape drops a selection before it clears the line, so losing a
         // highlight does not also lose everything you had written.
-        if (anchor !== undefined) { anchor = undefined; dirty = true; break }
+        if (anchor !== undefined) { anchor = undefined; dragged = false; dirty = true; break }
         if (input) { applyComposer({ text: "", cursor: 0 }, true); dirty = true }
         else if (streaming) {
           turn?.abort()

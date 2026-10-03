@@ -39,8 +39,8 @@ export const ansi = {
    */
   pasteOn: `${ESC}?2004h`,
   pasteOff: `${ESC}?2004l`,
-  /** Button and wheel reporting, SGR encoded - the app takes the mouse. */
-  takeMouse: `${ESC}?1000h${ESC}?1006h`,
+  /** Button, wheel and drag reporting, SGR encoded - the app takes the mouse. */
+  takeMouse: `${ESC}?1002h${ESC}?1006h`,
   ownMouse: `${ESC}?1007l`,
   releaseMouse: `${ESC}?1007h`,
 }
