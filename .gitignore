@@ -20,3 +20,8 @@ codegoblin-output/
 # finds, which is why the test script skips them too.
 _RECOVERED_LOCAL_*/
 _RECOVERED_LOCAL_*.txt
+
+# Test workspaces, CODEGOBLIN_DIR profiles and screenshots from user passes.
+# Profiles hold auth.json once a key is connected, so they must never be staged.
+/output/
+.playwright-cli/
