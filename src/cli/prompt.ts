@@ -19,6 +19,7 @@ import { apiKey, envVariable } from "../core/auth"
 import { streamChat } from "../core/chat"
 import { isChatModel } from "../core/providers"
 import { resolveStartupModel } from "../core/model-selection"
+import { configuredInstructions } from "../core/instructions"
 
 const argv = process.argv.slice(2)
 
@@ -74,11 +75,12 @@ process.on("SIGINT", () => stopping.abort())
 
 try {
   let answered = false
+  const instructions = configuredInstructions(process.cwd())
   for await (const delta of streamChat({
     provider: selection.provider,
     modelId: selection.model.id,
     apiKey: key,
-    messages: [{ role: "user", content: prompt }],
+    messages: [...(instructions ? [{ role: "system" as const, content: instructions }] : []), { role: "user", content: prompt }],
     signal: stopping.signal,
   })) {
     answered = true

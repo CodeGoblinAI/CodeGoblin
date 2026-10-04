@@ -3,6 +3,7 @@ import { verifyLocalModel } from "./local-provider"
 import { cliCompletion } from "./cli-completion"
 import { TOOL_SCHEMA, runTool, isConcurrent } from "./tools"
 import { checkpointEvery } from "./config"
+import { configuredInstructions } from "./instructions"
 import type { Permissions } from "./permission"
 import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT, estimateTokens } from "./context"
 import { parseTodos, type Todo } from "./todo"
@@ -51,9 +52,9 @@ export type Message = {
 export const LOCAL_CHAT_SYSTEM = "You are CodeGoblin, a helpful assistant. Answer concisely. You cannot run tools or modify files in local chat mode."
 
 /** The exact conversation a tool-free local model receives. Shared with context metering. */
-export function localChatMessages(messages: Message[]): Message[] {
+export function localChatMessages(messages: Message[], instructions?: string): Message[] {
   return [
-    { role: "system", content: LOCAL_CHAT_SYSTEM },
+    { role: "system", content: [LOCAL_CHAT_SYSTEM, instructions].filter(Boolean).join("\n\n") },
     ...messages
       .filter((message) => message.role === "user" || message.role === "assistant")
       .map((message): Message => ({ role: message.role, content: message.content })),
@@ -168,6 +169,7 @@ const wire = (messages: Message[], memory?: string, images = false, instructions
   if (extra && first?.role === "system" && typeof first.content === "string") {
     sent[0] = { ...first, content: first.content + String.fromCharCode(10, 10) + extra }
   }
+  if (extra && first?.role !== "system") sent.unshift({ role: "system", content: extra, tool_calls: undefined, tool_call_id: undefined })
   return sent
 }
 
@@ -280,6 +282,8 @@ export async function* runAgent(input: {
   // so - and a model that has finished says so by answering without a tool.
   // A person stops a turn that is going nowhere; that is what stop is for.
   const maxTurns = input.maxTurns ?? Number.POSITIVE_INFINITY
+  const configured = configuredInstructions(input.root)
+  input = { ...input, instructions: [configured, input.instructions].filter(Boolean).join("\n\n") || undefined }
   const localChat = input.provider.local && !input.provider.localTools
   await verifyLocalModel(input.provider, input.modelId, input.signal)
 
@@ -308,7 +312,7 @@ export async function* runAgent(input: {
     // CLI serialization/tools have their own bounded transport budget, not a claimed model window.
     const contextWindow = input.provider.cli ? Math.min(input.contextWindow || 100_000, 100_000) : input.contextWindow
     const cliSize = input.provider.cli ? estimateTokens(JSON.stringify({ messages: wire(input.messages, input.memory, false, input.instructions), tools: offeredTools(input) })) : 0
-  if (contextWindow && (input.provider.cli ? cliSize > contextWindow * 0.75 : shouldCompact(localChat ? localChatMessages(input.messages) : input.messages, contextWindow))) {
+    if (contextWindow && (input.provider.cli ? cliSize > contextWindow * 0.75 : shouldCompact(localChat ? localChatMessages(input.messages, configured) : input.messages, contextWindow))) {
     const before = input.messages.length
     const plan = planCompaction(input.messages, contextWindow)
     if (plan.summarise.length) {
@@ -339,7 +343,7 @@ export async function* runAgent(input: {
       body: JSON.stringify({
         model: input.modelId,
         ...(input.provider.localThinking !== undefined ? { chat_template_kwargs: { enable_thinking: input.provider.localThinking } } : {}),
-        messages: localChat ? localChatMessages(input.messages) : wire(
+        messages: localChat ? localChatMessages(input.messages, configured) : wire(
           input.messages,
           input.memory,
           input.images,
