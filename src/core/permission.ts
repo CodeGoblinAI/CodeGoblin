@@ -29,6 +29,23 @@ export const DECISIONS: { id: Decision; label: string; hint: string }[] = [
   { id: "reject", label: "Reject", hint: "refuse, and tell the model so" },
 ]
 
+/** What an autonomy checkpoint asks under, in place of a tool name. */
+export const CHECKPOINT_TOOL = "autonomous run"
+
+/**
+ * The hint beside each answer, worded for what is being asked.
+ *
+ * A checkpoint reuses the tool prompt, but "just this one call" is wrong
+ * there: allowing it once lets the turn run on to the next checkpoint, and
+ * rejecting it stops the turn rather than refusing a call.
+ */
+export function decisionHints(tool: string, cover?: string): Record<Decision, string> {
+  if (tool === CHECKPOINT_TOOL) {
+    return { once: "keep going until the next checkpoint", always: "stop asking about checkpoints this session", reject: "stop the turn here" }
+  }
+  return { once: "just this one call", always: "stop asking about " + (cover || "calls like this"), reject: "refuse, and tell the model so" }
+}
+
 /** Patterns and what to do when a shell command matches one. */
 export type Rules = Record<string, RuleAction>
 
@@ -579,7 +596,7 @@ export class Permissions {
   async checkpoint(toolCalls: number, every: number): Promise<"continue" | "stop"> {
     if (this.checkpointsOff) return "continue"
     const decision = await this.ask(
-      "autonomous run",
+      CHECKPOINT_TOOL,
       `${toolCalls} tool calls this turn - keep going`,
       "future checkpoints",
     )

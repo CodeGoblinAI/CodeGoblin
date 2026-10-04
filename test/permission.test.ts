@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Permissions, DECISIONS, MODES, nextMode, scopeOf } from "../src/core/permission"
+import { Permissions, DECISIONS, MODES, nextMode, scopeOf, decisionHints, CHECKPOINT_TOOL } from "../src/core/permission"
 
 describe("permissions", () => {
   test("tools that change nothing never prompt", async () => {
@@ -204,5 +204,18 @@ describe("how much to ask", () => {
     expect(asked).toBe(0)
     off.reset()
     expect(off.checkpointsOff).toBe(false)
+  })
+
+  test("a checkpoint's answers say what they do there, not what they do for a tool call", async () => {
+    let tool = ""
+    await new Permissions(async (asked) => { tool = asked; return "once" }).checkpoint(3, 3)
+    expect(tool).toBe(CHECKPOINT_TOOL)
+    const atCheckpoint = decisionHints(CHECKPOINT_TOOL, "future checkpoints")
+    expect(atCheckpoint.once).toBe("keep going until the next checkpoint")
+    expect(atCheckpoint.reject).toBe("stop the turn here")
+    expect(Object.values(atCheckpoint).join(" ")).not.toContain("one call")
+    const shell = decisionHints("shell", "git status")
+    expect(shell).toEqual({ once: "just this one call", always: "stop asking about git status", reject: "refuse, and tell the model so" })
+    expect(decisionHints("write_file").always).toBe("stop asking about calls like this")
   })
 })

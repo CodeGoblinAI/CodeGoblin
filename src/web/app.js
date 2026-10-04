@@ -635,6 +635,10 @@ function toolChip(name, args, id) {
  * Asks before a tool that changes things runs. Rendered inline in the
  * thread so the request sits next to the work that caused it.
  */
+// Mirrors decisionHints() in core/permission.ts: at an autonomy checkpoint,
+// allowing once runs on to the next checkpoint and rejecting stops the turn.
+const CHECKPOINT_HINTS = { once: "keep going until the next checkpoint", always: "stop asking about checkpoints this session", reject: "stop the turn here" }
+
 function permissionPrompt(event) {
   const box = document.createElement("div")
   box.className = "permission"
@@ -697,7 +701,9 @@ function permissionPrompt(event) {
     const button = document.createElement("button")
     button.className = choice.id === "reject" ? "pdeny" : "pallow"
     button.textContent = choice.label
-    button.title = choice.id === "always" && cover ? cover : choice.hint
+    button.title = event.tool === "autonomous run"
+      ? CHECKPOINT_HINTS[choice.id]
+      : choice.id === "always" && cover ? cover : choice.hint
     button.onclick = () => answer(choice.id)
     actions.appendChild(button)
   }

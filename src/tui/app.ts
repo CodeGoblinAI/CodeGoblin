@@ -86,7 +86,7 @@ import {
   type Spend,
 } from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
-import { Permissions, DECISIONS, MODES, nextMode, commandOf, refusalLabel, type Decision, type PermissionMode } from "../core/permission"
+import { Permissions, DECISIONS, MODES, nextMode, commandOf, refusalLabel, decisionHints, type Decision, type PermissionMode } from "../core/permission"
 import { McpManager } from "../core/mcp"
 import { SubagentManager, type SubagentEvent } from "../core/subagents"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
@@ -698,7 +698,8 @@ function render() {
     // nothing once an approval covered one command rather than the whole tool.
     const asked = (pending.tool === "shell" ? commandOf(pending.detail) : pending.detail).replace(/\s+/g, " ")
     const title = " " + (pending.from ? pending.from + " subagent: " : "") + "allow " + pending.tool + ": " + asked + "?"
-    const hints = DECISIONS.map((d) => (d.id === "always" ? "stop asking about " + pending!.cover : d.hint))
+    const worded = decisionHints(pending.tool, pending.cover)
+    const hints = DECISIONS.map((d) => worded[d.id])
     // One width for every row, padded after colouring - displayWidth skips
     // escape sequences, so the box lines up whatever colour the text is. As
     // wide as the words need, but never wider than the terminal.
