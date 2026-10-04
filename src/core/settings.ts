@@ -35,6 +35,8 @@ export type Settings = {
    * understand it is how a provider starts rejecting whole requests.
    */
   effort: Effort
+  /** Exact provider/model identity. Unset models use auto after the first scoped save. */
+  effortByModel: Record<string, Effort>
 }
 
 /** Sent as reasoning_effort, except for "auto", which is sent as nothing. */
@@ -52,6 +54,7 @@ export const defaults = (): Settings => ({
   thinking: true,
   mouse: true,
   effort: "auto",
+  effortByModel: {},
 })
 
 export function normalise(raw: unknown): Settings {
@@ -63,7 +66,23 @@ export function normalise(raw: unknown): Settings {
     thinking: typeof value.thinking === "boolean" ? value.thinking : base.thinking,
     mouse: typeof value.mouse === "boolean" ? value.mouse : base.mouse,
     effort: isEffort(value.effort) ? value.effort : base.effort,
+    effortByModel: value.effortByModel && typeof value.effortByModel === "object" && !Array.isArray(value.effortByModel)
+      ? Object.fromEntries(Object.entries(value.effortByModel).filter(([id, level]) => modelKey(id) && isEffort(level)).slice(0, 256))
+      : {},
   }
+}
+
+const modelKey = (id: string) => /^[A-Za-z0-9._:-]+\/[A-Za-z0-9._:/-]{1,160}$/.test(id)
+
+export function effortForModel(settings: Settings, id: string): Effort {
+  if (Object.hasOwn(settings.effortByModel, id)) return settings.effortByModel[id]!
+  // Preserve the legacy global preference until the first per-model choice.
+  return Object.keys(settings.effortByModel).length ? "auto" : settings.effort
+}
+
+export function withModelEffort(settings: Settings, id: string, level: unknown): Settings {
+  if (!modelKey(id) || !isEffort(level)) throw new Error("Select a valid model and effort level")
+  return { ...settings, effortByModel: Object.fromEntries([...Object.entries(settings.effortByModel).filter(([key]) => key !== id), [id, level]].slice(-256)) }
 }
 
 export async function load(): Promise<Settings> {

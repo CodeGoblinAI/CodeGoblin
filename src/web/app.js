@@ -930,7 +930,7 @@ function openSettingsDialog() {
   }
   select("Theme", paletteData.themes.map((t) => [t.value.slice(7), t.hint]), webSettings.theme, (theme) => saveSettings({ theme }))
   select("Thinking", [["on", "Shown"], ["off", "Hidden"]], webSettings.thinking ? "on" : "off", (value) => saveSettings({ thinking: value === "on" }))
-  select("Reasoning effort (supported models)", ["auto", "low", "medium", "high"].map((x) => [x, x]), webSettings.effort || "auto", (effort) => saveSettings({ effort }))
+  select("Reasoning effort (this model)", ["auto", "low", "medium", "high"].map((x) => [x, x]), currentEffort(), (effort) => saveSettings({ effort }))
   for (const option of modelSettings()) {
     if (!option.choices?.length) continue
     select(option.label, option.choices.map((c) => [c.id, c.label]), mediaValue(option.id), (value) => runCommand("/settings " + option.id + " " + value))
@@ -1032,13 +1032,18 @@ async function saveSettings(change) {
   const result = await fetch("/api/settings", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(change),
+    body: JSON.stringify(change.effort !== undefined ? { ...change, model: currentModel } : change),
   }).then((r) => r.json()).catch(() => null)
   if (!result?.settings) { note("Could not save settings. Please try again."); return null }
   webSettings = result.settings
   applyPalette(result.palette)
   document.body.classList.toggle("hide-thinking", !webSettings.thinking)
   return result
+}
+
+function currentEffort() {
+  const saved = webSettings.effortByModel || {}
+  return Object.hasOwn(saved, currentModel) ? saved[currentModel] : Object.keys(saved).length ? "auto" : webSettings.effort || "auto"
 }
 
 /**
@@ -1300,7 +1305,7 @@ async function runCommand(text) {
     if (!argument) {
       note("usage: /effort auto|low|medium|high" + String.fromCharCode(10) +
         "auto lets the provider decide. The rest only reach reasoning models." + String.fromCharCode(10) +
-        "now: " + (webSettings.effort || "auto"))
+        "now: " + currentEffort() + " (" + currentModel + ")")
       return true
     }
     if (!EFFORTS.includes(argument)) {
@@ -1308,7 +1313,8 @@ async function runCommand(text) {
       return true
     }
     const result = await saveSettings({ effort: argument })
-    const level = result ? result.settings.effort : argument
+    if (!result) return true
+    const level = currentEffort()
     const model = modelOptions.find((option) => option.value === currentModel)
     const reasons = model && model.effort
     note(
