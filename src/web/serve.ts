@@ -16,6 +16,7 @@ import { cliHandoff } from "../core/cli-handoff"
 import { fetchBalance, balanceRows } from "../core/balance"
 import { codexAccount, cachedCodexAccount, accountRows, startCodexLogin } from "../core/codex-account"
 import { startCursorLogin } from "../core/cursor-sdk"
+import { subscriptionAccount, cachedSubscriptionAccount, subscriptionRows } from "../core/subscription-account"
 import { listCodexSessions, importCodexSession } from "../core/codex-import"
 import { addSpend, priceOf, usage } from "../core/context"
 import {
@@ -182,6 +183,14 @@ async function handle(request: Request): Promise<Response> {
     const snapshot = cached ? await cachedCodexAccount() : await codexAccount()
     const response = json(snapshot ? { ...snapshot, rows: accountRows(snapshot) } : { rows: [["Codex account", "No cached snapshot; refresh to check"]] })
     response.headers.set("cache-control", "no-store")
+    return response
+  }
+  if (url.pathname === "/api/subscription/account" && request.method === "GET") {
+    const source = url.searchParams.get("source")
+    if (source !== "claude" && source !== "cursor") return json({message:"Unknown subscription source"},400)
+    const snapshot = url.searchParams.get("cached") === "1" ? await cachedSubscriptionAccount(source) : await subscriptionAccount(source)
+    const response = json(snapshot ? {...snapshot,rows:subscriptionRows(snapshot)} : {rows:[["account","No cached snapshot; refresh to check"]]})
+    response.headers.set("cache-control","no-store")
     return response
   }
   if (url.pathname === "/api/codex/login") {

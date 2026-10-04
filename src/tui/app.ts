@@ -21,6 +21,7 @@ import { cliAuthStatus, cliStatuses } from "../core/cli-status"
 import { cliHandoff } from "../core/cli-handoff"
 import { fetchBalance, balanceRows } from "../core/balance"
 import { codexAccount, cachedCodexAccount, accountRows, startCodexLogin } from "../core/codex-account"
+import { subscriptionAccount, cachedSubscriptionAccount, subscriptionRows } from "../core/subscription-account"
 import { startCursorLogin } from "../core/cursor-sdk"
 import { listCodexSessions, importCodexSession } from "../core/codex-import"
 import { openCodexLogin, openCursorLogin } from "../core/open-browser"
@@ -1129,7 +1130,7 @@ function usageRows(): [string, string][] {
     ["context", formatContext(context)],
     ["tokens", spend.input.toLocaleString() + " input / " + spend.output.toLocaleString() + " output"],
     ["cost", spend.dollars === undefined ? "unknown / subscription; not zero" : formatSpend(spend)],
-    ["subscription quota", "Codex: /account; others not wired"],
+    ["subscription quota", "/account codex, claude or cursor (dashboard)"],
   ]
 }
 
@@ -1148,27 +1149,29 @@ function openUsage(provider = selection.provider.id, accountOnly = false) {
 }
 
 let accountRequest = 0
+let accountSource: "codex" | "claude" | "cursor" = "codex"
 let codexLogin: Awaited<ReturnType<typeof startCodexLogin>> | undefined
 let cursorLogin: Awaited<ReturnType<typeof startCursorLogin>> | undefined
 
 function accountDialog(rows: [string, string][]) {
-  return Dialogs.open("codex-account", "Codex account / subscription quotas", [
+  return Dialogs.open("codex-account", (accountSource === "claude" ? "Claude" : accountSource === "cursor" ? "Cursor" : "Codex") + " account / subscription quotas", [
     { label: "Refresh quotas", value: "refresh" },
-    { label: "Sign in through official CLI", value: "login" },
+    { label: accountSource === "cursor" ? "Cursor Spending: https://cursor.com/dashboard (copy)" : "Sign in through official CLI", value: "login" },
     ...rows.map(([label, value]) => ({ label: label + ": " + value, value: "info" })),
   ], { size: "large", footer: "up/down scroll . enter refresh/sign-in . esc closes" })
 }
 
-function openAccount() {
+function openAccount(source: "codex" | "claude" | "cursor" = "codex") {
+  accountSource = source
   const request = ++accountRequest
   dialog = accountDialog([["status", "Checking official CLI…"]])
   void (async () => {
-    const cached = await cachedCodexAccount()
+    const cached = source === "codex" ? await cachedCodexAccount() : await cachedSubscriptionAccount(source)
     if (request !== accountRequest || dialog?.kind !== "codex-account") return
-    if (cached) { dialog = accountDialog([["refresh", "checking…"], ...accountRows(cached)]); render() }
-    const snapshot = await codexAccount()
+    if (cached) { dialog = accountDialog([["refresh", "checking…"], ...(source === "codex" ? accountRows(cached) : subscriptionRows(cached as Awaited<ReturnType<typeof subscriptionAccount>>))]); render() }
+    const snapshot = source === "codex" ? await codexAccount() : await subscriptionAccount(source)
     if (request !== accountRequest || dialog?.kind !== "codex-account") return
-    dialog = accountDialog(accountRows(snapshot))
+    dialog = accountDialog(source === "codex" ? accountRows(snapshot) : subscriptionRows(snapshot as Awaited<ReturnType<typeof subscriptionAccount>>))
     render()
   })()
 }
@@ -1445,8 +1448,18 @@ async function chooseInDialog() {
   const row = Dialogs.selected(dialog)
   if (!row || !row.value) { render(); return }
   if (dialog.kind === "codex-account") {
-    if (row.value === "refresh") openAccount()
-    if (row.value === "login") await openLogin()
+    if (row.value === "refresh") openAccount(accountSource)
+    if (row.value === "login" && accountSource === "codex") await openLogin()
+    if (row.value === "login" && accountSource === "claude") {
+      closeDialog()
+      const handoff = cliHandoff("claude")
+      dialog = Dialogs.open("cli-login", handoff.label + " sign-in handoff", [
+        {label:"Copy official sign-in command",value:handoff.command},
+        {label:handoff.command,inert:true}, {label:handoff.warning,inert:true},
+        {label:"Run in your terminal; check afterward: " + handoff.statusCommand,inert:true},
+      ], {size:"large",footer:"enter copies command . esc closes"})
+    }
+    if (row.value === "login" && accountSource === "cursor") { await copyText("https://cursor.com/dashboard"); status="Cursor Spending dashboard URL copied" }
     render(); return
   }
   if (dialog.kind === "cli-login") {
@@ -2014,7 +2027,7 @@ async function send() {
     if (result.kind === "usage") {
       openUsage()
     }
-    if (result.kind === "account") { openAccount(); render(); return }
+    if (result.kind === "account") { openAccount(result.source); render(); return }
     if (result.kind === "login") { openLogin(result.source); render(); return }
     if (result.kind === "cli-login") {
       const handoff = cliHandoff(result.source)
