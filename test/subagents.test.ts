@@ -5,7 +5,8 @@ import { runAgent, type AgentEvent, type Message } from "../src/core/agent"
 import { Permissions } from "../src/core/permission"
 import type { Provider } from "../src/core/providers"
 import { Global } from "../src/platform/paths"
-import { SubagentManager, listAgents, toolsFrom, type SubagentEvent } from "../src/core/subagents"
+import { SubagentManager, listAgents, toolsFrom, selectedAgent, agentSelection, type SubagentEvent } from "../src/core/subagents"
+import { runCommand } from "../src/core/commands"
 import { requireSandbox } from "./sandbox"
 
 /**
@@ -236,6 +237,49 @@ describe("stopping", () => {
 })
 
 describe("agent files", () => {
+  test("/agents is a picker and /agent is an alias, not approval mode", () => {
+    expect(runCommand("/agents")).toEqual({ kind: "agents", name: undefined })
+    expect(runCommand("/agent reviewer")).toEqual({ kind: "agents", name: "reviewer" })
+    expect(runCommand("/agents default")).toEqual({ kind: "agents", name: "default" })
+  })
+
+  test("loads model overrides and fails visibly for a missing saved profile", async () => {
+    fs.writeFileSync(path.join(project, ".claude", "agents", "override.md"), "---\nname: override\ndescription: Test override\nmodel: zai/glm-5.3\ntools: Read, Grep\n---\nOwn prompt.")
+    const profile = selectedAgent("override", project)
+    expect(profile).toMatchObject({ model: "zai/glm-5.3", tools: ["read_file", "grep"], prompt: "Own prompt." })
+    expect((await agentSelection(profile, { provider, model: provider.models[0]! })).model.id).toBe("glm-5.3")
+    expect(selectedAgent(undefined, project)).toBeUndefined()
+    expect(() => selectedAgent("missing-profile", project)).toThrow("Saved agent unavailable")
+  })
+
+  test("inherit keeps the exact parent; invalid overrides cannot fallback", async () => {
+    const inherited = { provider, model: provider.models[0]! }
+    const profile = { name: "test-override", description: "test", prompt: "test", source: "project" as const }
+    expect(await agentSelection({ ...profile, model: "inherit" }, inherited)).toBe(inherited)
+    await expect(agentSelection({ ...profile, model: "not-a-provider/no-model" }, inherited)).rejects.toThrow("unavailable text model")
+    expect((await agentSelection({ ...profile, model: "haiku" }, inherited)).provider.id).toBe("claude-code")
+  })
+
+  test("an override uses its own provider key, never the parent's", async () => {
+    fs.writeFileSync(path.join(project, ".claude", "agents", "key-test.md"), "---\nname: key-test\ndescription: Test key routing\nmodel: zai/glm-5.3\n---\nOwn prompt.")
+    const previous = process.env.ZAI_API_KEY
+    process.env.ZAI_API_KEY = "override-fixture-key"
+    const headers: string[] = []
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      headers.push(new Headers(init?.headers).get("authorization") || "")
+      return say("override answered")
+    }) as typeof fetch
+    try {
+      const subagents = manager()
+      await subagents.call("task", { agent: "key-test", description: "key", prompt: "test" })
+      const result = await subagents.call("task_result", { id: "task-1", wait: true })
+      expect(result).toContain("override answered")
+      expect(headers).toEqual(["Bearer override-fixture-key"])
+    } finally {
+      if (previous === undefined) delete process.env.ZAI_API_KEY
+      else process.env.ZAI_API_KEY = previous
+    }
+  })
   test("Claude Code's tool names mean the same tools here", () => {
     expect(toolsFrom("Read, Grep, Glob, Bash, Edit, WebFetch")).toEqual(["read_file", "grep", "glob", "shell", "edit_file", "webfetch"])
     expect(toolsFrom("read_file mcp__github__search")).toEqual(["read_file", "mcp"])

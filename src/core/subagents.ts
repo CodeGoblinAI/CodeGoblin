@@ -4,7 +4,9 @@ import { Global } from "../platform/paths"
 import { runAgent, type AgentEvent, type ExtraTools, type Message, type Subagents } from "./agent"
 import { parseFrontmatter } from "./frontmatter"
 import type { Permissions } from "./permission"
-import type { Provider } from "./providers"
+import { kindOf, effortFor, type Provider, type Selection } from "./providers"
+import { resolveStartupModel } from "./model-selection"
+import { apiKey } from "./auth"
 import { systemPrompt, type Where } from "./system-prompt"
 import type { History } from "./undo"
 
@@ -30,8 +32,8 @@ import type { History } from "./undo"
  *   <project>/.codegoblin/agent(s), <project>/.claude/agents
  *   <config>/agent(s), ~/.claude/agents
  *
- * Not yet: a `model` in an agent file (subagents use the conversation's
- * model), and resuming a finished subagent.
+ * Agent files may override the model; credentials still belong to the chosen
+ * provider. Resuming a finished background subagent is not supported.
  */
 
 export type AgentProfile = {
@@ -42,6 +44,7 @@ export type AgentProfile = {
   prompt: string
   source: "built-in" | "project" | "global"
   location?: string
+  model?: string
 }
 
 /** Tools that only look. */
@@ -129,22 +132,40 @@ export function listAgents(cwd: string = process.cwd()): AgentProfile[] {
       for (const file of agentFiles(dir)) {
         let text: string
         try {
+          if (fs.statSync(file).size > 128 * 1024) continue
           text = fs.readFileSync(file, "utf8")
         } catch {
           continue
         }
+        if (text.includes("\0")) continue
         const { data, body } = parseFrontmatter(text)
         const name = (typeof data.name === "string" && data.name.trim()) || path.basename(file, path.extname(file))
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) || found.has(name)) continue
         const description = typeof data.description === "string" ? data.description.trim() : ""
         if (!description) continue
         const tools = toolsFrom(data.tools)
-        found.set(name, { name, description, ...(tools ? { tools } : {}), prompt: body.trim(), source, location: file })
+        found.set(name, { name, description, ...(tools ? { tools } : {}), ...(typeof data.model === "string" && data.model.trim() ? { model: data.model.trim() } : {}), prompt: body.trim(), source, location: file })
       }
     }
   }
   for (const agent of BUILT_IN_AGENTS) if (!found.has(agent.name)) found.set(agent.name, agent)
   return [...found.values()]
+}
+
+export function selectedAgent(name: string | undefined, root: string): AgentProfile | undefined {
+  if (!name) return
+  const agent = listAgents(root).find(agent => agent.name === name)
+  if (!agent) throw new Error("Saved agent unavailable: " + name + "; choose /agents default or another profile")
+  return agent
+}
+
+/** An explicit override never silently falls back or reuses another provider's key. */
+export async function agentSelection(agent: AgentProfile | undefined, inherited: Selection): Promise<Selection> {
+  if (!agent?.model || agent.model === "inherit") return inherited
+  const alias = ["sonnet", "opus", "haiku"].includes(agent.model) ? "claude-code/" + agent.model : agent.model
+  const selection = await resolveStartupModel(alias)
+  if (!selection || kindOf(selection.model) !== "text") throw new Error("Agent " + agent.name + " requests an unavailable text model: " + agent.model)
+  return selection
 }
 
 /** What a subagent needs from the conversation that starts it, read when the task starts. */
@@ -302,20 +323,24 @@ export class SubagentManager implements Subagents {
       { role: "user", content: prompt },
     ]
     try {
+      const selected = await agentSelection(task.agent, { provider: context.provider, model: context.provider.models.find(model => model.id === context.modelId) || { id: context.modelId, label: context.modelId, contextWindow: context.contextWindow || 0 } })
+      const override = Boolean(task.agent.model && task.agent.model !== "inherit")
+      const key = apiKey(selected.provider.id)
+      if (override && key === undefined) throw new Error("Connect the agent model's provider: " + selected.provider.id)
       for await (const event of runAgent({
-        provider: context.provider,
-        modelId: context.modelId,
-        apiKey: context.apiKey,
+        provider: selected.provider,
+        modelId: selected.model.id,
+        apiKey: override ? key! : context.apiKey,
         messages,
         root: context.root,
-        contextWindow: context.contextWindow,
+        contextWindow: selected.model.contextWindow,
         permissions: context.permissions?.forSubagent(task.agent.name),
         history: context.history,
         extraTools: !task.agent.tools || task.agent.tools.includes("mcp") ? context.mcp : undefined,
         tools: task.agent.tools,
         instructions: context.instructions,
         memory: context.memory,
-        effort: context.effort,
+        effort: effortFor(selected.model, override ? "auto" : context.effort || "auto"),
         signal: task.controller.signal,
       })) {
         if (event.type === "tool_start") task.toolCalls++
