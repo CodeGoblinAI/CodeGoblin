@@ -631,14 +631,14 @@ function toolChip(name, args, id) {
   return chip
 }
 
-/**
- * Asks before a tool that changes things runs. Rendered inline in the
- * thread so the request sits next to the work that caused it.
- */
 // Mirrors decisionHints() in core/permission.ts: at an autonomy checkpoint,
 // allowing once runs on to the next checkpoint and rejecting stops the turn.
 const CHECKPOINT_HINTS = { once: "keep going until the next checkpoint", always: "stop asking about checkpoints this session", reject: "stop the turn here" }
 
+/**
+ * Asks before a tool that changes things runs. Rendered inline in the
+ * thread so the request sits next to the work that caused it.
+ */
 function permissionPrompt(event) {
   const box = document.createElement("div")
   box.className = "permission"
@@ -656,15 +656,20 @@ function permissionPrompt(event) {
   box.querySelector("strong").textContent = event.tool
   // A subagent's question says so: from the conversation alone a person cannot tell which agent is asking.
   if (event.from) box.querySelector(".ptext").insertAdjacentText("afterbegin", event.from + " subagent: ")
-  // A shell call is shown as its command rather than the JSON it arrived in.
-  let asked = event.detail || ""
-  try {
-    const parsed = JSON.parse(asked)
-    if (parsed && typeof parsed.command === "string") asked = parsed.command
-  } catch {
-    // Not JSON, so it is shown as it came.
+  // The server sends a readable summary (askedFor in core/permission.ts): a
+  // shell call's command, an edit's file and change. The raw JSON hid the
+  // file name past the cut. The full arguments stay on hover.
+  let asked = event.asked || event.detail || ""
+  if (!event.asked) {
+    try {
+      const parsed = JSON.parse(asked)
+      if (parsed && typeof parsed.command === "string") asked = parsed.command
+    } catch {
+      // Not JSON, so it is shown as it came.
+    }
   }
   box.querySelector(".pdetail").textContent = asked.slice(0, 160)
+  if (event.detail && event.detail !== asked) box.querySelector(".pdetail").title = event.detail.slice(0, 2000)
   // What "Allow for this session" would approve. It covers one command now,
   // not the whole tool, so the choice has to say which.
   const always = choices.find((c) => c.id === "always")
@@ -1783,7 +1788,7 @@ async function submit() {
         if (event.type === "tool_start") {
           body = null
           thinking = null
-          toolChip(event.name, event.args, event.id)
+          toolChip(event.name, event.asked || event.args, event.id)
           lastToolArgs = event.args
           runningTools.push(event.name)
           renderActivity()

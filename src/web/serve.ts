@@ -35,7 +35,7 @@ import {
 import { apiKey } from "../core/auth"
 import * as auth from "../core/auth"
 import * as sessions from "../core/sessions"
-import { DECISIONS, MODES, refusalLabel, type Decision, type PermissionMode, type Permissions } from "../core/permission"
+import { DECISIONS, MODES, askedFor, refusalLabel, type Decision, type PermissionMode, type Permissions } from "../core/permission"
 import { BrowserConsent } from "./consent"
 import { McpManager } from "../core/mcp"
 import { SubagentManager, type SubagentContext } from "../core/subagents"
@@ -736,7 +736,12 @@ async function handle(request: Request): Promise<Response> {
             if (event.type === "spend") {
               session.spend = addSpend(session.spend ?? { input: 0, output: 0 }, { ...event, dollars: priceOf(event, model.price) })
             }
-            send(event.type === "tool_denied" ? { ...event, label: refusalLabel(event) } : event)
+            send(
+              event.type === "tool_denied" ? { ...event, label: refusalLabel(event) }
+                // The row says which file, not the raw JSON that cut the path off.
+                : event.type === "tool_start" ? { ...event, asked: askedFor(event.name, event.args) }
+                : event,
+            )
             if (event.type === "spend" || event.type === "turn_end") send({
               type: "usage",
               spend: session.spend,

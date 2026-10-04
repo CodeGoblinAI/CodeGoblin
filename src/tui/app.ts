@@ -86,7 +86,7 @@ import {
   type Spend,
 } from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
-import { Permissions, DECISIONS, MODES, nextMode, commandOf, refusalLabel, decisionHints, type Decision, type PermissionMode } from "../core/permission"
+import { Permissions, DECISIONS, MODES, nextMode, askedFor, refusalLabel, decisionHints, type Decision, type PermissionMode } from "../core/permission"
 import { McpManager } from "../core/mcp"
 import { SubagentManager, type SubagentEvent } from "../core/subagents"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
@@ -696,7 +696,7 @@ function render() {
     // cover. It used to say only "allow this?", with the command down in the
     // input line, and the session hint said "calls like this" - which told you
     // nothing once an approval covered one command rather than the whole tool.
-    const asked = (pending.tool === "shell" ? commandOf(pending.detail) : pending.detail).replace(/\s+/g, " ")
+    const asked = askedFor(pending.tool, pending.detail).replace(/\s+/g, " ")
     const title = " " + (pending.from ? pending.from + " subagent: " : "") + "allow " + pending.tool + ": " + asked + "?"
     const worded = decisionHints(pending.tool, pending.cover)
     const hints = DECISIONS.map((d) => worded[d.id])
@@ -739,7 +739,7 @@ function render() {
   if (pending && !input) {
     shown =
       theme.gold + pending.tool + ansi.reset + " " +
-      dim + pending.detail.slice(0, Math.max(10, visibleInput - 24)) + ansi.reset
+      dim + askedFor(pending.tool, pending.detail).replace(/\s+/g, " ").slice(0, Math.max(10, visibleInput - 24)) + ansi.reset
   } else if (streaming && !input) {
     caretOffset = 0
     shown =
@@ -2217,7 +2217,8 @@ async function send() {
       }
       if (event.type === "tool_start") {
         current = undefined
-        transcript.push({ kind: "tool", call: event.id, text: event.name + " " + event.args.slice(0, 60), state: "running" })
+        // Summarised as approvals are, so an edit's row names its file before the cut.
+        transcript.push({ kind: "tool", call: event.id, text: event.name + " " + askedFor(event.name, event.args).replace(/\s+/g, " ").slice(0, 60), state: "running" })
       }
       if (event.type === "spend") {
         spend = addSpend(spend, {

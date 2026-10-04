@@ -1,4 +1,4 @@
-import { Permissions, DECISIONS, type Decision, type PermissionMode } from "../core/permission"
+import { Permissions, DECISIONS, askedFor, type Decision, type PermissionMode } from "../core/permission"
 
 /**
  * Consent for browser conversations.
@@ -39,7 +39,8 @@ export class BrowserConsent {
         new Promise<Decision>((resolve) => {
           const id = sessionId + ":" + tool + ":" + ++this.asked
           this.waiting.set(id, { sessionId, tool, detail, resolve })
-          this.streams.get(sessionId)?.({ type: "permission", id, tool, detail, cover, ...(from ? { from } : {}) })
+          // `asked` is the same readable summary the TUI shows; `detail` stays raw.
+          this.streams.get(sessionId)?.({ type: "permission", id, tool, detail, asked: askedFor(tool, detail), cover, ...(from ? { from } : {}) })
         }),
     )
     this.permissions.set(sessionId, created)

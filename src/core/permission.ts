@@ -89,6 +89,40 @@ export function commandOf(detail: string): string {
 }
 
 /**
+ * What an approval is for, in words a person can check at a glance.
+ *
+ * Prompts used to show the raw arguments. An edit's JSON puts the path last,
+ * so a narrow box showed `{"new_string":...,"old_string":...` and cut off the
+ * one thing you need to know before allowing it: which file. Arguments that
+ * are not recognised are shown as they came.
+ */
+export function askedFor(tool: string, detail: string): string {
+  let args: Record<string, unknown> | undefined
+  try {
+    const parsed: unknown = JSON.parse(detail)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) args = parsed as Record<string, unknown>
+  } catch {
+    // Not JSON, so the detail already says it in words.
+  }
+  if (!args) return detail
+  if (typeof args.command === "string") return args.command
+  const flat = (value: string, max: number) => {
+    const text = value.replace(/\s+/g, " ").trim()
+    return text.length > max ? text.slice(0, max - 1) + "…" : text
+  }
+  const file = typeof args.path === "string" ? args.path : undefined
+  if (tool === "edit_file" && file && typeof args.old_string === "string" && typeof args.new_string === "string") {
+    return `${file}: "${flat(args.old_string, 40)}" -> "${flat(args.new_string, 40)}"`
+  }
+  if (tool === "write_file" && file && typeof args.content === "string") {
+    const lines = args.content.split(String.fromCharCode(10)).filter((line, index, all) => line || index < all.length - 1).length
+    return `${file} (${lines} ${lines === 1 ? "line" : "lines"})`
+  }
+  if (tool === "webfetch" && typeof args.url === "string") return args.url
+  return detail
+}
+
+/**
  * A command broken at the places a shell starts another command.
  *
  * `git status & rd /s /q dist` is two commands to cmd.exe, and an approval for

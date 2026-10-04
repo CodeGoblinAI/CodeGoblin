@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Permissions, DECISIONS, MODES, nextMode, scopeOf, decisionHints, CHECKPOINT_TOOL } from "../src/core/permission"
+import { Permissions, DECISIONS, MODES, nextMode, scopeOf, decisionHints, askedFor, CHECKPOINT_TOOL } from "../src/core/permission"
 
 describe("permissions", () => {
   test("tools that change nothing never prompt", async () => {
@@ -217,5 +217,18 @@ describe("how much to ask", () => {
     const shell = decisionHints("shell", "git status")
     expect(shell).toEqual({ once: "just this one call", always: "stop asking about git status", reject: "refuse, and tell the model so" })
     expect(decisionHints("write_file").always).toBe("stop asking about calls like this")
+  })
+
+  test("an approval names the file first, so a narrow box cannot cut it off", () => {
+    const edit = JSON.stringify({ new_string: "  return a + b", old_string: "  return a - b", path: "src/sum.js" })
+    expect(askedFor("edit_file", edit)).toBe('src/sum.js: "return a - b" -> "return a + b"')
+    const long = JSON.stringify({ path: "a.ts", old_string: "x".repeat(100), new_string: "y" })
+    expect(askedFor("edit_file", long)).toMatch(/^a\.ts: "x{39}…" -> "y"$/)
+    expect(askedFor("write_file", JSON.stringify({ path: "note.txt", content: "one\ntwo\n" }))).toBe("note.txt (2 lines)")
+    expect(askedFor("write_file", JSON.stringify({ path: "n.txt", content: "solo" }))).toBe("n.txt (1 line)")
+    expect(askedFor("shell", JSON.stringify({ command: "git status" }))).toBe("git status")
+    expect(askedFor("webfetch", JSON.stringify({ url: "https://example.com" }))).toBe("https://example.com")
+    expect(askedFor("autonomous run", "3 tool calls this turn - keep going")).toBe("3 tool calls this turn - keep going")
+    expect(askedFor("mcp__x__y", '{"q":1}')).toBe('{"q":1}')
   })
 })
