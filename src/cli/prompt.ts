@@ -17,7 +17,8 @@
  */
 import { apiKey, envVariable } from "../core/auth"
 import { streamChat } from "../core/chat"
-import { defaultSelection, isChatModel, resolveSelection } from "../core/providers"
+import { isChatModel } from "../core/providers"
+import { resolveStartupModel } from "../core/model-selection"
 
 const argv = process.argv.slice(2)
 
@@ -46,7 +47,7 @@ if (!prompt) {
 
 // An unknown model is a typo, not a reason to answer with something else. The
 // surfaces can show a list; here, saying which string failed is the whole help.
-const selection = wanted ? resolveSelection(wanted) : defaultSelection()
+const selection = await resolveStartupModel(wanted)
 if (!selection) {
   console.error(`no such model: ${wanted}`)
   process.exit(1)

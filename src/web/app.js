@@ -14,11 +14,12 @@ const providerMenu = document.getElementById("provider-menu")
 const providerLabel = providerBtn.querySelector(".picker-label")
 let modelOptions = []
 let currentModel = ""
+let modelIndex = 0
 
 function renderModelMenu() {
   providerMenu.innerHTML = ""
   let section = null
-  for (const option of modelOptions) {
+  for (const [index, option] of modelOptions.entries()) {
     // A heading each time the section changes, so the list reads as groups
     // rather than as one run of names.
     if (option.section && option.section !== section) {
@@ -36,6 +37,8 @@ function renderModelMenu() {
     row.className =
       "picker-item" + (option.value === currentModel ? " chosen" : "") + (option.ready ? "" : " unready")
     row.setAttribute("role", "option")
+    row.id = "model-option-" + index
+    row.setAttribute("aria-selected", String(option.value === currentModel))
     row.textContent = option.label
     if (!option.ready) {
       const tag = document.createElement("span")
@@ -44,9 +47,10 @@ function renderModelMenu() {
       row.appendChild(tag)
       row.title = option.connectionHint || "No API key for this provider yet - add one with /connect"
     }
-    row.onclick = () => { setModel(option.value); closeModelMenu() }
+    row.onclick = () => { setModel(option.value); closeModelMenu(true) }
     providerMenu.appendChild(row)
   }
+  if (!providerMenu.hidden) highlightModel(modelIndex)
 }
 
 function setModel(value) {
@@ -60,21 +64,61 @@ function setModel(value) {
   return true
 }
 
-function closeModelMenu() {
+function closeModelMenu(restoreFocus = false) {
   providerMenu.hidden = true
   providerBtn.setAttribute("aria-expanded", "false")
+  providerMenu.removeAttribute("aria-activedescendant")
+  if (restoreFocus) providerBtn.focus()
+}
+
+function highlightModel(index) {
+  modelIndex = Math.max(0, Math.min(modelOptions.length - 1, index))
+  for (const [rowIndex, row] of [...providerMenu.querySelectorAll('[role="option"]')].entries()) {
+    row.classList.toggle("active", rowIndex === modelIndex)
+  }
+  const row = providerMenu.querySelector("#model-option-" + modelIndex)
+  if (!row) return
+  providerMenu.setAttribute("aria-activedescendant", row.id)
+  row.scrollIntoView({ block: "nearest" })
+}
+
+function openModelMenu() {
+  providerMenu.hidden = false
+  providerBtn.setAttribute("aria-expanded", "true")
+  highlightModel(Math.max(0, modelOptions.findIndex((option) => option.value === currentModel)))
+  providerMenu.focus()
 }
 
 providerBtn.onclick = (event) => {
   event.stopPropagation()
-  providerMenu.hidden = !providerMenu.hidden
-  providerBtn.setAttribute("aria-expanded", String(!providerMenu.hidden))
+  if (providerMenu.hidden) openModelMenu()
+  else closeModelMenu(true)
 }
+providerBtn.addEventListener("keydown", (event) => {
+  if (!["ArrowDown", "ArrowUp"].includes(event.key)) return
+  event.preventDefault()
+  openModelMenu()
+})
+providerMenu.addEventListener("keydown", (event) => {
+  if (event.key === "Tab") { closeModelMenu(true); return }
+  if (!["ArrowDown", "ArrowUp", "Home", "End", "PageDown", "PageUp", "Enter", " ", "Escape"].includes(event.key)) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (event.key === "Escape") { closeModelMenu(true); return }
+  if (event.key === "Enter" || event.key === " ") {
+    const option = modelOptions[modelIndex]
+    if (option) setModel(option.value)
+    closeModelMenu(true)
+    return
+  }
+  highlightModel(event.key === "Home" ? 0 : event.key === "End" ? modelOptions.length - 1
+    : modelIndex + (event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : event.key === "PageDown" ? 8 : -8))
+})
 document.addEventListener("click", (event) => {
   if (!providerMenu.hidden && !providerMenu.contains(event.target)) closeModelMenu()
 })
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeModelMenu()
+  if (event.key === "Escape" && !providerMenu.hidden) closeModelMenu(true)
 })
 
 /**

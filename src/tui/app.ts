@@ -12,6 +12,7 @@ import { THEMES } from "../core/theme"
 import { EFFORTS } from "../core/settings"
 import { createKeyReader } from "./keys"
 import { parseLaunch } from "./args"
+import { resolveStartupModel } from "../core/model-selection"
 import { isLiveCommand } from "./live-commands"
 import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
 import { allSelections } from "../core/providers"
@@ -118,7 +119,14 @@ if (requested) {
   }
 }
 
-let selection: Selection = resolveSelection(parseLaunch(argv).model) ?? defaultSelection()
+const launchModel = parseLaunch(argv).model
+if (launchModel && !resolveSelection(launchModel)) process.stderr.write("Checking requested model " + launchModel + "…\n")
+const launched = await resolveStartupModel(launchModel)
+if (!launched) {
+  process.stderr.write("No such available model: " + launchModel + ". Check provider sign-in and the model picker.\n")
+  process.exit(1)
+}
+let selection: Selection = launched
 let key = apiKey(selection.provider.id)
 
 const out = process.stdout
