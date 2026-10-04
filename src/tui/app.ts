@@ -475,6 +475,13 @@ function refreshPalette() {
   // A key is not a command and not a mention. Matching it against either
   // would put part of it on screen in a palette row.
   if (secret) { palette = undefined; return }
+  if (findMention(input, cursor)) {
+    void refreshFileCache().then((changed) => {
+      if (!changed || secret || !findMention(input, cursor)) return
+      refreshPalette()
+      render()
+    })
+  }
   palette = paletteFor(input, cursor)
   // Reset the highlight whenever the list itself changes: carrying an index
   // across two different lists selects something the user never looked at.
@@ -2294,6 +2301,7 @@ async function send() {
     session.messages = messages
     session.spend = spend
     void sessions.save(session).then(refreshSessionCache).catch(() => {})
+    void refreshFileCache(true)
 
     boostOnce = false
 
@@ -2340,8 +2348,18 @@ async function refreshSessionCache() {
 }
 void refreshSessionCache()
 
-async function refreshFileCache() {
-  setFileCache(await globFiles(process.cwd(), "**/*", 4000).catch(() => []))
+let filesReadAt = 0
+let filesReading: Promise<boolean> | undefined
+async function refreshFileCache(force = false): Promise<boolean> {
+  if (filesReading) return filesReading
+  if (!force && Date.now() - filesReadAt < 1000) return false
+  // Share one bounded walk across keystrokes; failed walks keep the useful cache.
+  filesReading = globFiles(process.cwd(), "**/*", 4000).then((files) => {
+    setFileCache(files)
+    filesReadAt = Date.now()
+    return true
+  }).catch(() => false).finally(() => { filesReading = undefined })
+  return filesReading
 }
 void refreshFileCache()
 

@@ -260,6 +260,11 @@ let attachments = []
 const MAX_IMAGE_BYTES = 5_000_000
 const MAX_IMAGES = 10
 
+function updateSendButton() {
+  // Stop must remain available while working, including with an empty draft.
+  sendBtn.disabled = !busy && !input.value.trim() && attachments.length === 0
+}
+
 function renderAttached() {
   attachedRow.innerHTML = ""
   attachedRow.hidden = attachments.length === 0
@@ -279,8 +284,7 @@ function renderAttached() {
     cell.appendChild(drop)
     attachedRow.appendChild(cell)
   })
-  // While a turn runs this button is Stop, and a disabled Stop cannot stop anything.
-  sendBtn.disabled = !busy && !input.value.trim() && attachments.length === 0
+  updateSendButton()
 }
 
 /** Whether the model on the picker can actually be shown one. */
@@ -667,7 +671,7 @@ function setBusy(state) {
   sendBtn.classList.toggle("stopping", state)
   sendBtn.textContent = state ? "■" : "↑"
   sendBtn.title = state ? "Stop" : "Send"
-  sendBtn.disabled = state ? false : !input.value.trim()
+  updateSendButton()
   stopBtn.hidden = true
   input.placeholder = state ? "goblin is working…" : "Ask the goblin…  / for commands, @ for context"
   try { activityBusy(state) } catch { /* panel not built yet during startup */ }
@@ -1202,7 +1206,7 @@ async function runCommand(text) {
     const result = await fetch("/api/export", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId }),
+      body: JSON.stringify({ sessionId, path: argument }),
     }).then((r) => r.json()).catch(() => ({ message: "could not reach the server" }))
     note(result.message)
     return true
@@ -1713,6 +1717,7 @@ async function submit() {
         if (event.type === "error") turn("agent", "**Error:** " + event.message)
         if (event.type === "saved") {
           refreshSessions()
+          void refreshFiles(true)
           boostOnce = false
           boostTag.hidden = !boost
           // A planned answer ends with the choice of what happens next.
@@ -1745,7 +1750,7 @@ async function stopTurn() {
 }
 stopBtn.onclick = stopTurn
 // Typing while a turn runs used to disable the button - which is Stop by then.
-input.oninput = () => { sendBtn.disabled = !busy && !input.value.trim() && !attachments.length }
+input.oninput = updateSendButton
 input.onkeydown = (e) => {
   // The palette owns enter while it is open, otherwise this would submit the
   // half-typed command the palette was about to complete.
@@ -1912,6 +1917,22 @@ async function loadVoices() {
 let paletteData = { commands: [], models: [], sessions: [], files: [], themes: [], connectable: [] }
 let paletteItems = []
 let paletteIndex = 0
+let filesReadAt = 0
+let filesReading = null
+
+async function refreshFiles(force = false) {
+  if (filesReading) return filesReading
+  if (!force && Date.now() - filesReadAt < 1000) return false
+  filesReading = fetch("/api/files" + (force ? "?refresh=1" : ""))
+    .then((response) => response.ok ? response.json() : null)
+    .then((data) => {
+      if (!Array.isArray(data?.files)) return false
+      paletteData.files = data.files
+      filesReadAt = Date.now()
+      return true
+    }).catch(() => false).finally(() => { filesReading = null })
+  return filesReading
+}
 
 const paletteEl = document.createElement("div")
 paletteEl.className = "palette"
@@ -2076,6 +2097,13 @@ function endPreview() {
 paletteEl.onmouseleave = endPreview
 
 function refreshPalette() {
+  updateSendButton()
+  if (findMention(input.value, input.selectionStart ?? input.value.length)) {
+    void refreshFiles().then((changed) => {
+      if (!changed || !findMention(input.value, input.selectionStart ?? input.value.length)) return
+      refreshPalette()
+    })
+  }
   const wasTheme = paletteItems.some((item) => item.palette)
   paletteItems = itemsFor(input.value, input.selectionStart ?? input.value.length)
   // Leaving the theme list by typing has to put the colours back too, not

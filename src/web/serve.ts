@@ -156,6 +156,18 @@ function sameOrigin(request: Request, url: URL): boolean {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } })
 
+let fileList: { files: string[]; at: number } = { files: [], at: 0 }
+let fileWalk: Promise<string[]> | undefined
+async function projectFiles(force = false): Promise<string[]> {
+  if (fileWalk) return fileWalk
+  if (!force && Date.now() - fileList.at < 1000) return fileList.files
+  fileWalk = globFiles(root, "**/*", 4000).then((files) => {
+    fileList = { files, at: Date.now() }
+    return files
+  }).catch(() => fileList.files).finally(() => { fileWalk = undefined })
+  return fileWalk
+}
+
 async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url)
 
@@ -263,15 +275,7 @@ async function handle(request: Request): Promise<Response> {
  * for the life of the server would never notice a new file - so it is cached
  * briefly and re-walked when the browser next asks.
  */
-let fileList: { files: string[]; at: number } = { files: [], at: 0 }
-const FILE_CACHE_MS = 30_000
-
-async function projectFiles(): Promise<string[]> {
-  if (Date.now() - fileList.at < FILE_CACHE_MS) return fileList.files
-  const files = await globFiles(root, "**/*", 4000).catch(() => [] as string[])
-  fileList = { files, at: Date.now() }
-  return files
-}
+  if (url.pathname === "/api/files") return json({ files: await projectFiles(url.searchParams.get("refresh") === "1") })
 
   // The web composer needs the same command set the TUI has, so it comes
   // from one place rather than being duplicated in the browser.
@@ -364,11 +368,12 @@ async function projectFiles(): Promise<string[]> {
   }
 
   if (url.pathname === "/api/export" && request.method === "POST") {
-    const body = (await request.json()) as { sessionId?: string }
+    const body = (await request.json()) as { sessionId?: string; path?: unknown }
+    if (body.path !== undefined && typeof body.path !== "string") return json({ message: "export path must be text" }, 400)
     const session = await sessions.load(body.sessionId ?? "")
     if (!session) return json({ message: "nothing to export yet - say something first" })
     try {
-      const name = await exportSession(session, root, Date.now())
+      const name = await exportSession(session, root, Date.now(), body.path)
       return json({ message: "wrote " + name })
     } catch (error) {
       return json({ message: "export failed: " + (error instanceof Error ? error.message : "unknown") }, 500)

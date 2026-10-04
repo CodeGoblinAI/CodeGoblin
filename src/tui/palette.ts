@@ -30,8 +30,8 @@ export function setConnectedProviders(ids: string[]) {
 /**
  * Files the @ picker offers.
  *
- * Walking the tree on every keystroke would be far too slow, so the app fills
- * this once at startup, the same way it fills the session list.
+ * The app refreshes this on mention use and after turns, sharing and throttling
+ * tree walks so typing stays immediate while new project files become visible.
  */
 let fileCache: string[] = []
 export function setFileCache(files: string[]) {
