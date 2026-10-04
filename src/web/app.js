@@ -865,6 +865,7 @@ async function openSession(id) {
   for (const m of data.session.messages) {
     if (m.role === "user") turn("user", m.display || m.content)
     else if (m.role === "assistant" && m.content) turn("agent", m.content)
+    if (m.stopped) turn("agent", "_stopped_")
   }
   if (!thread.children.length) emptyState()
   activityReset()
@@ -1728,6 +1729,7 @@ async function submit() {
         try { event = JSON.parse(line.slice(5).trim()) } catch { continue }
 
         if (event.type === "session") sessionId = event.id
+        if (event.type === "stopped") stopRequested = true
         if (event.type === "thinking") {
           const stick = atBottom()
           if (!thinking) { thinkingRaw = ""; thinking = thinkingBlock() }
