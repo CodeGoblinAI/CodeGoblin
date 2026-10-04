@@ -11,6 +11,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { localChatMessages, runAgent, type Message } from "../core/agent"
 import { cliStatuses } from "../core/cli-status"
+import { resolveStartupModel } from "../core/model-selection"
 import { cliHandoff } from "../core/cli-handoff"
 import { fetchBalance, balanceRows } from "../core/balance"
 import { codexAccount, cachedCodexAccount, accountRows, startCodexLogin } from "../core/codex-account"
@@ -341,9 +342,10 @@ async function handle(request: Request): Promise<Response> {
 
   if (url.pathname === "/api/session" && request.method === "GET") {
     const session = await sessions.load(url.searchParams.get("id") ?? "")
-    const selected = resolveSelection(url.searchParams.get("model") ?? "")
+    const selected = session ? await resolveStartupModel(session.model ? session.provider + "/" + session.model : session.provider) : undefined
     return session ? json({
       session,
+      selection: selected ? selected.provider.id + "/" + selected.model.id : undefined,
       context: selected ? usage(selected.provider.local && !selected.provider.localTools ? localChatMessages(session.messages) : session.messages, selected.model.contextWindow) : undefined,
     }) : json({ error: "not found" }, 404)
   }
@@ -614,13 +616,16 @@ async function handle(request: Request): Promise<Response> {
     const text = (body.text ?? "").trim()
     if (!text) return json({ error: "empty prompt" }, 400)
 
-    const selection = resolveSelection(body.provider) ?? defaultSelection()
+    const selection = body.provider ? await resolveStartupModel(body.provider) : defaultSelection()
+    if (!selection || kindOf(selection.model) !== "text") return json({ error: "Requested chat model is unavailable; choose a model before continuing." }, 400)
     const { provider, model } = selection
     const key = apiKey(provider.id)
     if (key === undefined) return json({ error: `No API key for ${provider.label}.` }, 400)
 
     const session =
-      (body.sessionId ? await sessions.load(body.sessionId) : undefined) ?? sessions.create(provider.id)
+      (body.sessionId ? await sessions.load(body.sessionId) : undefined) ?? sessions.create(provider.id, model.id)
+    session.provider = provider.id
+    session.model = model.id
 
     if (session.messages.length === 0) {
       session.messages.push({

@@ -14,6 +14,7 @@ const providerMenu = document.getElementById("provider-menu")
 const providerLabel = providerBtn.querySelector(".picker-label")
 let modelOptions = []
 let currentModel = ""
+let resumeModelMissing = false
 let modelIndex = 0
 
 function renderModelMenu() {
@@ -57,6 +58,7 @@ function setModel(value) {
   const option = modelOptions.find((o) => o.value === value)
   if (!option) return false
   if (deferUntilIdle(() => setModel(value), "switch model")) return true
+  resumeModelMissing = false
   if (currentModel !== value) showUsage(sessionUsage ? { spend: sessionUsage.spend } : null)
   currentModel = value
   providerLabel.textContent = option.label
@@ -818,16 +820,27 @@ async function refreshSessions() {
 async function openSession(id) {
   if (deferUntilIdle(() => openSession(id), "open conversation")) return
   closeMobilePanels(false)
-  const data = await fetch("/api/session?id=" + encodeURIComponent(id) + "&model=" + encodeURIComponent(currentModel)).then((r) => r.json()).catch(() => null)
+  const data = await fetch("/api/session?id=" + encodeURIComponent(id)).then((r) => r.json()).catch(() => null)
   if (!data || !data.session) return
   sessionId = id
-  showUsage({ spend: data.session.spend, context: data.context })
+  if (data.selection && !modelOptions.some((option) => option.value === data.selection)) await loadProviders()
+  const restored = data.selection && setModel(data.selection)
+  if (!restored) {
+    resumeModelMissing = true
+    currentModel = ""
+    providerLabel.textContent = "Saved model unavailable — choose a model"
+    renderModelMenu()
+  }
+  showUsage({ spend: data.session.spend, context: restored ? data.context : undefined })
   thread.innerHTML = ""
   for (const m of data.session.messages) {
     if (m.role === "user") turn("user", m.display || m.content)
     else if (m.role === "assistant" && m.content) turn("agent", m.content)
   }
   if (!thread.children.length) emptyState()
+  activityReset()
+  if (!restored) note("This conversation's saved model is unavailable. Choose a model explicitly before continuing.")
+  else if (!data.session.model) note("This older conversation did not record its exact model; restored the saved provider's default. You can choose a different model.")
   refreshSessions()
   input.focus()
 }
@@ -1206,6 +1219,8 @@ async function runCommand(text) {
   if (name === "/new" || name === "/clear") {
     showUsage(null)
     sessionId = null
+    resumeModelMissing = false
+    if (!currentModel) await loadProviders()
     emptyState()
     activityReset()
     refreshSessions()
@@ -1608,11 +1623,16 @@ async function submit() {
     renderPalette()
     if (await runCommand(text)) { setBusy(false); return }
   }
-  input.value = ""
-
   // A generation model has no conversation to join, so a plain prompt is a
   // generation request. Picking one and typing is the whole interaction.
   const selected = modelOptions.find((option) => option.value === currentModel)
+  if (!selected) {
+    input.value = text
+    note("Choose an available model before sending; your draft is still here.")
+    refreshPalette()
+    return
+  }
+  input.value = ""
   if (selected && selected.kind && selected.kind !== "text") {
     turn("user", text)
     setBusy(true)
@@ -1879,7 +1899,8 @@ async function loadProviders() {
     modelOptions.find((option) => option.kind === "text" && option.ready) ||
     modelOptions.find((option) => option.kind === "text")
   const keep = previous && modelOptions.some((option) => option.value === previous) ? previous : null
-  if (keep) setModel(keep)
+  if (resumeModelMissing) renderModelMenu()
+  else if (keep) setModel(keep)
   else if (firstChat || modelOptions.length) setModel((firstChat || modelOptions[0]).value)
   const ready = data.providers.filter((p) => p.ready).length
   hint.textContent = ready ? "" : "no API keys found"

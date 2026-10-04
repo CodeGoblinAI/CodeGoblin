@@ -17,6 +17,8 @@ export type Session = {
   created: number
   updated: number
   provider: string
+  /** Last model actually used; omitted on older conversations. */
+  model?: string
   messages: Message[]
   spend?: Spend
   importedFrom?: { provider: string; id: string; importedAt: number }
@@ -89,13 +91,14 @@ export async function rename(id: string, title: string): Promise<boolean> {
   return true
 }
 
-export function create(provider: string): Session {
+export function create(provider: string, model?: string): Session {
   return {
     id: newSessionId(),
     title: "New session",
     created: Date.now(),
     updated: Date.now(),
     provider,
+    model,
     messages: [],
   }
 }

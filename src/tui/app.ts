@@ -256,7 +256,8 @@ let settings = settingsStore.defaults()
 let media: MediaSettings = {}
 /** The account's voices, once fetched, so a voice id can be shown by name. */
 let voices: MediaChoice[] = []
-let session = sessions.create(selection.provider.id)
+let session = sessions.create(selection.provider.id, selection.model.id)
+let resumeModelMissing = false
 
 let input = ""
 let cursor = 0
@@ -1526,7 +1527,7 @@ async function chooseInDialog() {
     const next = resolveSelection(row.value)
     if (next) {
       if (streaming) { queued = "/model " + row.value; status = "model switch queued until this turn ends" }
-      else { selection = next; key = apiKey(next.provider.id); status = next.provider.label + " " + next.model.label }
+      else { selection = next; resumeModelMissing = false; key = apiKey(next.provider.id); status = next.provider.label + " " + next.model.label }
     }
     closeDialog(); render(); return
   }
@@ -1544,13 +1545,7 @@ async function chooseInDialog() {
   if (dialog.kind === "sessions") {
     const loaded = await sessions.load(row.value)
     if (!loaded) { status = "could not open that conversation"; closeDialog(); render(); return }
-    session = loaded
-    spend = session.spend ?? { input: 0, output: 0 }
-    messages = session.messages
-    transcript = fromMessages(session.messages)
-    scroll = 0
-    edits.reset()
-    status = "opened " + session.title
+    await restoreSession(loaded)
     closeDialog()
     render()
     return
@@ -1698,7 +1693,8 @@ async function deleteInDialog() {
   // Deleting the one you are in leaves you somewhere real rather than in a
   // conversation whose file is gone.
   if (row.value === session.id) {
-    session = sessions.create(selection.provider.id)
+    session = sessions.create(selection.provider.id, selection.model.id)
+    resumeModelMissing = false
     messages = []
     transcript = []
     edits.reset()
@@ -1775,7 +1771,8 @@ async function send() {
       transcript = []
       messages = [SYSTEM]
       plan = []
-      session = sessions.create(selection.provider.id)
+      session = sessions.create(selection.provider.id, selection.model.id)
+      resumeModelMissing = false
       permissions.reset()
       subagents.reset()
       edits.reset()
@@ -2055,6 +2052,7 @@ async function send() {
       const next = resolveSelection(result.id)
       if (next) {
         selection = next
+        resumeModelMissing = false
         key = apiKey(selection.provider.id)
         status = selection.provider.label + " " + selection.model.label
       }
@@ -2087,11 +2085,7 @@ async function send() {
         const loaded = await sessions.load(result.id)
         if (!loaded) status = "no such conversation: " + result.id
         else {
-          session = loaded
-          spend = session.spend ?? { input: 0, output: 0 }
-          messages = loaded.messages
-          transcript = fromMessages(messages)
-          status = "resumed: " + loaded.title
+          await restoreSession(loaded)
         }
       }
     }
@@ -2102,6 +2096,11 @@ async function send() {
   // A generation model has no chat endpoint, so a plain prompt belongs to it
   // rather than to a conversation. Picking one and typing is how you make a
   // picture without remembering a command.
+  if (resumeModelMissing) {
+    status = "choose /model to continue"
+    render()
+    return
+  }
   const selectedKind = kindOf(selection.model)
   if (selectedKind !== "text") {
     input = ""
@@ -2131,6 +2130,8 @@ async function send() {
   scroll = 0
   history.push(text)
   historyIndex = -1
+  session.provider = selection.provider.id
+  session.model = selection.model.id
   // Mentions are read here rather than in the agent so the stored message
   // carries the files with it: a resumed conversation keeps its context.
   // What was folded away goes back before anything sees it.
@@ -2339,6 +2340,25 @@ function shutdown() {
   // MCP servers started as child processes go with the app, but one that will
   // not close is not allowed to keep the terminal waiting.
   void Promise.race([Promise.all([mcp.close(), codexLogin?.cancel(), cursorLogin?.cancel()]), new Promise((done) => setTimeout(done, 3500))]).finally(() => process.exit(0))
+}
+
+async function restoreSession(loaded: sessions.Session) {
+  const requested = loaded.model ? loaded.provider + "/" + loaded.model : loaded.provider
+  const restored = await resolveStartupModel(requested)
+  session = loaded
+  spend = loaded.spend ?? { input: 0, output: 0 }
+  messages = loaded.messages
+  transcript = fromMessages(messages)
+  scroll = 0
+  edits.reset()
+  resumeModelMissing = !restored || kindOf(restored.model) !== "text"
+  if (resumeModelMissing) transcript.push({ kind: "tool", state: "failed", text: "Saved model " + requested + " is unavailable. Choose /model explicitly before continuing; prompts will not use a different model silently." })
+  if (restored && !resumeModelMissing) {
+    selection = restored
+    key = apiKey(restored.provider.id)
+  }
+  status = resumeModelMissing ? "choose /model to continue"
+    : "resumed: " + loaded.title + (loaded.model ? "" : " (older session: provider default)")
 }
 
 async function refreshSessionCache() {
