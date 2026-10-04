@@ -12,8 +12,8 @@ in installed headless Chromium (owner away). TUI: actual Windows PTY at 80×24.
 |---|---|
 | Cursor API-key route | Official SDK catalog succeeded. Actual Web `/model cursor-api/default` and tiny prompt returned `CURSOR_LIVE_OK`, 9,101 reported input / 100 output tokens. Native tools disabled; CG tools unused. One real inference request consumes the key owner's plan/team allowance; cost and effective context remain unknown. |
 | Tripo | Actual Web and TUI `/balance tripo`: ready, 0 available / 0 frozen API credits. Balance GET only; **no generation**. |
-| ElevenLabs | Actual Web `/balance elevenlabs`: ready, 0 used / 10,000 included / 10,000 remaining characters, reported October 29 reset. Subscription GET only; **no generation**. |
-| Codex | Actual Web `/account codex` and Refresh quotas succeeded (5-hour and weekly windows, checked timestamp). |
+| ElevenLabs | Actual Web and 80×24 TUI `/balance elevenlabs`: ready, 0 used / 10,000 included / 10,000 remaining characters, reported October 29 reset. Subscription GET only; **no generation**. |
+| Codex | Actual Web `/account codex` and Refresh quotas, plus actual TUI `/account codex`, succeeded (5-hour and weekly windows, checked timestamp). |
 | Real Codex import | Actual `/import codex`, selected project conversation ending `267d648c`, confirmed new text-only copy (999 messages), then `/resume` and sidebar opened it. Rendered transcript verified without printing its private content or continuing it with a model. Source remains untouched; imported copy only in test profile. |
 | Cursor user-plan login | Owned official SDK flow reaches signed-in browser confirmation. Action-time confirmation requested before key creation. Intended key name: **CG-Next user-plan access**. No key created at this checkpoint. |
 
