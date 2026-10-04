@@ -13,6 +13,7 @@
     "test": "bun test \"--path-ignore-patterns=**/_RECOVERED_LOCAL_*/**\""
   },
   "dependencies": {
+    "@cursor/sdk": "1.0.35",
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {

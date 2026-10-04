@@ -50,7 +50,7 @@ export type Model = {
 }
 
 export type Provider = {
-  cli?: "claude-code"
+  cli?: "claude-code" | "codex" | "cursor" | "cursor-api"
   local?: boolean
   localTools?: boolean
   localThinking?: boolean
@@ -265,8 +265,17 @@ export const PROVIDERS: Record<string, Provider> = {
 const local = localProvider()
 if (local) PROVIDERS.local = local
 PROVIDERS["claude-code"] = {
-  id: "claude-code", label: "Claude CLI (chat only)", cli: "claude-code",
-  models: ["default", "haiku", "sonnet", "opus"].map((id) => ({ id, label: id, contextWindow: 200_000 })),
+  id: "claude-code", label: "Claude CLI (CG tools)", cli: "claude-code",
+  // Aliases resolve inside the CLI; its effective context window is not reported here.
+  models: ["default", "haiku", "sonnet", "opus"].map((id) => ({ id, label: id, contextWindow: 0, effort: id !== "haiku", reasoning: id !== "haiku" })),
+}
+PROVIDERS.codex = {
+  id: "codex", label: "Codex CLI (CG tools)", cli: "codex",
+  models: [{ id: "default", label: "official default", contextWindow: 0, effort: true, reasoning: true }],
+}
+for (const id of ["cursor", "cursor-api"] as const) PROVIDERS[id] = {
+  id, label: id === "cursor" ? "Cursor user plan (CG tools)" : "Cursor API key (CG tools)", cli: id,
+  models: [{ id: "default", label: "Auto (official selection)", contextWindow: 0, effort: false }],
 }
 
 export const DEFAULT_PROVIDER = "deepseek"
@@ -393,6 +402,7 @@ const KIND_ALIASES: Record<string, ModelKind> = {
  * because "elevenlabs" alone does not tell you it is the one that speaks.
  */
 export const CONNECTABLE: { id: string; label: string; about: string }[] = [
+  { id: "cursor-api", label: "Cursor API key", about: "SDK access; billed to the key's user or team. Browser user-plan login: /login cursor" },
   { id: "deepseek", label: "DeepSeek", about: "chat and reasoning" },
   { id: "zai", label: "GLM", about: "chat and reasoning" },
   { id: "moonshotai", label: "Kimi", about: "chat, long context" },

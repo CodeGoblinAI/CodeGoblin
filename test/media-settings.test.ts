@@ -12,6 +12,7 @@ import {
   model3dOverrides,
   imageOverrides,
   optionsForModel,
+  requireMediaSetting,
 } from "../src/core/media-settings"
 import { runCommand } from "../src/core/commands"
 
@@ -169,9 +170,7 @@ describe("what reaches a provider", () => {
 })
 
 describe("the command", () => {
-  // The two-level grammar is gone. It was two commands where one had to know
-  // the other's argument names, which is exactly the coupling that breaks -
-  // a settings screen you can only drive by typing the answer is not one.
+  // The panel remains the default; direct settings use the same model rules.
   test("/settings opens the panel", () => {
     expect(runCommand("/settings")).toEqual({ kind: "settings" })
   })
@@ -180,10 +179,10 @@ describe("the command", () => {
     expect(runCommand("/set")).toEqual({ kind: "settings" })
   })
 
-  test("arguments no longer change the meaning", () => {
-    // Whatever follows is ignored rather than half-parsed: there is one way
-    // in, and it is the panel.
-    expect(runCommand("/set 3d.topology quad")).toEqual({ kind: "settings" })
+  test("both aliases preserve a setting argument for the same shared validation", () => {
+    expect(runCommand("/set 3d.topology quad")).toEqual({ kind: "settings", argument: "3d.topology quad" })
+    expect(runCommand("/settings 3d.topology quad")).toEqual(runCommand("/set 3d.topology quad"))
+    expect(runCommand("/settings 3d.topology")).toEqual({ kind: "settings", argument: "3d.topology" })
   })
 
   test("/diff and /changes both ask for the review panel", () => {
@@ -196,31 +195,27 @@ describe("what a panel offers", () => {
   // The dialog only ever shows real choices, so an invalid value cannot be
   // picked. The check still matters for the web, which accepts a posted
   // value - so the rule itself is tested here rather than the old command.
-  const accepts = (id: string, value: string) => {
-    const option = optionById(id)
-    if (!option) return false
-    if (value === DEFAULT) return true
-    if (option.dynamic) return true
-    return option.choices.some((choice) => choice.id === value)
-  }
+  const accepts = (id: string, value: string) => requireMediaSetting(TRIPO.provider, TRIPO.model, id, value)
 
   test("a value the provider takes is accepted", () => {
-    expect(accepts("3d.topology", "quad")).toBe(true)
+    expect(accepts("3d.topology", "quad").id).toBe("3d.topology")
   })
 
   test("a value it does not take is refused", () => {
-    expect(accepts("3d.topology", "hexagons")).toBe(false)
+    expect(() => accepts("3d.topology", "hexagons")).toThrow("has no hexagons")
   })
 
   test("a setting that does not exist is refused", () => {
-    expect(accepts("colour", "red")).toBe(false)
+    expect(() => accepts("colour", "red")).toThrow("does not take setting")
   })
 
   test("any voice id is accepted, because the account decides what they are", () => {
-    expect(accepts("audio.voice", "21m00Tcm4TlvDq8ikWAM")).toBe(true)
+    expect(requireMediaSetting(ELEVEN.provider, ELEVEN.model, "audio.voice", "21m00Tcm4TlvDq8ikWAM").id).toBe("audio.voice")
+    expect(() => requireMediaSetting(ELEVEN.provider, ELEVEN.model, "audio.voice", " ")).toThrow("cannot be empty")
   })
 
   test("the default is always allowed, so a choice can be taken back", () => {
-    expect(accepts("3d.topology", DEFAULT)).toBe(true)
+    expect(accepts("3d.topology", DEFAULT).id).toBe("3d.topology")
+    expect(() => accepts("audio.voice", DEFAULT)).toThrow("does not take setting")
   })
 })

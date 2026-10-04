@@ -40,7 +40,7 @@ function renderModelMenu() {
     if (!option.ready) {
       const tag = document.createElement("span")
       tag.className = "picker-tag"
-      tag.textContent = option.connectionHint ? "CLI setup" : "no key"
+      tag.textContent = option.connectionHint ? "setup" : "no key"
       row.appendChild(tag)
       row.title = option.connectionHint || "No API key for this provider yet - add one with /connect"
     }
@@ -306,11 +306,12 @@ function showUsage(value) {
   sessionUsage = value
   const used = value?.spend
   const context = value?.context
+  const contextLabel = context ? context.limit > 0 ? " · ~" + context.percent + "% context" : " · context window unavailable" : ""
   document.getElementById("usage-readout").textContent = !value
     ? "Usage unavailable until a response"
     : !used
-    ? "Tokens/cost unavailable (not zero)" + (context ? " · ~" + context.percent + "% context" : "")
-    : `${used.input.toLocaleString()} in / ${used.output.toLocaleString()} out · ${used.dollars === undefined ? "cost unknown / subscription" : "$" + used.dollars.toFixed(4) + (used.unpriced ? " + unpriced usage" : " estimated")}${context ? " · ~" + context.percent + "% context" : ""}`
+    ? "Tokens/cost unavailable (not zero)" + contextLabel
+    : `${used.input.toLocaleString()} in / ${used.output.toLocaleString()} out · ${used.dollars === undefined ? "cost unknown / subscription" : "$" + used.dollars.toFixed(4) + (used.unpriced ? " + unpriced usage" : " estimated")}${contextLabel}`
 }
 let busy = false
 let deferredAction
@@ -892,8 +893,8 @@ function connectForm(provider) {
     '<div class="pactions"><input class="pkey" type="password" autocomplete="off" spellcheck="false" ' +
     'placeholder="paste the key" /><button class="pallow">Save</button></div>'
   box.querySelector("strong").textContent = provider
-  box.querySelector(".pdetail").textContent =
-    provider.toUpperCase().replace(/[^A-Z0-9]/g, "_") + "_API_KEY would also work, without storing anything"
+  const environment = paletteData.connectable?.find((entry) => entry.id === provider)?.env || (provider === "cursor-api" ? "CURSOR_API_KEY" : provider.toUpperCase().replace(/[^A-Z0-9]/g, "_") + "_API_KEY")
+  box.querySelector(".pdetail").textContent = environment + " would also work, without storing anything"
 
   const field = box.querySelector(".pkey")
   const save = async () => {
@@ -916,10 +917,125 @@ function connectForm(provider) {
   field.focus()
 }
 
+function openAccountDialog() {
+  const modal = makeDialog("Codex account / subscription quotas")
+  const body = document.createElement("pre"); body.style.whiteSpace = "pre-wrap"; body.textContent = "Checking official Codex CLI…"
+  const refresh = document.createElement("button"); refresh.textContent = "Refresh quotas"
+  const login = document.createElement("button"); login.textContent = "Official sign-in"; login.onclick = () => { modal.close(); openCodexLoginDialog() }
+  modal.append(body, refresh, login)
+  const show = (data) => { body.textContent = data?.rows ? data.rows.map(([label, value]) => label + ": " + value).join("\n") : "Codex account unavailable; check CLI compatibility/sign-in" }
+  const update = async () => {
+    refresh.disabled = true
+    const cached = await fetch("/api/codex/account?cached=1", { cache: "no-store" }).then((r) => r.json()).catch(() => null)
+    if (!modal.isConnected) return
+    show(cached)
+    body.textContent += "\nRefreshing…"
+    const data = await fetch("/api/codex/account", { cache: "no-store" }).then((r) => r.json()).catch(() => null)
+    if (!modal.isConnected) return
+    show(data)
+    refresh.disabled = false
+  }
+  refresh.onclick = () => { void update() }
+  void update()
+}
+
+function openCodexLoginDialog(source = "codex") {
+  const cursor = source === "cursor"
+  const endpoint = "/api/" + source + "/login"
+  const modal = makeDialog(cursor ? "Cursor SDK / user-plan sign-in" : "Official Codex sign-in")
+  const status = document.createElement("p"); status.textContent = cursor ? "SDK login is separate from Cursor CLI login. Completing browser sign-in creates a named SDK API key stored in this CG profile and billed to your Cursor user plan, replacing this profile's existing SDK sign-in. Native SDK tools are disabled; CG-Next owns approvals. For an existing user or service-account key, use /connect cursor-api instead." : "This signs into the official CLI's shared account. CG-Next never copies passwords or tokens. Completing sign-in may change the account used by your other Codex clients."
+  const start = document.createElement("button"); start.textContent = "Start official sign-in"
+  modal.append(status, start)
+  let id
+  const cancel = () => { if (id) void fetch(endpoint + "?id=" + encodeURIComponent(id), { method: "DELETE", keepalive: true }).catch(() => {}) }
+  modal.addEventListener("close", cancel, { once: true })
+  start.onclick = async () => {
+    start.disabled = true
+    const result = await fetch(endpoint, { method: "POST" }).then((r) => r.json()).catch(() => null)
+    id = result?.id
+    if (!modal.isConnected) { cancel(); return }
+    if (!result?.url) { status.textContent = result?.message || "Could not start official sign-in"; start.disabled = false; return }
+    const link = document.createElement("a"); link.href = result.url; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = "Open official sign-in in browser"
+    status.textContent = "Complete sign-in using the link. This attempt expires in five minutes; closing this popup cancels an unfinished attempt." + (cursor ? " A completed SDK key stays stored; revoke it from Cursor's account dashboard if needed." : "")
+    const check = document.createElement("button"); check.textContent = "Check sign-in"
+    check.onclick = async () => {
+      const state = await fetch(endpoint + "?id=" + encodeURIComponent(id)).then((r) => r.json()).catch(() => null)
+      if (!modal.isConnected) return
+      if (state?.state === "complete") { modal.close(); if (cursor) { void loadProviders(); note("Cursor SDK signed in; select /model cursor/default") } else openAccountDialog(); return }
+      status.textContent = state?.state === "pending" ? "Still waiting for browser sign-in." : "Sign-in failed, expired or was cancelled; close this popup and try again."
+    }
+    modal.append(link, check)
+    start.remove()
+  }
+}
+
+async function openImportDialog(selectedId) {
+  const modal = makeDialog("Import Codex text conversation")
+  const status = document.createElement("p"); status.textContent = "Choose a conversation for this project. A new text-only copy is created; your source and current conversation stay unchanged. Native tools, images, reasoning and hidden prompts are omitted. Continuing the copy sends its text to your selected model."
+  const list = document.createElement("div"); modal.append(status, list)
+  const choose = (entry) => {
+    list.replaceChildren()
+    const label = document.createElement("p"); label.textContent = entry.title + " · ID …" + entry.id.slice(-8)
+    const confirm = document.createElement("button"); confirm.textContent = "Copy as new conversation"
+    confirm.onclick = async () => {
+      confirm.disabled = true
+      const result = await fetch("/api/codex/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: entry.id, model: currentModel }) }).then((r) => r.json()).catch(() => null)
+      if (!modal.isConnected) return
+      status.textContent = result?.message || "Import failed; source and current conversation unchanged"
+      if (!result?.id) { confirm.disabled = false; return }
+      label.textContent = result.title + " · " + result.messages + " messages. Use /resume to open the copy."
+      confirm.remove()
+      void refreshSessions()
+    }
+    list.append(label, confirm)
+  }
+  if (selectedId) { choose({ id: selectedId, title: selectedId }); return }
+  const page = async (cursor) => {
+    list.textContent = "Reading official CLI session list…"
+    const data = await fetch("/api/codex/import" + (cursor ? "?cursor=" + encodeURIComponent(cursor) : "")).then((r) => r.json()).catch(() => null)
+    if (!modal.isConnected) return
+    list.replaceChildren()
+    for (const entry of data?.sessions || []) {
+      const row = document.createElement("button"); row.className = "dialog-action"
+      const time = (entry.updatedAt === undefined ? "" : new Date(entry.updatedAt * 1000).toLocaleString() + " · ") + entry.id.slice(-8)
+      row.textContent = entry.title + " · " + time; row.onclick = () => choose(entry); list.appendChild(row)
+    }
+    if (data?.next) { const more = document.createElement("button"); more.textContent = "More conversations"; more.onclick = () => { void page(data.next) }; list.appendChild(more) }
+    if (!list.children.length) list.textContent = data?.message || "No Codex conversations for this project."
+  }
+  await page()
+}
+
 async function runCommand(text) {
   text = text.replace(/^\/[^\s]+/, (name) => paletteData.aliases?.[name] || name)
   const [name, ...rest] = text.split(" ")
   const argument = rest.join(" ").trim()
+  if (name === "/account") {
+    if (argument && argument !== "codex") { note("Only Codex account telemetry is wired; use /account codex"); return true }
+    openAccountDialog(); return true
+  }
+  if (name === "/login") {
+    if (argument === "cursor") { openCodexLoginDialog("cursor"); return true }
+    if (argument === "claude" || argument === "claude-code" || argument === "cursor-cli") {
+      const source = argument === "cursor-cli" ? "cursor" : "claude"
+      const modal = makeDialog("Official " + source + " sign-in handoff")
+      const body = document.createElement("pre"); body.textContent = "Loading official command…"; modal.append(body)
+      const handoff = await fetch("/api/cli/login?source=" + source, { cache: "no-store" }).then((r) => r.json()).catch(() => null)
+      if (!modal.isConnected) return true
+      if (!handoff?.command) { body.textContent = "Sign-in handoff unavailable"; return true }
+      body.textContent = handoff.warning + "\n\n" + handoff.command + "\n\nCheck afterward: " + handoff.statusCommand
+      const copy = document.createElement("button"); copy.textContent = "Copy official sign-in command"
+      copy.onclick = async () => { try { await navigator.clipboard.writeText(handoff.command); copy.textContent = "Copied; run in your own terminal" } catch { copy.textContent = "Copy unavailable; select the command above" } }
+      modal.append(copy); return true
+    }
+    if (argument !== "codex") { note("Use /login codex, /login claude or /login cursor"); return true }
+    openCodexLoginDialog(); return true
+  }
+  if (name === "/import") {
+    const [source, id, extra] = argument.split(/\s+/)
+    if (source !== "codex" || extra) { note("Use /import codex [session-id]; imports are new text-only conversations"); return true }
+    await openImportDialog(id); return true
+  }
   if (paletteData.pending?.[name]) { note(paletteData.pending[name]); return true }
   if (name === "/quit") { note("Close this browser tab to exit the Web UI; the local server keeps running."); return true }
   if (name === "/mouse") { note("The browser supports mouse selection and Ctrl+C natively."); return true }
@@ -987,7 +1103,7 @@ async function runCommand(text) {
     const result = await saveSettings({ effort: argument })
     const level = result ? result.settings.effort : argument
     const model = modelOptions.find((option) => option.value === currentModel)
-    const reasons = model && /reasoning/.test(model.label)
+    const reasons = model && model.effort
     note(
       level === "auto"
         ? "effort: auto - the provider decides"
@@ -1080,8 +1196,29 @@ async function runCommand(text) {
     return true
   }
 
-  if (name === "/status" || name === "/usage") {
-    if (name === "/usage") { note(document.getElementById("usage-readout").textContent + "\nContext is a transcript estimate, excluding extra tool schemas and injected context. Dollar figures use catalog rates, not a provider bill. Quotas/balances are not wired yet."); return true }
+  if (name === "/usage" || name === "/balance") {
+    const provider = name === "/balance" && argument ? argument : currentModel.split("/")[0]
+    const modal = makeDialog(name === "/usage" ? "Usage and provider balance" : "Provider balance")
+    if (name === "/usage") {
+      const session = document.createElement("p")
+      session.textContent = document.getElementById("usage-readout").textContent + "\nContext is estimated. Session cost is not a provider bill. Codex subscription quotas: /account codex; other subscriptions not wired yet."
+      modal.appendChild(session)
+    }
+    const status = document.createElement("pre"); status.style.whiteSpace = "pre-wrap"; status.textContent = "Checking " + provider + "…"; modal.appendChild(status)
+    const refresh = document.createElement("button"); refresh.textContent = "Refresh balance"; modal.appendChild(refresh)
+    const update = async () => {
+      refresh.disabled = true
+      status.textContent = "Checking " + provider + "…"
+      const data = await fetch("/api/balance?provider=" + encodeURIComponent(provider), { cache: "no-store" }).then((response) => response.json()).catch(() => null)
+      if (!modal.isConnected) return
+      status.textContent = data?.rows ? data.rows.map(([label, value]) => label + ": " + value).join("\n") : (data?.message || "Balance unavailable; try again")
+      refresh.disabled = false
+    }
+    refresh.addEventListener("click", () => { void update() })
+    void update()
+    return true
+  }
+  if (name === "/status") {
     const model = modelOptions.find((o) => o.value === currentModel)
     note([
       "model     " + (model ? model.label : currentModel),
@@ -1155,6 +1292,7 @@ async function runCommand(text) {
   }
 
   if (name === "/connect") {
+    if (argument === "cursor") { note("Use /login cursor for SDK user-plan sign-in, or /connect cursor-api for an existing key"); return true }
     if (argument) { connectForm(argument); return true }
     const data = await fetch("/api/connect").then((r) => r.json()).catch(() => null)
     if (!data) { note("could not reach the server"); return true }
@@ -1171,6 +1309,7 @@ async function runCommand(text) {
   }
 
   if (name === "/disconnect") {
+    if (argument === "cursor") { note("Revoke the SDK user-plan key in Cursor's account dashboard. /disconnect cursor-api only removes a CG-stored API key, not SDK/CLI sign-in."); return true }
     if (!argument) {
       const stored = (paletteData.connectable || []).filter((entry) => entry.connected)
       note(
@@ -1215,7 +1354,32 @@ async function runCommand(text) {
   }
 
   if (name === "/diff") {
-    note("The Web UI diff viewer is not wired yet. Activity shows changed files; use /diff in the TUI for the session diff.")
+    const selected = sessionId
+    const data = await fetch("/api/diff?sessionId=" + encodeURIComponent(selected || "")).then((response) => response.ok ? response.json() : null).catch(() => null)
+    if (!data) { note("Could not load the conversation diff."); return true }
+    if (sessionId !== selected) return true
+    const modal = makeDialog("Conversation changes")
+    const summary = document.createElement("p"); summary.textContent = data.message; modal.appendChild(summary)
+    for (const file of data.files) {
+      const section = document.createElement("details"); section.open = true
+      const heading = document.createElement("summary")
+      heading.textContent = file.path + " · " + file.status + " · +" + file.added + " −" + file.removed
+      section.appendChild(heading)
+      if (file.truncated) {
+        const warning = document.createElement("p"); warning.textContent = "This file is too large for a full line-by-line diff."; section.appendChild(warning)
+      }
+      for (const hunk of file.hunks) {
+        const header = document.createElement("pre"); header.className = "diff-hunk"
+        header.textContent = `@@ -${hunk.beforeStart},${hunk.beforeCount} +${hunk.afterStart},${hunk.afterCount} @@`
+        section.appendChild(header)
+        for (const line of hunk.lines) {
+          const row = document.createElement("pre"); row.className = "diff-line diff-" + line.kind
+          row.textContent = String(line.before ?? "").padStart(5) + " " + String(line.after ?? "").padStart(5) + " " + (line.kind === "add" ? "+" : line.kind === "remove" ? "−" : " ") + line.text
+          section.appendChild(row)
+        }
+      }
+      modal.appendChild(section)
+    }
     return true
   }
 
@@ -1252,7 +1416,7 @@ async function submit() {
     input.value = ""
     paletteItems = []
     renderPalette()
-    if (/^\/(?:approvals|mode|help|status|usage|settings|theme|thinking|effort)(?:\s|$)/.test(text)) {
+    if (/^\/(?:approvals|mode|help|status|usage|balance|account|settings|theme|thinking|effort)(?:\s|$)/.test(text)) {
       await runCommand(text)
       return
     }
@@ -1534,6 +1698,7 @@ async function loadProviders() {
   modelOptions = data.providers.map((p) => ({
     value: p.id,
     label: p.label + (p.reasoning ? " (reasoning)" : ""),
+    effort: p.effort,
     kind: p.kind,
     section: p.section,
     ready: p.ready,
@@ -1968,6 +2133,7 @@ let planItems = []
 let runningTools = []
 let feedItems = []
 let changedFiles = new Map()
+document.getElementById("review-diff").addEventListener("click", () => { void runCommand("/diff") })
 /** Calls that were refused, so their tool_end cannot mark them done. */
 const deniedCalls = new Set()
 

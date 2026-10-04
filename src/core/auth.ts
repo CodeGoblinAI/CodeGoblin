@@ -27,7 +27,7 @@ const file = path.join(Global.Path.data, "auth.json")
 /** Owner read/write only, where the platform honours it. */
 const SECRET_MODE = 0o600
 
-const envName = (providerId: string) => `${providerId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`
+const envName = (providerId: string) => providerId === "cursor-api" ? "CURSOR_API_KEY" : `${providerId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`
 
 function readStore(): Record<string, StoredAuth> {
   try {
@@ -58,7 +58,7 @@ async function writeStore(store: Record<string, StoredAuth>): Promise<void> {
  */
 export function apiKey(providerId: string): string | undefined {
   // Local servers need no key; the CLI owns its own authentication. Never forward a stored key.
-  if (providerId === "local" || providerId === "claude-code") return ""
+  if (providerId === "local" || providerId === "claude-code" || providerId === "codex" || providerId === "cursor") return ""
   const fromEnv = process.env[envName(providerId)]
   if (fromEnv) return fromEnv
 
@@ -93,7 +93,7 @@ export function connections(): Connection[] {
   // provider works without being connected deserves to see why.
   for (const name of Object.keys(process.env)) {
     if (!name.endsWith("_API_KEY")) continue
-    const id = name.slice(0, -"_API_KEY".length).toLowerCase()
+    const id = name === "CURSOR_API_KEY" ? "cursor-api" : name.slice(0, -"_API_KEY".length).toLowerCase()
     if (found.some((connection) => connection.id === id)) continue
     found.push({ id, type: "api", source: "environment" })
   }

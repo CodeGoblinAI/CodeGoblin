@@ -16,7 +16,13 @@ import { isLiveCommand } from "./live-commands"
 import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
 import { allSelections } from "../core/providers"
 import { normalizeCommand } from "../core/commands"
-import { claudeAuthStatus } from "../core/claude-cli"
+import { cliAuthStatus, cliStatuses } from "../core/cli-status"
+import { cliHandoff } from "../core/cli-handoff"
+import { fetchBalance, balanceRows } from "../core/balance"
+import { codexAccount, cachedCodexAccount, accountRows, startCodexLogin } from "../core/codex-account"
+import { startCursorLogin } from "../core/cursor-sdk"
+import { listCodexSessions, importCodexSession } from "../core/codex-import"
+import { openCodexLogin, openCursorLogin } from "../core/open-browser"
 import * as Dialogs from "./dialog"
 import { changesIn, summarise, countsOf, statusLetter, type Changes } from "../core/changes"
 import {
@@ -49,6 +55,7 @@ import {
   loadMedia,
   saveMedia,
   withValue,
+  requireMediaSetting,
   optionById,
   labelOf,
   optionsForModel,
@@ -74,6 +81,7 @@ import {
   addSpend,
   priceOf,
   formatSpend,
+  formatContext,
   type Spend,
 } from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
@@ -810,7 +818,7 @@ function render() {
   // Usage stays on the bar even while a status is showing: a transient
   // message used to replace the model, context and spend readout entirely,
   // so "no key" also hid what you were connected to.
-  const usage = selection.provider.label + " . " + selection.model.id + "  ~" + context.percent + "% ctx" + spendTag
+  const usage = selection.provider.label + " . " + selection.model.id + (context.limit > 0 ? "  ~" + context.percent + "% ctx" : "  ctx window unknown") + spendTag
   const left = status ? status + "   " + usage : modeTag.trim() + (modeTag ? "  " : "") + usage
   const right = dialog
     ? "up/down move . enter chooses . esc closes"
@@ -1089,11 +1097,116 @@ function checkpointStatus(): string {
 function usageRows(): [string, string][] {
   const context = contextUsage()
   return [
-    ["context", "~" + context.used + " / " + selection.model.contextWindow + " (" + context.percent + "%)"],
+    ["context", formatContext(context)],
     ["tokens", spend.input.toLocaleString() + " input / " + spend.output.toLocaleString() + " output"],
     ["cost", spend.dollars === undefined ? "unknown / subscription; not zero" : formatSpend(spend)],
-    ["quotas/balances", "not wired yet"],
+    ["subscription quota", "Codex: /account; others not wired"],
   ]
+}
+
+/** Keep the composer responsive; don't let a late result replace another popup. */
+function openUsage(provider = selection.provider.id, accountOnly = false) {
+  const view = { title: accountOnly ? "Provider balance" : "Usage (context is estimated)", rows: [
+    ...(accountOnly ? [] : usageRows()),
+    ["provider balance", "checking " + provider + "…"],
+  ] as [string, string][] }
+  overlay = view
+  void fetchBalance(provider, apiKey(provider)).then((snapshot) => {
+    if (overlay !== view) return
+    view.rows = [...(accountOnly ? [] : view.rows.slice(0, -1)), ...balanceRows(snapshot)]
+    render()
+  })
+}
+
+let accountRequest = 0
+let codexLogin: Awaited<ReturnType<typeof startCodexLogin>> | undefined
+let cursorLogin: Awaited<ReturnType<typeof startCursorLogin>> | undefined
+
+function accountDialog(rows: [string, string][]) {
+  return Dialogs.open("codex-account", "Codex account / subscription quotas", [
+    { label: "Refresh quotas", value: "refresh" },
+    { label: "Sign in through official CLI", value: "login" },
+    ...rows.map(([label, value]) => ({ label: label + ": " + value, value: "info" })),
+  ], { size: "large", footer: "up/down scroll . enter refresh/sign-in . esc closes" })
+}
+
+function openAccount() {
+  const request = ++accountRequest
+  dialog = accountDialog([["status", "Checking official CLI…"]])
+  void (async () => {
+    const cached = await cachedCodexAccount()
+    if (request !== accountRequest || dialog?.kind !== "codex-account") return
+    if (cached) { dialog = accountDialog([["refresh", "checking…"], ...accountRows(cached)]); render() }
+    const snapshot = await codexAccount()
+    if (request !== accountRequest || dialog?.kind !== "codex-account") return
+    dialog = accountDialog(accountRows(snapshot))
+    render()
+  })()
+}
+
+function openLogin(source: "codex" | "cursor" = "codex") {
+  dialog = Dialogs.open(source + "-login-start", source === "cursor" ? "Cursor SDK / user-plan sign-in" : "Official Codex sign-in", [
+    { label: "Start official browser sign-in", value: "start" },
+    { label: "Cancel", value: "cancel" },
+    { label: source === "cursor" ? "SDK login is separate from Cursor CLI login" : "Signing in changes the official CLI's shared account", inert: true },
+    { label: source === "cursor" ? "Creates a named SDK key billed to your Cursor plan" : "No token or password is copied into CG-Next", inert: true },
+    ...(source === "cursor" ? [{ label: "Key stored in this CG profile; native SDK tools disabled", inert: true }, { label: "Replaces this profile's SDK sign-in on completion", inert: true }, { label: "For an existing key: /connect cursor-api", inert: true }] : []),
+  ], { footer: "enter chooses . esc closes", size: "large" })
+}
+
+async function beginLogin(source: "codex" | "cursor" = "codex") {
+  if (source === "cursor") await cursorLogin?.cancel()
+  if (source === "codex") await codexLogin?.cancel()
+  const title = source === "cursor" ? "Cursor SDK / user-plan sign-in" : "Official Codex sign-in"
+  const view = Dialogs.open(source + "-login", title, [{ label: "Starting official sign-in…", inert: true }])
+  dialog = view
+  status = "starting official " + source + " sign-in…"
+  render()
+  try {
+    const login = await (source === "cursor" ? startCursorLogin() : startCodexLogin())
+    if (dialog !== view) { await login.cancel(); return }
+    if (source === "cursor") cursorLogin = login
+    if (source === "codex") codexLogin = login
+    dialog = Dialogs.open(source + "-login", title, [
+      { label: "Open official sign-in in browser", value: "open" },
+      { label: source === "cursor" ? "Check sign-in / models" : "Check sign-in / quotas", value: "check" },
+      { label: "Cancel sign-in", value: "cancel" },
+      { label: source === "cursor" ? "Creates a profile-local SDK key; expires in 5 minutes" : "Uses the official CLI's shared sign-in; expires in 5 minutes", inert: true },
+      { label: source === "cursor" ? "Billed to your user plan; native SDK tools disabled" : "No token or password is copied into CG-Next", inert: true },
+      ...(source === "cursor" ? [{ label: "Cancel stops pending login; a completed key stays stored", inert: true }] : []),
+    ], { footer: "enter chooses . esc cancels", size: "large" })
+  } catch { status = source === "cursor" ? "Could not start Cursor SDK sign-in; check SDK compatibility" : "Could not start Codex sign-in; run codex login" }
+  render()
+}
+
+async function openImport(cursor?: string) {
+  const view = Dialogs.open("codex-import", "Import a Codex text conversation", [{ label: "Reading this project's conversations…", inert: true }])
+  dialog = view
+  status = "reading this project's Codex conversation list…"
+  render()
+  try {
+    const result = await listCodexSessions(process.cwd(), cursor)
+    if (dialog !== view) return
+    dialog = Dialogs.open("codex-import", "Import a Codex text conversation (new copy)", [
+      ...result.sessions.map((entry) => ({ label: entry.title, hint: (entry.updatedAt === undefined ? "" : new Date(entry.updatedAt * 1000).toLocaleString() + " · ") + entry.id.slice(-8), value: entry.id })),
+      ...(result.next ? [{ label: "More conversations…", value: "page:" + result.next }] : []),
+      ...(!result.sessions.length ? [{ label: "No Codex conversations for this project", inert: true }] : []),
+    ], { size: "large", footer: "enter selects . confirmation before copying . esc closes" })
+    status = "Choose a conversation; source stays unchanged"
+  } catch { if (dialog === view) status = "Could not list Codex sessions; check CLI compatibility" }
+  render()
+}
+
+function confirmImport(id: string, title: string) {
+  dialog = Dialogs.open("codex-import-confirm", "Copy selected Codex conversation?", [
+    { label: "Copy as a new text conversation", value: id },
+    { label: "Cancel", value: "cancel" },
+    { label: title, inert: true },
+    { label: "Source ID ends in " + id.slice(-8), inert: true },
+    { label: "Native tools, images, reasoning and hidden prompts omitted", inert: true },
+    { label: "Source untouched; current conversation not replaced", inert: true },
+    { label: "Continuing sends copied text to your selected model", inert: true },
+  ], { size: "large", footer: "enter confirms . esc cancels" })
 }
 
 /** Session, spend and servers beside the transcript on wide terminals. */
@@ -1107,7 +1220,7 @@ function railLines(height: number): string[] {
   const rows: [string, string][] = [
     ["session", session.title],
     ["model", selection.provider.label + " " + selection.model.label],
-    ["context", bar + " " + context.percent + "%"],
+    ["context", context.limit > 0 ? bar + " " + context.percent + "%" : formatContext(context)],
     ["tokens", spend.input.toLocaleString() + " in / " + spend.output.toLocaleString() + " out"],
     ["cost", spend.dollars === undefined ? "unknown" : formatSpend(spend)],
     ["mode", permissions.mode + (permissions.planning ? " +planning" : "") + (boost || boostOnce ? " +boost" : "")],
@@ -1283,6 +1396,16 @@ function toFile(dialog: Dialogs.Dialog, direction: number): Dialogs.Dialog {
 }
 
 function closeDialog() {
+  if (dialog?.kind === "codex-login" && codexLogin) {
+    const login = codexLogin
+    codexLogin = undefined
+    void login.cancel()
+  }
+  if (dialog?.kind === "cursor-login" && cursorLogin) {
+    const login = cursorLogin
+    cursorLogin = undefined
+    void login.cancel()
+  }
   dialog = undefined
   settingBeing = undefined
 }
@@ -1292,6 +1415,67 @@ async function chooseInDialog() {
   if (!dialog) return
   const row = Dialogs.selected(dialog)
   if (!row || !row.value) { render(); return }
+  if (dialog.kind === "codex-account") {
+    if (row.value === "refresh") openAccount()
+    if (row.value === "login") await openLogin()
+    render(); return
+  }
+  if (dialog.kind === "cli-login") {
+    if (row.value) await copyText(row.value)
+    status = "Official sign-in command copied; run it in your own terminal"
+    closeDialog()
+    render()
+    return
+  }
+  if (dialog.kind === "codex-login-start" || dialog.kind === "cursor-login-start") {
+    if (row.value === "start") await beginLogin(dialog.kind === "cursor-login-start" ? "cursor" : "codex")
+    if (row.value === "cancel") closeDialog()
+    render(); return
+  }
+  if (dialog.kind === "cursor-login") {
+    if (row.value === "open" && cursorLogin) {
+      try { await openCursorLogin(cursorLogin.url); status = "Complete SDK sign-in in the browser, then check here" }
+      catch { status = "Could not open official Cursor sign-in in the browser" }
+    }
+    if (row.value === "check") {
+      const state = cursorLogin?.status()
+      if (state === "pending") status = "Complete the browser sign-in first; this attempt is still pending"
+      if (state === "complete") { closeDialog(); refreshConnected(); status = "Cursor SDK signed in; select /model cursor/default" }
+      if (state !== "pending" && state !== "complete") status = "Sign-in failed, expired or cancelled; close and retry /login cursor"
+    }
+    if (row.value === "cancel") closeDialog()
+    render(); return
+  }
+  if (dialog.kind === "codex-login") {
+    if (row.value === "open" && codexLogin) {
+      try { await openCodexLogin(codexLogin.url); status = "Complete sign-in in your browser, then check sign-in here" }
+      catch { status = "Browser could not open; run codex login" }
+    }
+    if (row.value === "check") {
+      if (codexLogin?.status() === "pending") status = "Complete the browser sign-in first; this attempt is still pending"
+      else { closeDialog(); openAccount() }
+    }
+    if (row.value === "cancel") closeDialog()
+    render(); return
+  }
+  if (dialog.kind === "codex-import") {
+    if (row.value.startsWith("page:")) { await openImport(row.value.slice(5)); return }
+    confirmImport(row.value, row.label)
+    render(); return
+  }
+  if (dialog.kind === "codex-import-confirm") {
+    const id = row.value
+    closeDialog()
+    if (id === "cancel") { status = "Import cancelled; no conversation copied"; render(); return }
+    status = "Copying selected text conversation…"
+    render()
+    try {
+      const result = await importCodexSession(id, process.cwd(), selection.provider.id)
+      await refreshSessionCache()
+      status = "Copied " + result.messages + " messages; use /resume to open the new copy"
+    } catch { status = "Import failed; source and current conversation unchanged" }
+    render(); return
+  }
   if (dialog.kind === "attach") {
     closeDialog()
     if (row.value === "image") {
@@ -1606,7 +1790,20 @@ async function send() {
             ? "effort: " + result.level
             : "effort: " + result.level + " (saved; " + selection.model.label + " does not reason)"
     }
-    if (result.kind === "settings") { openSettings(); render(); return }
+    if (result.kind === "settings") {
+      if (!result.argument) { openSettings(); render(); return }
+      const [id, ...parts] = result.argument.split(/\s+/)
+      const value = parts.join(" ") || MEDIA_DEFAULT
+      try {
+        const option = requireMediaSetting(selection.provider.id, selection.model.id, id!, value)
+        media = withValue(media, selection.provider.id, selection.model.id, option.id, value)
+        await saveMedia(media)
+        status = option.label + ": " + labelOf(option, value, voices)
+      } catch (error) {
+        status = error instanceof Error ? error.message : "Could not save setting"
+      }
+      render(); return
+    }
     if (result.kind === "diff") { await openDiff(); render(); return }
     if (result.kind === "thinking") {
       settings = { ...settings, thinking: !settings.thinking }
@@ -1757,13 +1954,13 @@ async function send() {
       overlay = { title: "mcp servers", rows }
     }
     if (result.kind === "status") {
-      const cli = selection.provider.cli ? await claudeAuthStatus() : undefined
+      const cli = selection.provider.cli ? await cliAuthStatus(selection.provider.id) : undefined
       const context = contextUsage()
       const approved = permissions.summary()
       const rows: [string, string][] = [
         ["model", selection.provider.label + " " + selection.model.label],
         ["session", session.title + "  (" + messages.length + " messages)"],
-        ["context", context.percent + "% of " + selection.model.contextWindow.toLocaleString()],
+        ["context", formatContext(context)],
         [
           "spent",
           spend.input + spend.output > 0
@@ -1789,7 +1986,33 @@ async function send() {
     // /usage is the spend readout, not session config: tokens, cost and
     // context on their own, the way the [Usage] button shows them.
     if (result.kind === "usage") {
-      overlay = { title: "Usage (context is estimated)", rows: usageRows() }
+      openUsage()
+    }
+    if (result.kind === "account") { openAccount(); render(); return }
+    if (result.kind === "login") { openLogin(result.source); render(); return }
+    if (result.kind === "cli-login") {
+      const handoff = cliHandoff(result.source)
+      dialog = Dialogs.open("cli-login", handoff.label + " sign-in handoff", [
+        { label: "Copy official sign-in command", value: handoff.command },
+        { label: handoff.command, inert: true },
+        { label: "Completing sign-in can change the shared CLI account", inert: true },
+        { label: "Run in your terminal; official CLI opens the browser", inert: true },
+        { label: "CG-Next does not read or copy passwords/tokens", inert: true },
+        { label: "Check afterward: " + handoff.statusCommand, inert: true },
+        { label: "Closing does not cancel an externally started login", inert: true },
+      ])
+      render(); return
+    }
+    if (result.kind === "import") {
+      if (kindOf(selection.model) !== "text") { status = "Select a text model before importing"; render(); return }
+      if (result.id) {
+        confirmImport(result.id, "Selected Codex conversation")
+        render(); return
+      }
+      await openImport(); return
+    }
+    if (result.kind === "balance") {
+      openUsage(result.provider || selection.provider.id, true)
     }
     if (result.kind === "undo" || result.kind === "redo") {
       const forward = result.kind === "redo"
@@ -1815,7 +2038,8 @@ async function send() {
       const plan = planCompaction(messages, window)
       // Says why: the most recent quarter of the window is always kept word for
       // word, so a short conversation has nothing older to summarise.
-      if (!plan.summarise.length) status = "nothing to compact yet - the whole conversation still fits in the recent part that is kept as it is"
+      if (window <= 0) status = "context window unavailable; history unchanged (CLI transport compaction remains automatic)"
+      else if (!plan.summarise.length) status = "nothing to compact yet - the whole conversation still fits in the recent part that is kept as it is"
       else {
         const summary = plan.summarise
           .filter((m) => m.role === "user")
@@ -2083,7 +2307,7 @@ function shutdown() {
   out.write("[0m" + ansi.pasteOff + "\x1b[?1002l\x1b[?1006l" + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
   // MCP servers started as child processes go with the app, but one that will
   // not close is not allowed to keep the terminal waiting.
-  void Promise.race([mcp.close(), new Promise((done) => setTimeout(done, 1500))]).finally(() => process.exit(0))
+  void Promise.race([Promise.all([mcp.close(), codexLogin?.cancel(), cursorLogin?.cancel()]), new Promise((done) => setTimeout(done, 3500))]).finally(() => process.exit(0))
 }
 
 async function refreshSessionCache() {
@@ -2111,8 +2335,8 @@ function applyMouse() {
 
 function refreshConnected() {
   setConnectedProviders([...connections().map((item) => item.id), "local"])
-  void claudeAuthStatus().then((cli) => {
-    setConnectedProviders([...connections().map((item) => item.id), "local", ...(cli.ready ? ["claude-code"] : [])])
+  void cliStatuses().then((cli) => {
+    setConnectedProviders([...connections().map((item) => item.id), "local", ...Object.keys(cli).filter((id) => cli[id]?.ready)])
   }).catch(() => {})
 }
 refreshConnected()
@@ -2261,7 +2485,7 @@ process.stdin.on("data", (chunk) => {
         if (streaming) { status = "sessions cannot change during a turn; use /resume to queue" }
         else void openSessions().then(render)
       }
-      if (target === "usage") overlay = { title: "Usage (context is estimated)", rows: usageRows() }
+      if (target === "usage") openUsage()
       render(); continue
     }
     if (pressed.type === "shifttab") {

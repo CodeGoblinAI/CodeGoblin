@@ -16,6 +16,22 @@ await fs.mkdir(path.dirname(auth.storePath()), { recursive: true })
 
 const FAKE = "sk-fake-not-a-real-key-0000"
 
+test("Cursor explicit API key has one documented env name and never authenticates the browser route", async () => {
+  const previous = process.env.CURSOR_API_KEY
+  await auth.connect("cursor-api", FAKE)
+  process.env.CURSOR_API_KEY = "cursor-env-fixture"
+  try {
+    expect(auth.apiKey("cursor-api")).toBe("cursor-env-fixture")
+    expect(auth.apiKey("cursor")).toBe("")
+    expect(auth.connections().some((entry) => entry.id === "cursor-api")).toBe(true)
+    expect(auth.envVariable("cursor-api")).toBe("CURSOR_API_KEY")
+  } finally {
+    if (previous === undefined) delete process.env.CURSOR_API_KEY
+    if (previous !== undefined) process.env.CURSOR_API_KEY = previous
+    await auth.disconnect("cursor-api")
+  }
+})
+
 describe("keeping keys", () => {
   test("stores one and reads it back", async () => {
     await auth.connect("testprovider", FAKE)

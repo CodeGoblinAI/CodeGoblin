@@ -41,6 +41,10 @@ export function usage(messages: Message[], contextWindow: number): Usage {
   return { used, limit: contextWindow, percent }
 }
 
+export function formatContext(context: Usage): string {
+  return context.limit > 0 ? "~" + context.used.toLocaleString() + " / " + context.limit.toLocaleString() + " (" + context.percent + "%)" : "~" + context.used.toLocaleString() + " tokens; window unavailable"
+}
+
 /** What a turn used, as the provider reported it. */
 export type Spend = { input: number; output: number; dollars?: number; unpriced?: boolean }
 
@@ -89,7 +93,7 @@ export const COMPACT_AT = 0.75
 const PRESERVE_RECENT = 0.25
 
 export function shouldCompact(messages: Message[], contextWindow: number): boolean {
-  return conversationTokens(messages) > contextWindow * COMPACT_AT
+  return Number.isFinite(contextWindow) && contextWindow > 0 && conversationTokens(messages) > contextWindow * COMPACT_AT
 }
 
 /**
@@ -102,6 +106,8 @@ export function shouldCompact(messages: Message[], contextWindow: number): boole
 export function planCompaction(messages: Message[], contextWindow: number) {
   const system = messages.filter((message) => message.role === "system")
   const rest = messages.filter((message) => message.role !== "system")
+  // An unknown window is not a zero-token retention budget. Leave history intact.
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return { system, summarise: [], keep: rest }
 
   const budget = contextWindow * PRESERVE_RECENT
   let kept = 0

@@ -26,7 +26,7 @@ export async function claudeAuthStatus(signal?: AbortSignal) {
     text += decoder.decode()
     if (await proc.exited !== 0) return { ready: false, detail: "Run claude auth login (or claude auth status for diagnostics)" }
     const value = record(JSON.parse(text))
-    return { ready: value.loggedIn === true, detail: value.loggedIn === true ? "Signed in through the official Claude CLI; chat only" : "Run claude auth login" }
+    return { ready: value.loggedIn === true, detail: value.loggedIn === true ? "Signed in through the official Claude CLI; CG-Next owns tool approvals" : "Run claude auth login" }
   } catch {
     return { ready: false, detail: "Could not verify Claude CLI sign-in; run claude auth status" }
   } finally {
@@ -53,11 +53,13 @@ export class ClaudeStream {
   text = ""
   finished = false
   initialized = false
+  constructor(private structured = false) {}
 
   parse(line: string): AgentEvent[] {
     const raw = record(JSON.parse(line))
     if (raw.type === "system" && raw.subtype === "init") {
-      if (!Array.isArray(raw.tools) || raw.tools.length || !Array.isArray(raw.mcp_servers) || raw.mcp_servers.length) {
+      // StructuredOutput is the CLI's pure schema formatter, never a filesystem/shell tool.
+      if (!Array.isArray(raw.tools) || raw.tools.some((name) => !this.structured || name !== "StructuredOutput") || raw.tools.length > (this.structured ? 1 : 0) || !Array.isArray(raw.mcp_servers) || raw.mcp_servers.length) {
         throw new Error("Claude CLI did not start in tool-free mode; stopped for safety. Update the official CLI.")
       }
       this.initialized = true
@@ -65,11 +67,12 @@ export class ClaudeStream {
     if (raw.type === "stream_event") {
       if (!this.initialized) throw new Error("Claude CLI streamed before confirming tool-free initialization")
       const event = record(raw.event)
-      if (event.type === "content_block_start" && record(event.content_block).type === "tool_use") {
+      if (event.type === "content_block_start" && record(event.content_block).type === "tool_use" && (!this.structured || record(event.content_block).name !== "StructuredOutput")) {
         throw new Error("Unexpected native tool call in Claude chat-only mode")
       }
       const delta = record(event.delta)
       if (delta.type === "text_delta" && typeof delta.text === "string") {
+        if (this.structured) return []
         this.text += delta.text
         return [{ type: "text", delta: delta.text }]
       }
@@ -77,12 +80,17 @@ export class ClaudeStream {
     }
     if (raw.type !== "result") return []
     if (raw.is_error === true || raw.subtype !== "success") {
-      throw new Error(`Claude CLI failed: ${typeof raw.result === "string" ? raw.result.slice(0, 500) : String(raw.subtype)}. Check 'claude auth status' or run 'claude auth login'.`)
+      throw new Error("Claude CLI failed. Check 'claude auth status' or run 'claude auth login'.")
     }
     if (!this.initialized) throw new Error("Claude CLI did not confirm tool-free initialization")
     this.finished = true
     const events: AgentEvent[] = []
-    if (!this.text && typeof raw.result === "string") {
+    if (this.structured && raw.stop_reason !== "max_tokens") {
+      if (!raw.structured_output || typeof raw.structured_output !== "object" || Array.isArray(raw.structured_output)) throw new Error("Claude CLI did not return its structured response; no CG-Next tools were executed")
+      this.text = JSON.stringify(raw.structured_output)
+      events.push({ type: "text", delta: this.text })
+    }
+    if (!this.structured && !this.text && typeof raw.result === "string") {
       this.text = raw.result
       events.push({ type: "text", delta: raw.result })
     }
@@ -96,18 +104,21 @@ export class ClaudeStream {
 
 export async function* claudeChat(input: {
   modelId: string; messages: Message[]; signal?: AbortSignal
+  system?: string; prompt?: string; command?: string[]; schema?: Record<string, unknown>
+  effort?: "low" | "medium" | "high"
 }): AsyncGenerator<AgentEvent> {
   input.signal?.throwIfAborted()
   const executable = claudeExecutable()
-  if (!executable) throw new Error("Claude Code CLI is not installed or not on PATH. Install the official CLI, then run 'claude auth login'.")
-  const auth = await claudeAuthStatus(input.signal)
+  if (!input.command && !executable) throw new Error("Claude Code CLI is not installed or not on PATH. Install the official CLI, then run 'claude auth login'.")
+  const auth = input.command ? { ready: true, detail: "Test peer" } : await claudeAuthStatus(input.signal)
   input.signal?.throwIfAborted()
   if (!auth.ready) throw new Error(auth.detail)
-  const prompt = JSON.stringify(input.messages.filter((m) => m.role !== "system").map((m) => ({
+  const prompt = input.prompt ?? JSON.stringify(input.messages.filter((m) => m.role !== "system").map((m) => ({
     role: m.role, content: m.content + (m.images?.length ? "\n[Attached images were not sent: this connector is text-only.]" : ""),
   })))
-  if (prompt.length > 500_000) throw new Error("Claude CLI conversation is too large. Start a new session; CLI compaction is not supported yet.")
-  const proc = Bun.spawn([executable, ...CLAUDE_CHAT_FLAGS, ...(input.modelId === "default" ? [] : ["--model", input.modelId])], {
+  if (prompt.length > 500_000) throw new Error("Claude CLI conversation is too large, including instructions and tools. Shorten the prompt or start a new session.")
+  const flags = input.system ? [...CLAUDE_CHAT_FLAGS.slice(0, -1), input.system] : CLAUDE_CHAT_FLAGS
+  const proc = Bun.spawn(input.command ?? claudeCommand(executable!, flags, input), {
     stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true,
   })
   const stop = () => { if (proc.exitCode === null) proc.kill() }
@@ -116,13 +127,9 @@ export async function* claudeChat(input: {
   const timer = setTimeout(stop, 10 * 60_000)
   // Drain stderr concurrently, but never retain unlimited CLI diagnostics.
   const stderr = (async () => {
-    let text = ""
-    for await (const part of proc.stderr) {
-      if (text.length < 4096) text += new TextDecoder().decode(part).slice(0, 4096 - text.length)
-    }
-    return text
-  })().catch(() => "Could not read CLI diagnostics")
-  const parser = new ClaudeStream()
+    for await (const _ of proc.stderr) {}
+  })().catch(() => {})
+  const parser = new ClaudeStream(Boolean(input.schema))
   try {
     input.signal?.throwIfAborted()
     proc.stdin.write(prompt)
@@ -143,7 +150,7 @@ export async function* claudeChat(input: {
     if (buffer.trim()) yield* parser.parse(buffer)
     const code = await proc.exited
     input.signal?.throwIfAborted()
-    if (code !== 0) throw new Error(`Claude CLI exited with code ${code}. Check 'claude auth status'. ${(await stderr).slice(0, 500)}`)
+    if (code !== 0) throw new Error(`Claude CLI exited with code ${code}. Check 'claude auth status'.`)
     if (!parser.finished) throw new Error("Claude CLI ended without a completed result (possibly timed out). Retry or check the CLI directly.")
   } finally {
     clearTimeout(timer)
@@ -152,4 +159,9 @@ export async function* claudeChat(input: {
     await proc.exited
     await stderr
   }
+}
+
+/** Keep the actual CLI argument boundary testable without subscription calls. */
+export function claudeCommand(executable: string, flags: readonly string[], input: { modelId: string; schema?: Record<string, unknown>; effort?: "low" | "medium" | "high" }) {
+  return [executable, ...flags, ...(input.schema ? ["--json-schema", JSON.stringify(input.schema)] : []), ...(input.modelId === "default" ? [] : ["--model", input.modelId]), ...(input.effort ? ["--effort", input.effort] : [])]
 }

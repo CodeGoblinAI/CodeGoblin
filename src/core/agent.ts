@@ -1,10 +1,10 @@
 import { authHeaders, type Provider } from "./providers"
 import { verifyLocalModel } from "./local-provider"
-import { claudeChat } from "./claude-cli"
+import { cliCompletion } from "./cli-completion"
 import { TOOL_SCHEMA, runTool, isConcurrent } from "./tools"
 import { checkpointEvery } from "./config"
 import type { Permissions } from "./permission"
-import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT } from "./context"
+import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT, estimateTokens } from "./context"
 import { parseTodos, type Todo } from "./todo"
 import type { History } from "./undo"
 
@@ -272,19 +272,9 @@ export async function* runAgent(input: {
   checkpoint?: number
   maxTurns?: number
   signal?: AbortSignal
+  /** An internal inference transport seam; never exposed through UI/config. Consent stays here. */
+  completion?: typeof cliCompletion
 }): AsyncGenerator<AgentEvent, void, unknown> {
-  if (input.provider.cli === "claude-code") {
-    closeOpenCalls(input.messages)
-    let text = ""
-    for await (const event of claudeChat(input)) {
-      if (event.type === "text") text += event.delta
-      if (event.type === "output_limit") text += "\n\n[The model reached its output-token limit; this answer is unfinished.]"
-      yield event
-    }
-    input.messages.push({ role: "assistant", content: text })
-    yield { type: "turn_end" }
-    return
-  }
   // No limit unless a caller sets one. A fixed cap stopped real work part way
   // - a plan carried out, checked, and then cut off before the model could say
   // so - and a model that has finished says so by answering without a tool.
@@ -312,20 +302,37 @@ export async function* runAgent(input: {
   // the person is asked whether the turn may keep going. 0 means never.
   let toolCallsThisTurn = 0
   let nextCheckpoint = windowOf()
-  if (input.contextWindow && shouldCompact(localChat ? localChatMessages(input.messages) : input.messages, input.contextWindow)) {
+  for (let turn = 0; turn < maxTurns; turn++) {
+    if (input.signal?.aborted) return
+    if (turn > 0) await verifyLocalModel(input.provider, input.modelId, input.signal)
+    // CLI serialization/tools have their own bounded transport budget, not a claimed model window.
+    const contextWindow = input.provider.cli ? Math.min(input.contextWindow || 100_000, 100_000) : input.contextWindow
+    const cliSize = input.provider.cli ? estimateTokens(JSON.stringify({ messages: wire(input.messages, input.memory, false, input.instructions), tools: offeredTools(input) })) : 0
+  if (contextWindow && (input.provider.cli ? cliSize > contextWindow * 0.75 : shouldCompact(localChat ? localChatMessages(input.messages) : input.messages, contextWindow))) {
     const before = input.messages.length
-    const plan = planCompaction(input.messages, input.contextWindow)
+    const plan = planCompaction(input.messages, contextWindow)
     if (plan.summarise.length) {
-      const summary = await summarise(input, plan.summarise)
+      const summary = input.provider.cli ? yield* summariseCli(input, plan.summarise) : await summarise(input, plan.summarise)
       input.messages.splice(0, input.messages.length, ...applyCompaction(plan.system, summary, plan.keep))
       yield { type: "compacted", before, after: input.messages.length }
     }
   }
 
-  for (let turn = 0; turn < maxTurns; turn++) {
-    if (input.signal?.aborted) return
-    if (turn > 0) await verifyLocalModel(input.provider, input.modelId, input.signal)
-
+    let text = ""
+    let outputLimited = false
+    const calls = new Map<number, ToolCall>()
+    if (input.provider.cli) {
+      for await (const event of (input.completion ?? cliCompletion)({
+        cli: input.provider.cli, apiKey: input.apiKey, modelId: input.modelId, signal: input.signal, effort: input.effort, tools: offeredTools(input),
+        messages: wire(input.messages, input.memory, false,
+          [input.instructions, input.permissions?.planning ? PLANNING : undefined].filter(Boolean).join("\n\n")),
+      })) {
+        if (event.type === "calls") { event.calls.forEach((call, index) => calls.set(index, call)); continue }
+        if (event.type === "text") text += event.delta
+        if (event.type === "output_limit") { outputLimited = true; continue }
+        yield event
+      }
+    } else {
     const response = await fetch(chatEndpoint(input.provider), {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders(input.provider, input.apiKey) },
@@ -361,9 +368,6 @@ export async function* runAgent(input: {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ""
-    let text = ""
-    let outputLimited = false
-    const calls = new Map<number, ToolCall>()
 
     for (;;) {
       const { done, value } = await reader.read()
@@ -423,6 +427,8 @@ export async function* runAgent(input: {
       }
     }
 
+    }
+    if (input.signal?.aborted) return
     if (outputLimited) {
       // Truncated tool arguments are not executable requests.
       input.messages.push({ role: "assistant", content: text + "\n\n[The model reached its output-token limit; this answer is unfinished.]" })
@@ -580,6 +586,23 @@ export async function* runAgent(input: {
   // other way out returns, so this is the only path that reaches here.
   yield { type: "limit", turns: maxTurns }
   yield { type: "turn_end" }
+}
+
+async function* summariseCli(input: {
+  provider: Provider; modelId: string; apiKey: string; signal?: AbortSignal; completion?: typeof cliCompletion
+}, messages: Message[]): AsyncGenerator<AgentEvent, string> {
+  let text = ""
+  for await (const event of (input.completion ?? cliCompletion)({
+    cli: input.provider.cli, apiKey: input.apiKey, modelId: input.modelId, signal: input.signal, tools: [],
+    messages: wire([...messages, { role: "user", content: SUMMARY_PROMPT }]),
+  })) {
+    if (event.type === "text") text += event.delta
+    if (event.type === "spend") yield event
+    if (event.type === "output_limit") throw new Error("CLI summary reached its output limit; history was not replaced")
+  }
+  input.signal?.throwIfAborted()
+  if (!text.trim()) throw new Error("CLI returned an empty summary; history was not replaced")
+  return text.trim()
 }
 
 

@@ -19,6 +19,7 @@ export type Session = {
   provider: string
   messages: Message[]
   spend?: Spend
+  importedFrom?: { provider: string; id: string; importedAt: number }
 }
 
 const dir = path.join(Global.Path.state, "sessions")

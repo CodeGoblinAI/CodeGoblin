@@ -25,6 +25,19 @@ describe("token estimation", () => {
 })
 
 describe("compaction", () => {
+  test("unknown or invalid windows never discard assistant/tool history", () => {
+    const messages: Message[] = [{ role: "system", content: "s" }, user("task"), assistant("decision"),
+      { role: "assistant", content: "", tool_calls: [{ id: "1", type: "function", function: { name: "read_file", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "1", content: "important result" }, assistant("answer"), user("next")]
+    const saved = JSON.stringify(messages)
+    for (const window of [0, -1, NaN, Infinity]) {
+      expect(shouldCompact(messages, window)).toBe(false)
+      const plan = planCompaction(messages, window)
+      expect(plan.summarise).toEqual([])
+      expect([...plan.system, ...plan.keep]).toEqual(messages)
+    }
+    expect(JSON.stringify(messages)).toBe(saved)
+  })
   test("leaves a short conversation alone", () => {
     expect(shouldCompact([user("hello")], 128_000)).toBe(false)
   })

@@ -28,6 +28,17 @@ export type MediaSettings = Record<string, string>
 /** The value that means "don't send this at all". */
 export const DEFAULT = "default"
 
+/** Validate command and picker values through the same model-specific rules. */
+export function requireMediaSetting(provider: string, model: string, id: string, value = DEFAULT) {
+  const option = optionsForModel(provider, model).find((entry) => entry.id === id)
+  if (!option) throw new Error(provider + "/" + model + " does not take setting " + id)
+  if (value !== DEFAULT && !option.dynamic && !option.choices.some((choice) => choice.id === value)) {
+    throw new Error(option.label + " has no " + value)
+  }
+  if (!value.trim()) throw new Error("Setting value cannot be empty")
+  return option
+}
+
 export type MediaChoice = { id: string; label: string }
 
 /** The model a setting is about. */

@@ -1,14 +1,27 @@
 import { expect, test } from "bun:test"
-import { CLAUDE_CHAT_FLAGS, ClaudeStream, claudeChat } from "../src/core/claude-cli"
-import { isChatModel, resolveSelection, acceptsImages } from "../src/core/providers"
+import { CLAUDE_CHAT_FLAGS, ClaudeStream, claudeChat, claudeCommand } from "../src/core/claude-cli"
+import { isChatModel, resolveSelection, acceptsImages, effortFor } from "../src/core/providers"
 import { apiKey } from "../src/core/auth"
 
 const init = { type: "system", subtype: "init", tools: [], mcp_servers: [] }
 const result = { type: "result", subtype: "success", result: "Hello", usage: { input_tokens: 3, cache_read_input_tokens: 10, cache_creation_input_tokens: 2, output_tokens: 4 } }
 const parse = (parser: ClaudeStream, value: unknown) => parser.parse(JSON.stringify(value))
 
+test("supported Claude effort reaches the actual CLI argument boundary", () => {
+  for (const level of ["low", "medium", "high"] as const) {
+    for (const id of ["default", "sonnet", "opus"]) {
+      const effort = effortFor(resolveSelection("claude-code/" + id)!.model, level)
+      expect(effort).toBe(level)
+      expect(claudeCommand("claude", CLAUDE_CHAT_FLAGS, { modelId: id, effort }).slice(-2)).toEqual(["--effort", level])
+    }
+  }
+  expect(effortFor(resolveSelection("claude-code/haiku")!.model, "high")).toBeUndefined()
+  expect(claudeCommand("claude", CLAUDE_CHAT_FLAGS, { modelId: "sonnet" })).not.toContain("--effort")
+})
+
 test("Claude connector is text-only chat without a copied API key", () => {
   const selection = resolveSelection("claude-code/haiku")!
+  expect(selection.model.contextWindow).toBe(0)
   expect(isChatModel(selection)).toBe(true)
   expect(acceptsImages(selection)).toBe(false)
   expect(selection.provider.baseUrl).toBeUndefined()
@@ -55,4 +68,18 @@ test("errors and unsafe native tools fail closed", () => {
 test("already-cancelled calls never launch a CLI", async () => {
   const signal = AbortSignal.abort()
   await expect(claudeChat({ modelId: "haiku", messages: [], signal }).next()).rejects.toThrow()
+})
+
+test("structured mode permits only the pure formatter and ignores prose outside the final schema", () => {
+  const parser = new ClaudeStream(true)
+  parse(parser, { ...init, tools: ["StructuredOutput"] })
+  expect(parse(parser, { type: "stream_event", event: { delta: { type: "text_delta", text: "Preamble that must not be control JSON" } } })).toEqual([])
+  expect(parse(parser, { type: "stream_event", event: { type: "content_block_start", content_block: { type: "tool_use", name: "StructuredOutput" } } })).toEqual([])
+  const output = { text: "Safe reply", calls: [] }
+  expect(parse(parser, { ...result, structured_output: output })[0]).toEqual({ type: "text", delta: JSON.stringify(output) })
+  expect(() => parse(new ClaudeStream(true), { ...init, tools: ["StructuredOutput", "Bash"] })).toThrow()
+  const bad = new ClaudeStream(true)
+  parse(bad, init)
+  expect(() => parse(bad, { type: "stream_event", event: { type: "content_block_start", content_block: { type: "tool_use", name: "write_file" } } })).toThrow()
+  expect(() => parse(bad, result)).toThrow("structured response")
 })

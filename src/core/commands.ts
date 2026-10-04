@@ -17,6 +17,11 @@ export type CommandResult =
   | { kind: "resume"; id?: string }
   | { kind: "compact" }
   | { kind: "usage" }
+  | { kind: "balance"; provider?: string }
+  | { kind: "account" }
+  | { kind: "login"; source?: "cursor" }
+  | { kind: "cli-login"; source: "claude" | "cursor" }
+  | { kind: "import"; id?: string }
   | { kind: "undo" }
   | { kind: "redo" }
   | { kind: "status" }
@@ -30,7 +35,7 @@ export type CommandResult =
   | { kind: "theme"; name?: string }
   | { kind: "thinking" }
   | { kind: "effort"; level?: Effort }
-  | { kind: "settings" }
+  | { kind: "settings"; argument?: string }
   | { kind: "diff" }
   | { kind: "media"; media: MediaKind; line: string }
   | { kind: "memory"; action: "list" | "add" | "forget" | "clear"; text?: string }
@@ -39,7 +44,11 @@ export type CommandResult =
   | { kind: "none" }
 
 export const COMMANDS = [
-  { name: "/usage", description: "session tokens and estimated context; quotas and balances not wired yet" },
+  { name: "/usage", description: "session tokens/context and provider balance; Codex quotas via /account" },
+  { name: "/balance", description: "refresh balance/quota: deepseek, tripo or elevenlabs" },
+  { name: "/account", description: "official Codex sign-in and subscription quota windows" },
+  { name: "/login", description: "official sign-in: /login codex, /login claude or /login cursor" },
+  { name: "/import", description: "copy a selected Codex text conversation for this project: /import codex" },
   { name: "/help", description: "show these commands" },
   { name: "/clear", description: "start a fresh conversation" },
   { name: "/model", description: "switch provider: /model zai" },
@@ -48,7 +57,7 @@ export const COMMANDS = [
   { name: "/undo", description: "put back the files the last turn changed" },
   { name: "/redo", description: "reapply what /undo took back" },
   { name: "/connect", description: "connect a provider - pick one, paste its key" },
-  { name: "/disconnect", description: "remove a stored key - pick one, or /disconnect tripo" },
+  { name: "/disconnect", description: "remove a CG API key, not a CLI/SDK sign-in - /disconnect tripo" },
   { name: "/memory", description: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
   { name: "/status", description: "what this session is using right now" },
   { name: "/mcp", description: "MCP servers from codegoblin.jsonc, and the tools each offers" },
@@ -62,7 +71,7 @@ export const COMMANDS = [
   { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
   { name: "/effort", description: "how hard a reasoning model thinks: /effort high" },
-  { name: "/settings", description: "interface and model settings - opens a panel" },
+  { name: "/settings", description: "open settings, or /settings <model setting> <value>; omit value to reset" },
   { name: "/diff", description: "what this session changed, file by file" },
   { name: "/quit", description: "exit" },
 ]
@@ -77,6 +86,7 @@ export const COMMAND_ALIASES: Record<string, string> = {
   "/logout": "/disconnect", "/remove-key": "/disconnect", "/memories": "/memory",
   "/mcps": "/mcp", "/reasoning": "/effort", "/set": "/settings", "/changes": "/diff",
   "/exit": "/quit", "/q": "/quit",
+  "/credits": "/balance",
   "/market": "/plugins", "/mcp-market": "/plugins", "/skills-market": "/plugins",
   "/upgrade": "/update", "/version": "/update", "/orgs": "/org", "/switch-org": "/org",
 }
@@ -104,6 +114,18 @@ export function runCommand(text: string): CommandResult {
   if (name && PENDING_COMMANDS[name]) return { kind: "message", text: PENDING_COMMANDS[name]! }
 
   switch (name) {
+    case "/account":
+      return !argument || argument === "codex" ? { kind: "account" } : { kind: "message", text: "Only Codex account telemetry is wired; use /account codex" }
+    case "/login":
+      if (argument === "cursor") return { kind: "login", source: "cursor" }
+      if (argument === "claude" || argument === "claude-code" || argument === "cursor-cli") return { kind: "cli-login", source: argument === "cursor-cli" ? "cursor" : "claude" }
+      return argument === "codex" ? { kind: "login" } : { kind: "message", text: "Use /login codex, /login claude or /login cursor" }
+    case "/import": {
+      const [source, id, extra] = argument.split(/\s+/)
+      return source === "codex" && !extra ? { kind: "import", id } : { kind: "message", text: "Use /import codex [session-id]; imports are new text-only conversations" }
+    }
+    case "/balance":
+      return { kind: "balance", provider: argument || undefined }
     case "/help":
       return {
         kind: "message",
@@ -156,11 +178,13 @@ export function runCommand(text: string): CommandResult {
       return { kind: "memory", action: "list", text: argument }
     }
     case "/connect":
+      if (argument === "cursor") return { kind: "message", text: "Use /login cursor for SDK user-plan sign-in, or /connect cursor-api for an existing key" }
       return { kind: "connect", provider: argument || undefined }
     // Bare opens the picker, the way /connect already does. Naming the
     // provider from memory was the only way in, and the id is not always the
     // label - "zai" for GLM, "google" for Gemini.
     case "/disconnect":
+      if (argument === "cursor") return { kind: "message", text: "Revoke the SDK user-plan key in Cursor's account dashboard. /disconnect cursor-api only removes a CG-stored API key, not SDK/CLI sign-in." }
       return { kind: "disconnect", provider: argument || undefined }
     case "/status":
       return { kind: "status" }
@@ -179,12 +203,10 @@ export function runCommand(text: string): CommandResult {
       return { kind: "boost", text: argument || undefined }
     case "/export":
       return { kind: "export", path: argument || undefined }
-    // A panel, not a grammar. This was two commands where one had to know
-    // the other's argument names, and a settings screen that can only be
-    // driven by typing the answer is not a settings screen.
+    // No argument opens the panel; a model setting can also be changed directly.
     case "/settings":
     case "/set":
-      return { kind: "settings" }
+      return argument ? { kind: "settings", argument } : { kind: "settings" }
     case "/diff":
     case "/changes":
       return { kind: "diff" }

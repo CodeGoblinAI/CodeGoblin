@@ -9,9 +9,15 @@
 import { file } from "bun"
 import { fileURLToPath } from "node:url"
 import { localChatMessages, runAgent, type Message } from "../core/agent"
-import { claudeAuthStatus } from "../core/claude-cli"
+import { cliStatuses } from "../core/cli-status"
+import { cliHandoff } from "../core/cli-handoff"
+import { fetchBalance, balanceRows } from "../core/balance"
+import { codexAccount, cachedCodexAccount, accountRows, startCodexLogin } from "../core/codex-account"
+import { startCursorLogin } from "../core/cursor-sdk"
+import { listCodexSessions, importCodexSession } from "../core/codex-import"
 import { addSpend, priceOf, usage } from "../core/context"
 import {
+  PROVIDERS,
   resolveSelection,
   acceptsImages,
   allSelections,
@@ -19,6 +25,7 @@ import {
   selectionsByKind,
   kindOf,
   effortFor,
+  takesEffort,
   exactSelection,
   KIND_LABEL,
   CONNECTABLE,
@@ -37,15 +44,16 @@ import { systemPrompt } from "../core/system-prompt"
 import { expandMentions } from "../core/mention"
 import { globFiles } from "../core/search"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
+import { changesIn, summarise } from "../core/changes"
 import { THEMES, paletteOf } from "../core/theme"
 import * as settingsStore from "../core/settings"
 import { exportSession } from "../core/export"
 import { runMedia, MEDIA_KINDS, withinMediaOutput } from "../core/media"
 import {
   MEDIA_OPTIONS,
-  optionById,
   optionsForModel,
   withValue,
+  requireMediaSetting,
   loadMedia,
   saveMedia,
   DEFAULT,
@@ -96,6 +104,10 @@ const subagentContexts = new Map<string, SubagentContext>()
  * kept running server-side, spending tokens on a turn nobody would see.
  */
 const activeTurns = new Map<string, AbortController>()
+const codexLogins = new Map<string, Awaited<ReturnType<typeof startCodexLogin>>>()
+let codexLoginsStarting = 0
+const cursorLogins = new Map<string, Awaited<ReturnType<typeof startCursorLogin>>>()
+let cursorLoginsStarting = 0
 
 /**
  * What each session has written, so /undo can put it back.
@@ -142,7 +154,7 @@ function sameOrigin(request: Request, url: URL): boolean {
 }
 
 const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } })
 
 async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url)
@@ -151,8 +163,76 @@ async function handle(request: Request): Promise<Response> {
     return json({ error: "refused: local same-origin requests only" }, 403)
   }
 
+  if (url.pathname === "/api/codex/account" && request.method === "GET") {
+    const cached = url.searchParams.get("cached") === "1"
+    const snapshot = cached ? await cachedCodexAccount() : await codexAccount()
+    const response = json(snapshot ? { ...snapshot, rows: accountRows(snapshot) } : { rows: [["Codex account", "No cached snapshot; refresh to check"]] })
+    response.headers.set("cache-control", "no-store")
+    return response
+  }
+  if (url.pathname === "/api/codex/login") {
+    if (request.method === "GET") return json({ state: codexLogins.get(url.searchParams.get("id") || "")?.status() || "expired" })
+    if (request.method === "POST") {
+      if (codexLogins.size + codexLoginsStarting >= 2) return json({ message: "Finish or cancel the existing sign-in first" }, 409)
+      codexLoginsStarting++
+      try {
+        const login = await startCodexLogin()
+        const id = crypto.randomUUID()
+        codexLogins.set(id, login)
+        setTimeout(() => { codexLogins.delete(id); void login.cancel() }, 5 * 60_000).unref()
+        return json({ id, url: login.url, expiresAt: login.expiresAt })
+      } catch { return json({ message: "Could not start official Codex sign-in; run codex login" }, 503) }
+      finally { codexLoginsStarting-- }
+    }
+    if (request.method === "DELETE") {
+      const id = url.searchParams.get("id") || ""
+      const login = codexLogins.get(id)
+      codexLogins.delete(id)
+      await login?.cancel()
+      return json({ cancelled: true })
+    }
+  }
+  if (url.pathname === "/api/cursor/login") {
+    if (request.method === "GET") return json({ state: cursorLogins.get(url.searchParams.get("id") || "")?.status() || "expired" })
+    if (request.method === "POST") {
+      if (cursorLogins.size + cursorLoginsStarting >= 2) return json({ message: "Finish or cancel the existing sign-in first" }, 409)
+      cursorLoginsStarting++
+      try {
+        const login = await startCursorLogin()
+        const id = crypto.randomUUID()
+        cursorLogins.set(id, login)
+        setTimeout(() => { cursorLogins.delete(id); void login.cancel() }, 5 * 60_000).unref()
+        return json({ id, url: login.url, expiresAt: login.expiresAt })
+      } catch { return json({ message: "Could not start Cursor SDK sign-in; check SDK compatibility" }, 503) }
+      finally { cursorLoginsStarting-- }
+    }
+    if (request.method === "DELETE") {
+      const id = url.searchParams.get("id") || ""
+      const login = cursorLogins.get(id)
+      cursorLogins.delete(id)
+      await login?.cancel()
+      return json({ cancelled: true })
+    }
+  }
+  if (url.pathname === "/api/codex/import") {
+    try {
+      if (request.method === "GET") return json(await listCodexSessions(root, url.searchParams.get("cursor") || undefined))
+      if (request.method === "POST") {
+        const body = await request.json() as { id?: string; model?: string }
+        const selected = exactSelection(String(body.model || ""))
+        if (!selected || kindOf(selected.model) !== "text") return json({ message: "Select a text model before importing" }, 400)
+        const imported = await importCodexSession(String(body.id || ""), root, selected.provider.id)
+        return json({ ...imported, message: "Imported a new text conversation; tools, images, reasoning and hidden prompts were omitted. Source untouched." })
+      }
+    } catch { return json({ message: "Could not read/import this project's Codex conversation; check CLI compatibility and selected session" }, 400) }
+  }
+
+  if (url.pathname === "/api/cli/login" && request.method === "GET") {
+    const source = url.searchParams.get("source")
+    return source === "claude" || source === "cursor" ? json(cliHandoff(source)) : json({ message: "Unknown CLI sign-in handoff" }, 400)
+  }
   if (url.pathname === "/api/providers") {
-    const claude = await claudeAuthStatus()
+    const cli = await cliStatuses()
     return json({
       providers: selectionsByKind().map((s) => ({
         kind: kindOf(s.model),
@@ -160,8 +240,9 @@ async function handle(request: Request): Promise<Response> {
         id: s.provider.id + "/" + s.model.id,
         label: s.provider.label + " " + s.model.label,
         reasoning: Boolean(s.model.reasoning),
-        ready: s.provider.cli ? claude.ready : apiKey(s.provider.id) !== undefined,
-        connectionHint: s.provider.cli ? claude.detail : undefined,
+        effort: takesEffort(s.model),
+        ready: s.provider.cli ? cli[s.provider.id]?.ready === true : apiKey(s.provider.id) !== undefined,
+        connectionHint: s.provider.cli ? cli[s.provider.id]?.detail : undefined,
         /** Can be shown a picture, as distinct from one that draws them. */
         vision: acceptsImages(s),
         /**
@@ -224,6 +305,7 @@ async function projectFiles(): Promise<string[]> {
       checkpoint: checkpointEvery(),
       connectable: CONNECTABLE.map((entry) => ({
         ...entry,
+        env: auth.envVariable(entry.id),
         connected: auth.isConnected(entry.id),
       })),
     })
@@ -308,9 +390,19 @@ async function projectFiles(): Promise<string[]> {
     return json({ connections: auth.connections(), store: auth.storePath() })
   }
 
+  if (url.pathname === "/api/balance" && request.method === "GET") {
+    const provider = url.searchParams.get("provider") ?? ""
+    if (!Object.hasOwn(PROVIDERS, provider)) return json({ message: "Unknown provider" }, 400)
+    const snapshot = await fetchBalance(provider, apiKey(provider))
+    const response = json({ ...snapshot, rows: balanceRows(snapshot) })
+    response.headers.set("cache-control", "no-store")
+    return response
+  }
+
   if (url.pathname === "/api/connect" && request.method === "POST") {
     const body = (await request.json()) as { provider?: string; key?: string }
     const provider = (body.provider ?? "").trim()
+    if (provider === "cursor") return json({ message: "Use /login cursor for SDK user-plan sign-in, or /connect cursor-api for an existing key" }, 400)
     if (!provider) return json({ message: "which provider?" }, 400)
     try {
       await auth.connect(provider, String(body.key ?? ""))
@@ -322,6 +414,7 @@ async function projectFiles(): Promise<string[]> {
 
   if (url.pathname === "/api/connect" && request.method === "DELETE") {
     const provider = url.searchParams.get("provider") ?? ""
+    if (provider === "cursor") return json({ message: "Revoke the SDK user-plan key in Cursor's account dashboard; /disconnect cursor-api only removes a CG-stored API key" }, 400)
     const gone = await auth.disconnect(provider)
     return json({ message: gone ? "disconnected " + provider : "no stored key for " + provider })
   }
@@ -374,26 +467,14 @@ async function projectFiles(): Promise<string[]> {
       // the default for nothing at all and write this onto a model nobody chose.
       const selected = exactSelection(named)
       if (!selected) return json({ ok: false, message: named ? "no such model: " + named : "which model?" }, 400)
-      const option = optionsForModel(selected.provider.id, selected.model.id).find(
-        (each) => each.id === String(body.option ?? ""),
-      )
-      if (!option) {
-        const known = optionById(String(body.option ?? ""))
-        return json(
-          {
-            ok: false,
-            message: known
-              ? selected.provider.label + " " + selected.model.label + " does not take " + known.label.toLowerCase()
-              : "unknown setting",
-          },
-          400,
-        )
-      }
       const value = String(body.value ?? DEFAULT)
-      if (value !== DEFAULT && !option.dynamic && !option.choices.some((choice) => choice.id === value)) {
-        return json({ ok: false, message: option.label + " has no " + value }, 400)
+      const id = String(body.option ?? "")
+      try {
+        requireMediaSetting(selected.provider.id, selected.model.id, id, value)
+      } catch (error) {
+        return json({ ok: false, message: error instanceof Error ? error.message : "Invalid setting" }, 400)
       }
-      const next = withValue(await loadMedia(), selected.provider.id, selected.model.id, option.id, value)
+      const next = withValue(await loadMedia(), selected.provider.id, selected.model.id, id, value)
       await saveMedia(next)
       return json({ ok: true, settings: next })
     }
@@ -469,6 +550,14 @@ async function projectFiles(): Promise<string[]> {
     } catch (error) {
       return json({ message: "undo failed: " + (error instanceof Error ? error.message : "unknown") }, 500)
     }
+  }
+
+  if (url.pathname === "/api/diff" && request.method === "GET") {
+    const id = url.searchParams.get("sessionId") ?? ""
+    const edits = editsBySession.get(id)
+    if (!edits) return json({ files: [], added: 0, removed: 0, message: id ? "No edit history is available for this conversation in this server run." : "No conversation is selected." })
+    const changes = await changesIn(root, edits)
+    return json({ ...changes, message: summarise(changes) })
   }
 
   if (url.pathname === "/api/stop" && request.method === "POST") {
@@ -692,6 +781,6 @@ console.log(`CodeGoblin web -> http://localhost:${server.port}  (loopback only)`
 // MCP servers started as child processes go when this server does.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    void mcp.close().finally(() => process.exit(0))
+    void Promise.all([mcp.close(), ...[...codexLogins.values(), ...cursorLogins.values()].map((login) => login.cancel())]).finally(() => process.exit(0))
   })
 }

@@ -1,6 +1,7 @@
 import { authHeaders, type Provider } from "./providers"
 import { verifyLocalModel } from "./local-provider"
 import { claudeChat } from "./claude-cli"
+import { cliCompletion } from "./cli-completion"
 
 export type Role = "user" | "assistant" | "system"
 export type Message = { role: Role; content: string }
@@ -22,6 +23,10 @@ export async function* streamChat(input: {
 }): AsyncGenerator<string, void, unknown> {
   if (input.provider.cli === "claude-code") {
     for await (const event of claudeChat(input)) if (event.type === "text") yield event.delta
+    return
+  }
+  if (input.provider.cli) {
+    for await (const event of cliCompletion({ ...input, cli: input.provider.cli, tools: [] })) if (event.type === "text") yield event.delta
     return
   }
   if (!input.provider.baseUrl) {

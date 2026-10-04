@@ -4,8 +4,8 @@ import { Permissions, isReadOnlyCommand } from "../src/core/permission"
 import * as sessions from "../src/core/sessions"
 
 test("display and approval commands run live; mutations and prompts queue", () => {
-  for (const text of ["/approvals", "/help", "/theme dracula", "/thinking", "/diff"]) expect(isLiveCommand(text)).toBe(true)
-  for (const text of ["hello", "/clear", "/resume", "/model local", "/undo", "/compact", "/plan fix this", "/boost", "/custom", "/approvals-extra"]) expect(isLiveCommand(text)).toBe(false)
+  for (const text of ["/approvals", "/help", "/theme dracula", "/thinking", "/diff", "/balance deepseek", "/credits tripo", "/account codex"]) expect(isLiveCommand(text)).toBe(true)
+  for (const text of ["hello", "/clear", "/resume", "/model local", "/undo", "/compact", "/plan fix this", "/boost", "/custom", "/approvals-extra", "/login codex", "/import codex"]) expect(isLiveCommand(text)).toBe(false)
 })
 
 test("mode changes release normal requests but preserve forced ask, deny and plan", () => {
