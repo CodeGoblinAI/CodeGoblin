@@ -1,9 +1,17 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
-import { create, load, save } from "../src/core/sessions"
+import { ago, create, load, save } from "../src/core/sessions"
 import { resolveStartupModel } from "../src/core/model-selection"
 import { Global } from "../src/platform/paths"
 import { requireSandbox } from "./sandbox"
+
+test("ago says how long ago in the sidebar's words", () => {
+  const now = 10_000_000_000
+  expect(ago(now - 5_000, now)).toBe("just now")
+  expect(ago(now - 5 * 60_000, now)).toBe("5m")
+  expect(ago(now - 3 * 3_600_000, now)).toBe("3h")
+  expect(ago(now - 2 * 86_400_000, now)).toBe("2d")
+})
 
 test("session storage retains the last exact model while older sessions remain readable", async () => {
   requireSandbox(path.join(Global.Path.state, "sessions", "check.json"), "session model tests")

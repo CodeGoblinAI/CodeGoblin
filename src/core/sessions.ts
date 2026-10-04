@@ -59,6 +59,19 @@ export async function load(id: string): Promise<Session | undefined> {
   }
 }
 
+/**
+ * How long ago, in the web sidebar's words: "just now", "5m", "3h", "2d".
+ * Conversations often share a title ("fix the test"), and the age is what
+ * tells them apart in a picker.
+ */
+export function ago(ms: number, now = Date.now()): string {
+  const seconds = Math.round((now - ms) / 1000)
+  if (seconds < 60) return "just now"
+  if (seconds < 3600) return Math.round(seconds / 60) + "m"
+  if (seconds < 86400) return Math.round(seconds / 3600) + "h"
+  return Math.round(seconds / 86400) + "d"
+}
+
 export async function list(limit = 30): Promise<Session[]> {
   try {
     const names = await fs.readdir(dir)

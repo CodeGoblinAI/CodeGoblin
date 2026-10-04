@@ -1042,7 +1042,8 @@ async function openSessions() {
     "Conversations",
     saved.map((entry) => ({
       label: (entry.id === session.id ? "\u2022 " : "  ") + entry.title,
-      hint: entry.id === session.id ? "open" : "",
+      // The age tells apart conversations that share a title, as the web sidebar does.
+      hint: (entry.id === session.id ? "open . " : "") + sessions.ago(entry.updated),
       value: entry.id,
     })),
     { footer: "enter opens . ctrl+d twice deletes . esc closes", size: "large" },
@@ -1712,7 +1713,8 @@ async function deleteInDialog() {
     dialog,
     saved.map((entry) => ({
       label: (entry.id === session.id ? "\u2022 " : "  ") + entry.title,
-      hint: entry.id === session.id ? "open" : "",
+      // The age tells apart conversations that share a title, as the web sidebar does.
+      hint: (entry.id === session.id ? "open . " : "") + sessions.ago(entry.updated),
       value: entry.id,
     })),
   )
