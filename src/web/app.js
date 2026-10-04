@@ -83,6 +83,7 @@ function highlightModel(index) {
 }
 
 function openModelMenu() {
+  closeModeMenu()
   providerMenu.hidden = false
   providerBtn.setAttribute("aria-expanded", "true")
   highlightModel(Math.max(0, modelOptions.findIndex((option) => option.value === currentModel)))
@@ -136,6 +137,7 @@ const MODE_CHOICES = [
   { id: "full", label: "Full access", hint: "never ask - only the rules in codegoblin.jsonc stop anything" },
 ]
 let currentMode = "ask"
+let modeIndex = 0
 let planning = false
 /** /boost: subagents are offered only when asked for - for the session, or once for one request. */
 let boost = false
@@ -147,18 +149,21 @@ function modeChoices() {
 
 function renderModeMenu() {
   modeMenu.innerHTML = ""
-  for (const choice of modeChoices()) {
+  for (const [index, choice] of modeChoices().entries()) {
     const row = document.createElement("div")
     row.className = "picker-item" + (choice.id === currentMode ? " chosen" : "")
     row.setAttribute("role", "option")
+    row.id = "mode-option-" + index
+    row.setAttribute("aria-selected", String(choice.id === currentMode))
     row.textContent = choice.label
     const hint = document.createElement("span")
     hint.className = "picker-hint"
     hint.textContent = choice.hint
     row.appendChild(hint)
-    row.onclick = () => { setMode(choice.id); closeModeMenu() }
+    row.onclick = () => { setMode(choice.id); closeModeMenu(true) }
     modeMenu.appendChild(row)
   }
+  if (!modeMenu.hidden) highlightMode(modeIndex)
 }
 
 async function setMode(id) {
@@ -187,27 +192,60 @@ function setBoost(on) {
   boostTag.hidden = !(boost || boostOnce)
 }
 
-function closeModeMenu() {
+function closeModeMenu(restoreFocus = false) {
   modeMenu.hidden = true
   modeBtn.setAttribute("aria-expanded", "false")
+  modeMenu.removeAttribute("aria-activedescendant")
+  if (restoreFocus) modeBtn.focus()
+}
+
+function highlightMode(index) {
+  modeIndex = Math.max(0, Math.min(modeChoices().length - 1, index))
+  for (const [rowIndex, row] of [...modeMenu.querySelectorAll('[role="option"]')].entries()) row.classList.toggle("active", rowIndex === modeIndex)
+  const row = modeMenu.querySelector("#mode-option-" + modeIndex)
+  if (!row) return
+  modeMenu.setAttribute("aria-activedescendant", row.id)
+  row.scrollIntoView({ block: "nearest" })
 }
 
 function openModeMenu() {
+  closeModelMenu()
   renderModeMenu()
   modeMenu.hidden = false
   modeBtn.setAttribute("aria-expanded", "true")
+  highlightMode(Math.max(0, modeChoices().findIndex((choice) => choice.id === currentMode)))
+  modeMenu.focus()
 }
 
 modeBtn.onclick = (event) => {
   event.stopPropagation()
   if (modeMenu.hidden) openModeMenu()
-  else closeModeMenu()
+  else closeModeMenu(true)
 }
+modeBtn.addEventListener("keydown", (event) => {
+  if (!["ArrowDown", "ArrowUp"].includes(event.key)) return
+  event.preventDefault()
+  openModeMenu()
+})
+modeMenu.addEventListener("keydown", (event) => {
+  if (event.key === "Tab") { closeModeMenu(true); return }
+  if (!["ArrowDown", "ArrowUp", "Home", "End", "Enter", " ", "Escape"].includes(event.key)) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (event.key === "Escape") { closeModeMenu(true); return }
+  if (event.key === "Enter" || event.key === " ") {
+    const choice = modeChoices()[modeIndex]
+    if (choice) void setMode(choice.id)
+    closeModeMenu(true)
+    return
+  }
+  highlightMode(event.key === "Home" ? 0 : event.key === "End" ? modeChoices().length - 1 : modeIndex + (event.key === "ArrowDown" ? 1 : -1))
+})
 document.addEventListener("click", (event) => {
   if (!modeMenu.hidden && !modeMenu.contains(event.target)) closeModeMenu()
 })
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeModeMenu()
+  if (event.key === "Escape" && !modeMenu.hidden) closeModeMenu(true)
 })
 
 /** After a planned answer: carry it out, keep planning, or stop. Inline, like a permission prompt. */
@@ -671,6 +709,7 @@ function setBusy(state) {
   sendBtn.classList.toggle("stopping", state)
   sendBtn.textContent = state ? "■" : "↑"
   sendBtn.title = state ? "Stop" : "Send"
+  sendBtn.setAttribute("aria-label", state ? "Stop" : "Send")
   updateSendButton()
   stopBtn.hidden = true
   input.placeholder = state ? "goblin is working…" : "Ask the goblin…  / for commands, @ for context"
@@ -717,10 +756,13 @@ async function refreshSessions() {
     const row = document.createElement("div")
     row.className = "row session" + (s.id === sessionId ? " active" : "")
 
-    const label = document.createElement("span")
+    const label = document.createElement("button")
+    label.type = "button"
     label.className = "label"
     label.textContent = s.title
     label.title = s.title
+    label.setAttribute("aria-label", "Open conversation: " + s.title)
+    if (s.id === sessionId) label.setAttribute("aria-current", "true")
 
     const when = document.createElement("span")
     when.className = "when"
@@ -732,6 +774,7 @@ async function refreshSessions() {
     const renameBtn = document.createElement("button")
     renameBtn.className = "icon"
     renameBtn.title = "Rename"
+    renameBtn.setAttribute("aria-label", "Rename conversation: " + s.title)
     renameBtn.textContent = "✎"
     renameBtn.onclick = async (e) => {
       e.stopPropagation()
@@ -748,6 +791,7 @@ async function refreshSessions() {
     const deleteBtn = document.createElement("button")
     deleteBtn.className = "icon danger"
     deleteBtn.title = "Delete"
+    deleteBtn.setAttribute("aria-label", "Delete conversation: " + s.title)
     deleteBtn.textContent = "×"
     deleteBtn.onclick = async (e) => {
       e.stopPropagation()
@@ -773,6 +817,7 @@ async function refreshSessions() {
 
 async function openSession(id) {
   if (deferUntilIdle(() => openSession(id), "open conversation")) return
+  closeMobilePanels(false)
   const data = await fetch("/api/session?id=" + encodeURIComponent(id) + "&model=" + encodeURIComponent(currentModel)).then((r) => r.json()).catch(() => null)
   if (!data || !data.session) return
   sessionId = id
@@ -784,6 +829,7 @@ async function openSession(id) {
   }
   if (!thread.children.length) emptyState()
   refreshSessions()
+  input.focus()
 }
 
 /**
@@ -819,6 +865,7 @@ function applyPalette(palette) {
 let webSettings = { theme: "goblin", thinking: true }
 
 function makeDialog(title) {
+  closeMobilePanels(false)
   document.querySelector("dialog")?.close()
   const modal = document.createElement("dialog")
   modal.setAttribute("aria-label", title)
@@ -891,12 +938,53 @@ function openHelpDialog(initial = "") {
 
 document.getElementById("settings-open").onclick = openSettingsDialog
 document.getElementById("help-open").onclick = () => openHelpDialog()
+const narrowLayout = matchMedia("(max-width: 650px)")
+const panelBackdrop = document.getElementById("panel-backdrop")
+let openPanel = "sessions"
+function paintPanel(panel, hidden) {
+  document.body.classList.toggle("hide-" + panel, hidden)
+  document.getElementById(panel + "-toggle").setAttribute("aria-expanded", String(!hidden))
+}
+function syncPanelLayout() {
+  const visible = narrowLayout.matches && ["sessions", "activity"].some((panel) => !document.body.classList.contains("hide-" + panel))
+  panelBackdrop.hidden = !visible
+  thread.inert = visible
+  document.querySelector(".composer").inert = visible
+  document.documentElement.style.setProperty("--layout-header-height", document.querySelector(".layout-controls").getBoundingClientRect().bottom + "px")
+}
+function closeMobilePanels(restoreFocus = true) {
+  if (!narrowLayout.matches || panelBackdrop.hidden) return
+  paintPanel("sessions", true)
+  paintPanel("activity", true)
+  syncPanelLayout()
+  if (restoreFocus) document.getElementById(openPanel + "-toggle").focus()
+}
+function restorePanelLayout() {
+  for (const panel of ["sessions", "activity"]) paintPanel(panel, narrowLayout.matches || localStorage.getItem("cg-hide-" + panel) === "true")
+  syncPanelLayout()
+}
 for (const panel of ["sessions", "activity"]) {
   const button = document.getElementById(panel + "-toggle")
-  const paint = (hidden) => { document.body.classList.toggle("hide-" + panel, hidden); button.setAttribute("aria-expanded", String(!hidden)) }
-  paint(localStorage.getItem("cg-hide-" + panel) === "true" || (innerWidth < 650 && localStorage.getItem("cg-hide-" + panel) === null))
-  button.onclick = () => { const hidden = !document.body.classList.contains("hide-" + panel); paint(hidden); localStorage.setItem("cg-hide-" + panel, String(hidden)) }
+  button.onclick = () => {
+    const hidden = !document.body.classList.contains("hide-" + panel)
+    if (narrowLayout.matches && !hidden) {
+      paintPanel(panel === "sessions" ? "activity" : "sessions", true)
+      closeModelMenu()
+      closeModeMenu()
+      openPanel = panel
+    }
+    paintPanel(panel, hidden)
+    if (!narrowLayout.matches) localStorage.setItem("cg-hide-" + panel, String(hidden))
+    syncPanelLayout()
+  }
 }
+panelBackdrop.onclick = () => closeMobilePanels()
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !document.querySelector("dialog[open]")) closeMobilePanels()
+})
+narrowLayout.addEventListener("change", restorePanelLayout)
+new ResizeObserver(syncPanelLayout).observe(document.querySelector(".layout-controls"))
+restorePanelLayout()
 
 async function saveSettings(change) {
   const result = await fetch("/api/settings", {
@@ -1941,6 +2029,7 @@ document.querySelector(".composer").prepend(paletteEl)
 
 async function loadCommands() {
   paletteData = await fetch("/api/commands").then((r) => r.json()).catch(() => paletteData)
+  if (paletteData.project) document.getElementById("project-name").textContent = paletteData.project
   if (paletteData.settings) {
     webSettings = paletteData.settings
     const chosen = (paletteData.themes || []).find((t) => t.value === "/theme " + webSettings.theme)

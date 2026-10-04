@@ -144,10 +144,13 @@
   /* sidebar rows */
   .row.session { display: flex; align-items: center; gap: 8px; }
   .row.session .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button.row, .row.session .label { background: none; border: 0; font: inherit; text-align: left; color: inherit; cursor: pointer; }
+  button.row { border-left: 2px solid transparent; }
+  .row.session .label { padding: 0; }
   .row.session .when { font-size: 11px; opacity: .55; flex-shrink: 0; }
   .row.session .actions { display: none; gap: 2px; flex-shrink: 0; }
-  .row.session:hover .actions { display: flex; }
-  .row.session:hover .when { display: none; }
+  .row.session:hover .actions, .row.session:focus-within .actions { display: flex; }
+  .row.session:hover .when, .row.session:focus-within .when { display: none; }
   .icon { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 4px; border-radius: 4px; font-size: 13px; line-height: 1; }
   .icon:hover { background: var(--panel2); color: var(--text); }
   .icon.danger:hover { color: var(--red); }
@@ -200,13 +203,13 @@
   .pill.busy { color: var(--goblin); border-color: #2c4a1e; }
 </style>
 
-<aside>
+<aside aria-label="Conversations">
   <div class="brand">CodeGoblin</div>
   <div class="group">Sessions</div>
-  <div class="row" id="new-session">+ New session</div>
+  <button class="row" id="new-session" type="button">+ New session</button>
   <div id="session-list"></div>
   <div class="group">Project</div>
-  <div class="row">cg-next</div>
+  <div class="row muted" id="project-name">Local workspace</div>
   <footer><button id="settings-open" class="icon">Settings</button> · <button id="help-open" class="icon">Help</button></footer>
 </aside>
 
@@ -219,10 +222,10 @@
     <div class="attached" id="attached" hidden></div>
     <div class="box">
       <input type="file" id="picker" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
-      <button class="attach" id="attach" type="button" title="Attach an image">+</button>
-      <input id="input" placeholder="Ask the goblin…  / for commands, @ for context" autocomplete="off" />
+      <button class="attach" id="attach" type="button" title="Add to the prompt" aria-label="Add to the prompt">+</button>
+      <input id="input" aria-label="Message or slash command" placeholder="Ask the goblin…  / for commands, @ for context" autocomplete="off" />
       <button class="stop" id="stop" hidden>Stop</button>
-      <button class="send" id="send" title="Send">↑</button>
+      <button class="send" id="send" title="Send" aria-label="Send">↑</button>
     </div>
     <div class="meta">
       <span>Local workspace</span>
@@ -233,10 +236,10 @@
         <div class="picker-menu" id="provider-menu" role="listbox" aria-label="Models" tabindex="-1" hidden></div>
       </div>
       <div class="picker" id="mode">
-        <button class="picker-btn" id="mode-btn" type="button" aria-haspopup="listbox" aria-expanded="false" title="How much to ask before acting">
+        <button class="picker-btn" id="mode-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="mode-menu" title="How much to ask before acting">
           <span class="picker-label">Ask for approval</span><span class="picker-caret">▾</span>
         </button>
-        <div class="picker-menu" id="mode-menu" role="listbox" hidden></div>
+        <div class="picker-menu" id="mode-menu" role="listbox" aria-label="Approval mode" tabindex="-1" hidden></div>
       </div>
       <span class="plan-tag" id="plan-tag" hidden>planning</span>
       <span class="plan-tag" id="boost-tag" hidden>boost</span>
@@ -245,7 +248,7 @@
   </div>
 </main>
 
-<section class="activity">
+<section class="activity" aria-label="Activity">
   <div class="act-head"><span class="pill" id="act-state">Idle</span> <button id="review-diff" type="button">Review diff</button></div>
   <div class="act-section" id="act-plan" hidden>
     <div class="act-label">Plan <span class="act-count" id="plan-count"></span></div>
@@ -266,11 +269,12 @@
   <p class="act-empty" id="act-empty">Nothing running yet.</p>
 </section>
 
-<script src="/app.js"></script>
 <style>
   .layout-controls { padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 14px; border-bottom: 1px solid var(--line); }
   #usage-readout { margin-left: auto; font: 11px var(--mono); color: var(--muted); }
   body.hide-sessions > aside, body.hide-activity > .activity { display: none; }
+  #panel-backdrop { position: fixed; inset: var(--layout-header-height, 45px) 0 0; z-index: 20; background: #0008; border: 0; }
+  :focus-visible { outline: 2px solid var(--goblin); outline-offset: 2px; }
   dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line-strong); border-radius: 12px; width: min(560px, 92vw); max-height: 80vh; overflow: auto; }
   dialog::backdrop { background: #0009; }
   dialog h2 { margin-top: 0; font-size: 18px; }
@@ -289,5 +293,15 @@
   dialog .diff-remove { color: var(--red); }
   dialog .diff-hunk { color: var(--muted); margin: 8px 0; }
   @media(max-width: 900px) { body > .activity { width: 210px; } aside { width: 180px; } }
-  @media(max-width: 650px) { body > .activity { position: fixed; right: 0; top: 45px; bottom: 0; z-index: 30; background: var(--panel); } aside { position: fixed; left: 0; top: 45px; bottom: 0; z-index: 30; background: var(--panel); } }
+  @media(max-width: 650px) {
+    body > .activity, aside { position: fixed; top: var(--layout-header-height, 45px); bottom: 0; z-index: 30; background: var(--panel); max-width: 85vw; }
+    body > .activity { right: 0; } aside { left: 0; }
+    .meta { flex-wrap: wrap; gap: 8px; }
+    .box input { min-width: 0; }
+    .thread { padding: 18px 12px; }
+    .tool, .permission, .thinking { margin-left: 0; }
+    .turn .who { width: 38px; }
+  }
 </style>
+<button id="panel-backdrop" type="button" aria-label="Close sidebar" hidden></button>
+<script src="/app.js"></script>

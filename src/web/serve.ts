@@ -7,6 +7,7 @@
  *   bun run web
  */
 import { file } from "bun"
+import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { localChatMessages, runAgent, type Message } from "../core/agent"
 import { cliStatuses } from "../core/cli-status"
@@ -286,6 +287,7 @@ async function handle(request: Request): Promise<Response> {
     }))
     const saved = await sessions.list(20)
     return json({
+      project: path.basename(root),
       commands: [
         ...COMMANDS.filter((c) => !["/quit"].includes(c.name)).map((c) => ({ value: c.name, hint: c.description, expands: ["/model", "/resume", "/connect", "/disconnect", "/theme", "/effort"].includes(c.name) })),
         // Marked, so the page sends them to the model rather than calling them unknown.
