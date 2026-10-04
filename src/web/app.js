@@ -428,16 +428,26 @@ const TABLE_ROW = /^\s*\|.*\|\s*$/
 const TABLE_RULE = /^\s*\|(?:\s*:?-+:?\s*\|)+\s*$/
 
 /**
- * Inline code and bold, on text that is already HTML-escaped.
+ * Inline code, bold and italics, on text that is already HTML-escaped.
  *
  * Shared with the table builder. Cells are escaped and lifted out before the
  * line-level passes run, so without this a cell holding `tsc --noEmit` kept
  * its backticks while the same words in a sentence became code.
  */
 function inlineMarkdown(escaped) {
+  // Code spans are split out first so emphasis never reaches inside them:
+  // `my_var_name` and `a * b * c` stay exactly as written.
   return escaped
-    .replace(/`([^`\n]+)`/g, (_, code) => "<code>" + code + "</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .split(/(`[^`\n]+`)/g)
+    .map((part, index) => index % 2
+      ? "<code>" + part.slice(1, -1) + "</code>"
+      : part
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        // Italics need a non-space just inside each marker and no word
+        // character just outside, so snake_case and 2 * 3 * 4 are left alone.
+        .replace(/(^|[^\w*])\*(?=\S)([^*\n]*?\S)\*(?![\w*])/g, "$1<em>$2</em>")
+        .replace(/(^|[^\w])_(?=\S)([^_\n]*?\S)_(?!\w)/g, "$1<em>$2</em>"))
+    .join("")
 }
 
 /** Cells of one row; an escaped pipe is content, not a boundary. */
