@@ -337,6 +337,15 @@ const waitingAsks: NonNullable<typeof pending>[] = []
 /** Which answer is highlighted. Starts on "allow once", the least committal. */
 let pendingChoice = 0
 
+function cancelPending() {
+  const asks = pending ? [pending, ...waitingAsks] : [...waitingAsks]
+  pending = undefined
+  waitingAsks.length = 0
+  pendingChoice = 0
+  for (const ask of asks) ask.resolve("reject")
+  render()
+}
+
 /**
  * A panel you read and dismiss.
  *
@@ -366,8 +375,9 @@ let settingBeing: string | undefined
 // the agent this terminal drives, and a test fails if a surface builds one
 // without them.
 const permissions = Permissions.withConfig(
-  (tool, detail, cover, from) =>
-    new Promise<Decision>((resolve) => {
+  (tool, detail, cover, from) => {
+    if (turn?.signal.aborted) return Promise.resolve<Decision>("reject")
+    return new Promise<Decision>((resolve) => {
       const ask = { tool, detail, cover, from, resolve }
       if (pending) waitingAsks.push(ask)
       else {
@@ -375,7 +385,8 @@ const permissions = Permissions.withConfig(
         pendingChoice = 0
       }
       render()
-    }),
+    })
+  },
 )
 
 // The plan sits above the composer rather than scrolling away in the
@@ -2139,6 +2150,8 @@ async function send() {
 
   let current: Entry | undefined
   turn = new AbortController()
+  // Every stop path must wake consent, not only the Ctrl+S interrupt path.
+  turn.signal.addEventListener("abort", cancelPending, { once: true })
   // Everything this turn writes is captured under one checkpoint, so /undo
   // takes back the whole answer rather than its last file.
   edits.begin(text)
@@ -2304,6 +2317,8 @@ async function send() {
 }
 
 function shutdown() {
+  turn?.abort()
+  subagents.stopAll()
   out.write("[0m" + ansi.pasteOff + "\x1b[?1002l\x1b[?1006l" + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
   // MCP servers started as child processes go with the app, but one that will
   // not close is not allowed to keep the terminal waiting.
@@ -2405,9 +2420,6 @@ process.stdin.on("data", (chunk) => {
     // the key.
     if (pressed.type === "ctrl" && pressed.value === "s") {
       if (streaming && !secret && !dialog && (input.trim() || queued)) {
-        if (pending) { pending.resolve("reject"); pending = undefined; pendingChoice = 0 }
-        for (const ask of waitingAsks) ask.resolve("reject")
-        waitingAsks.length = 0
         if (input.trim()) {
           queued = input
           input = ""

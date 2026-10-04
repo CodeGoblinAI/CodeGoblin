@@ -533,6 +533,7 @@ function permissionPrompt(event) {
   const box = document.createElement("div")
   box.className = "permission"
   box.dataset.permission = event.id
+  box.dataset.permissionState = "pending"
   // Three answers, the same three the TUI offers. "Allow once" first,
   // because the least committal choice should be the easiest to reach.
   const choices = paletteData.decisions || [
@@ -562,17 +563,28 @@ function permissionPrompt(event) {
 
   const actions = box.querySelector(".pactions")
   const answer = async (decision) => {
+    if (box.dataset.permissionState !== "pending") return
     const chosen = choices.find((c) => c.id === decision)
-    actions.innerHTML = ""
-    const done = document.createElement("span")
-    done.className = "presolved"
-    done.textContent = chosen ? chosen.label.toLowerCase() : decision
-    actions.appendChild(done)
-    await fetch("/api/permission", {
+    box.dataset.permissionState = "answering"
+    for (const button of actions.querySelectorAll("button")) button.disabled = true
+    const response = await fetch("/api/permission", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: event.id, decision }),
-    })
+    }).catch(() => null)
+    // Stop or a live mode change may have settled it while the request was in flight.
+    if (box.dataset.permissionState !== "answering") return
+    if (response?.ok) {
+      resolvePermission(box, chosen ? chosen.label.toLowerCase() : decision)
+      return
+    }
+    if (response?.status === 404) {
+      resolvePermission(box, "expired — no pending request")
+      return
+    }
+    box.dataset.permissionState = "pending"
+    for (const button of actions.querySelectorAll("button")) button.disabled = false
+    note("Could not confirm the approval. Try again, or stop this turn.")
   }
 
   for (const choice of choices) {
@@ -588,8 +600,23 @@ function permissionPrompt(event) {
   scrollDown()
 }
 
+function resolvePermission(box, label) {
+  box.dataset.permissionState = "resolved"
+  const done = document.createElement("span")
+  done.className = "presolved"
+  done.textContent = label
+  box.querySelector(".pactions").replaceChildren(done)
+}
+
+function expirePermissions() {
+  for (const box of thread.querySelectorAll(".permission[data-permission]")) {
+    if (box.dataset.permissionState !== "resolved") resolvePermission(box, "cancelled — turn ended")
+  }
+}
+
 function setBusy(state) {
   busy = state
+  if (!state) expirePermissions()
   // The send button becomes stop while a turn runs. A separate small button
   // was there before and was easy to miss, especially on fast models where
   // it appears for barely a second.
@@ -1587,7 +1614,7 @@ async function submit() {
         if (event.type === "permission") { body = null; permissionPrompt(event) }
         if (event.type === "permission_resolved") {
           const box = [...thread.querySelectorAll(".permission")].find((box) => box.dataset.permission === event.id)
-          if (box) box.querySelector(".pactions").textContent = event.allowed ? "Allowed by the new approval mode" : "Blocked by current policy"
+          if (box) resolvePermission(box, event.allowed ? "Allowed by the new approval mode" : "Blocked by current policy")
         }
         if (event.type === "tool_denied") {
           deniedCalls.add(event.id)
@@ -1659,6 +1686,7 @@ async function submit() {
 
 sendBtn.onclick = () => (busy ? stopTurn() : submit())
 async function stopTurn() {
+  expirePermissions()
   // Tell the server first: aborting only the fetch leaves the agent running
   // and still spending tokens on a turn nobody will see.
   if (sessionId) {
@@ -1666,6 +1694,7 @@ async function stopTurn() {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sessionId }),
+      signal: AbortSignal.timeout(5000),
     }).catch(() => {})
   }
   if (controller) controller.abort()
