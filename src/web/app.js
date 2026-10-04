@@ -418,6 +418,7 @@ function deferUntilIdle(action, label) {
   return true
 }
 let controller = null
+let stopRequested = false
 let lastToolArgs = ""
 
 const escapeHtml = (s) =>
@@ -1841,15 +1842,28 @@ async function submit() {
       }
     }
   } catch {
-    turn("agent", "_stopped_")
+    stopRequested = true
   }
 
+  // The server can close the stream before the abort lands, so the read loop
+  // ends quietly and a stopped answer used to look finished.
+  if (stopRequested) {
+    turn("agent", "_stopped_")
+    // A stopped turn never sends "saved", but the server still stores the
+    // conversation as its loop unwinds; without this it stayed missing from
+    // Sessions until a reload. The second look covers a save that lands late.
+    refreshSessions()
+    setTimeout(refreshSessions, 1000)
+  }
+
+  stopRequested = false
   setBusy(false)
   controller = null
 }
 
 sendBtn.onclick = () => (busy ? stopTurn() : submit())
 async function stopTurn() {
+  if (controller) stopRequested = true
   expirePermissions()
   // Tell the server first: aborting only the fetch leaves the agent running
   // and still spending tokens on a turn nobody will see.

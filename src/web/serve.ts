@@ -746,7 +746,12 @@ async function handle(request: Request): Promise<Response> {
           await sessions.save(session)
           send({ type: "saved", id: session.id, title: session.title })
         } catch (error) {
-          send({ type: "error", message: error instanceof Error ? error.message : "request failed" })
+          // Stopping mid-stream throws out of the loop. The TUI keeps the
+          // conversation when that happens; here it used to vanish - the
+          // prompt never reached Sessions and could not be resumed. A stop
+          // is also not an error worth reporting.
+          if (turn.signal.aborted) await sessions.save(session).catch(() => {})
+          else send({ type: "error", message: error instanceof Error ? error.message : "request failed" })
         } finally {
           edits.commit()
           clearInterval(heartbeat)
