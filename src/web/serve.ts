@@ -342,7 +342,8 @@ async function handle(request: Request): Promise<Response> {
 
   if (url.pathname === "/api/session" && request.method === "GET") {
     const session = await sessions.load(url.searchParams.get("id") ?? "")
-    const selected = session ? await resolveStartupModel(session.model ? session.provider + "/" + session.model : session.provider) : undefined
+    const resolved = session ? await resolveStartupModel(session.model ? session.provider + "/" + session.model : session.provider) : undefined
+    const selected = resolved && kindOf(resolved.model) === "text" ? resolved : undefined
     return session ? json({
       session,
       selection: selected ? selected.provider.id + "/" + selected.model.id : undefined,

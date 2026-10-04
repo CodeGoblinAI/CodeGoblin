@@ -2352,7 +2352,7 @@ async function restoreSession(loaded: sessions.Session) {
   scroll = 0
   edits.reset()
   resumeModelMissing = !restored || kindOf(restored.model) !== "text"
-  if (resumeModelMissing) transcript.push({ kind: "tool", state: "failed", text: "Saved model " + requested + " is unavailable. Choose /model explicitly before continuing; prompts will not use a different model silently." })
+  if (resumeModelMissing) transcript.push({ kind: "tool", state: "failed", text: "Saved model unavailable: " + requested + ". Use /model to continue." })
   if (restored && !resumeModelMissing) {
     selection = restored
     key = apiKey(restored.provider.id)

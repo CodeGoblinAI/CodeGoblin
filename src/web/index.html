@@ -297,6 +297,10 @@
     body > .activity, aside { position: fixed; top: var(--layout-header-height, 45px); bottom: 0; z-index: 30; background: var(--panel); max-width: 85vw; }
     body > .activity { right: 0; } aside { left: 0; }
     .meta { flex-wrap: wrap; gap: 8px; }
+    .picker, .picker-btn { max-width: 100%; }
+    .picker-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+    .picker-menu { position: fixed; left: 20px; right: 20px; bottom: var(--picker-bottom, 90px); min-width: 0; max-height: min(320px, 50vh); }
+    .picker-item { white-space: normal; overflow-wrap: anywhere; }
     .box input { min-width: 0; }
     .thread { padding: 18px 12px; }
     .tool, .permission, .thinking { margin-left: 0; }

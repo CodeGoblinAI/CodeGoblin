@@ -86,6 +86,7 @@ function highlightModel(index) {
 
 function openModelMenu() {
   closeModeMenu()
+  positionPicker(providerMenu, providerBtn)
   providerMenu.hidden = false
   providerBtn.setAttribute("aria-expanded", "true")
   highlightModel(Math.max(0, modelOptions.findIndex((option) => option.value === currentModel)))
@@ -212,6 +213,7 @@ function highlightMode(index) {
 
 function openModeMenu() {
   closeModelMenu()
+  positionPicker(modeMenu, modeBtn)
   renderModeMenu()
   modeMenu.hidden = false
   modeBtn.setAttribute("aria-expanded", "true")
@@ -223,6 +225,11 @@ modeBtn.onclick = (event) => {
   event.stopPropagation()
   if (modeMenu.hidden) openModeMenu()
   else closeModeMenu(true)
+}
+
+function positionPicker(menu, button) {
+  // Narrow layouts use a viewport-contained dropdown, still anchored above its button.
+  menu.style.setProperty("--picker-bottom", Math.max(8, innerHeight - button.getBoundingClientRect().top + 6) + "px")
 }
 modeBtn.addEventListener("keydown", (event) => {
   if (!["ArrowDown", "ArrowUp"].includes(event.key)) return
@@ -533,7 +540,7 @@ const atBottom = () => thread.scrollHeight - thread.scrollTop - thread.clientHei
 const scrollDown = () => { thread.scrollTop = thread.scrollHeight }
 
 function emptyState() {
-  thread.innerHTML = '<div class="empty-hint"><h1>What should we work on?</h1><p>Ask about your code, or try <code>/help</code> in the TUI.</p></div>'
+  thread.innerHTML = '<div class="empty-hint"><h1>What should we work on?</h1><p>Ask about your code. Use <code>/</code> for commands or <code>+</code> to add context.</p></div>'
 }
 
 function turn(kind, text, images) {
