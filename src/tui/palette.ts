@@ -129,6 +129,7 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
           item.value.toLowerCase().includes(query) ||
           item.hint.toLowerCase().includes(query),
       )
+      .sort((a, b) => Number(b.value.toLowerCase() === "/model " + query) - Number(a.value.toLowerCase() === "/model " + query))
       .slice(0, LIST_LIMIT)
   }
 

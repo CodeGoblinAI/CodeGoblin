@@ -13,6 +13,7 @@ const providerBtn = document.getElementById("provider-btn")
 const providerMenu = document.getElementById("provider-menu")
 const providerLabel = providerBtn.querySelector(".picker-label")
 let modelOptions = []
+let modelCatalogState = "loading"
 let currentModel = ""
 let resumeModelMissing = false
 let modelIndex = 0
@@ -1619,6 +1620,10 @@ function note(text) {
 async function submit() {
   const text = input.value.trim().replace(/^\/[^\s]+/, (name) => paletteData.aliases?.[name] || name)
   if (!text && !attachments.length) return
+  if (!modelOptions.length && !text.startsWith("/")) {
+    note(modelCatalogState === "loading" ? "Models are still loading; your draft is kept. Try Enter again when the model name appears." : "Could not load models; your draft is kept. Reload the page to retry.")
+    return
+  }
   if (busy) {
     input.value = ""
     paletteItems = []
@@ -1920,8 +1925,10 @@ document.getElementById("new-session").onclick = () => {
  * key the picker was insisting you did not have.
  */
 async function loadProviders() {
+  modelCatalogState = "loading"
   const data = await fetch("/api/providers").then((r) => r.json()).catch(() => null)
-  if (!data) return
+  if (!data || !Array.isArray(data.providers)) { modelCatalogState = "failed"; return }
+  modelCatalogState = "ready"
   const previous = currentModel
   modelOptions = data.providers.map((p) => ({
     value: p.id,
@@ -2124,7 +2131,8 @@ function itemsFor(text, cursor) {
 
   if (head === "/model" && hasArgument) {
     const q = text.slice(7).trim().toLowerCase()
-    return paletteData.models.filter((m) => !q || m.value.toLowerCase().includes(q)).slice(0, 8)
+    return paletteData.models.filter((m) => !q || m.value.toLowerCase().includes(q))
+      .sort((a, b) => Number(b.value.toLowerCase() === "/model " + q) - Number(a.value.toLowerCase() === "/model " + q)).slice(0, 8)
   }
   if (head === "/theme" && hasArgument) {
     const q = text.slice(7).trim().toLowerCase()
