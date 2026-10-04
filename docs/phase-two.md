@@ -4,8 +4,10 @@ Hands-on follow-up: [October 4 user pass](user-pass-2026-10-04.md). A real Codex
 approval/write/diff succeeded in the integrated browser, and actual 80×24 TUI
 copy/dialog/live-command checks ran. The pass also reproduced a TUI pending-approval
 cancellation hang, stale Web approval controls, dynamic-model launch fallback and
-picker/export gaps. These remain open despite 686 green tests; do not treat the UX
-or Cursor authenticated live verification as complete.
+picker/export gaps. All seven original findings are fixed and interactively retested
+on `codex/phase2-hardening`. The follow-up also adds exact-model resume, keyboard
+approval settings and exclusive mobile drawers; 689 tests pass. Persistent history,
+full accessibility and Cursor authenticated live verification remain open.
 
 ## Current slice: CG-owned Claude, Codex and Cursor tools
 
