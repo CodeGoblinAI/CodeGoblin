@@ -320,14 +320,14 @@ describe("a remote server over Streamable HTTP", () => {
     }
   })
 
-  test("an HTTP error is reported straight away, not waited out", async () => {
+  test("HTTP 401 is reported as sign-in required straight away, not waited out", async () => {
     const { server, url } = remoteServer({ failInitialize: 401 })
     try {
       const client = new McpClient("remote", { type: "remote", url, headers: {}, enabled: true, timeout: 20_000 })
       const started = Date.now()
       await client.connect()
-      expect(client.status).toBe("failed")
-      expect(client.error).toContain("HTTP 401")
+      expect(client.status).toBe("authorization_required")
+      expect(client.error).toContain("Sign-in required")
       expect(Date.now() - started).toBeLessThan(5000)
     } finally {
       server.stop(true)
