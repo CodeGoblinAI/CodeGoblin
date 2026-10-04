@@ -74,6 +74,7 @@ import { apiKey, connect, disconnect, connections, storePath, envVariable } from
 import { localChatMessages, runAgent, type Attachment, type Message } from "../core/agent"
 import { COMMANDS, isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
+import { normaliseActivity, recordActivity } from "../core/session-activity"
 import {
   usage,
   shouldCompact,
@@ -1085,6 +1086,8 @@ function openDisconnect() {
  */
 /** A subagent's progress, into the transcript under its name. */
 function onSubagent(event: SubagentEvent) {
+  session.activity ??= normaliseActivity(undefined)
+  recordActivity(session.activity, event)
   const rowFor = (id: string) => [...transcript].reverse().find((entry) => entry.kind === "tool" && entry.call === id)
   if (event.type === "subagent_start") {
     transcript.push({ kind: "tool", text: event.agent + " subagent started: " + event.description })
@@ -1254,6 +1257,7 @@ function railLines(height: number): string[] {
     ["cost", spend.dollars === undefined ? "unknown" : formatSpend(spend)],
     ["mode", permissions.mode + (permissions.planning ? " +planning" : "") + (boost || boostOnce ? " +boost" : "")],
     ["checkpoints", every > 0 ? "every " + every + (permissions.checkpointsOff ? " (off)" : "") : "off"],
+    ["activity", (session.activity?.items.length || 0) + " recent tool calls"],
     ["mcp", servers.length ? "" : "none yet"],
     ...servers.slice(0, 4).map((server): [string, string] => [
       server.name,
@@ -2201,6 +2205,8 @@ async function send() {
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
       instructions: [skillIndex(listSkills(process.cwd())), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
     })) {
+      session.activity ??= normaliseActivity(undefined)
+      recordActivity(session.activity, event)
       if (event.type === "thinking") {
         if (!current || current.kind !== "thinking") {
           current = { kind: "thinking", text: "" }
@@ -2305,6 +2311,8 @@ async function send() {
     edits.commit()
     session.messages = messages
     session.spend = spend
+    session.review = edits.reviewState(process.cwd())
+    session.activity = normaliseActivity(session.activity, true)
     void sessions.save(session).then(refreshSessionCache).catch(() => {})
     void refreshFileCache(true)
 
@@ -2355,6 +2363,14 @@ async function restoreSession(loaded: sessions.Session) {
   transcript = fromMessages(messages)
   scroll = 0
   edits.reset()
+  edits.restoreReview(process.cwd(), loaded.review)
+  session.activity = normaliseActivity(loaded.activity, true)
+  plan = session.activity.plan
+  if (session.activity.items.length) {
+    transcript.push({ kind: "tool", text: "Saved activity (latest 12 calls)" })
+    transcript.push(...session.activity.items.slice(-12).map(item => ({ kind: "tool" as const, text: item.label + (item.state === "interrupted" ? " · not completed" : ""), state: item.state === "done" ? "done" as const : "failed" as const })))
+  }
+  if (edits.reviewNotice) transcript.push({ kind: "tool", state: "failed", text: edits.reviewNotice })
   resumeModelMissing = !restored || kindOf(restored.model) !== "text"
   if (resumeModelMissing) transcript.push({ kind: "tool", state: "failed", text: "Saved model unavailable: " + requested + ". Use /model to continue." })
   if (restored && !resumeModelMissing) {

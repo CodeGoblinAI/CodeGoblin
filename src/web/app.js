@@ -419,7 +419,7 @@ function deferUntilIdle(action, label) {
 }
 let controller = null
 let stopRequested = false
-let lastToolArgs = ""
+const toolArgsByCall = new Map()
 
 const escapeHtml = (s) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -868,6 +868,15 @@ async function openSession(id) {
   }
   if (!thread.children.length) emptyState()
   activityReset()
+  if (data.session.activity) {
+    planItems = data.session.activity.plan || []
+    feedItems = (data.session.activity.items || []).map(item => ({ label: item.label + (item.state === "interrupted" ? " · not completed" : ""), ok: item.state === "done" }))
+    const diff = await fetch("/api/diff?sessionId=" + encodeURIComponent(id), { cache: "no-store" }).then(r => r.json()).catch(() => null)
+    if (sessionId !== id) return
+    changedFiles = new Map((diff?.files || []).map(file => [file.path, "+" + file.added + " -" + file.removed]))
+    renderActivity()
+  }
+  if (data.reviewNotice) note(data.reviewNotice)
   if (!restored) note("This conversation's saved model is unavailable. Choose a model explicitly before continuing.")
   else if (!data.session.model) note("This older conversation did not record its exact model; restored the saved provider's default. You can choose a different model.")
   refreshSessions()
@@ -1753,7 +1762,10 @@ async function submit() {
         if (event.type === "subagent_event") {
           const inner = event.event
           const id = event.task + ":" + inner.id
-          if (inner.type === "tool_start") toolChip(event.agent + " > " + inner.name, inner.args, id)
+          if (inner.type === "tool_start") {
+            toolChip(event.agent + " > " + inner.name, inner.args, id)
+            toolArgsByCall.set(id, inner.args)
+          }
           if (inner.type === "tool_denied") {
             deniedCalls.add(id)
             const chip = chipFor(id)
@@ -1775,7 +1787,9 @@ async function submit() {
               chip.classList.add(failed ? "failed" : "done")
               chip.querySelector(".spin").textContent = failed ? "✗" : "✓"
             }
+            if (!/^(error|stopped|refused|not run)/i.test(inner.result || "")) noteChange(inner.name, toolArgsByCall.get(id), inner.result)
           }
+          if (inner.type === "tool_end") toolArgsByCall.delete(id)
         }
         if (event.type === "subagent_end") {
           runningTools = runningTools.filter((name) => name !== event.agent + " subagent")
@@ -1789,7 +1803,7 @@ async function submit() {
           body = null
           thinking = null
           toolChip(event.name, event.asked || event.args, event.id)
-          lastToolArgs = event.args
+          toolArgsByCall.set(event.id, event.args)
           runningTools.push(event.name)
           renderActivity()
         }
@@ -1819,10 +1833,11 @@ async function submit() {
         if (event.type === "tool_end") {
           runningTools = runningTools.filter((n) => n !== event.name)
           const denied = deniedCalls.has(event.id)
-          const ok = !denied && !String(event.result || "").startsWith("error:")
+          const ok = !denied && !/^(error|stopped|refused|not run)/i.test(event.result || "")
           feedItems.push({ label: event.name, ok })
           // A refused write changed nothing, so there is nothing to note.
-          if (!denied) noteChange(event.name, lastToolArgs, event.result)
+          if (ok) noteChange(event.name, toolArgsByCall.get(event.id), event.result)
+          toolArgsByCall.delete(event.id)
           renderActivity()
         }
         if (event.type === "tool_end") {
@@ -2441,6 +2456,8 @@ function activityBusy(state) {
 }
 
 function activityReset() {
+  toolArgsByCall.clear()
+  deniedCalls.clear()
   planItems = []
   runningTools = []
   feedItems = []

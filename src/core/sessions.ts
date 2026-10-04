@@ -3,6 +3,8 @@ import path from "node:path"
 import { Global } from "../platform/paths"
 import type { Message } from "./agent"
 import type { Spend } from "./context"
+import type { ReviewState } from "./undo"
+import type { SessionActivity } from "./session-activity"
 
 /**
  * Sessions on disk.
@@ -21,6 +23,8 @@ export type Session = {
   model?: string
   messages: Message[]
   spend?: Spend
+  review?: ReviewState
+  activity?: SessionActivity
   importedFrom?: { provider: string; id: string; importedAt: number }
 }
 
@@ -48,7 +52,10 @@ export async function save(session: Session): Promise<void> {
   await fs.mkdir(dir, { recursive: true })
   session.updated = Date.now()
   session.title = session.title === "New session" ? titleFrom(session.messages) : session.title
-  await fs.writeFile(file(session.id), JSON.stringify(session, null, 2), "utf8")
+  const target = file(session.id)
+  const temporary = target + "." + newSessionId() + ".tmp"
+  await fs.writeFile(temporary, JSON.stringify(session, null, 2), { encoding: "utf8", mode: 0o600 })
+  await fs.rename(temporary, target)
 }
 
 export async function load(id: string): Promise<Session | undefined> {

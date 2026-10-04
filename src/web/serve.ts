@@ -35,6 +35,7 @@ import {
 import { apiKey } from "../core/auth"
 import * as auth from "../core/auth"
 import * as sessions from "../core/sessions"
+import { normaliseActivity, recordActivity } from "../core/session-activity"
 import { DECISIONS, MODES, askedFor, refusalLabel, type Decision, type PermissionMode, type Permissions } from "../core/permission"
 import { BrowserConsent } from "./consent"
 import { McpManager } from "../core/mcp"
@@ -118,12 +119,19 @@ let cursorLoginsStarting = 0
  * would otherwise undo each other's work.
  */
 const editsBySession = new Map<string, History>()
-function editsFor(sessionId: string): History {
+function editsFor(sessionId: string, review?: unknown): History {
   const existing = editsBySession.get(sessionId)
   if (existing) return existing
   const created = new History()
+  created.restoreReview(root, review)
   editsBySession.set(sessionId, created)
   return created
+}
+
+async function saveReviewSession(session: sessions.Session) {
+  session.review = editsFor(session.id, session.review).reviewState(root)
+  session.activity = normaliseActivity(session.activity, true)
+  await sessions.save(session)
 }
 
 /**
@@ -344,10 +352,12 @@ async function handle(request: Request): Promise<Response> {
     const session = await sessions.load(url.searchParams.get("id") ?? "")
     const resolved = session ? await resolveStartupModel(session.model ? session.provider + "/" + session.model : session.provider) : undefined
     const selected = resolved && kindOf(resolved.model) === "text" ? resolved : undefined
+    if (session) session.activity = normaliseActivity(session.activity, true)
     return session ? json({
       session,
       selection: selected ? selected.provider.id + "/" + selected.model.id : undefined,
       context: selected ? usage(selected.provider.local && !selected.provider.localTools ? localChatMessages(session.messages) : session.messages, selected.model.contextWindow) : undefined,
+      reviewNotice: editsFor(session.id, session.review).reviewNotice,
     }) : json({ error: "not found" }, 404)
   }
 
@@ -564,10 +574,11 @@ async function handle(request: Request): Promise<Response> {
 
   if (url.pathname === "/api/diff" && request.method === "GET") {
     const id = url.searchParams.get("sessionId") ?? ""
-    const edits = editsBySession.get(id)
+    const saved = !editsBySession.has(id) && id ? await sessions.load(id) : undefined
+    const edits = editsBySession.get(id) || (saved ? editsFor(id, saved.review) : undefined)
     if (!edits) return json({ files: [], added: 0, removed: 0, message: id ? "No edit history is available for this conversation in this server run." : "No conversation is selected." })
     const changes = await changesIn(root, edits)
-    return json({ ...changes, message: summarise(changes) })
+    return json({ ...changes, message: [edits.reviewNotice, summarise(changes)].filter(Boolean).join(" ") })
   }
 
   if (url.pathname === "/api/stop" && request.method === "POST") {
@@ -677,7 +688,8 @@ async function handle(request: Request): Promise<Response> {
 
         send({ type: "session", id: session.id })
         // One checkpoint per turn, so undo takes back the whole answer.
-        const edits = editsFor(session.id)
+        const edits = editsFor(session.id, session.review)
+        session.activity = normaliseActivity(session.activity, true)
         edits.begin(text)
         // Say what was attached: a mention that silently did nothing and a
         // mention that worked would otherwise look exactly the same.
@@ -704,12 +716,14 @@ async function handle(request: Request): Promise<Response> {
           subagents = new SubagentManager(() => subagentContexts.get(id)!)
           subagentsBySession.set(id, subagents)
         }
-        subagents.onEvent = (event) =>
+        subagents.onEvent = (event) => {
+          recordActivity(session.activity!, event)
           send(
             event.type === "subagent_event" && event.event.type === "tool_denied"
               ? { ...event, event: { ...event.event, label: refusalLabel(event.event) } }
               : event,
           )
+        }
         try {
           for await (const event of runAgent({
             provider,
@@ -731,6 +745,7 @@ async function handle(request: Request): Promise<Response> {
             effort: effortFor(model, (await settingsStore.load()).effort),
             signal: turn.signal,
           })) {
+            recordActivity(session.activity!, event)
             // A refused call carries who refused it; the label is composed here
             // so the browser and the terminal say the same words about it.
             if (event.type === "spend") {
@@ -748,15 +763,15 @@ async function handle(request: Request): Promise<Response> {
               context: usage(provider.local && !provider.localTools ? localChatMessages(session.messages) : session.messages, model.contextWindow),
             })
           }
-          await sessions.save(session)
+          await saveReviewSession(session)
           send({ type: "saved", id: session.id, title: session.title })
         } catch (error) {
           // Stopping mid-stream throws out of the loop. The TUI keeps the
           // conversation when that happens; here it used to vanish - the
           // prompt never reached Sessions and could not be resumed. A stop
           // is also not an error worth reporting.
-          if (turn.signal.aborted) await sessions.save(session).catch(() => {})
-          else send({ type: "error", message: error instanceof Error ? error.message : "request failed" })
+          await saveReviewSession(session).catch(() => {})
+          if (!turn.signal.aborted) send({ type: "error", message: error instanceof Error ? error.message : "request failed" })
         } finally {
           edits.commit()
           clearInterval(heartbeat)
