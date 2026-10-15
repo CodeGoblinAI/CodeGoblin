@@ -2541,7 +2541,14 @@ process.stdin.on("data", (chunk) => {
       if (pressed.row !== toolbarRow || secret) { render(); continue }
       const target = toolbarTargets.find((item) => pressed.col >= item.from && pressed.col <= item.to)?.command
       if (target === "attach") dialog = Dialogs.open("attach", "Add to the prompt", [{ label: "Mention a project file", value: "file" }, { label: "Paste image from clipboard", value: "image" }, { label: "Run a slash command", value: "command" }])
-      if (target === "model") dialog = Dialogs.open("model-picker", "Choose model", allSelections().map((s) => ({ label: s.provider.label + " " + s.model.label, value: s.provider.id + "/" + s.model.id })), { size: "large" })
+      if (target === "model") {
+        const current = selection.provider.id + "/" + selection.model.id
+        dialog = Dialogs.open("model-picker", "Choose model", allSelections().map((s) => ({
+          label: s.provider.label + " " + s.model.label,
+          value: s.provider.id + "/" + s.model.id,
+          hint: s.provider.id + "/" + s.model.id === current ? "current" : undefined,
+        })), { size: "large", selectedValue: current })
+      }
       if (target === "settings") openSettings()
       if (target === "sessions") {
         if (streaming) { status = "sessions cannot change during a turn; use /resume to queue" }
