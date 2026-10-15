@@ -43,6 +43,6 @@ $env:CODEGOBLIN_DIR = "$PWD\output\home-web-recovery-profile"
 bun run web
 ```
 
-Use only disposable drafts/workspaces. Stop this owned server from its terminal, leave the page open, type a message and press Send. Expect the draft to return with useful connection feedback. Restart and reload before continuing. A delayed rejection with a newer draft, attachment restoration, and an interrupted accepted stream are additional checks; never assume a failed response means tools did not execute. Normal inference can consume allowance when using a real model.
+Use only disposable drafts/workspaces. Stop this owned server from its terminal, leave the page open, type a message and press Send. Expect the draft to return with useful connection feedback. Restart and retry without reloading; if a reload is needed, copy the draft first because browser drafts are not durable. A delayed rejection with a newer draft, attachment restoration, and an interrupted accepted stream are additional checks; never assume a failed response means tools did not execute. Normal inference can consume allowance when using a real model.
 
 These checks do not integrate the October 4 concern branches. The brain skill is currently missing at its saved locations; repository records and the Downloads checklist are the fallback until it is restored.
