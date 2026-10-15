@@ -309,7 +309,7 @@ const MAX_IMAGES = 10
 
 function updateSendButton() {
   // Stop must remain available while working, including with an empty draft.
-  sendBtn.disabled = !busy && !input.value.trim() && attachments.length === 0
+  sendBtn.disabled = !busy && (sessionNavigation.pending() || (!input.value.trim() && attachments.length === 0))
 }
 
 function renderAttached() {
@@ -395,7 +395,30 @@ for (const name of ["dragover", "drop"]) {
 const hint = document.getElementById("hint")
 const sessionList = document.getElementById("session-list")
 
+/** The latest navigation intent wins, including an explicit New session. */
+function createSessionNavigation() {
+  let generation = 0
+  let loading = false
+  return {
+    begin() { loading = true; return ++generation },
+    current(request) { return request === generation },
+    finish(request) {
+      if (request !== generation) return false
+      loading = false
+      return true
+    },
+    cancel() { loading = false; return ++generation },
+    pending() { return loading },
+  }
+}
+
 let sessionId = null
+const sessionNavigation = createSessionNavigation()
+function updateSessionNavigation() {
+  thread.setAttribute("aria-busy", String(sessionNavigation.pending()))
+  document.getElementById("session-loading").hidden = !sessionNavigation.pending()
+  updateSendButton()
+}
 let sessionUsage = null
 function showUsage(value) {
   sessionUsage = value
@@ -849,29 +872,37 @@ async function refreshSessions() {
 async function openSession(id) {
   if (deferUntilIdle(() => openSession(id), "open conversation")) return
   closeMobilePanels(false)
-  const data = await fetch("/api/session?id=" + encodeURIComponent(id)).then((r) => r.json()).catch(() => null)
-  if (!data || !data.session) return
-  sessionId = id
-  if (data.selection && !modelOptions.some((option) => option.value === data.selection)) await loadProviders()
-  const restored = data.selection && setModel(data.selection)
-  if (!restored) {
-    resumeModelMissing = true
-    currentModel = ""
-    providerLabel.textContent = "Saved model unavailable — choose a model"
-    renderModelMenu()
+  const request = sessionNavigation.begin()
+  updateSessionNavigation()
+  try {
+    const data = await fetch("/api/session?id=" + encodeURIComponent(id), { signal: AbortSignal.timeout(15000) }).then((r) => r.ok ? r.json() : null).catch(() => null)
+    if (!sessionNavigation.current(request)) return
+    if (!data?.session) { note("Could not open that conversation. Your current conversation and draft are unchanged; try again."); return }
+    if (data.selection && !modelOptions.some((option) => option.value === data.selection)) await loadProviders()
+    if (!sessionNavigation.current(request)) return
+    sessionId = id
+    const restored = data.selection && setModel(data.selection)
+    if (!restored) {
+      resumeModelMissing = true
+      currentModel = ""
+      providerLabel.textContent = "Saved model unavailable — choose a model"
+      renderModelMenu()
+    }
+    showUsage({ spend: data.session.spend, context: restored ? data.context : undefined })
+    thread.innerHTML = ""
+    for (const m of data.session.messages) {
+      if (m.role === "user") turn("user", m.display || m.content)
+      else if (m.role === "assistant" && m.content) turn("agent", m.content)
+    }
+    if (!thread.children.length) emptyState()
+    activityReset()
+    if (!restored) note("This conversation's saved model is unavailable. Choose a model explicitly before continuing.")
+    else if (!data.session.model) note("This older conversation did not record its exact model; restored the saved provider's default. You can choose a different model.")
+    refreshSessions()
+    input.focus()
+  } finally {
+    if (sessionNavigation.finish(request)) updateSessionNavigation()
   }
-  showUsage({ spend: data.session.spend, context: restored ? data.context : undefined })
-  thread.innerHTML = ""
-  for (const m of data.session.messages) {
-    if (m.role === "user") turn("user", m.display || m.content)
-    else if (m.role === "assistant" && m.content) turn("agent", m.content)
-  }
-  if (!thread.children.length) emptyState()
-  activityReset()
-  if (!restored) note("This conversation's saved model is unavailable. Choose a model explicitly before continuing.")
-  else if (!data.session.model) note("This older conversation did not record its exact model; restored the saved provider's default. You can choose a different model.")
-  refreshSessions()
-  input.focus()
 }
 
 /**
@@ -1246,13 +1277,17 @@ async function runCommand(text) {
   if (name === "/mouse") { note("The browser supports mouse selection and Ctrl+C natively."); return true }
 
   if (name === "/new" || name === "/clear") {
+    const request = sessionNavigation.cancel()
+    updateSessionNavigation()
     showUsage(null)
     sessionId = null
     resumeModelMissing = false
     if (!currentModel) await loadProviders()
+    if (!sessionNavigation.current(request)) return true
     emptyState()
     activityReset()
     refreshSessions()
+    input.focus()
     return true
   }
 
@@ -1619,6 +1654,10 @@ function note(text) {
 async function submit() {
   const text = input.value.trim().replace(/^\/[^\s]+/, (name) => paletteData.aliases?.[name] || name)
   if (!text && !attachments.length) return
+  if (sessionNavigation.pending() && !/^\/(?:clear|new|resume|sessions|continue)(?:\s|$)/.test(text)) {
+    note("Conversation is still loading; your draft and attachments are kept. Wait, or choose New session before sending.")
+    return
+  }
   if (busy) {
     input.value = ""
     paletteItems = []
