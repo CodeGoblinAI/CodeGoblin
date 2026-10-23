@@ -1,0 +1,32 @@
+{
+  "model": {
+    "slug": "deepseek-v4.1-flash-uncensored",
+    "display_name": "DeepSeek V4.1 Flash 1017 Uncensored",
+    "status": "active",
+    "release_date": null,
+    "context_window": 1048576,
+    "max_input_tokens": 655360,
+    "max_output_tokens": 393216,
+    "input_modalities": ["text"],
+    "output_modalities": ["text"],
+    "supported_params": {}
+  },
+  "default_provider_ids": ["5c614206-6257-42d9-8a49-685fa680502f"],
+  "providers": [
+    {
+      "id": "5c614206-6257-42d9-8a49-685fa680502f",
+      "status": "active",
+      "routable": true,
+      "input_nano_usd_per_million": 300000000,
+      "output_nano_usd_per_million": 1200000000,
+      "cached_input_nano_usd_per_million": 30000000,
+      "cache_write_input_nano_usd_per_million": 300000000,
+      "capabilities": {
+        "supports_tools": true,
+        "supports_streaming": true,
+        "supports_reasoning": true,
+        "supports_temperature": true
+      }
+    }
+  ]
+}
