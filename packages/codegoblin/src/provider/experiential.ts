@@ -13,21 +13,36 @@ const Row = Schema.Struct({
     max_output_tokens: Schema.NullOr(Schema.Finite),
     input_modalities: Schema.Array(Schema.String),
     output_modalities: Schema.Array(Schema.String),
-    supported_params: Schema.Struct({
-      tools: Schema.optional(Schema.Boolean),
-      reasoning: Schema.optional(Schema.Boolean),
-      temperature: Schema.optional(Schema.Boolean),
-    }),
+    supported_params: Schema.optional(
+      Schema.NullOr(
+        Schema.Struct({
+          tools: Schema.optional(Schema.Boolean),
+          reasoning: Schema.optional(Schema.Boolean),
+          temperature: Schema.optional(Schema.Boolean),
+        }),
+      ),
+    ),
   }),
   default_provider_ids: Schema.Array(Schema.String),
   providers: Schema.Array(
     Schema.Struct({
       id: Schema.String,
+      status: Schema.optional(Schema.String),
+      routable: Schema.optional(Schema.NullOr(Schema.Boolean)),
       input_nano_usd_per_million: Rate,
       output_nano_usd_per_million: Rate,
       cached_input_nano_usd_per_million: Rate,
       cache_write_input_nano_usd_per_million: Rate,
-      capabilities: Schema.optional(Schema.Struct({ supports_streaming: Schema.optional(Schema.Boolean) })),
+      capabilities: Schema.optional(
+        Schema.NullOr(
+          Schema.Struct({
+            supports_streaming: Schema.optional(Schema.Boolean),
+            supports_tools: Schema.optional(Schema.Boolean),
+            supports_reasoning: Schema.optional(Schema.Boolean),
+            supports_temperature: Schema.optional(Schema.Boolean),
+          }),
+        ),
+      ),
     }),
   ),
 })
@@ -48,7 +63,7 @@ export function experientialModels(rows: readonly unknown[]): Record<string, Mod
       if (
         !model.slug ||
         model.status !== "active" ||
-        !model.supported_params.tools ||
+        !(model.supported_params?.tools ?? provider?.capabilities?.supports_tools) ||
         !model.input_modalities.includes("text") ||
         !model.output_modalities.includes("text") ||
         !model.context_window ||
@@ -56,6 +71,8 @@ export function experientialModels(rows: readonly unknown[]): Record<string, Mod
         !model.max_output_tokens ||
         model.max_output_tokens <= 0 ||
         !provider ||
+        (provider.status !== undefined && provider.status !== "active") ||
+        provider.routable === false ||
         provider.capabilities?.supports_streaming === false
       )
         return []
@@ -76,8 +93,10 @@ export function experientialModels(rows: readonly unknown[]): Record<string, Mod
         name: model.display_name,
         release_date: model.release_date ?? "",
         attachment: input.some((item) => item !== "text"),
-        reasoning: model.supported_params.reasoning ?? false,
-        temperature: model.supported_params.temperature ?? false,
+        // Some models (including DeepSeek Uncensored) have empty model-level
+        // params. Fall back to the selected route, preserving explicit model flags.
+        reasoning: model.supported_params?.reasoning ?? provider.capabilities?.supports_reasoning ?? false,
+        temperature: model.supported_params?.temperature ?? provider.capabilities?.supports_temperature ?? false,
         tool_call: true,
         modalities: { input, output: ["text"] },
         limit: {
@@ -110,7 +129,9 @@ export async function experientialCatalog(
   const models: Record<string, ModelsDev.Model> = {}
   for (let offset = 0; offset < 5000; ) {
     const response = await fetcher(
-      `https://api.experientiallabs.ai/api/models?sort=preferred&supports=tools&limit=100&offset=${offset}`,
+      // The upstream tools filter also relies on model-level params, so fetch
+      // the full inventory and inspect each default route locally.
+      `https://api.experientiallabs.ai/api/models?sort=preferred&limit=100&offset=${offset}`,
       {
         signal: AbortSignal.timeout(15_000),
         redirect: "error",

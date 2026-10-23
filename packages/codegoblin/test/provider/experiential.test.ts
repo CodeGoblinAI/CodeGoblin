@@ -4,6 +4,7 @@ import * as ModelsDev from "@codegoblin/core/models-dev"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { jsonSchema, stepCountIs, streamText, tool } from "ai"
 import { experientialCatalog, experientialModels } from "../../src/provider/experiential"
+import deepseek from "./fixtures/experiential-deepseek-uncensored.json"
 
 function row() {
   return {
@@ -34,6 +35,70 @@ function row() {
 }
 
 describe("Experiential Labs catalog", () => {
+  test.each([{}, undefined, null])("imports DeepSeek Uncensored from route capabilities: %j", (params) => {
+    // Relevant public catalog fields captured 2026-10-23. The model-level
+    // capability object is empty even though its default route supports tools.
+    const model = experientialModels([{ ...deepseek, model: { ...deepseek.model, supported_params: params } }])[
+      "deepseek-v4.1-flash-uncensored"
+    ]
+    expect(model).toMatchObject({
+      id: "deepseek-v4.1-flash-uncensored",
+      name: "DeepSeek V4.1 Flash 1017 Uncensored",
+      tool_call: true,
+      reasoning: true,
+      temperature: true,
+      cost: { input: 0.3, output: 1.2, cache_read: 0.03, cache_write: 0.3 },
+      limit: { context: 1048576, input: 655360, output: 393216 },
+      modalities: { input: ["text"], output: ["text"] },
+    })
+    Schema.decodeUnknownSync(ModelsDev.Model)(model)
+  })
+
+  test.each(["no-tools", "no-stream", "disabled", "unroutable"])(
+    "does not override an unavailable default route: %s",
+    (kind) => {
+      const entry = {
+        ...deepseek,
+        providers: deepseek.providers.map((provider) => ({
+          ...provider,
+          status: kind === "disabled" ? "disabled" : provider.status,
+          routable: kind !== "unroutable",
+          capabilities: {
+            ...provider.capabilities,
+            supports_tools: kind !== "no-tools",
+            supports_streaming: kind !== "no-stream",
+          },
+        })),
+      }
+      expect(experientialModels([entry])).toEqual({})
+    },
+  )
+
+  test("uses only the default route's capabilities and honors explicit model flags", () => {
+    const entry = {
+      ...deepseek,
+      model: { ...deepseek.model, supported_params: { reasoning: false, temperature: false } },
+      providers: [
+        { ...deepseek.providers[0], id: "other", capabilities: { supports_tools: false } },
+        {
+          ...deepseek.providers[0],
+          capabilities: deepseek.providers[0].capabilities,
+        },
+      ],
+    }
+    expect(experientialModels([entry])[deepseek.model.slug]).toMatchObject({
+      tool_call: true,
+      reasoning: false,
+      temperature: false,
+    })
+    expect(experientialModels([{ ...deepseek, providers: [{ ...deepseek.providers[0], capabilities: {} }] }])).toEqual(
+      {},
+    )
+    expect(
+      experientialModels([{ ...deepseek, model: { ...deepseek.model, supported_params: { tools: false } } }]),
+    ).toEqual({})
+  })
+
   test("uses the gateway slug, default waterfall price, limits, and input modalities", () => {
     const model = experientialModels([row()])["claude-opus-5.5"]
     expect(model).toMatchObject({
@@ -99,10 +164,15 @@ describe("Experiential Labs catalog", () => {
         const url = new URL(request.url)
         seen.push(url.searchParams.get("offset")!)
         expect(request.headers.get("authorization")).toBeNull()
-        expect(url.searchParams.get("supports")).toBe("tools")
+        expect(url.searchParams.has("supports")).toBe(false)
         const entry = row()
         if (seen.length === 2) entry.model.slug = "second-model"
-        return Response.json({ models: [entry], total: 2, limit: 1, offset: Number(url.searchParams.get("offset")) })
+        return Response.json({
+          models: seen.length === 1 ? [deepseek] : [entry],
+          total: 2,
+          limit: 1,
+          offset: Number(url.searchParams.get("offset")),
+        })
       },
     })
     const catalog = await experientialCatalog((url, init) =>
@@ -116,7 +186,7 @@ describe("Experiential Labs catalog", () => {
       api: "https://api.experientiallabs.ai/v1",
       npm: "@ai-sdk/openai-compatible",
     })
-    expect(Object.keys(catalog.models)).toEqual(["claude-opus-5.5", "second-model"])
+    expect(Object.keys(catalog.models)).toEqual(["deepseek-v4.1-flash-uncensored", "second-model"])
     Schema.decodeUnknownSync(ModelsDev.Provider)(catalog)
   })
 
@@ -139,63 +209,71 @@ describe("Experiential Labs catalog", () => {
     expect(snapshot.openai).toBeDefined()
     expect(snapshot.anthropic).toBeDefined()
     expect(provider.models["claude-opus-5.5"]).toBeDefined()
+    expect(provider.models["deepseek-v4.1-flash-uncensored"]).toMatchObject({
+      name: "DeepSeek V4.1 Flash 1017 Uncensored",
+      tool_call: true,
+      reasoning: true,
+    })
     expect(provider.models["jev-latest"]).toBeUndefined()
   })
 
-  test("actual SDK authenticates, streams, executes a tool, and continues with the result", async () => {
-    const calls: unknown[] = []
-    using server = Bun.serve({
-      port: 0,
-      hostname: "127.0.0.1",
-      async fetch(request) {
-        expect(new URL(request.url).pathname).toBe("/v1/chat/completions")
-        expect(request.headers.get("authorization")).toBe("Bearer local-test-key")
-        const body = await request.json()
-        calls.push(body)
-        expect(body.model).toBe("claude-opus-5.5")
-        const first = calls.length === 1
-        if (!first) expect(body.messages).toContainEqual(expect.objectContaining({ role: "tool", content: "canary" }))
-        const delta = first
-          ? {
-              tool_calls: [
-                {
-                  index: 0,
-                  id: "call_read",
-                  type: "function",
-                  function: { name: "read", arguments: '{"path":"README.md"}' },
-                },
-              ],
-            }
-          : { content: "EXPLABS_OK" }
-        return new Response(
-          `data: ${JSON.stringify({ id: "test", object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: "test", object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: first ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`,
-          { headers: { "content-type": "text/event-stream" } },
-        )
-      },
-    })
-    const result = streamText({
-      model: createOpenAICompatible({
-        name: "explabs",
-        apiKey: "local-test-key",
-        baseURL: `${server.url.origin}/v1`,
-      }).chatModel("claude-opus-5.5"),
-      prompt: "Read README.md",
-      stopWhen: stepCountIs(2),
-      tools: {
-        read: tool({
-          inputSchema: jsonSchema<{ path: string }>({
-            type: "object",
-            properties: { path: { type: "string" } },
-            required: ["path"],
+  test.each(["claude-opus-5.5", "deepseek-v4.1-flash-uncensored"])(
+    "actual SDK authenticates, streams, executes a tool, and continues with the result: %s",
+    async (slug) => {
+      const calls: unknown[] = []
+      using server = Bun.serve({
+        port: 0,
+        hostname: "127.0.0.1",
+        async fetch(request) {
+          expect(new URL(request.url).pathname).toBe("/v1/chat/completions")
+          expect(request.headers.get("authorization")).toBe("Bearer local-test-key")
+          const body = await request.json()
+          calls.push(body)
+          expect(body.model).toBe(slug)
+          const first = calls.length === 1
+          if (!first) expect(body.messages).toContainEqual(expect.objectContaining({ role: "tool", content: "canary" }))
+          const delta = first
+            ? {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_read",
+                    type: "function",
+                    function: { name: "read", arguments: '{"path":"README.md"}' },
+                  },
+                ],
+              }
+            : { content: "EXPLABS_OK" }
+          return new Response(
+            `data: ${JSON.stringify({ id: "test", object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: "test", object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: first ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`,
+            { headers: { "content-type": "text/event-stream" } },
+          )
+        },
+      })
+      const result = streamText({
+        model: createOpenAICompatible({
+          name: "explabs",
+          apiKey: "local-test-key",
+          baseURL: `${server.url.origin}/v1`,
+        }).chatModel(slug),
+        prompt: "Read README.md",
+        stopWhen: stepCountIs(2),
+        tools: {
+          read: tool({
+            inputSchema: jsonSchema<{ path: string }>({
+              type: "object",
+              properties: { path: { type: "string" } },
+              required: ["path"],
+            }),
+            execute: async ({ path }) => {
+              expect(path).toBe("README.md")
+              return "canary"
+            },
           }),
-          execute: async ({ path }) => {
-            expect(path).toBe("README.md")
-            return "canary"
-          },
-        }),
-      },
-    })
-    expect(await result.text).toBe("EXPLABS_OK")
-    expect(calls).toHaveLength(2)
-  })
+        },
+      })
+      expect(await result.text).toBe("EXPLABS_OK")
+      expect(calls).toHaveLength(2)
+    },
+  )
 })
