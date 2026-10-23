@@ -62,11 +62,15 @@ export function experientialModels(rows: readonly unknown[]): Record<string, Mod
       const input = model.input_modalities.filter((item): item is "text" | "image" | "audio" | "video" | "pdf" =>
         ["text", "image", "audio", "video", "pdf"].includes(item),
       )
-      const priced =
-        typeof provider.input_nano_usd_per_million === "number" &&
-        provider.input_nano_usd_per_million >= 0 &&
-        typeof provider.output_nano_usd_per_million === "number" &&
-        provider.output_nano_usd_per_million >= 0
+      // Missing prices become zero in the shared provider loader. Do not list
+      // unpriced routes as free models.
+      if (
+        typeof provider.input_nano_usd_per_million !== "number" ||
+        provider.input_nano_usd_per_million < 0 ||
+        typeof provider.output_nano_usd_per_million !== "number" ||
+        provider.output_nano_usd_per_million < 0
+      )
+        return []
       const result: ModelsDev.Model = {
         id: model.slug,
         name: model.display_name,
@@ -83,20 +87,17 @@ export function experientialModels(rows: readonly unknown[]): Record<string, Mod
         },
         // Catalog prices are nano-USD per million tokens, not USD. Promotions
         // depend on the caller's plan and must not be advertised as a free model.
-        ...(priced
-          ? {
-              cost: {
-                input: provider.input_nano_usd_per_million! / 1e9,
-                output: provider.output_nano_usd_per_million! / 1e9,
-                ...(provider.cached_input_nano_usd_per_million != null
-                  ? { cache_read: provider.cached_input_nano_usd_per_million / 1e9 }
-                  : {}),
-                ...(provider.cache_write_input_nano_usd_per_million != null
-                  ? { cache_write: provider.cache_write_input_nano_usd_per_million / 1e9 }
-                  : {}),
-              },
-            }
-          : {}),
+        cost: {
+          input: provider.input_nano_usd_per_million / 1e9,
+          output: provider.output_nano_usd_per_million / 1e9,
+          ...(provider.cached_input_nano_usd_per_million != null && provider.cached_input_nano_usd_per_million >= 0
+            ? { cache_read: provider.cached_input_nano_usd_per_million / 1e9 }
+            : {}),
+          ...(provider.cache_write_input_nano_usd_per_million != null &&
+          provider.cache_write_input_nano_usd_per_million >= 0
+            ? { cache_write: provider.cache_write_input_nano_usd_per_million / 1e9 }
+            : {}),
+        },
       }
       return [[model.slug, result]]
     }),

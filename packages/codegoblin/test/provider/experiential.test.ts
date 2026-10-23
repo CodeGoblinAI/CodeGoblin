@@ -81,7 +81,12 @@ describe("Experiential Labs catalog", () => {
       ...row(),
       providers: [{ id: "default", input_nano_usd_per_million: null, output_nano_usd_per_million: null }],
     }
-    expect(experientialModels([unknownPrice])["claude-opus-5.5"].cost).toBeUndefined()
+    expect(experientialModels([unknownPrice])).toEqual({})
+    const negativePrice = {
+      ...row(),
+      providers: [{ id: "default", input_nano_usd_per_million: -1, output_nano_usd_per_million: 0 }],
+    }
+    expect(experientialModels([negativePrice])).toEqual({})
     expect(experientialModels([{ ...row(), promotion: { free: true } }])["claude-opus-5.5"].cost?.input).toBe(4)
   })
 
