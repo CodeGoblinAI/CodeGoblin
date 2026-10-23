@@ -697,6 +697,67 @@ function createEventResponse(chunks: unknown[], includeDone = false) {
 }
 
 describe("session.llm.stream", () => {
+  it.instance(
+    "continues a conversation after the provider rejects expired encrypted reasoning",
+    () =>
+      Effect.gen(function* () {
+        const model = yield* Provider.use.getModel(ProviderID.openai, ModelID.make("gpt-5.2"))
+        const failed = waitRequest(
+          "/responses",
+          Response.json({ error: { message: "reasoning `encrypted_content` has expired" } }, { status: 400 }),
+        )
+        const recovered = waitRequest(
+          "/responses",
+          createEventResponse([
+            { type: "response.created", response: { id: "resp-recovered", created_at: 1, model: model.id } },
+            {
+              type: "response.completed",
+              response: {
+                incomplete_details: null,
+                usage: { input_tokens: 1, output_tokens: 1, input_tokens_details: null, output_tokens_details: null },
+              },
+            },
+          ]),
+        )
+        const sessionID = SessionID.make("session-recovery")
+        yield* drain({
+          sessionID,
+          model,
+          user: {
+            id: MessageID.make("msg_recovery"),
+            sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: "test",
+            model: { providerID: model.providerID, modelID: model.id },
+          },
+          agent: { name: "test", mode: "primary", options: {}, permission: [] },
+          system: [],
+          messages: [
+            { role: "user", content: "Original question" },
+            {
+              role: "assistant",
+              content: [
+                { type: "reasoning", text: "", providerOptions: { openai: { reasoningEncryptedContent: "expired" } } },
+                { type: "text", text: "Original answer" },
+              ],
+            },
+            { role: "user", content: "Continue this conversation" },
+          ],
+          tools: {},
+        })
+        const before = yield* Effect.promise(() => failed)
+        const after = yield* Effect.promise(() => recovered)
+        expect(JSON.stringify(before.body)).toContain('"encrypted_content":"expired"')
+        expect(JSON.stringify(after.body.input)).not.toContain("encrypted_content")
+        expect(JSON.stringify(after.body)).toContain("Original answer")
+        expect(JSON.stringify(after.body)).toContain("Continue this conversation")
+        expect(after.body.model).toBe(before.body.model)
+        expect(after.headers.get("authorization")).toBe(before.headers.get("authorization"))
+      }),
+    { config: () => openAIConfig(loadFixture("openai", "gpt-5.2").model, `${state.server!.url.origin}/v1`) },
+  )
+
   const vivgridFixture = { providerID: "vivgrid", modelID: "gemini-3.1-pro-preview" }
   it.instance(
     "sends temperature, tokens, and reasoning options for openai-compatible models",

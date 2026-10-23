@@ -26,6 +26,7 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { reasoningRecovery } from "./llm/reasoning-recovery"
 import { isNativeModelUnavailableError, markNativeModelUnavailable } from "@/provider/model-discovery"
 
 const log = Log.create({ service: "llm" })
@@ -78,6 +79,7 @@ const live: Layer.Layer<
     const perm = yield* Permission.Service
     const llmClient = yield* LLMClient.Service
     const flags = yield* RuntimeFlags.Service
+    const recovery = reasoningRecovery(() => log.warn("retrying without expired reasoning state"))
 
     const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
       const l = log
@@ -347,6 +349,7 @@ const live: Layer.Layer<
           model: wrapLanguageModel({
             model: language,
             middleware: [
+              recovery,
               {
                 specificationVersion: "v3" as const,
                 async transformParams(args) {
