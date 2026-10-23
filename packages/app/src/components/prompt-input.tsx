@@ -63,6 +63,7 @@ import {
 } from "./prompt-input/history"
 import { createPromptSubmit, type AudioGenerationSettings, type FollowupDraft, type Model3DGenerationSettings } from "./prompt-input/submit"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
+import { slashListOptions } from "./prompt-input/slash-commands"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
@@ -671,7 +672,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     // inline references — UI commands like /models would just become dead text.
     if (store.slashInline && store.popover === "slash") return custom
 
-    return [...custom, ...builtin]
+    return [...builtin, ...custom]
   })
 
   // Replace the "/partial" token at the cursor with the completed "/name "
@@ -813,8 +814,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onKeyDown: slashOnKeyDown,
   } = useFilteredList<SlashCommand>({
     items: slashCommands,
-    key: (x) => x?.id,
-    filterKeys: ["trigger", "aliasSearch", "title"],
+    ...slashListOptions,
     onSelect: handleSlashSelect,
   })
 
