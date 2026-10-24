@@ -33,6 +33,7 @@ import { emptyConsoleState, type ConsoleState } from "@/config/console-state"
 import path from "path"
 import { useKV } from "./kv"
 import { aggregateFailures } from "./aggregate-failures"
+import { errorMessage } from "@/util/error"
 
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
   name: "Sync",
@@ -66,6 +67,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       message: {
         [sessionID: string]: Message[]
       }
+      message_page: Record<string, { cursor?: string; loading: boolean; error?: string }>
       part: {
         [messageID: string]: Part[]
       }
@@ -99,6 +101,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       session_diff: {},
       todo: {},
       message: {},
+      message_page: {},
       part: {},
       lsp: [],
       mcp: {},
@@ -113,6 +116,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     const kv = useKV()
 
     const fullSyncedSessions = new Set<string>()
+    const historyRequests = new Map<string, Promise<void>>()
 
     function sessionListQuery(): { scope?: "project"; path?: string } {
       if (!kv.get("session_directory_filter_enabled", true)) return { scope: "project" }
@@ -288,25 +292,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
               draft.splice(result.index, 0, event.properties.info)
             }),
           )
-          const updated = store.message[event.properties.info.sessionID]
-          if (updated.length > 100) {
-            const oldest = updated[0]
-            batch(() => {
-              setStore(
-                "message",
-                event.properties.info.sessionID,
-                produce((draft) => {
-                  draft.shift()
-                }),
-              )
-              setStore(
-                "part",
-                produce((draft) => {
-                  delete draft[oldest.id]
-                }),
-              )
-            })
-          }
           break
         }
         case "message.removed": {
@@ -546,6 +531,52 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           if (last.role === "user") return "working"
           return last.time.completed ? "idle" : "working"
         },
+        loadOlder(sessionID: string): Promise<void> {
+          const pending = historyRequests.get(sessionID)
+          if (pending) return pending
+          const cursor = store.message_page[sessionID]?.cursor
+          if (!cursor) return store.message_page[sessionID]?.error ? result.session.sync(sessionID) : Promise.resolve()
+          setStore("message_page", sessionID, { cursor, loading: true, error: undefined })
+          const request = sdk.client.session
+            .messages({ sessionID, limit: 100, before: cursor }, { throwOnError: true })
+            .then((response) => {
+              const next = response.response.headers.get("X-Next-Cursor") ?? undefined
+              if (next === cursor) throw new Error("History pagination did not advance")
+              setStore(
+                produce((draft) => {
+                  const messages = (draft.message[sessionID] ??= [])
+                  for (const message of response.data ?? []) {
+                    const match = Binary.search(messages, message.info.id, (item) => item.id)
+                    // Preserve live updates received while the older page was in flight.
+                    if (!match.found) messages.splice(match.index, 0, message.info)
+                    const parts = (draft.part[message.info.id] ??= [])
+                    for (const part of message.parts) {
+                      const match = Binary.search(parts, part.id, (item) => item.id)
+                      if (!match.found) parts.splice(match.index, 0, part)
+                    }
+                  }
+                  draft.message_page[sessionID] = {
+                    cursor: next,
+                    loading: false,
+                  }
+                }),
+              )
+            })
+            .catch((error) => {
+              setStore("message_page", sessionID, { loading: false, error: errorMessage(error) })
+              throw error
+            })
+            .finally(() => historyRequests.delete(sessionID))
+          historyRequests.set(sessionID, request)
+          return request
+        },
+        async loadAll(sessionID: string, signal?: AbortSignal): Promise<void> {
+          await result.session.sync(sessionID)
+          if (store.message_page[sessionID]?.error) throw new Error(store.message_page[sessionID].error)
+          while (!signal?.aborted && store.message_page[sessionID]?.cursor) {
+            await result.session.loadOlder(sessionID)
+          }
+        },
         async sync(sessionID: string) {
           if (fullSyncedSessions.has(sessionID)) return
           const [session, messages, todo, diff] = await Promise.all([
@@ -566,10 +597,15 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
                 draft.part[message.info.id] = message.parts
               }
               draft.message[sessionID] = infos
+              draft.message_page[sessionID] = {
+                cursor: messages.response?.headers.get("X-Next-Cursor") ?? undefined,
+                loading: false,
+                error: messages.error ? errorMessage(messages.error) : undefined,
+              }
               draft.session_diff[sessionID] = diff.data ?? []
             }),
           )
-          fullSyncedSessions.add(sessionID)
+          if (messages.data) fullSyncedSessions.add(sessionID)
         },
       },
       bootstrap,

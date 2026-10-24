@@ -60,6 +60,8 @@ import { DialogMessage } from "./dialog-message"
 import type { PromptInfo } from "../../component/prompt/history"
 import { DialogConfirm } from "@tui/ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
+import { DialogHistorySearch } from "./dialog-history-search"
+import { HistoryControls } from "./history-controls"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
 import { SESSION_SIDEBAR_WIDTH, Sidebar } from "./sidebar"
@@ -128,6 +130,7 @@ function goUpsellKeys(action: SessionRetry.Retryable["action"]) {
 const sessionBindingCommands = [
   "session.rename",
   "session.timeline",
+  "session.search",
   "session.fork",
   "session.compact",
   "session.undo",
@@ -493,6 +496,30 @@ export function Session() {
 
   const sessionCommandList = createMemo(() => [
     {
+      title: "Search chat history",
+      value: "session.search",
+      category: "Session",
+      slash: { name: "search", aliases: ["history", "transcript"] },
+      run: () => {
+        dialog.replace(() => (
+          <DialogHistorySearch
+            sessionID={route.sessionID}
+            onSelect={(messageID) => {
+              setFoldOverrides((previous) => ({ ...previous, [messageID]: false }))
+              const jump = () => {
+                renderer.removePostProcessFn(jump)
+                if (scroll.isDestroyed) return
+                const child = scroll.getChildren().find((child) => child.id === messageID)
+                if (child) scroll.scrollBy(child.y - scroll.viewport.y)
+              }
+              renderer.addPostProcessFn(jump)
+              renderer.requestRender()
+            }}
+          />
+        ))
+      },
+    },
+    {
       title: "Rename session",
       value: "session.rename",
       category: "Session",
@@ -510,7 +537,10 @@ export function Session() {
       slash: {
         name: "timeline",
       },
-      run: () => {
+      run: async () => {
+        await sync.session.loadAll(route.sessionID).catch((error) => {
+          toast.show({ message: errorMessage(error), variant: "error" })
+        })
         dialog.replace(() => (
           <DialogTimeline
             onMove={(messageID) => {
@@ -813,20 +843,24 @@ export function Session() {
       },
     },
     {
-      title: "First message",
+      title: "Jump to start of chat",
       value: "session.first",
       category: "Session",
-      hidden: true,
-      run: () => {
-        scroll.scrollTo(0)
+      slash: { name: "first", aliases: ["top"] },
+      run: async () => {
+        const sessionID = route.sessionID
+        await sync.session.loadAll(sessionID).catch((error) => {
+          toast.show({ message: errorMessage(error), variant: "error" })
+        })
+        if (route.sessionID === sessionID && !scroll.isDestroyed) scroll.scrollTo(0)
         dialog.clear()
       },
     },
     {
-      title: "Last message",
+      title: "Jump to latest",
       value: "session.last",
       category: "Session",
-      hidden: true,
+      slash: { name: "latest", aliases: ["bottom"] },
       run: () => {
         scroll.scrollTo(scroll.scrollHeight)
         dialog.clear()
@@ -930,6 +964,7 @@ export function Session() {
         try {
           const sessionData = session()
           if (!sessionData) return
+          await sync.session.loadAll(route.sessionID)
           const sessionMessages = messages()
           const transcript = formatTranscript(
             sessionData,
@@ -960,6 +995,7 @@ export function Session() {
         try {
           const sessionData = session()
           if (!sessionData) return
+          await sync.session.loadAll(route.sessionID)
           const sessionMessages = messages()
 
           const defaultFilename = `session-${sessionData.id.slice(0, 8)}.md`
@@ -1170,7 +1206,11 @@ export function Session() {
                 flexGrow={1}
                 scrollAcceleration={scrollAcceleration()}
               >
-                <box height={1} />
+                <box height={1}>
+                  <Show when={sync.data.message_page[route.sessionID] && !sync.data.message_page[route.sessionID].cursor && !sync.data.message_page[route.sessionID].error}>
+                    <text fg={theme.textMuted}>Start of conversation</text>
+                  </Show>
+                </box>
                 <For each={messages()}>
                   {(message, index) => (
                     <Switch>
@@ -1266,6 +1306,13 @@ export function Session() {
                   )}
                 </For>
               </scrollbox>
+              <HistoryControls
+                scroll={() => scroll}
+                sessionID={route.sessionID}
+                page={sync.data.message_page[route.sessionID]}
+                onLoadOlder={() => sync.session.loadOlder(route.sessionID)}
+                onSearch={() => keymap.dispatchCommand("session.search")}
+              />
               <box flexShrink={0}>
                 <Show when={permissions().length > 0}>
                   <PermissionPrompt request={permissions()[0]} />
@@ -1347,7 +1394,11 @@ function UserMessage(props: {
   const metadataVisible = createMemo(() => queued() || ctx.showTimestamps())
   const timestamp = createMemo(() => Locale.todayTimeOrDateTime(props.message.time.created))
   const bubbleWidth = createMemo(() => {
-    return messageBubbleWidth(text(), queued() ? " QUEUED " : ctx.showTimestamps() ? timestamp() : undefined, ctx.width)
+    return messageBubbleWidth(
+      [text(), ...files().map((file) => file.filename ?? file.mime)].join("\n"),
+      queued() ? " QUEUED " : ctx.showTimestamps() ? timestamp() : undefined,
+      ctx.width,
+    )
   })
   const textWidth = createMemo(() => Math.max(1, bubbleWidth() - 5))
 
@@ -1355,10 +1406,9 @@ function UserMessage(props: {
 
   return (
     <>
-      <Show when={text()}>
-        <box width="100%" alignItems="flex-end" marginTop={props.index === 0 ? 0 : 1}>
+      <Show when={text() || files().length}>
+        <box id={props.message.id} width="100%" alignItems="flex-end" marginTop={props.index === 0 ? 0 : 1}>
           <box
-            id={props.message.id}
             border={["right"]}
             borderColor={theme.secondary}
             customBorderChars={SplitBorder.customBorderChars}
@@ -1493,94 +1543,96 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
   )
 
   return (
-    <Show
-      when={!folded()}
-      fallback={
-        <FoldedAssistant
-          agent={props.message.agent}
-          mode={props.message.mode}
-          model={model()}
-          duration={duration()}
-          summary={summary()}
-          onExpand={toggleFold}
-        />
-      }
-    >
-      <box border={["left"]} customBorderChars={SplitBorder.customBorderChars} borderColor={accent()}>
-        <For each={props.parts}>
-          {(part, index) => {
-            const component = createMemo(() => PART_MAPPING[part.type as keyof typeof PART_MAPPING])
-            return (
-              <Show when={component()}>
-                <Dynamic
-                  last={index() === props.parts.length - 1}
-                  component={component()}
-                  part={part as any}
-                  message={props.message}
-                />
-              </Show>
-            )
-          }}
-        </For>
-      </box>
-      <Show when={props.parts.some((x) => x.type === "tool" && x.tool === "task")}>
-        <box paddingTop={1} paddingLeft={3}>
-          <text fg={theme.text}>
-            {childShortcut()}
-            <span style={{ fg: theme.textMuted }}> view subagents</span>
-          </text>
+    <box id={props.message.id} flexShrink={0}>
+      <Show
+        when={!folded()}
+        fallback={
+          <FoldedAssistant
+            agent={props.message.agent}
+            mode={props.message.mode}
+            model={model()}
+            duration={duration()}
+            summary={summary()}
+            onExpand={toggleFold}
+          />
+        }
+      >
+        <box border={["left"]} customBorderChars={SplitBorder.customBorderChars} borderColor={accent()}>
+          <For each={props.parts}>
+            {(part, index) => {
+              const component = createMemo(() => PART_MAPPING[part.type as keyof typeof PART_MAPPING])
+              return (
+                <Show when={component()}>
+                  <Dynamic
+                    last={index() === props.parts.length - 1}
+                    component={component()}
+                    part={part as any}
+                    message={props.message}
+                  />
+                </Show>
+              )
+            }}
+          </For>
         </box>
-      </Show>
-      <Show when={props.message.error && props.message.error.name !== "MessageAbortedError"}>
-        <box
-          border={["left"]}
-          paddingTop={1}
-          paddingBottom={1}
-          paddingLeft={2}
-          marginTop={1}
-          backgroundColor={theme.backgroundPanel}
-          customBorderChars={SplitBorder.customBorderChars}
-          borderColor={theme.error}
-        >
-          <text fg={theme.textMuted}>{props.message.error?.data.message}</text>
-        </box>
-      </Show>
-      <Switch>
-        <Match when={props.last || final() || props.message.error?.name === "MessageAbortedError"}>
-          <box paddingLeft={3} onMouseUp={toggleFold}>
-            <text marginTop={1}>
-              <span
-                style={{
-                  fg:
-                    props.message.error?.name === "MessageAbortedError"
-                      ? theme.textMuted
-                      : props.message.agent?.toLowerCase() === "build"
-                        ? theme.primary
-                        : local.agent.color(props.message.agent),
-                }}
-              >
-                ▣{" "}
-              </span>{" "}
-              <span style={{ fg: theme.text }}>{displayAgentMode(props.message.mode)}</span>
-              <span style={{ fg: theme.textMuted }}> · {model()}</span>
-              <Show when={duration()}>
-                <span style={{ fg: theme.textMuted }}> · worked {Locale.duration(duration())}</span>
-              </Show>
-              <Show when={props.message.error?.name === "MessageAbortedError"}>
-                <span style={{ fg: theme.textMuted }}> · interrupted</span>
-              </Show>
-              <Show when={foldable()}>
-                <span style={{ fg: theme.textMuted }}> · click to fold</span>
-              </Show>
+        <Show when={props.parts.some((x) => x.type === "tool" && x.tool === "task")}>
+          <box paddingTop={1} paddingLeft={3}>
+            <text fg={theme.text}>
+              {childShortcut()}
+              <span style={{ fg: theme.textMuted }}> view subagents</span>
             </text>
           </box>
-        </Match>
-      </Switch>
-      {/* Subtle rule separating a settled turn from whatever comes next. */}
-      <Show when={final() || props.message.error?.name === "MessageAbortedError"}>
-        <box marginTop={1} border={["top"]} borderColor={theme.borderSubtle} />
+        </Show>
+        <Show when={props.message.error && props.message.error.name !== "MessageAbortedError"}>
+          <box
+            border={["left"]}
+            paddingTop={1}
+            paddingBottom={1}
+            paddingLeft={2}
+            marginTop={1}
+            backgroundColor={theme.backgroundPanel}
+            customBorderChars={SplitBorder.customBorderChars}
+            borderColor={theme.error}
+          >
+            <text fg={theme.textMuted}>{props.message.error?.data.message}</text>
+          </box>
+        </Show>
+        <Switch>
+          <Match when={props.last || final() || props.message.error?.name === "MessageAbortedError"}>
+            <box paddingLeft={3} onMouseUp={toggleFold}>
+              <text marginTop={1}>
+                <span
+                  style={{
+                    fg:
+                      props.message.error?.name === "MessageAbortedError"
+                        ? theme.textMuted
+                        : props.message.agent?.toLowerCase() === "build"
+                          ? theme.primary
+                          : local.agent.color(props.message.agent),
+                  }}
+                >
+                  ▣{" "}
+                </span>{" "}
+                <span style={{ fg: theme.text }}>{displayAgentMode(props.message.mode)}</span>
+                <span style={{ fg: theme.textMuted }}> · {model()}</span>
+                <Show when={duration()}>
+                  <span style={{ fg: theme.textMuted }}> · worked {Locale.duration(duration())}</span>
+                </Show>
+                <Show when={props.message.error?.name === "MessageAbortedError"}>
+                  <span style={{ fg: theme.textMuted }}> · interrupted</span>
+                </Show>
+                <Show when={foldable()}>
+                  <span style={{ fg: theme.textMuted }}> · click to fold</span>
+                </Show>
+              </text>
+            </box>
+          </Match>
+        </Switch>
+        {/* Subtle rule separating a settled turn from whatever comes next. */}
+        <Show when={final() || props.message.error?.name === "MessageAbortedError"}>
+          <box marginTop={1} border={["top"]} borderColor={theme.borderSubtle} />
+        </Show>
       </Show>
-    </Show>
+    </box>
   )
 }
 
