@@ -84,7 +84,7 @@ export const SHARED_SLASH_COMMANDS = [
   },
   {
     name: "usage",
-    aliases: [],
+    aliases: ["cost"],
     title: "View usage",
     description: "View tokens, spend, balances, and provider quota",
     category: "CodeGoblin",
@@ -100,7 +100,7 @@ export const SHARED_SLASH_COMMANDS = [
   },
   {
     name: "settings",
-    aliases: [],
+    aliases: ["config"],
     title: "Settings",
     description: "Open CodeGoblin settings",
     category: "System",
