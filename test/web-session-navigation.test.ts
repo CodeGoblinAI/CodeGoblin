@@ -35,7 +35,8 @@ test("New session invalidates a pending open without leaving loading stuck", () 
 
 test("the actual Send guard stays disabled while switching, but Stop stays available", () => {
   const update = new Function("busy", `
-    const input = { value: 'newer draft' }
+    // The composer also sizes itself here, so the stub has a style to set.
+    const input = { value: 'newer draft', style: { height: '' }, scrollHeight: 32 }
     const sendBtn = {}
     const attachments = []
     const sessionNavigation = { pending: () => true }
