@@ -810,13 +810,18 @@ async function handle(request: Request): Promise<Response> {
             })
           }
           await sessions.save(session)
+          if (session.messages.at(-1)?.stopped) send({ type: "stopped" })
           send({ type: "saved", id: session.id, title: session.title })
         } catch (error) {
           // Stopping mid-stream throws out of the loop. The TUI keeps the
           // conversation when that happens; here it used to vanish - the
           // prompt never reached Sessions and could not be resumed. A stop
           // is also not an error worth reporting.
-          if (turn.signal.aborted) await sessions.save(session).catch(() => {})
+          if (turn.signal.aborted) {
+            if (!session.messages.at(-1)?.stopped) session.messages.push({ role: "assistant", content: "", stopped: true })
+            await sessions.save(session).catch(() => {})
+            send({ type: "stopped" })
+          }
           else send({ type: "error", message: error instanceof Error ? error.message : "request failed" })
         } finally {
           edits.commit()

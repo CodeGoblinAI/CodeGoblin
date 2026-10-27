@@ -47,6 +47,12 @@ export type Message = {
   images?: Attachment[]
   tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[]
   tool_call_id?: string
+  /** UI/session metadata; never forwarded as an API field. */
+  stopped?: boolean
+}
+
+function continuationContent(message: Message) {
+  return message.stopped ? message.content + "\n\n[This answer was stopped by the user.]" : message.content
 }
 
 export const LOCAL_CHAT_SYSTEM = "You are CodeGoblin, a helpful assistant. Answer concisely. You cannot run tools or modify files in local chat mode."
@@ -57,7 +63,7 @@ export function localChatMessages(messages: Message[], instructions?: string): M
     { role: "system", content: [LOCAL_CHAT_SYSTEM, instructions].filter(Boolean).join("\n\n") },
     ...messages
       .filter((message) => message.role === "user" || message.role === "assistant")
-      .map((message): Message => ({ role: message.role, content: message.content })),
+      .map((message): Message => ({ role: message.role, content: continuationContent(message) })),
   ]
 }
 
@@ -126,7 +132,9 @@ function chatEndpoint(provider: Provider): string {
  * input reject unknown keys outright - so the wire gets the wire fields.
  */
 const wire = (messages: Message[], memory?: string, images = false, instructions?: string) => {
-  const sent = messages.map(({ role, content, images: attached, tool_calls, tool_call_id }) => {
+  const sent = messages.map((message) => {
+    const { role, images: attached, tool_calls, tool_call_id } = message
+    const content = continuationContent(message)
     // A message with pictures becomes the multimodal shape, which is the only
     // form a vision model reads them in. Without this the attachment simply
     // did not reach the model: content was always a plain string.
@@ -285,6 +293,9 @@ export async function* runAgent(input: {
   const configured = configuredInstructions(input.root)
   input = { ...input, instructions: [configured, input.instructions].filter(Boolean).join("\n\n") || undefined }
   const localChat = input.provider.local && !input.provider.localTools
+  let partial = ""
+  let checkpointStopped = false
+  try {
   await verifyLocalModel(input.provider, input.modelId, input.signal)
 
   // A turn stopped while its tools ran left calls with no answer.
@@ -332,7 +343,7 @@ export async function* runAgent(input: {
           [input.instructions, input.permissions?.planning ? PLANNING : undefined].filter(Boolean).join("\n\n")),
       })) {
         if (event.type === "calls") { event.calls.forEach((call, index) => calls.set(index, call)); continue }
-        if (event.type === "text") text += event.delta
+        if (event.type === "text") { text += event.delta; partial = text }
         if (event.type === "output_limit") { outputLimited = true; continue }
         yield event
       }
@@ -417,6 +428,7 @@ export async function* runAgent(input: {
 
         if (typeof delta?.content === "string" && delta.content) {
           text += delta.content
+          partial = text
           yield { type: "text", delta: delta.content }
         }
 
@@ -436,6 +448,7 @@ export async function* runAgent(input: {
     if (outputLimited) {
       // Truncated tool arguments are not executable requests.
       input.messages.push({ role: "assistant", content: text + "\n\n[The model reached its output-token limit; this answer is unfinished.]" })
+      partial = ""
       yield { type: "output_limit" }
       yield { type: "turn_end" }
       return
@@ -443,6 +456,7 @@ export async function* runAgent(input: {
 
     if (calls.size === 0) {
       input.messages.push({ role: "assistant", content: text })
+      partial = ""
       // Subagents still working, or finished with results the model never
       // collected, are waited for and handed over, and the model carries on
       // with them - so an answer never ends with its own work still out.
@@ -466,6 +480,7 @@ export async function* runAgent(input: {
         function: { name: call.name, arguments: call.args || "{}" },
       })),
     })
+    partial = ""
 
     // Consent runs first, in the order asked, one at a time. A permission
     // prompt is a question put to a person; two of them arriving at once is
@@ -578,6 +593,7 @@ export async function* runAgent(input: {
           (await input.permissions.checkpoint(toolCallsThisTurn, every)) === "stop" || input.signal?.aborted === true
         yield { type: "checkpoint", toolCalls: toolCallsThisTurn, stopped }
         if (stopped) {
+          checkpointStopped = true
           yield { type: "turn_end" }
           return
         }
@@ -590,6 +606,14 @@ export async function* runAgent(input: {
   // other way out returns, so this is the only path that reaches here.
   yield { type: "limit", turns: maxTurns }
   yield { type: "turn_end" }
+  } finally {
+    if (input.signal?.aborted || checkpointStopped) {
+      // Partial tool-call fragments are not saved as executable proposals.
+      // Already-committed calls get ordinary stopped results before the marker.
+      closeOpenCalls(input.messages)
+      input.messages.push({ role: "assistant", content: partial, stopped: true })
+    }
+  }
 }
 
 async function* summariseCli(input: {

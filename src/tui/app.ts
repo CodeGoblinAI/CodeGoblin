@@ -320,6 +320,7 @@ function fromMessages(list: Message[]): Entry[] {
   for (const message of list) {
     if (message.role === "user") out.push({ kind: "user", text: message.content })
     else if (message.role === "assistant" && message.content) out.push({ kind: "agent", text: message.content })
+    if (message.stopped) out.push({ kind: "tool", text: "stopped", state: "failed" })
   }
   return out
 }
@@ -2409,6 +2410,8 @@ async function send() {
       transcript.push({ kind: "tool", state: "failed", text: error instanceof Error ? error.message.slice(0, 400) : "request failed" })
     }
   } finally {
+    if (turn?.signal.aborted && !messages.at(-1)?.stopped) messages.push({ role: "assistant", content: "", stopped: true })
+    if (messages.at(-1)?.stopped) transcript.push({ kind: "tool", text: "stopped", state: "failed" })
     streaming = false
     stopSpinner()
     turn = undefined
