@@ -10,6 +10,11 @@ import { paletteFor, setConnectedProviders, slashToken, slashRange } from "../sr
  * Both halves have broken in use, so both are pinned here.
  */
 describe("palette expansion", () => {
+  test("exact model argument ranks before a longer prefix model", () => {
+    expect(paletteFor("/model zai/glm-5.3")?.[0]?.value).toBe("/model zai/glm-5.3")
+    expect(paletteFor("/model zai/glm-5")?.[0]?.value).toBe("/model zai/glm-5")
+    expect(paletteFor("/model zai/glm-5.3 ")?.[0]?.value).toBe("/model zai/glm-5.3")
+  })
   test("typing a slash lists commands", () => {
     const items = paletteFor("/")
     expect(items?.some((i) => i.value === "/model")).toBe(true)
