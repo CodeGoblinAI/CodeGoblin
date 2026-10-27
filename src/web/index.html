@@ -80,17 +80,18 @@
   .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .shot button { position: absolute; top: 2px; right: 2px; width: 17px; height: 17px; line-height: 15px; padding: 0; border: 0; border-radius: 50%; background: rgba(0,0,0,.72); color: #fff; font-size: 12px; cursor: pointer; }
   .shot.bad { display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--red); text-align: center; padding: 4px; }
-  .attach { width: 26px; height: 26px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 7px; background: none; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
+  .attach { width: 32px; height: 32px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 7px; background: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
   .attach:hover { color: var(--goblin); border-color: var(--goblin); }
   .attach[disabled] { opacity: .35; cursor: not-allowed; }
   .attach[disabled]:hover { color: var(--muted); border-color: var(--line); }
-  .box { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; transition: border-color .15s; }
+  .box { display: flex; align-items: flex-end; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; transition: border-color .15s; }
   .box:focus-within { border-color: var(--goblin); }
-  .box input { flex: 1; background: none; border: 0; outline: 0; color: var(--text); font: inherit; }
-  .send { width: 30px; height: 30px; border: 0; border-radius: 999px; background: linear-gradient(var(--goblin-bright), var(--goblin)); color: #06210a; font-size: 15px; cursor: pointer; flex-shrink: 0; }
+  .box textarea { flex: 1; min-width: 0; min-height: 32px; max-height: 156px; resize: none; overflow-y: auto; margin: 0; padding: 5px 0; background: none; border: 0; outline: 0; color: var(--text); font: inherit; line-height: 1.5; }
+  .send { width: 34px; height: 34px; border: 0; border-radius: 999px; background: var(--goblin); color: #06210a; font-size: 15px; cursor: pointer; flex-shrink: 0; }
   .send:disabled { opacity: .3; cursor: default; }
   .stop { border: 1px solid var(--line); background: var(--panel2); color: var(--muted); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
-  .meta { display: flex; align-items: center; gap: 12px; padding: 9px 3px 0; font-size: 12px; color: var(--muted); }
+  .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 9px 3px 0; font-size: 12px; color: var(--muted); }
+  .composer-hint { order: 1; flex-basis: 100%; font-size: 11px; color: var(--muted); }
   select { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 3px 7px; font: inherit; font-size: 12px; }
 
   section.activity { width: 290px; flex-shrink: 0; border-left: 1px solid var(--line); padding: 15px 16px; }
@@ -223,12 +224,12 @@
     <div class="box">
       <input type="file" id="picker" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
       <button class="attach" id="attach" type="button" title="Add to the prompt" aria-label="Add to the prompt">+</button>
-      <input id="input" aria-label="Message or slash command" placeholder="Ask the goblin…  / for commands, @ for context" autocomplete="off" />
+      <textarea id="input" rows="1" aria-label="Message or slash command" aria-describedby="composer-hint" placeholder="Ask the goblin…  / for commands, @ for context" autocomplete="off" spellcheck="false"></textarea>
       <button class="stop" id="stop" hidden>Stop</button>
       <button class="send" id="send" title="Send" aria-label="Send">↑</button>
     </div>
     <div class="meta">
-      <span>Local workspace</span>
+      <span class="composer-hint" id="composer-hint">Enter to send · Shift+Enter for a new line</span>
       <div class="picker" id="provider">
         <button class="picker-btn" id="provider-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="provider-menu">
           <span class="picker-label">…</span><span class="picker-caret">▾</span>
@@ -301,7 +302,7 @@
     .picker-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: left; }
     .picker-menu { position: fixed; left: 20px; right: 20px; bottom: var(--picker-bottom, 90px); min-width: 0; max-height: min(320px, 50vh); }
     .picker-item { white-space: normal; overflow-wrap: anywhere; }
-    .box input { min-width: 0; }
+    .box textarea { min-width: 0; }
     .thread { padding: 18px 12px; }
     .tool, .permission, .thinking { margin-left: 0; }
     .turn .who { width: 38px; }

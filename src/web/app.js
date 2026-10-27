@@ -310,6 +310,10 @@ const MAX_IMAGE_BYTES = 5_000_000
 const MAX_IMAGES = 10
 
 function updateSendButton() {
+  // Grow with prose/code, then scroll inside the composer rather than moving
+  // the conversation off-screen. Also shrink after programmatic clear/send.
+  input.style.height = "auto"
+  input.style.height = Math.min(input.scrollHeight, 156) + "px"
   // Stop must remain available while working, including with an empty draft.
   sendBtn.disabled = !busy && !input.value.trim() && attachments.length === 0
 }
@@ -746,6 +750,9 @@ function setBusy(state) {
   updateSendButton()
   stopBtn.hidden = true
   input.placeholder = state ? "goblin is working…" : "Ask the goblin…  / for commands, @ for context"
+  document.getElementById("composer-hint").textContent = state
+    ? "Enter to queue · Ctrl+S to send now · Shift+Enter for a new line"
+    : "Enter to send · Shift+Enter for a new line"
   try { activityBusy(state) } catch { /* panel not built yet during startup */ }
   if (!state && deferredAction) {
     const action = deferredAction
@@ -1084,6 +1091,7 @@ function syncPanelLayout() {
   thread.inert = visible
   document.querySelector(".composer").inert = visible
   document.documentElement.style.setProperty("--layout-header-height", document.querySelector(".layout-controls").getBoundingClientRect().bottom + "px")
+  updateSendButton()
 }
 function closeMobilePanels(restoreFocus = true) {
   if (!narrowLayout.matches || panelBackdrop.hidden) return
@@ -2511,6 +2519,7 @@ input.addEventListener("keydown", (event) => {
     if (busy && input.value.trim()) { void stopTurn().then(() => submit()) }
     return
   }
+  if (event.key === "Enter" && event.shiftKey) return
   if (!paletteItems.length || !PALETTE_KEYS.includes(event.key)) return
 
   // The palette owns these keys outright while it is open, and preventDefault
