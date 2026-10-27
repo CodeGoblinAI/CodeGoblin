@@ -66,11 +66,12 @@ export class CodexRpc {
   private async read() {
     const decoder = new TextDecoder()
     let buffer = ""
-    let bytes = 0
     for await (const chunk of this.process.stdout) {
-      bytes += chunk.byteLength
-      if (bytes > 32 * 1024 * 1024) throw new Error("Codex output limit")
       buffer += decoder.decode(chunk, { stream: true })
+      // One JSON frame is held whole until its newline, so a single frame is
+      // capped: a broken CLI must not grow this without end. Frames are parsed
+      // and dropped as they complete, so there is no lifetime cap - a long
+      // chat or a paged import reads far more than any one frame.
       if (buffer.length > 16 * 1024 * 1024) throw new Error("Codex frame limit")
       const lines = buffer.split("\n")
       buffer = lines.pop() ?? ""

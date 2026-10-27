@@ -72,9 +72,14 @@ test("project-scoped CLI import saves a new resumable copy and rejects mismatche
   await sessions.save(current)
   const copied = await importCodexSession("source-1", root, "deepseek", start)
   expect(copied.id).not.toBe(current.id)
-  expect(copied.messages).toBe(2)
+  // Read a page of turns at a time: both pages, text only.
+  expect(copied.messages).toBe(4)
+  expect((await sessions.load(copied.id))?.messages.map((m) => m.content)).toEqual(["Paged hello", "Paged reply one", "Paged again", "Paged reply two"])
   expect((await sessions.load(copied.id))?.importedFrom?.id).toBe("source-1")
   expect((await sessions.load(current.id))?.messages).toEqual(current.messages)
+  // An older CLI without paged turns still imports through the one-shot read.
+  const legacy = await importCodexSession("source-1", root, "deepseek", () => CodexRpc.start([...fixture, "no-paging"]))
+  expect(legacy.messages).toBe(2)
   const refused = await importCodexSession("wrong-id", root, "deepseek", start).catch(String)
   expect(refused).toContain("different conversation")
 })
@@ -148,7 +153,11 @@ test("imports create independent text copies with provenance and no native capab
 
 test("empty or oversized imports are refused", () => {
   expect(() => importTranscript({ thread: { id: "test", cwd: root, turns: [] } }, root, "deepseek")).toThrow("No text messages")
-  expect(() => importTranscript({ thread: { id: "test", cwd: root, turns: [{ items: [{ type: "agentMessage", text: "x".repeat(2000001) }] }] } }, root, "deepseek")).toThrow("too large")
+  // Long conversations import whole; only something absurd is refused.
+  const long = Array.from({ length: 3000 }, (_, index) => ({ items: [{ type: "agentMessage", text: "reply " + index }] }))
+  expect(importTranscript({ thread: { id: "test", cwd: root, turns: long } }, root, "deepseek").messages.length).toBe(3000)
+  const absurd = Array.from({ length: 50001 }, () => ({ items: [{ type: "agentMessage", text: "x" }] }))
+  expect(() => importTranscript({ thread: { id: "test", cwd: root, turns: absurd } }, root, "deepseek")).toThrow("too large")
 })
 
 test("account, login and explicit import commands enforce their supported source", () => {

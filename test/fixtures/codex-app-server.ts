@@ -52,6 +52,19 @@ for await (const line of createInterface({ input: process.stdin })) {
       ], nextCursor: "fixture-next" } }) + "\n")
       continue
     }
+    // Paged turns, two pages, unless the run pretends to be an older CLI.
+    if (input.method === "thread/turns/list" && process.argv[2] !== "no-paging") {
+      const first = !input.params?.cursor
+      const turn = first
+        ? { items: [{ type: "userMessage", content: [{ type: "text", text: "Paged hello" }] }, { type: "agentMessage", text: "Paged reply one" }] }
+        : { items: [{ type: "userMessage", content: [{ type: "text", text: "Paged again" }] }, { type: "agentMessage", text: "Paged reply two" }, { type: "commandExecution", command: "must not import" }] }
+      process.stdout.write(JSON.stringify({ id: input.id, result: { data: [turn], nextCursor: first ? "page-2" : null } }) + "\n")
+      continue
+    }
+    if (input.method === "thread/read" && input.params?.includeTurns === false) {
+      process.stdout.write(JSON.stringify({ id: input.id, result: { thread: { id: "source-1", cwd: process.cwd(), name: "Fixture transcript" } } }) + "\n")
+      continue
+    }
     if (input.method === "thread/read") {
       process.stdout.write(JSON.stringify({ id: input.id, result: { thread: { id: "source-1", cwd: process.cwd(), name: "Fixture transcript", turns: [{ items: [
         { type: "userMessage", content: [{ type: "text", text: "Fixture hello" }] },

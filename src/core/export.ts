@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
-import type { Session } from "./sessions"
+import { loadArchive, type Session } from "./sessions"
+import type { Message } from "./agent"
 
 /**
  * A conversation as a file someone can keep.
@@ -24,14 +25,19 @@ export function slug(title: string): string {
   return cleaned.slice(0, 40) || "conversation"
 }
 
-export function toMarkdown(session: Session, when: number): string {
+export function toMarkdown(session: Session, when: number, archived: Message[] = []): string {
   const lines = [
     "# " + session.title,
     "",
     `*${new Date(when).toISOString().slice(0, 16).replace("T", " ")} · ${session.provider} · ${session.id}*`,
   ]
 
-  for (const message of session.messages) {
+  // Compaction replaced these in the live conversation; the record keeps them,
+  // ahead of the summary that stood in for them.
+  const messages = archived.length
+    ? [...archived, { role: "user" as const, content: "--- compacted here: the conversation continued from a summary of the messages above ---" }, ...session.messages]
+    : session.messages
+  for (const message of messages) {
     // The system prompt is the app talking to itself, not part of the record.
     if (message.role === "system") continue
 
@@ -78,6 +84,6 @@ export async function exportSession(
   const name = target?.trim() || `codegoblin-${slug(session.title)}.md`
   const absolute = path.resolve(root, name)
   await fs.mkdir(path.dirname(absolute), { recursive: true })
-  await fs.writeFile(absolute, toMarkdown(session, when), "utf8")
+  await fs.writeFile(absolute, toMarkdown(session, when, await loadArchive(session.id).catch(() => [])), "utf8")
   return path.relative(root, absolute).startsWith("..") ? absolute : path.relative(root, absolute)
 }

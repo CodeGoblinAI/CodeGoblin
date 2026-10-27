@@ -804,3 +804,37 @@ describe("autonomy checkpoints", () => {
     expect(served()).toBe(2)
   })
 })
+
+describe("compacting a long conversation", () => {
+  test("archives what it replaces, counts the summary's spend, and sends only what fits", async () => {
+    // Far bigger than the 4,000-token window: compaction must run first.
+    const history = Array.from({ length: 300 }, (_, index) => ({ role: index % 2 ? "assistant" as const : "user" as const, content: "word ".repeat(80) + index }))
+    const bodies: string[] = []
+    let call = 0
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      bodies.push(String(init.body))
+      call++
+      if (call === 1) return new Response(JSON.stringify({ choices: [{ message: { content: "the gist" } }], usage: { prompt_tokens: 1900, completion_tokens: 12 } }))
+      return stream({ choices: [{ delta: { content: "answer" } }] })
+    }) as typeof fetch
+    const archived: unknown[][] = []
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider: { ...provider, models: [{ id: "test-model", label: "Test", contextWindow: 4000 }] },
+      modelId: "test-model",
+      apiKey: "not-a-real-key",
+      messages: [...history, { role: "user", content: "and now?" }],
+      root: process.cwd(),
+      contextWindow: 4000,
+      archive: async (messages) => { archived.push(messages) },
+    })) events.push(event)
+    const summaryRequest = JSON.parse(bodies[0]!)
+    // The summary request fits the window instead of carrying all 300 messages.
+    expect(summaryRequest.messages.length).toBeLessThan(100)
+    expect(JSON.stringify(summaryRequest.messages)).toContain("earlier messages are kept in the saved transcript")
+    expect(archived.length).toBe(1)
+    expect(archived[0]!.length).toBeGreaterThan(250)
+    expect(events.find((event) => event.type === "spend")).toEqual({ type: "spend", input: 1900, output: 12 })
+    expect(events.some((event) => event.type === "compacted")).toBe(true)
+  })
+})

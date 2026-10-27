@@ -126,6 +126,43 @@ export function planCompaction(messages: Message[], contextWindow: number) {
   return { system, summarise: rest.slice(0, index), keep: rest.slice(index) }
 }
 
+/** Share of the window the summary request itself may use; the rest is prompt and answer. */
+const SUMMARY_INPUT = 0.5
+
+/**
+ * What a summary request can actually carry.
+ *
+ * A long or imported conversation can be many times the window, and sending
+ * all of it to be summarised fails the same way the turn would have. The most
+ * recent messages that fit are kept, plus an earlier summary when there is
+ * one, since that already stands for everything before it. Whatever does not
+ * fit is still in the session archive and the export - it is only left out
+ * of what the model is asked to condense.
+ */
+export function boundSummaryInput(messages: Message[], contextWindow: number): { messages: Message[]; omitted: number } {
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return { messages, omitted: 0 }
+  const budget = contextWindow * SUMMARY_INPUT
+  const earlier = messages[0]?.role === "user" && messages[0].content.startsWith("Summary of earlier conversation:") ? messages[0] : undefined
+  let used = earlier ? messageTokens(earlier) : 0
+  let start = messages.length
+  while (start > (earlier ? 1 : 0)) {
+    const next = messageTokens(messages[start - 1]!)
+    if (used + next > budget) break
+    used += next
+    start--
+  }
+  // A tool result whose call was cut off is rejected by providers.
+  while (start < messages.length && messages[start]!.role === "tool") start++
+  const tail = messages.slice(start)
+  const omitted = start - (earlier ? 1 : 0)
+  if (!omitted) return { messages, omitted: 0 }
+  const note: Message = {
+    role: "user",
+    content: "(" + omitted + " earlier messages are kept in the saved transcript but were too long to include here.)",
+  }
+  return { messages: [...(earlier ? [earlier] : []), note, ...tail], omitted }
+}
+
 export const SUMMARY_PROMPT =
   "Summarise the conversation so far for your own future reference. Keep decisions made, " +
   "files touched, what worked and what did not, and anything still outstanding. " +

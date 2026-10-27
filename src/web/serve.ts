@@ -400,8 +400,12 @@ async function handle(request: Request): Promise<Response> {
     const resolved = session ? await resolveStartupModel(session.model ? session.provider + "/" + session.model : session.provider) : undefined
     const selected = resolved && kindOf(resolved.model) === "text" ? resolved : undefined
     if (session) session.activity = normaliseActivity(session.activity, true)
+    // The page draws the recent end; the full record is one /export away.
+    const shown = session ? sessions.displayWindow(session.messages) : undefined
     return session ? json({
-      session,
+      session: { ...session, messages: shown!.messages },
+      hiddenMessages: shown!.hidden,
+      archived: await sessions.hasArchive(session.id),
       selection: selected ? selected.provider.id + "/" + selected.model.id : undefined,
       context: selected ? usage(selected.provider.local && !selected.provider.localTools ? localChatMessages(session.messages) : session.messages, selected.model.contextWindow) : undefined,
       reviewNotice: editsFor(session.id, session.review).reviewNotice,
@@ -803,6 +807,8 @@ async function handle(request: Request): Promise<Response> {
             // rather than reaching for an unrelated tool in their place.
             instructions: [profile ? "Active agent: " + profile.name + "\n" + profile.prompt : undefined, skillIndex(listSkills(root)), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
             history: edits,
+            // Compaction archives what it replaces, so /export still has every word.
+            archive: sessions.appendArchive.bind(null, session.id),
             effort: effortFor(model, settingsStore.effortForModel(await settingsStore.load(), provider.id + "/" + model.id)),
             signal: turn.signal,
           })) {

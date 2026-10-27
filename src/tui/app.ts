@@ -80,7 +80,7 @@ import { normaliseActivity, recordActivity } from "../core/session-activity"
 import {
   usage,
   shouldCompact,
-  planCompaction,
+  planCompaction, boundSummaryInput,
   applyCompaction,
   addSpend,
   priceOf,
@@ -163,6 +163,15 @@ type Entry = {
   by?: string
 }
 let transcript: Entry[] = []
+/** Readable messages of a resumed conversation left out of the drawn transcript. */
+let hiddenEarlier = 0
+/** Whether compaction has archived older messages of this conversation. */
+let historyArchived = false
+/**
+ * Transcript rows drawn at most. Every frame walks what is drawn, so a long
+ * conversation is drawn from its recent end and /export has the rest.
+ */
+const TRANSCRIPT_WINDOW = sessions.DISPLAY_MESSAGES
 /** Named for what it holds, since "history" here is the prompt recall list. */
 /**
  * The prompt, as an editor.
@@ -547,6 +556,65 @@ function caretIn(rows: string[], cursor: number): { line: number; column: number
 const RAIL_WIDTH = 34
 /** The narrowest terminal that shows it; below this every column is the transcript. */
 const RAIL_MIN_COLS = 150
+/**
+ * Each transcript entry's drawn rows, kept until something that changes them
+ * does. Every keystroke and stream token repaints the frame; re-wrapping a
+ * long conversation each time made typing in a resumed 1,300-message import
+ * take most of a second per key. Only the entry being streamed is redrawn.
+ */
+const drawnRows = new WeakMap<Entry, { key: string; rows: string[] }>()
+function entryLines(entry: Entry, width: number): string[] {
+  const key = [width, settings.theme, settings.thinking, entry.kind, entry.state ?? "", entry.by ?? selection.provider.label, entry.text.length].join("|")
+  const cached = drawnRows.get(entry)
+  if (cached && cached.key === key) return cached.rows
+  const rows = drawEntry(entry, width)
+  drawnRows.set(entry, { key, rows })
+  return rows
+}
+
+function drawEntry(entry: Entry, width: number): string[] {
+  const out: string[] = []
+  if (entry.kind === "tool") {
+    for (const [i, line] of entry.text.split(String.fromCharCode(10)).entries()) {
+      // Every row used to start with "x", so a read that worked looked like one that failed.
+      const mark = entry.state === "done" ? "✓" : entry.state === "failed" ? "✗" : entry.state === "running" ? "…" : "·"
+      out.push(theme.muted + (i === 0 ? "  " + mark + " " : "    ") + line.slice(0, width) + ansi.reset)
+    }
+    out.push("")
+    return out
+  }
+  if (entry.kind === "thinking") {
+    // Hiding reasoning is a view, not a filter on what is collected -
+    // turning it back on should show what was said while it was off.
+    if (!settings.thinking) return out
+    out.push(dim + "  thinking" + ansi.reset)
+    for (const line of entry.text.split(String.fromCharCode(10)).slice(-6)) {
+      out.push(dim + "  | " + line.slice(0, width) + ansi.reset)
+    }
+    out.push("")
+    return out
+  }
+  const isUser = entry.kind === "user"
+  const accent = isUser ? theme.gold : theme.goblin
+  if (isUser) {
+    // Yours on the right, the goblin's on the left, as in a chat.
+    const room = Math.max(10, width - 6)
+    const wrapped = entry.text.split(String.fromCharCode(10)).flatMap((line) => wrapWords(line, Math.floor(room * 0.75)))
+    // A reduce, not Math.max(...spread): a huge pasted message has more lines
+    // than a call can take arguments.
+    const block = wrapped.reduce((widest, line) => Math.max(widest, displayWidth(line)), 3)
+    const indent = " ".repeat(Math.max(2, width - block - 4))
+    out.push(accent + indent + padStartToWidth("you", block + 2) + ansi.reset)
+    for (const line of wrapped) out.push(indent + theme.text + padToWidth(line, block) + ansi.reset + accent + " |" + ansi.reset)
+    out.push("")
+    return out
+  }
+  out.push(accent + "  " + (entry.by ?? selection.provider.label.toLowerCase()) + ansi.reset)
+  for (const line of renderMarkdown(entry.text, width)) out.push(accent + "  | " + ansi.reset + line)
+  out.push("")
+  return out
+}
+
 let toolbarRow = 0
 let toolbarTargets: { from: number; to: number; command: string }[] = []
 /** The floating back-to-latest pill, when one is drawn: its screen row and span. */
@@ -570,44 +638,13 @@ function render() {
     lines.push("")
     lines.push(theme.gold + centre("your local AI goblin for code, images and agents", (main - 47) / 2) + ansi.reset)
   } else {
-    for (const entry of transcript) {
-      if (entry.kind === "tool") {
-        for (const [i, line] of entry.text.split(String.fromCharCode(10)).entries()) {
-          // Every row used to start with "x", so a read that worked looked like one that failed.
-          const mark = entry.state === "done" ? "✓" : entry.state === "failed" ? "✗" : entry.state === "running" ? "…" : "·"
-          lines.push(theme.muted + (i === 0 ? "  " + mark + " " : "    ") + line.slice(0, width) + ansi.reset)
-        }
-        lines.push("")
-        continue
-      }
-      if (entry.kind === "thinking") {
-        // Hiding reasoning is a view, not a filter on what is collected -
-        // turning it back on should show what was said while it was off.
-        if (!settings.thinking) continue
-        lines.push(dim + "  thinking" + ansi.reset)
-        for (const line of entry.text.split(String.fromCharCode(10)).slice(-6)) {
-          lines.push(dim + "  | " + line.slice(0, width) + ansi.reset)
-        }
-        lines.push("")
-        continue
-      }
-      const isUser = entry.kind === "user"
-      const accent = isUser ? theme.gold : theme.goblin
-      if (isUser) {
-        // Yours on the right, the goblin's on the left, as in a chat.
-        const room = Math.max(10, width - 6)
-        const wrapped = entry.text.split(String.fromCharCode(10)).flatMap((line) => wrapWords(line, Math.floor(room * 0.75)))
-        const block = Math.max(3, ...wrapped.map((line) => displayWidth(line)))
-        const indent = " ".repeat(Math.max(2, width - block - 4))
-        lines.push(accent + indent + padStartToWidth("you", block + 2) + ansi.reset)
-        for (const line of wrapped) lines.push(indent + theme.text + padToWidth(line, block) + ansi.reset + accent + " |" + ansi.reset)
-        lines.push("")
-        continue
-      }
-      lines.push(accent + "  " + (entry.by ?? selection.provider.label.toLowerCase()) + ansi.reset)
-      for (const line of renderMarkdown(entry.text, width)) lines.push(accent + "  | " + ansi.reset + line)
+    const drawn = transcript.length > TRANSCRIPT_WINDOW ? transcript.slice(-TRANSCRIPT_WINDOW) : transcript
+    const leftOut = hiddenEarlier + transcript.length - drawn.length
+    if (leftOut || historyArchived) {
+      lines.push(dim + "  " + earlierNotice(leftOut, historyArchived).slice(0, width) + ansi.reset)
       lines.push("")
     }
+    for (const entry of drawn) for (const line of entryLines(entry, width)) lines.push(line)
   }
 
   const planLines: string[] = []
@@ -1136,6 +1173,14 @@ function onSubagent(event: SubagentEvent) {
     }
   }
   render()
+}
+
+/** What is not drawn and where the whole conversation is. Same words as the web. */
+function earlierNotice(hidden: number, archived: boolean): string {
+  const parts: string[] = []
+  if (hidden) parts.push(hidden.toLocaleString() + " earlier messages aren't shown here")
+  if (archived) parts.push((hidden ? "older " : "earlier ") + "history was compacted into a summary for the model")
+  return parts.join("; ") + ". /export saves the whole conversation as Markdown."
 }
 
 /**
@@ -1904,6 +1949,8 @@ async function send() {
     if (result.kind === "clear") {
       agentName = undefined
       transcript = []
+      hiddenEarlier = 0
+      historyArchived = false
       messages = [SYSTEM]
       plan = []
       session = sessions.create(selection.provider.id, selection.model.id)
@@ -2196,11 +2243,15 @@ async function send() {
       if (window <= 0) status = "context window unavailable; history unchanged (CLI transport compaction remains automatic)"
       else if (!plan.summarise.length) status = "nothing to compact yet - the whole conversation still fits in the recent part that is kept as it is"
       else {
-        const summary = plan.summarise
+        // Every replaced message goes to the archive first; the crude summary
+        // below covers only what fits, like the automatic one.
+        await sessions.appendArchive(session.id, plan.summarise)
+        const summary = boundSummaryInput(plan.summarise, window).messages
           .filter((m) => m.role === "user")
           .map((m) => "- " + m.content.slice(0, 160))
           .join(String.fromCharCode(10))
         messages = applyCompaction(plan.system, summary, plan.keep)
+        historyArchived = true
         status = "compacted to " + messages.length + " messages"
       }
     }
@@ -2330,6 +2381,8 @@ async function send() {
       images: seeing,
       permissions,
       history: edits,
+      // Compaction archives what it replaces, so /export still has every word.
+      archive: sessions.appendArchive.bind(null, session.id),
       extraTools: mcp,
       // Offered only with /boost - or while subagents started under it are still out.
       subagents: !profile?.tools && (boost || boostOnce || subagents.running().length) ? subagents : undefined,
@@ -2373,6 +2426,7 @@ async function send() {
         plan = event.todos
       }
       if (event.type === "compacted") {
+        historyArchived = true
         transcript.push({ kind: "tool", text: "compacted context: " + event.before + " -> " + event.after + " messages" })
       }
       // The loop ran out of turns while the model was still calling tools, so
@@ -2499,7 +2553,11 @@ async function restoreSession(loaded: sessions.Session) {
   agentName = loaded.agent
   spend = loaded.spend ?? { input: 0, output: 0 }
   messages = loaded.messages
-  transcript = fromMessages(messages)
+  // The model keeps the whole conversation; the screen draws its recent end.
+  const shown = sessions.displayWindow(messages)
+  transcript = fromMessages(shown.messages)
+  hiddenEarlier = shown.hidden
+  historyArchived = await sessions.hasArchive(loaded.id)
   scroll = 0
   edits.reset()
   edits.restoreReview(process.cwd(), loaded.review)

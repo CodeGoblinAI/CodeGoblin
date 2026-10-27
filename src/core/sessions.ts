@@ -31,10 +31,83 @@ export type Session = {
 }
 
 const dir = path.join(Global.Path.state, "sessions")
+const NEWLINE = String.fromCharCode(10)
 
 const file = (id: string) => {
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("Invalid session ID")
   return path.join(dir, `${id}.json`)
+}
+
+/**
+ * Messages compaction replaced, oldest first, one JSON message per line.
+ *
+ * Compaction swaps old history for a summary so the model can keep going;
+ * the words themselves are not thrown away. They live here, beside the
+ * session rather than inside it, so opening or listing a long conversation
+ * never has to read them - only /export does.
+ */
+const archiveFile = (id: string) => file(id).replace(/\.json$/, ".archive.jsonl")
+
+export async function appendArchive(id: string, messages: Message[]): Promise<void> {
+  if (!messages.length) return
+  await fs.mkdir(dir, { recursive: true })
+  await fs.appendFile(archiveFile(id), messages.map((message) => JSON.stringify(message)).join(NEWLINE) + NEWLINE, { encoding: "utf8", mode: 0o600 })
+}
+
+export async function hasArchive(id: string): Promise<boolean> {
+  try {
+    return (await fs.stat(archiveFile(id))).size > 0
+  } catch {
+    return false
+  }
+}
+
+/** How many messages a person reads on screen before older ones are left out. */
+export const DISPLAY_MESSAGES = 200
+
+const readable = (message: Message) => message.role === "user" || (message.role === "assistant" && Boolean(message.content))
+
+/**
+ * The recent end of a long conversation, for drawing.
+ *
+ * An imported or long-running conversation can run to thousands of messages;
+ * drawing all of them makes every keystroke and stream token pay for the
+ * lot, and sending them all to the browser is megabytes nobody scrolls to.
+ * The model still gets its own context and the export still gets every
+ * word - this only decides what is drawn. `hidden` counts readable
+ * messages left out, so the surfaces can say so and point at /export.
+ */
+export function displayWindow(messages: Message[], limit = DISPLAY_MESSAGES): { messages: Message[]; hidden: number } {
+  let seen = 0
+  let start = messages.length
+  while (start > 0) {
+    const message = messages[start - 1]!
+    if (readable(message)) {
+      if (seen === limit) break
+      seen++
+    }
+    start--
+  }
+  // Never open on a tool result whose call was left out.
+  while (start < messages.length && messages[start]!.role === "tool") start++
+  if (!start) return { messages, hidden: 0 }
+  return { messages: messages.slice(start), hidden: messages.slice(0, start).filter(readable).length }
+}
+
+export async function loadArchive(id: string): Promise<Message[]> {
+  let text: string
+  try {
+    text = await fs.readFile(archiveFile(id), "utf8")
+  } catch {
+    return []
+  }
+  const out: Message[] = []
+  for (const line of text.split(NEWLINE)) {
+    if (!line.trim()) continue
+    // A torn last line from an interrupted append is skipped, not fatal.
+    try { out.push(JSON.parse(line) as Message) } catch {}
+  }
+  return out
 }
 
 /** Sortable and unique without pulling in a uuid dependency. */
@@ -99,6 +172,7 @@ export async function list(limit = 30): Promise<Session[]> {
 export async function remove(id: string): Promise<boolean> {
   try {
     await fs.unlink(file(id))
+    await fs.unlink(archiveFile(id)).catch(() => {})
     return true
   } catch {
     return false

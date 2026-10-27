@@ -5,7 +5,7 @@ import { TOOL_SCHEMA, runTool, isConcurrent } from "./tools"
 import { checkpointEvery } from "./config"
 import { configuredInstructions } from "./instructions"
 import type { Permissions } from "./permission"
-import { shouldCompact, planCompaction, applyCompaction, SUMMARY_PROMPT, estimateTokens } from "./context"
+import { shouldCompact, planCompaction, applyCompaction, boundSummaryInput, SUMMARY_PROMPT, estimateTokens } from "./context"
 import { parseTodos, type Todo } from "./todo"
 import type { History } from "./undo"
 
@@ -258,6 +258,12 @@ export async function* runAgent(input: {
   instructions?: string
   /** Given a turn, keeps the previous state of every file the turn writes. */
   history?: History
+  /**
+   * Where compaction puts the messages it replaces, before replacing them.
+   * Surfaces pass the session archive; without one, compaction still works
+   * but the replaced words exist only in the summary.
+   */
+  archive?: (messages: Message[]) => Promise<void>
   /** MCP tools, offered next to the built-in ones and asked about the same way. */
   extraTools?: ExtraTools
   /** Subagents this conversation can start in the background - offered even while planning. */
@@ -327,7 +333,12 @@ export async function* runAgent(input: {
     const before = input.messages.length
     const plan = planCompaction(input.messages, contextWindow)
     if (plan.summarise.length) {
-      const summary = input.provider.cli ? yield* summariseCli(input, plan.summarise) : await summarise(input, plan.summarise)
+      // Only what fits the window is sent to be condensed; all of it is archived.
+      const { messages: condensing } = boundSummaryInput(plan.summarise, contextWindow)
+      const summary = input.provider.cli ? yield* summariseCli(input, condensing) : yield* summarise(input, condensing)
+      // Archived before history is replaced: if saving fails, the turn fails
+      // with the conversation intact rather than silently losing its past.
+      await input.archive?.(plan.summarise)
       input.messages.splice(0, input.messages.length, ...applyCompaction(plan.system, summary, plan.keep))
       yield { type: "compacted", before, after: input.messages.length }
     }
@@ -637,11 +648,15 @@ async function* summariseCli(input: {
 /**
  * One non-streaming call to summarise the older half of a conversation.
  * Failure is not fatal: a crude fallback beats losing the turn.
+ *
+ * Its usage is spend like any other request - on a long conversation the
+ * summary is often the biggest call of the turn - and Stop reaches it, since
+ * condensing a long history can take a minute.
  */
-async function summarise(
-  input: { provider: Provider; modelId: string; apiKey: string },
+async function* summarise(
+  input: { provider: Provider; modelId: string; apiKey: string; signal?: AbortSignal },
   messages: Message[],
-): Promise<string> {
+): AsyncGenerator<AgentEvent, string> {
   try {
     const response = await fetch(chatEndpoint(input.provider), {
       method: "POST",
@@ -651,13 +666,20 @@ async function summarise(
         messages: wire([...messages, { role: "user", content: SUMMARY_PROMPT }]),
         stream: false,
       }),
+      signal: input.signal,
     })
     if (!response.ok) throw new Error(String(response.status))
     const body = (await response.json()) as any
+    const used = body?.usage
+    if (used && (used.prompt_tokens || used.completion_tokens)) {
+      yield { type: "spend", input: Number(used.prompt_tokens ?? 0), output: Number(used.completion_tokens ?? 0) }
+    }
     const text = body?.choices?.[0]?.message?.content
     if (typeof text === "string" && text.trim()) return text.trim()
     throw new Error("empty summary")
-  } catch {
+  } catch (error) {
+    // A stop is a stop, not a reason to invent a summary and carry on.
+    if (input.signal?.aborted) throw error
     return messages
       .filter((message) => message.role === "user")
       .map((message) => "- " + message.content.slice(0, 160))

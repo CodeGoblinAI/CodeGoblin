@@ -878,6 +878,14 @@ async function refreshSessions() {
   }
 }
 
+/** Says what is not drawn and where the whole conversation is. Shared wording with the TUI. */
+function earlierNotice(hidden, archived) {
+  const parts = []
+  if (hidden) parts.push(hidden.toLocaleString() + " earlier messages aren't shown here")
+  if (archived) parts.push((hidden ? "older " : "earlier ") + "history was compacted into a summary for the model")
+  return parts.join("; ") + ". /export saves the whole conversation as Markdown."
+}
+
 async function openSession(id) {
   if (deferUntilIdle(() => openSession(id), "open conversation")) return
   closeMobilePanels(false)
@@ -900,6 +908,8 @@ async function openSession(id) {
     }
     showUsage({ spend: data.session.spend, context: restored ? data.context : undefined })
     thread.innerHTML = ""
+    // A long conversation opens at its recent end, like the terminal does.
+    if (data.hiddenMessages || data.archived) note(earlierNotice(data.hiddenMessages, data.archived))
     for (const m of data.session.messages) {
       if (m.role === "user") turn("user", m.display || m.content)
       else if (m.role === "assistant" && m.content) turn("agent", m.content)
