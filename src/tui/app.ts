@@ -14,6 +14,7 @@ import { createKeyReader } from "./keys"
 import { parseLaunch } from "./args"
 import { resolveStartupModel } from "../core/model-selection"
 import { isLiveCommand } from "./live-commands"
+import { footerHeight } from "./layout"
 import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
 import { allSelections } from "../core/providers"
 import { normalizeCommand } from "../core/commands"
@@ -624,8 +625,7 @@ function render() {
     planLines.push("")
   }
 
-  const paletteLines = palette && !streaming ? renderPalette(palette, paletteIndex, cols) : []
-  const promptHeight = input && !secret && !streaming && !pending
+  const promptHeight = input && !secret
     ? Math.min(COMPOSER_MAX_LINES, wrapToWidth(input, Math.max(10, cols - 8)).length)
     : 1
   /**
@@ -640,10 +640,28 @@ function render() {
    *
    * Both boxes are title, rows, and two borders.
    */
-  const overlayHeight = overlay ? overlay.rows.length + 3 : 0
-  const pendingHeight = pending ? DECISIONS.length + 3 : 0
-  const composerHeight =
-    4 + promptHeight + paletteLines.length + planLines.length + overlayHeight + pendingHeight
+  const footer = {
+    prompt: promptHeight,
+    pending: pending && !input ? DECISIONS.length + 3 : 0,
+    queued: Boolean(queued && !secret),
+    images: Boolean(pendingImages.length && !secret),
+    scrolled: scroll > 3,
+  }
+  // Editing a wrapped draft during inference still draws all its lines.
+  // Reserve those, plus queued/image/latest notices, before the transcript.
+  const overlayRows = overlay?.rows.slice(0, Math.max(0, rows - footerHeight(footer) - 5)) ?? []
+  if (overlay && overlayRows.length && overlayRows.length < overlay.rows.length) {
+    overlayRows.splice(-1, 1, ["more", `${overlay.rows.length - overlayRows.length + 1} rows hidden; resize to see more`])
+  }
+  const overlayHeight = overlay ? overlayRows.length + 3 : 0
+  const paletteBudget = Math.max(0, rows - footerHeight({ ...footer, overlay: overlayHeight }) - 2)
+  const paletteLines = palette && !streaming ? renderPalette(palette, paletteIndex, cols, paletteBudget) : []
+  const planBudget = Math.max(0, paletteBudget - paletteLines.length)
+  if (planLines.length > planBudget) {
+    planLines.splice(planBudget)
+    if (planLines.length) planLines[planLines.length - 1] = dim + "  plan shortened to fit; resize to see more" + ansi.reset
+  }
+  const composerHeight = footerHeight({ ...footer, overlay: overlayHeight, palette: paletteLines.length, plan: planLines.length })
   const room = Math.max(1, rows - composerHeight - 1)
 
   const maxScroll = Math.max(0, lines.length - room)
@@ -683,7 +701,7 @@ function render() {
         theme.gold + padToWidth("  " + overlay.title, inner) + ansi.reset +
         theme.border + "│" + ansi.reset,
     )
-    for (const [label, value] of overlay.rows) {
+    for (const [label, value] of overlayRows) {
       const row =
         "  " + theme.muted + padToWidth(label, labelWidth) + ansi.reset +
         theme.text + truncateToWidth(value, valueWidth) + ansi.reset
@@ -853,21 +871,22 @@ function render() {
   // so "no key" also hid what you were connected to.
   const usage = selection.provider.label + " . " + selection.model.id + (context.limit > 0 ? "  ~" + context.percent + "% ctx" : "  ctx window unknown") + spendTag
   const left = status ? status + "   " + usage : modeTag.trim() + (modeTag ? "  " : "") + usage
+  const compactHints = cols < 75
   const right = dialog
-    ? "up/down move . enter chooses . esc closes"
+    ? compactHints ? "enter . esc close" : "up/down . enter choose . esc close"
+    : pending && !input
+    ? compactHints ? "enter confirm . esc reject" : "up/down . enter confirm . esc reject"
     : streaming
-    ? (queued ? "queued . shift+tab mode . esc stops" : "enter queues . ctrl+s sends now . esc stops")
+    ? (queued ? "queued . esc stop" : compactHints ? "enter queue . esc stop" : "enter queue . ctrl+s now . esc stop")
     : secret
     ? "enter saves . esc cancels . nothing is echoed"
     : overlay
     ? "any key closes"
-    : pending
-    ? "up/down choose . enter confirm . esc reject"
     : scroll > 0
       ? "scrolled " + scroll
       : palette
         ? "tab complete . up/down pick"
-        : "shift+tab mode . ctrl+c copy/clear/quit"
+        : compactHints ? "ctrl+c copy/quit" : "shift+tab mode . ctrl+c copy/quit"
   // A long status gives way to the key hints rather than pushing them off the
   // edge: "mode: Full access - never ask - only the rules..." ran into them.
   const statusRoom = Math.max(10, cols - displayWidth(right) - 4)

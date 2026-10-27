@@ -191,7 +191,9 @@ export function slashRange(input: string, cursor: number): { start: number; end:
 const LIST_LIMIT = 60
 const VISIBLE_ROWS = 9
 
-export function renderPalette(items: PaletteItem[], selected: number, width: number): string[] {
+export function renderPalette(items: PaletteItem[], selected: number, width: number, maxHeight = Infinity): string[] {
+  if (maxHeight < 4) return []
+  const visibleRows = Math.max(1, Math.min(VISIBLE_ROWS, Math.floor(maxHeight) - 3))
   // Size to content, not to the terminal: a two-word command list should not
   // draw a box across the whole screen. The value column takes what the
   // longest entry needs so names are never cut in half.
@@ -209,8 +211,8 @@ export function renderPalette(items: PaletteItem[], selected: number, width: num
 
   // Keep the selected row on screen, and prefer a full window so the list
   // does not shrink as the selection nears the end.
-  const start = Math.max(0, Math.min(selected - Math.floor(VISIBLE_ROWS / 2), items.length - VISIBLE_ROWS))
-  const shown = items.slice(start, start + VISIBLE_ROWS)
+  const start = Math.max(0, Math.min(selected - Math.floor(visibleRows / 2), items.length - visibleRows))
+  const shown = items.slice(start, start + visibleRows)
 
   for (const [offset, item] of shown.entries()) {
     const index = start + offset
@@ -223,7 +225,7 @@ export function renderPalette(items: PaletteItem[], selected: number, width: num
     lines.push(theme.border + "  │" + ansi.reset + body + theme.border + "│" + ansi.reset)
   }
 
-  if (items.length > VISIBLE_ROWS) {
+  if (items.length > visibleRows) {
     const position = padToWidth(`  ${selected + 1} of ${items.length}`, inner)
     lines.push(theme.border + "  │" + ansi.reset + dim + position + ansi.reset + theme.border + "│" + ansi.reset)
   }
