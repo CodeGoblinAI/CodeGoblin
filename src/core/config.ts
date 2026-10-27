@@ -2,6 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { parse, printParseErrorCode, type ParseError } from "jsonc-parser"
 import { Global } from "../platform/paths"
+import type { McpOAuthConfig } from "./mcp-oauth"
 
 /**
  * codegoblin.jsonc, read in the shape the fork writes it.
@@ -31,6 +32,7 @@ export type McpServer =
       type: "remote"
       url: string
       headers: Record<string, string>
+      oauth?: McpOAuthConfig
       enabled: boolean
       timeout?: number
     }
@@ -91,7 +93,11 @@ function servers(value: unknown): Record<string, McpServer> {
     ) {
       out[name] = { type: "local", command: command as string[], environment: strings(entry.environment), enabled, ...timeout }
     } else if (entry.type === "remote" && typeof entry.url === "string" && entry.url) {
-      out[name] = { type: "remote", url: entry.url, headers: strings(entry.headers), enabled, ...timeout }
+      const oauth = entry.oauth === false ? false : isRecord(entry.oauth) ? {
+        ...(typeof entry.oauth.clientId === "string" ? { clientId: entry.oauth.clientId } : {}),
+        ...(typeof entry.oauth.scope === "string" ? { scope: entry.oauth.scope } : {}),
+      } : undefined
+      out[name] = { type: "remote", url: entry.url, headers: strings(entry.headers), enabled, ...timeout, ...(oauth !== undefined ? { oauth } : {}) }
     }
   }
   return out

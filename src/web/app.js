@@ -1017,6 +1017,49 @@ async function openAgentsDialog() {
     modal.append(button)
   }
 }
+
+async function openMcpDialog() {
+  const modal = makeDialog("MCP servers")
+  const status = document.createElement("pre"); status.style.whiteSpace = "pre-wrap"; status.textContent = "Loading configured servers…"; modal.append(status)
+  const data = await fetch("/api/mcp", { cache: "no-store" }).then(r => r.json()).catch(() => null)
+  if (!modal.isConnected) return
+  if (!data?.servers?.length) { status.textContent = "No MCP servers; add them under mcp in " + (data?.config || "codegoblin.jsonc"); return }
+  status.textContent = data.servers.map(server => server.name + ": " + server.status + (server.error ? " — " + server.error : "") + (server.tools.length ? "\n" + server.tools.join(", ") : "")).join("\n\n")
+  for (const server of data.servers.filter(server => server.oauth)) {
+    const button = document.createElement("button"); button.textContent = "Sign in to " + server.name
+    button.onclick = () => { modal.close(); openMcpLoginDialog(server.name, server.target) }
+    modal.append(button)
+  }
+}
+
+function openMcpLoginDialog(server, target) {
+  const modal = makeDialog("MCP sign-in · " + server)
+  const status = document.createElement("p")
+  status.textContent = "Authorize only a server you trust: " + target + ". It may read and change your workspace there. Start registers a public OAuth client; the browser asks for your account and scopes. Tokens are stored in this CG profile, not imported from other apps. Closing cancels waiting, not a grant already completed; revoke at the provider if needed."
+  const start = document.createElement("button"); start.textContent = "Start MCP sign-in"
+  modal.append(status, start)
+  let id
+  const cancel = () => { if (id) void fetch("/api/mcp/login?id=" + encodeURIComponent(id), { method: "DELETE", keepalive: true }).catch(() => {}) }
+  modal.addEventListener("close", cancel, { once: true })
+  start.onclick = async () => {
+    start.disabled = true
+    const result = await fetch("/api/mcp/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ server }) }).then(r => r.json()).catch(() => null)
+    id = result?.id
+    if (!modal.isConnected) { cancel(); return }
+    if (!id) { status.textContent = result?.message || "MCP sign-in unavailable"; start.disabled = false; return }
+    start.remove()
+    status.textContent = "Complete your account sign-in and consent in the browser, then check here. This attempt expires in five minutes."
+    const link = document.createElement("a"); link.href = result.url; link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = "Open server's sign-in page"
+    const check = document.createElement("button"); check.textContent = "Check MCP sign-in"
+    check.onclick = async () => {
+      const state = await fetch("/api/mcp/login?id=" + encodeURIComponent(id), { cache: "no-store" }).then(r => r.json()).catch(() => null)
+      if (!modal.isConnected) return
+      if (state?.state === "complete") { modal.close(); await openMcpDialog(); return }
+      status.textContent = ["pending", "exchanging"].includes(state?.state) ? "Waiting for browser sign-in/token exchange." : "Sign-in failed, cancelled or expired. Close and retry."
+    }
+    modal.append(link, check)
+  }
+}
 document.getElementById("help-open").onclick = () => openHelpDialog()
 const narrowLayout = matchMedia("(max-width: 650px)")
 const panelBackdrop = document.getElementById("panel-backdrop")
@@ -1444,15 +1487,7 @@ async function runCommand(text) {
   }
 
   if (name === "/mcp") {
-    const result = await fetch("/api/mcp").then((r) => r.json()).catch(() => null)
-    if (!result) { note("could not reach the server"); return true }
-    if (!result.servers.length) { note('no MCP servers - add them under "mcp" in ' + result.config); return true }
-    note(result.servers.map((server) =>
-      server.name.padEnd(14) +
-      (server.status === "connected"
-        ? server.tools.length + " tool" + (server.tools.length === 1 ? "" : "s") + (server.tools.length ? ": " + server.tools.join(", ") : "")
-        : server.status + (server.error ? " - " + server.error : ""))
-    ).join(String.fromCharCode(10)))
+    await openMcpDialog()
     return true
   }
 

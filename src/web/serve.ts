@@ -110,6 +110,8 @@ const activeTurns = new Map<string, AbortController>()
 const codexLogins = new Map<string, Awaited<ReturnType<typeof startCodexLogin>>>()
 let codexLoginsStarting = 0
 const cursorLogins = new Map<string, Awaited<ReturnType<typeof startCursorLogin>>>()
+const mcpLogins = new Map<string, Awaited<ReturnType<McpManager["login"]>>>()
+let mcpLoginsStarting = 0
 let cursorLoginsStarting = 0
 
 /**
@@ -353,8 +355,31 @@ async function handle(request: Request): Promise<Response> {
     } catch(error) {return json({error:error instanceof Error ? error.message : "Agent unavailable"},400)}
   }
 
-  if (url.pathname === "/api/mcp") {
+  if (url.pathname === "/api/mcp" && request.method === "GET") {
     return json({ servers: mcp.statuses(), config: configPath() })
+  }
+  if (url.pathname === "/api/mcp/login") {
+    if (request.method === "GET") return json({ state: mcpLogins.get(url.searchParams.get("id") || "")?.status() || "expired", servers: mcp.statuses() })
+    if (request.method === "DELETE") {
+      const id = url.searchParams.get("id") || ""
+      mcpLogins.get(id)?.cancel()
+      mcpLogins.delete(id)
+      return json({ cancelled: true })
+    }
+    if (request.method === "POST") {
+      if (mcpLogins.size + mcpLoginsStarting >= 2) return json({ message: "Close the previous MCP sign-in popup first" }, 409)
+      mcpLoginsStarting++
+      try {
+        const body = await request.json() as { server?: unknown }
+        if (typeof body.server !== "string" || body.server.length > 128) return json({ message: "Choose a configured MCP server" }, 400)
+        const login = await mcp.login(body.server)
+        const id = crypto.randomUUID()
+        mcpLogins.set(id, login)
+        setTimeout(() => { mcpLogins.delete(id); login.cancel() }, 5 * 60_000).unref()
+        return json({ id, url: login.url })
+      } catch (error) { return json({ message: error instanceof Error ? error.message : "MCP sign-in unavailable" }, 400) }
+      finally { mcpLoginsStarting-- }
+    }
   }
 
   if (url.pathname === "/api/sessions") {

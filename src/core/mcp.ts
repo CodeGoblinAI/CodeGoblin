@@ -1,5 +1,7 @@
 import { loadConfig, type McpServer } from "./config"
 import { clip } from "./tools"
+import { McpAuthorizationRequired, mcpAccessToken, discoverMcpOAuth, beginMcpOAuth, type McpOAuthConfig, type McpOAuthLogin } from "./mcp-oauth"
+import type { Network } from "./webfetch"
 
 /**
  * An MCP client, written here rather than taken from the official SDK.
@@ -12,7 +14,7 @@ import { clip } from "./tools"
  * Servers come from the global codegoblin.jsonc only, never from the project,
  * so opening a repository can never start a command that repository declares.
  *
- * Not built yet: OAuth for remote servers, the older HTTP+SSE transport, the
+ * Not built yet: the older HTTP+SSE transport, the
  * standing GET stream a server can use to push notifications between requests,
  * and resources and prompts.
  */
@@ -201,10 +203,13 @@ export class HttpTransport implements Transport {
   private session?: string
   private version?: string
   private handlers?: TransportHandlers
+  private abort = new AbortController()
 
   constructor(
     private url: string,
     private headers: Record<string, string> = {},
+    private oauth?: McpOAuthConfig,
+    private oauthNetwork?: Network,
   ) {}
 
   async start(handlers: TransportHandlers): Promise<void> {
@@ -222,11 +227,19 @@ export class HttpTransport implements Transport {
     }
   }
 
+  private async authHeaders() {
+    if (this.oauth === false || Object.keys(this.headers).some(key => key.toLowerCase() === "authorization")) return this.headers
+    const token = await mcpAccessToken(this.url, this.oauthNetwork)
+    return { ...this.headers, ...(token ? { authorization: "Bearer " + token } : {}) }
+  }
+
   async send(message: RpcMessage): Promise<void> {
-    const response = await fetch(this.url, {
+    const response = await (this.oauthNetwork?.fetch ?? fetch)(new URL(this.url), {
       method: "POST",
+      redirect: "manual",
+      signal: this.abort.signal,
       headers: {
-        ...this.headers,
+        ...await this.authHeaders(),
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
         ...this.sessionHeaders(),
@@ -242,6 +255,11 @@ export class HttpTransport implements Transport {
       return
     }
     if (!response.ok) {
+      if ((response.status === 401 || (response.status === 403 && /error="insufficient_scope"/i.test(response.headers.get("www-authenticate") || ""))) && this.oauth !== false && !Object.keys(this.headers).some(key => key.toLowerCase() === "authorization")) {
+        const challenge = response.headers.get("www-authenticate") || ""
+        await response.body?.cancel().catch(() => {})
+        throw new McpAuthorizationRequired(challenge.slice(0, 4096))
+      }
       const text = (await response.text().catch(() => "")).trim()
       if (response.status === 404 && this.session) {
         throw new Error("the server no longer knows this session (HTTP 404)")
@@ -289,17 +307,18 @@ export class HttpTransport implements Transport {
   }
 
   async close(): Promise<void> {
+    this.abort.abort()
     if (!this.session) return
-    const headers = { ...this.headers, ...this.sessionHeaders() }
+    const headers = { ...await this.authHeaders().catch(() => this.headers), ...this.sessionHeaders() }
     this.session = undefined
-    await fetch(this.url, { method: "DELETE", headers }).catch(() => {})
+    await (this.oauthNetwork?.fetch ?? fetch)(new URL(this.url), { method: "DELETE", headers, redirect: "manual", signal: AbortSignal.timeout(5000) }).catch(() => {})
   }
 }
 
 export function transportFor(config: McpServer): Transport {
   return config.type === "local"
     ? new StdioTransport(config.command, config.environment)
-    : new HttpTransport(config.url, config.headers)
+    : new HttpTransport(config.url, config.headers, config.oauth)
 }
 
 /**
@@ -360,7 +379,7 @@ export function toolNameFor(server: string, tool: string): string {
 }
 
 export type McpToolInfo = { name: string; description?: string; inputSchema?: Record<string, unknown> }
-export type ClientStatus = "disabled" | "connecting" | "connected" | "failed" | "closed"
+export type ClientStatus = "disabled" | "connecting" | "connected" | "authorization_required" | "failed" | "closed"
 
 type Waiting = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
 
@@ -368,6 +387,7 @@ type Waiting = { resolve: (value: unknown) => void; reject: (error: Error) => vo
 export class McpClient {
   status: ClientStatus
   error?: string
+  authChallenge = ""
   tools: McpToolInfo[] = []
   protocolVersion?: string
   serverInfo?: { name?: string; version?: string }
@@ -422,7 +442,8 @@ export class McpClient {
       this.tools = offersTools ? await this.listTools() : []
       this.status = "connected"
     } catch (error) {
-      this.status = "failed"
+      this.status = error instanceof McpAuthorizationRequired ? "authorization_required" : "failed"
+      if (error instanceof McpAuthorizationRequired) this.authChallenge = error.challenge
       this.error ??= describeError(error)
       await this.shutdown()
     }
@@ -543,6 +564,13 @@ export class McpClient {
       const result = await this.request("tools/call", { name: tool, arguments: isRecord(args) ? args : {} })
       return formatToolResult(result)
     } catch (error) {
+      if (error instanceof McpAuthorizationRequired) {
+        this.status = "authorization_required"
+        this.authChallenge = error.challenge
+        this.error = error.message
+        this.tools = []
+        this.onToolsChanged?.()
+      }
       return "error: " + describeError(error)
     }
   }
@@ -577,6 +605,7 @@ export type McpServerStatus = {
   error?: string
   /** The command or URL, so a person can tell which entry in the config this is. */
   target: string
+  oauth?: boolean
 }
 
 /**
@@ -590,6 +619,9 @@ export class McpManager {
   /** Called when a server finishes connecting, fails, or changes its tools. */
   onChange?: () => void
   private started?: Promise<void>
+  private logins = new Map<string, McpOAuthLogin>()
+  private loginStarting = new Set<string>()
+  private closing = false
 
   constructor(servers: Record<string, McpServer>, makeTransport: (config: McpServer) => Transport = transportFor) {
     this.clients = Object.entries(servers).map(([name, config]) => {
@@ -641,7 +673,7 @@ export class McpManager {
    * so it says so rather than using some other tool in their place.
    */
   notice(): string | undefined {
-    const down = this.clients.filter((client) => client.status === "failed" || client.status === "closed")
+    const down = this.clients.filter((client) => client.status === "failed" || client.status === "closed" || client.status === "authorization_required")
     if (!down.length) return undefined
     return [
       "These MCP servers are configured but not running, so their tools are not available:",
@@ -700,10 +732,35 @@ export class McpManager {
       tools: client.status === "connected" ? client.tools.map((tool) => tool.name) : [],
       ...(client.error ? { error: client.error } : {}),
       target: client.config.type === "local" ? client.config.command.join(" ") : client.config.url,
+      oauth: client.config.type === "remote" && client.config.enabled && client.config.oauth !== false && !Object.keys(client.config.headers).some(key => key.toLowerCase() === "authorization"),
     }))
   }
 
   async close(): Promise<void> {
+    this.closing = true
+    for (const login of this.logins.values()) login.cancel()
     await Promise.all(this.clients.map((client) => client.close()))
+  }
+
+  async login(name: string): Promise<McpOAuthLogin> {
+    if (this.closing || this.loginStarting.has(name)) throw new Error("Finish the current sign-in attempt first")
+    const client = this.clients.find(client => client.name === name)
+    if (!client || client.config.type !== "remote" || !client.config.enabled || client.config.oauth === false || Object.keys(client.config.headers).some(key => key.toLowerCase() === "authorization")) throw new Error("Choose an enabled OAuth remote MCP server without an Authorization header")
+    this.loginStarting.add(name)
+    try {
+      this.logins.get(name)?.cancel()
+      const info = await discoverMcpOAuth(client.config.url, client.authChallenge)
+      if (this.closing) throw new Error("MCP manager closed")
+      const login = await beginMcpOAuth(info, client.config.oauth)
+      if (this.closing) { login.cancel(); throw new Error("MCP manager closed") }
+      this.logins.set(name, login)
+      void login.done.then(async success => {
+        if (success && !this.closing && this.logins.get(name) === login) {
+          await client.restart()
+          this.onChange?.()
+        }
+      }).catch(() => {})
+      return login
+    } finally { this.loginStarting.delete(name) }
   }
 }

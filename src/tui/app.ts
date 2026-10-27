@@ -1154,6 +1154,27 @@ let accountRequest = 0
 let accountSource: "codex" | "claude" | "cursor" = "codex"
 let codexLogin: Awaited<ReturnType<typeof startCodexLogin>> | undefined
 let cursorLogin: Awaited<ReturnType<typeof startCursorLogin>> | undefined
+let mcpLogin: Awaited<ReturnType<McpManager["login"]>> | undefined
+
+function openMcp() {
+  const servers = mcp.statuses()
+  dialog = Dialogs.open("mcp", "MCP servers", servers.length ? servers.flatMap(server => [
+    { label: server.name + ": " + server.status, hint: server.tools.length ? server.tools.length + " tools" : server.error, inert: true },
+    ...(server.oauth ? [{ label: "Sign in to " + server.name, value: server.name }] : []),
+  ]) : [{ label: "No servers; add mcp entries in " + configPath(), inert: true }], { footer: "enter opens sign-in options · esc closes", size: "large" })
+}
+
+function openMcpLogin(name: string) {
+  dialog = Dialogs.open("mcp-login-start", "Authorize " + name + "?", [
+    { label: "Only authorize a remote server you trust.", inert: true },
+    { label: "It can read/change what your account grants there.", inert: true },
+    { label: "Start registers a public OAuth client; browser asks consent.", inert: true },
+    { label: "Tokens stay in this CG profile, not other apps' logins.", inert: true },
+    { label: "Cancel stops waiting; revoke completed grants at provider.", inert: true },
+    { label: "Start sign-in", value: name },
+    { label: "Cancel", value: "ui:cancel" },
+  ], { size: "large", footer: "enter chooses · esc cancels" })
+}
 
 function accountDialog(rows: [string, string][]) {
   return Dialogs.open("codex-account", (accountSource === "claude" ? "Claude" : accountSource === "cursor" ? "Cursor" : "Codex") + " account / subscription quotas", [
@@ -1454,6 +1475,7 @@ function toFile(dialog: Dialogs.Dialog, direction: number): Dialogs.Dialog {
 }
 
 function closeDialog() {
+  if (dialog?.kind === "mcp-login" && mcpLogin) { mcpLogin.cancel(); mcpLogin = undefined }
   if (dialog?.kind === "codex-login" && codexLogin) {
     const login = codexLogin
     codexLogin = undefined
@@ -1476,6 +1498,38 @@ async function chooseInDialog() {
   if (dialog.kind === "agents") {
     closeDialog()
     await chooseAgent(row.value === "ui:default-agent" ? undefined : row.value)
+    render(); return
+  }
+  if (dialog.kind === "mcp") { openMcpLogin(row.value); render(); return }
+  if (dialog.kind === "mcp-login-start") {
+    if (row.value === "ui:cancel") { closeDialog(); render(); return }
+    const view = Dialogs.open("mcp-login", "MCP sign-in · " + row.value, [{ label: "Discovering authorization server…", inert: true }], { size: "large" })
+    dialog = view; render()
+    try {
+      const login = await mcp.login(row.value)
+      if (dialog !== view) { login.cancel(); return }
+      mcpLogin = login
+      view.rows = [
+        { label: "Copy sign-in URL", value: "copy" },
+        { label: "Check sign-in / reconnect", value: "check" },
+        { label: "Cancel waiting", value: "cancel" },
+        { label: "Paste the URL in your browser and authorize there.", inert: true },
+        { label: "Expires in five minutes. Completed grants need provider revoke.", inert: true },
+      ]
+      view.index = 0
+    } catch (error) {
+      if (dialog === view) view.rows = [{ label: error instanceof Error ? error.message : "MCP sign-in unavailable", inert: true }]
+    }
+    render(); return
+  }
+  if (dialog.kind === "mcp-login") {
+    if (row.value === "copy" && mcpLogin) { await copyText(mcpLogin.url); status = "MCP sign-in URL copied; paste it in your browser" }
+    if (row.value === "check") {
+      const state = mcpLogin?.status()
+      if (state === "complete") { closeDialog(); openMcp() }
+      else status = state === "pending" || state === "exchanging" ? "Waiting for browser sign-in/token exchange" : "Sign-in failed, expired or cancelled; retry /mcp"
+    }
+    if (row.value === "cancel") closeDialog()
     render(); return
   }
   if (dialog.kind === "codex-account") {
@@ -2018,17 +2072,7 @@ async function send() {
       }
     }
     if (result.kind === "mcp") {
-      const servers = mcp.statuses()
-      const rows: [string, string][] = servers.length
-        ? servers.map((server): [string, string] => [
-            server.name,
-            server.status === "connected"
-              ? server.tools.length + " tool" + (server.tools.length === 1 ? "" : "s") +
-                (server.tools.length ? ": " + server.tools.join(", ") : "")
-              : server.status + (server.error ? " - " + server.error : ""),
-          ])
-        : [["none yet", 'add servers under "mcp" in ' + configPath()]]
-      overlay = { title: "mcp servers", rows }
+      openMcp()
     }
     if (result.kind === "status") {
       const cli = selection.provider.cli ? await cliAuthStatus(selection.provider.id) : undefined
