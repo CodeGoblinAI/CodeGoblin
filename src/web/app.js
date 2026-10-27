@@ -1165,20 +1165,22 @@ function connectForm(provider) {
   field.focus()
 }
 
-function openAccountDialog() {
-  const modal = makeDialog("Codex account / subscription quotas")
-  const body = document.createElement("pre"); body.style.whiteSpace = "pre-wrap"; body.textContent = "Checking official Codex CLI…"
+function openAccountDialog(source = "codex") {
+  const label = source === "claude" ? "Claude" : source === "cursor" ? "Cursor" : "Codex"
+  const endpoint = source === "codex" ? "/api/codex/account" : "/api/subscription/account?source=" + source
+  const modal = makeDialog(label + " account / subscription quotas")
+  const body = document.createElement("pre"); body.style.whiteSpace = "pre-wrap"; body.textContent = "Checking " + label + " account…"
   const refresh = document.createElement("button"); refresh.textContent = "Refresh quotas"
-  const login = document.createElement("button"); login.textContent = "Official sign-in"; login.onclick = () => { modal.close(); openCodexLoginDialog() }
+  const login = document.createElement("button"); login.textContent = source === "cursor" ? "Open Cursor Spending dashboard" : "Official sign-in"; login.onclick = () => { modal.close(); if (source === "cursor") window.open("https://cursor.com/dashboard", "_blank", "noopener,noreferrer"); else if (source === "claude") void runCommand("/login claude"); else openCodexLoginDialog() }
   modal.append(body, refresh, login)
   const show = (data) => { body.textContent = data?.rows ? data.rows.map(([label, value]) => label + ": " + value).join("\n") : "Codex account unavailable; check CLI compatibility/sign-in" }
   const update = async () => {
     refresh.disabled = true
-    const cached = await fetch("/api/codex/account?cached=1", { cache: "no-store" }).then((r) => r.json()).catch(() => null)
+    const cached = await fetch(endpoint + (source === "codex" ? "?" : "&") + "cached=1", { cache: "no-store" }).then((r) => r.json()).catch(() => null)
     if (!modal.isConnected) return
     show(cached)
     body.textContent += "\nRefreshing…"
-    const data = await fetch("/api/codex/account", { cache: "no-store" }).then((r) => r.json()).catch(() => null)
+    const data = await fetch(endpoint, { cache: "no-store" }).then((r) => r.json()).catch(() => null)
     if (!modal.isConnected) return
     show(data)
     refresh.disabled = false
@@ -1264,8 +1266,9 @@ async function runCommand(text) {
     return true
   }
   if (name === "/account") {
-    if (argument && argument !== "codex") { note("Only Codex account telemetry is wired; use /account codex"); return true }
-    openAccountDialog(); return true
+    const source = argument === "claude-code" ? "claude" : argument || "codex"
+    if (!["codex","claude","cursor"].includes(source)) { note("Use /account codex, /account claude or /account cursor"); return true }
+    openAccountDialog(source); return true
   }
   if (name === "/login") {
     if (argument === "cursor") { openCodexLoginDialog("cursor"); return true }
@@ -1458,7 +1461,7 @@ async function runCommand(text) {
     const modal = makeDialog(name === "/usage" ? "Usage and provider balance" : "Provider balance")
     if (name === "/usage") {
       const session = document.createElement("p")
-      session.textContent = document.getElementById("usage-readout").textContent + "\nContext is estimated. Session cost is not a provider bill. Codex subscription quotas: /account codex; other subscriptions not wired yet."
+      session.textContent = document.getElementById("usage-readout").textContent + "\nContext is estimated. Session cost is not a provider bill. Subscription snapshots: /account codex, /account claude, /account cursor (dashboard)."
       modal.appendChild(session)
     }
     const status = document.createElement("pre"); status.style.whiteSpace = "pre-wrap"; status.textContent = "Checking " + provider + "…"; modal.appendChild(status)

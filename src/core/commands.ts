@@ -18,7 +18,7 @@ export type CommandResult =
   | { kind: "compact" }
   | { kind: "usage" }
   | { kind: "balance"; provider?: string }
-  | { kind: "account" }
+  | { kind: "account"; source?: "claude" | "cursor" }
   | { kind: "login"; source?: "cursor" }
   | { kind: "cli-login"; source: "claude" | "cursor" }
   | { kind: "import"; id?: string }
@@ -47,7 +47,7 @@ export type CommandResult =
 export const COMMANDS = [
   { name: "/usage", description: "session tokens/context and provider balance; Codex quotas via /account" },
   { name: "/balance", description: "refresh balance/quota: deepseek, tripo or elevenlabs" },
-  { name: "/account", description: "official Codex sign-in and subscription quota windows" },
+  { name: "/account", description: "subscription snapshots: codex, claude or cursor (dashboard)" },
   { name: "/login", description: "official sign-in: /login codex, /login claude or /login cursor" },
   { name: "/import", description: "copy a selected Codex text conversation for this project: /import codex" },
   { name: "/help", description: "show these commands" },
@@ -116,9 +116,13 @@ export function runCommand(text: string): CommandResult {
 
   switch (name) {
     case "/account":
-      return !argument || argument === "codex" ? { kind: "account" } : { kind: "message", text: "Only Codex account telemetry is wired; use /account codex" }
+      if (!argument || argument === "codex") return { kind: "account" }
+      if (argument === "claude" || argument === "claude-code") return { kind: "account", source: "claude" }
+      if (argument === "cursor") return { kind: "account", source: "cursor" }
+      return { kind: "message", text: "Use /account codex, /account claude or /account cursor" }
     case "/agent":
-    case "/agents": return {kind:"agents",name:argument || undefined}
+    case "/agents":
+      return { kind: "agents", name: argument || undefined }
     case "/login":
       if (argument === "cursor") return { kind: "login", source: "cursor" }
       if (argument === "claude" || argument === "claude-code" || argument === "cursor-cli") return { kind: "cli-login", source: argument === "cursor-cli" ? "cursor" : "claude" }
