@@ -365,9 +365,12 @@ async function handle(request: Request): Promise<Response> {
   // Preferences live on the server so the TUI and the browser agree about
   // which theme is current rather than each remembering its own.
   if (url.pathname === "/api/settings" && request.method === "POST") {
-    const body = (await request.json()) as { theme?: unknown; thinking?: unknown }
+    const body = (await request.json()) as { theme?: unknown; thinking?: unknown; effort?: unknown; model?: string }
     const current = await settingsStore.load()
-    const next = settingsStore.normalise({ ...current, ...body })
+    if (body.effort !== undefined && (!settingsStore.isEffort(body.effort) || !exactSelection(body.model || ""))) return json({ message: "Select a valid model and effort level" }, 400)
+    const next = body.effort !== undefined
+      ? settingsStore.withModelEffort(settingsStore.normalise({ ...current, theme: body.theme ?? current.theme, thinking: body.thinking ?? current.thinking }), body.model!, body.effort)
+      : settingsStore.normalise({ ...current, theme: body.theme ?? current.theme, thinking: body.thinking ?? current.thinking })
     await settingsStore.save(next)
     return json({ settings: next, palette: paletteOf(next.theme) })
   }
@@ -696,7 +699,7 @@ async function handle(request: Request): Promise<Response> {
           history: edits,
           mcp,
           instructions: [skillIndex(listSkills(root)), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
-          effort: effortFor(model, (await settingsStore.load()).effort),
+          effort: effortFor(model, settingsStore.effortForModel(await settingsStore.load(), provider.id + "/" + model.id)),
         })
         let subagents = subagentsBySession.get(session.id)
         if (!subagents) {
@@ -728,7 +731,7 @@ async function handle(request: Request): Promise<Response> {
             // rather than reaching for an unrelated tool in their place.
             instructions: [skillIndex(listSkills(root)), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
             history: edits,
-            effort: effortFor(model, (await settingsStore.load()).effort),
+            effort: effortFor(model, settingsStore.effortForModel(await settingsStore.load(), provider.id + "/" + model.id)),
             signal: turn.signal,
           })) {
             // A refused call carries who refused it; the label is composed here

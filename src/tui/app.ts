@@ -212,7 +212,7 @@ const subagents = new SubagentManager(
     history: edits,
     mcp,
     instructions: skillIndex(listSkills(process.cwd())),
-    effort: effortFor(selection.model, settings.effort),
+    effort: effortFor(selection.model, currentEffort()),
   }),
   (event) => onSubagent(event),
 )
@@ -252,6 +252,7 @@ function unfoldPastes(text: string): string {
   return out
 }
 let settings = settingsStore.defaults()
+const currentEffort = () => settingsStore.effortForModel(settings, selection.provider.id + "/" + selection.model.id)
 /** How generation should come out. Separate file, separate lifetime. */
 let media: MediaSettings = {}
 /** The account's voices, once fetched, so a voice id can be shown by name. */
@@ -1326,7 +1327,7 @@ function openEffortPicker() {
     "effort",
     takes ? "Effort  ·  " + selection.model.label : "Effort  ·  " + selection.model.label + " does not reason",
     EFFORTS.map((level) => ({
-      label: (level === settings.effort ? "• " : "  ") + level,
+      label: (level === currentEffort() ? "• " : "  ") + level,
       hint:
         level === "auto"
           ? "let the provider decide"
@@ -1363,7 +1364,7 @@ function settingsRows(): Dialogs.DialogRow[] {
     { label: "Theme", hint: settings.theme, value: "ui:theme" },
     { label: "Show thinking", hint: settings.thinking ? "on" : "off", value: "ui:thinking" },
     { label: "Mouse controls", hint: settings.mouse ? "on (Shift+drag selects)" : "off (terminal selection)", value: "ui:mouse" },
-    { label: "Reasoning effort", hint: settings.effort, value: "ui:effort" },
+    { label: "Reasoning effort", hint: currentEffort(), value: "ui:effort" },
     { label: "Approvals", hint: permissions.mode, value: "ui:approvals" },
   ]
   if (!options.length) {
@@ -1620,7 +1621,7 @@ async function chooseInDialog() {
   }
 
   if (dialog.kind === "effort") {
-    settings = { ...settings, effort: row.value as settingsStore.Effort }
+    settings = settingsStore.withModelEffort(settings, selection.provider.id + "/" + selection.model.id, row.value)
     void settingsStore.save(settings)
     status =
       row.value === "auto"
@@ -1807,7 +1808,7 @@ async function send() {
     }
     if (result.kind === "effort") {
       if (!result.level) { openEffortPicker(); render(); return }
-      settings = { ...settings, effort: result.level }
+      settings = settingsStore.withModelEffort(settings, selection.provider.id + "/" + selection.model.id, result.level)
       void settingsStore.save(settings)
       status =
         result.level === "auto"
@@ -1997,9 +1998,9 @@ async function send() {
         ["thinking", settings.thinking ? "shown" : "hidden"],
         [
           "effort",
-          settings.effort === "auto"
+          currentEffort() === "auto"
             ? "auto"
-            : settings.effort + (takesEffort(selection.model) ? "" : "  (not sent - this model does not take it)"),
+            : currentEffort() + (takesEffort(selection.model) ? "" : "  (not sent - this model does not take it)"),
         ],
         ["approved", approved.length ? approved.join(", ") : "nothing yet"],
         ["checkpoints", checkpointStatus()],
@@ -2196,7 +2197,7 @@ async function send() {
       extraTools: mcp,
       // Offered only with /boost - or while subagents started under it are still out.
       subagents: boost || boostOnce || subagents.running().length ? subagents : undefined,
-      effort: effortFor(selection.model, settings.effort),
+      effort: effortFor(selection.model, currentEffort()),
       signal: turn.signal,
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
       instructions: [skillIndex(listSkills(process.cwd())), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
