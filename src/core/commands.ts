@@ -35,6 +35,7 @@ export type CommandResult =
   | { kind: "theme"; name?: string }
   | { kind: "thinking" }
   | { kind: "effort"; level?: Effort }
+  | { kind: "agents"; name?: string }
   | { kind: "settings"; argument?: string }
   | { kind: "diff" }
   | { kind: "media"; media: MediaKind; line: string }
@@ -71,6 +72,7 @@ export const COMMANDS = [
   { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
   { name: "/effort", description: "how hard a reasoning model thinks: /effort high" },
+  { name: "/agents", description: "choose a named agent profile; /agents default resets" },
   { name: "/settings", description: "open settings, or /settings <model setting> <value>; omit value to reset" },
   { name: "/diff", description: "what this session changed, file by file" },
   { name: "/quit", description: "exit" },
@@ -81,6 +83,7 @@ export function isCommand(text: string): boolean {
 }
 
 export const COMMAND_ALIASES: Record<string, string> = {
+  "/agent": "/agents",
   "/models": "/model", "/themes": "/theme", "/shortcuts": "/help", "/keys": "/help",
   "/new": "/clear", "/reset": "/clear", "/sessions": "/resume", "/continue": "/resume",
   "/logout": "/disconnect", "/remove-key": "/disconnect", "/memories": "/memory",
@@ -91,8 +94,6 @@ export const COMMAND_ALIASES: Record<string, string> = {
   "/upgrade": "/update", "/version": "/update", "/orgs": "/org", "/switch-org": "/org",
 }
 export const PENDING_COMMANDS: Record<string, string> = {
-  "/agents": "Named-agent selection is not wired yet; /mode controls approvals and /boost enables subagents.",
-  "/agent": "Named-agent selection is not wired yet; /mode controls approvals and /boost enables subagents.",
   "/variants": "Model-specific variants are not wired yet; /effort controls supported reasoning models.",
   "/plugins": "The plugin marketplace is not wired yet; /mcp and /skills show configured integrations.",
   "/update": "CG-Next's installer/updater is not wired yet. This is the source checkout, not the original cg installation.",
@@ -116,6 +117,8 @@ export function runCommand(text: string): CommandResult {
   switch (name) {
     case "/account":
       return !argument || argument === "codex" ? { kind: "account" } : { kind: "message", text: "Only Codex account telemetry is wired; use /account codex" }
+    case "/agent":
+    case "/agents": return {kind:"agents",name:argument || undefined}
     case "/login":
       if (argument === "cursor") return { kind: "login", source: "cursor" }
       if (argument === "claude" || argument === "claude-code" || argument === "cursor-cli") return { kind: "cli-login", source: argument === "cursor-cli" ? "cursor" : "claude" }

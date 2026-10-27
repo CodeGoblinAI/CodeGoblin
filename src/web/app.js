@@ -14,6 +14,7 @@ const providerMenu = document.getElementById("provider-menu")
 const providerLabel = providerBtn.querySelector(".picker-label")
 let modelOptions = []
 let currentModel = ""
+let currentAgent = ""
 let resumeModelMissing = false
 let modelIndex = 0
 
@@ -852,6 +853,7 @@ async function openSession(id) {
   const data = await fetch("/api/session?id=" + encodeURIComponent(id)).then((r) => r.json()).catch(() => null)
   if (!data || !data.session) return
   sessionId = id
+  currentAgent = data.session.agent || ""
   if (data.selection && !modelOptions.some((option) => option.value === data.selection)) await loadProviders()
   const restored = data.selection && setModel(data.selection)
   if (!restored) {
@@ -920,6 +922,10 @@ function makeDialog(title) {
 
 function openSettingsDialog() {
   const modal = makeDialog("Settings")
+  const agent = document.createElement("button")
+  agent.textContent = "Agent profile: " + (currentAgent || "default")
+  agent.onclick = () => { modal.close(); void openAgentsDialog() }
+  modal.append(agent)
   const select = (label, options, current, change) => {
     const row = document.createElement("label"); row.textContent = label
     const field = document.createElement("select")
@@ -979,6 +985,37 @@ function openHelpDialog(initial = "") {
 }
 
 document.getElementById("settings-open").onclick = openSettingsDialog
+
+async function chooseAgent(name = "") {
+  const response = await fetch("/api/agent/selection", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, model: currentModel }) })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error || "Agent selection unavailable")
+  if (!modelOptions.some(option => option.value === data.model)) await loadProviders()
+  if (!setModel(data.model)) throw new Error("Agent model unavailable; previous profile kept")
+  currentAgent = data.agent
+  note("Agent: " + (currentAgent || "default") + " · " + data.model)
+}
+
+async function openAgentsDialog() {
+  if (deferUntilIdle(() => openAgentsDialog(), "choose agent")) return
+  const modal = makeDialog("Agent profiles · " + (currentAgent || "default"))
+  const status = document.createElement("p"); status.textContent = "Loading profiles…"; modal.append(status)
+  const data = await fetch("/api/agents", { cache: "no-store" }).then(r => r.json()).catch(() => null)
+  if (!modal.isConnected) return
+  if (!data?.agents) { status.textContent = "Agent profiles unavailable"; return }
+  status.textContent = "Profiles add instructions and may override the model or restrict tools. Approvals still apply."
+  for (const profile of [{ name: "", description: "No profile; keep selected model", model: "inherit" }, ...data.agents]) {
+    const button = document.createElement("button"); button.className = "dialog-action"
+    button.textContent = (profile.name || "Default") + " · " + (profile.model || "inherit model") + " · " + profile.description
+    button.onclick = async () => {
+      button.disabled = true
+      try { await chooseAgent(profile.name); if (modal.isConnected) { modal.close(); input.focus() } }
+      catch (error) { status.textContent = error.message }
+      finally { button.disabled = false }
+    }
+    modal.append(button)
+  }
+}
 document.getElementById("help-open").onclick = () => openHelpDialog()
 const narrowLayout = matchMedia("(max-width: 650px)")
 const panelBackdrop = document.getElementById("panel-backdrop")
@@ -1220,6 +1257,11 @@ async function runCommand(text) {
   text = text.replace(/^\/[^\s]+/, (name) => paletteData.aliases?.[name] || name)
   const [name, ...rest] = text.split(" ")
   const argument = rest.join(" ").trim()
+  if (name === "/agents") {
+    if (!argument) await openAgentsDialog()
+    else { try { await chooseAgent(argument === "default" ? "" : argument) } catch (error) { note(error.message) } }
+    return true
+  }
   if (name === "/account") {
     if (argument && argument !== "codex") { note("Only Codex account telemetry is wired; use /account codex"); return true }
     openAccountDialog(); return true
@@ -1251,6 +1293,7 @@ async function runCommand(text) {
   if (name === "/mouse") { note("The browser supports mouse selection and Ctrl+C natively."); return true }
 
   if (name === "/new" || name === "/clear") {
+    currentAgent = ""
     showUsage(null)
     sessionId = null
     resumeModelMissing = false
@@ -1437,6 +1480,7 @@ async function runCommand(text) {
       "model     " + (model ? model.label : currentModel),
       ...(model?.connectionHint ? ["CLI       " + model.connectionHint] : []),
       "session   " + (sessionId || "not started yet"),
+      "agent     " + (currentAgent || "default"),
       "theme     " + webSettings.theme,
       "thinking  " + (webSettings.thinking ? "shown" : "hidden"),
       "checkpoints  " + (paletteData.checkpoint > 0 ? "ask every " + paletteData.checkpoint + " tool calls" : "off"),
@@ -1699,7 +1743,7 @@ async function submit() {
     response = await fetch("/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, sessionId, provider: currentModel, images: sending, mode: currentMode, planning, boost: boost || boostOnce }),
+      body: JSON.stringify({ text, sessionId, provider: currentModel, agent: currentAgent, images: sending, mode: currentMode, planning, boost: boost || boostOnce }),
       signal: controller.signal,
     })
   } catch {
@@ -1711,6 +1755,11 @@ async function submit() {
   if (!response.ok || !response.body) {
     const err = await response.json().catch(() => ({}))
     turn("agent", err.error || "request failed")
+    if (response.status === 400 && !input.value) {
+      input.value = text
+      attachments = [...sending, ...attachments]
+      renderAttached()
+    }
     setBusy(false)
     return
   }
@@ -1733,7 +1782,11 @@ async function submit() {
         let event
         try { event = JSON.parse(line.slice(5).trim()) } catch { continue }
 
-        if (event.type === "session") sessionId = event.id
+        if (event.type === "session") {
+          sessionId = event.id
+          currentAgent = event.agent || ""
+          if (event.model && event.model !== currentModel) setModel(event.model)
+        }
         if (event.type === "thinking") {
           const stick = atBottom()
           if (!thinking) { thinkingRaw = ""; thinking = thinkingBlock() }

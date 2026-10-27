@@ -38,7 +38,7 @@ import * as sessions from "../core/sessions"
 import { DECISIONS, MODES, askedFor, refusalLabel, type Decision, type PermissionMode, type Permissions } from "../core/permission"
 import { BrowserConsent } from "./consent"
 import { McpManager } from "../core/mcp"
-import { SubagentManager, type SubagentContext } from "../core/subagents"
+import { SubagentManager, listAgents, selectedAgent, agentSelection, type SubagentContext } from "../core/subagents"
 import { configPath, checkpointEvery } from "../core/config"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
@@ -330,6 +330,19 @@ async function handle(request: Request): Promise<Response> {
       commands: customCommands(root).map(({ name, description, scope }) => ({ name, description, scope })),
     })
   }
+  if (url.pathname === "/api/agents" && request.method === "GET") return json({agents:listAgents(root).map(({name,description,source,model,tools})=>({name,description,source,model,tools}))})
+  if (url.pathname === "/api/agent/selection" && request.method === "POST") {
+    const body=await request.json() as {name?:string;model?:string}
+      if (typeof body.name !== "string" || body.name.length > 128 || typeof body.model !== "string") return json({error:"Invalid agent selection"},400)
+    try {
+      const inherited=await resolveStartupModel(body.model)
+      if (!inherited) return json({error:"Choose an available model"},400)
+      const profile=selectedAgent(body.name || undefined,root)
+      const next=await agentSelection(profile,inherited)
+      if (kindOf(next.model)!=="text") return json({error:"Choose a text model before selecting an agent"},400)
+      return json({agent:profile?.name || "",model:next.provider.id + "/" + next.model.id})
+    } catch(error) {return json({error:error instanceof Error ? error.message : "Agent unavailable"},400)}
+  }
 
   if (url.pathname === "/api/mcp") {
     return json({ servers: mcp.statuses(), config: configPath() })
@@ -609,6 +622,7 @@ async function handle(request: Request): Promise<Response> {
       text?: string
       sessionId?: string
       provider?: string
+      agent?: string
       /** Pictures the page attached, already data URLs. */
       images?: { name?: string; dataUrl?: string }[]
       /** Ask for approval, Approve for me or Full access - ask when missing. */
@@ -620,16 +634,25 @@ async function handle(request: Request): Promise<Response> {
     const text = (body.text ?? "").trim()
     if (!text) return json({ error: "empty prompt" }, 400)
 
-    const selection = body.provider ? await resolveStartupModel(body.provider) : defaultSelection()
+    const loaded = body.sessionId ? await sessions.load(body.sessionId) : undefined
+    if (body.agent !== undefined && (typeof body.agent !== "string" || body.agent.length > 128)) return json({error:"Invalid agent profile"},400)
+    let profile: ReturnType<typeof selectedAgent>
+    let selection
+    try {
+      profile=selectedAgent(body.agent===undefined ? loaded?.agent : body.agent || undefined,root)
+      const inherited=body.provider ? await resolveStartupModel(body.provider) : defaultSelection()
+      selection=inherited ? await agentSelection(profile,inherited) : undefined
+    } catch(error) {return json({error:error instanceof Error ? error.message : "Agent unavailable"},400)}
     if (!selection || kindOf(selection.model) !== "text") return json({ error: "Requested chat model is unavailable; choose a model before continuing." }, 400)
     const { provider, model } = selection
     const key = apiKey(provider.id)
     if (key === undefined) return json({ error: `No API key for ${provider.label}.` }, 400)
 
     const session =
-      (body.sessionId ? await sessions.load(body.sessionId) : undefined) ?? sessions.create(provider.id, model.id)
+      loaded ?? sessions.create(provider.id, model.id)
     session.provider = provider.id
     session.model = model.id
+    session.agent = profile?.name
 
     if (session.messages.length === 0) {
       session.messages.push({
@@ -678,7 +701,7 @@ async function handle(request: Request): Promise<Response> {
         const turn = new AbortController()
         activeTurns.set(session.id, turn)
 
-        send({ type: "session", id: session.id })
+        send({ type: "session", id: session.id, model:provider.id + "/" + model.id, agent:profile?.name || "" })
         // One checkpoint per turn, so undo takes back the whole answer.
         const edits = editsFor(session.id)
         edits.begin(text)
@@ -724,12 +747,13 @@ async function handle(request: Request): Promise<Response> {
             images: acceptsImages(selection),
             permissions,
             // Offered only with /boost - or while subagents started under it are still out.
-            subagents: body.boost === true || subagents.running().length ? subagents : undefined,
+            subagents: !profile?.tools && (body.boost === true || subagents.running().length) ? subagents : undefined,
+            tools: profile?.tools,
             extraTools: mcp,
             memory: await memory.recall({ project: root, session: session.id }),
             // Servers that are configured but down are named, so the model says so
             // rather than reaching for an unrelated tool in their place.
-            instructions: [skillIndex(listSkills(root)), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
+            instructions: [profile ? "Active agent: " + profile.name + "\n" + profile.prompt : undefined, skillIndex(listSkills(root)), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
             history: edits,
             effort: effortFor(model, settingsStore.effortForModel(await settingsStore.load(), provider.id + "/" + model.id)),
             signal: turn.signal,

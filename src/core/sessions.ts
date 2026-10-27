@@ -19,6 +19,8 @@ export type Session = {
   provider: string
   /** Last model actually used; omitted on older conversations. */
   model?: string
+  /** Named profile actually used; missing/deleted profiles must be chosen again. */
+  agent?: string
   messages: Message[]
   spend?: Spend
   importedFrom?: { provider: string; id: string; importedAt: number }

@@ -88,7 +88,7 @@ import {
 import { marker, counts, type Todo } from "../core/todo"
 import { Permissions, DECISIONS, MODES, nextMode, askedFor, refusalLabel, decisionHints, type Decision, type PermissionMode } from "../core/permission"
 import { McpManager } from "../core/mcp"
-import { SubagentManager, type SubagentEvent } from "../core/subagents"
+import { SubagentManager, listAgents, selectedAgent, agentSelection, type SubagentEvent } from "../core/subagents"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
 import { setInvocations } from "./palette"
@@ -127,6 +127,7 @@ if (!launched) {
   process.exit(1)
 }
 let selection: Selection = launched
+let agentName: string | undefined
 let key = apiKey(selection.provider.id)
 
 const out = process.stdout
@@ -1348,6 +1349,29 @@ function openSettings() {
   })
 }
 
+function openAgents() {
+  dialog = Dialogs.open("agents", "Agent profile · " + (agentName || "default"), [
+    { label: "Default", hint: "no profile; keep selected model", value: "ui:default-agent" },
+    ...listAgents(process.cwd()).map(agent => ({ label: agent.name, hint: (agent.model || "inherit model") + " · " + agent.description, value: agent.name })),
+  ], { footer: "enter chooses · /agents default resets · esc closes", size: "large" })
+}
+
+async function chooseAgent(name?: string) {
+  try {
+    const profile = selectedAgent(name, process.cwd())
+    const next = await agentSelection(profile, selection)
+    if (kindOf(next.model) !== "text") throw new Error("Choose a text model before selecting an agent")
+    selection = next
+    key = apiKey(next.provider.id)
+    agentName = profile?.name
+    resumeModelMissing = false
+    status = "agent: " + (agentName || "default") + " · " + selection.provider.id + "/" + selection.model.id
+  } catch (error) {
+    status = error instanceof Error ? error.message : "Agent selection unavailable"
+    transcript.push({ kind: "tool", state: "failed", text: status })
+  }
+}
+
 /**
  * The settings the selected model takes, and nothing else.
  *
@@ -1366,6 +1390,7 @@ function settingsRows(): Dialogs.DialogRow[] {
     { label: "Mouse controls", hint: settings.mouse ? "on (Shift+drag selects)" : "off (terminal selection)", value: "ui:mouse" },
     { label: "Reasoning effort", hint: currentEffort(), value: "ui:effort" },
     { label: "Approvals", hint: permissions.mode, value: "ui:approvals" },
+    { label: "Agent profile", hint: agentName || "default", value: "ui:agents" },
   ]
   if (!options.length) {
     // Say why the list is empty - a chat model has no generation settings at
@@ -1445,6 +1470,11 @@ async function chooseInDialog() {
   if (!dialog) return
   const row = Dialogs.selected(dialog)
   if (!row || !row.value) { render(); return }
+  if (dialog.kind === "agents") {
+    closeDialog()
+    await chooseAgent(row.value === "ui:default-agent" ? undefined : row.value)
+    render(); return
+  }
   if (dialog.kind === "codex-account") {
     if (row.value === "refresh") openAccount()
     if (row.value === "login") await openLogin()
@@ -1640,6 +1670,7 @@ async function chooseInDialog() {
       if (action === "theme") openThemePicker()
       if (action === "effort") openEffortPicker()
       if (action === "approvals") openApprovalsPicker()
+      if (action === "agents") openAgents()
       if (action === "thinking" || action === "mouse") {
         settings = { ...settings, [action]: !settings[action] }
         void settingsStore.save(settings)
@@ -1772,6 +1803,7 @@ async function send() {
     const result = runCommand(text)
     if (result.kind === "quit") return shutdown()
     if (result.kind === "clear") {
+      agentName = undefined
       transcript = []
       messages = [SYSTEM]
       plan = []
@@ -1799,6 +1831,11 @@ async function send() {
       return
     }
     if (result.kind === "message") transcript.push({ kind: "tool", text: result.text })
+    if (result.kind === "agents") {
+      if (!result.name) openAgents()
+      else await chooseAgent(result.name === "default" ? undefined : result.name)
+      render(); return
+    }
     if (result.kind === "theme") {
       if (!result.name) { openThemePicker(); render(); return }
       settings = { ...settings, theme: result.name }
@@ -1995,6 +2032,7 @@ async function send() {
             : "nothing yet",
         ],
         ["theme", settings.theme],
+        ["agent", agentName || "default"],
         ["thinking", settings.thinking ? "shown" : "hidden"],
         [
           "effort",
@@ -2105,6 +2143,16 @@ async function send() {
     render()
     return
   }
+  let profile: ReturnType<typeof selectedAgent>
+  try {
+    profile = selectedAgent(agentName, process.cwd())
+    selection = await agentSelection(profile, selection)
+    key = apiKey(selection.provider.id)
+  } catch (error) {
+    status = error instanceof Error ? error.message : "Agent unavailable; choose /agents default"
+    transcript.push({ kind: "tool", state: "failed", text: status })
+    render(); return
+  }
   const selectedKind = kindOf(selection.model)
   if (selectedKind !== "text") {
     input = ""
@@ -2136,6 +2184,7 @@ async function send() {
   historyIndex = -1
   session.provider = selection.provider.id
   session.model = selection.model.id
+  session.agent = profile?.name
   // Mentions are read here rather than in the agent so the stored message
   // carries the files with it: a resumed conversation keeps its context.
   // What was folded away goes back before anything sees it.
@@ -2196,11 +2245,14 @@ async function send() {
       history: edits,
       extraTools: mcp,
       // Offered only with /boost - or while subagents started under it are still out.
-      subagents: boost || boostOnce || subagents.running().length ? subagents : undefined,
+      subagents: !profile?.tools && (boost || boostOnce || subagents.running().length) ? subagents : undefined,
+      tools: profile?.tools,
+      // The profile's model override already changed `selection`, so this is
+      // the target model's own saved effort, never the parent model's.
       effort: effortFor(selection.model, currentEffort()),
       signal: turn.signal,
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
-      instructions: [skillIndex(listSkills(process.cwd())), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
+      instructions: [profile ? "Active agent: " + profile.name + "\n" + profile.prompt : undefined, skillIndex(listSkills(process.cwd())), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
     })) {
       if (event.type === "thinking") {
         if (!current || current.kind !== "thinking") {
@@ -2351,6 +2403,7 @@ async function restoreSession(loaded: sessions.Session) {
   const requested = loaded.model ? loaded.provider + "/" + loaded.model : loaded.provider
   const restored = await resolveStartupModel(requested)
   session = loaded
+  agentName = loaded.agent
   spend = loaded.spend ?? { input: 0, output: 0 }
   messages = loaded.messages
   transcript = fromMessages(messages)

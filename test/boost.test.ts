@@ -25,12 +25,12 @@ describe("neither surface offers subagents unless boosted", () => {
 
   test("the terminal passes them only with boost, or while some are still out", () => {
     const text = fs.readFileSync(path.join(root, "tui", "app.ts"), "utf8")
-    expect(text).toContain("subagents: boost || boostOnce || subagents.running().length ? subagents : undefined")
+    expect(text).toContain("subagents: !profile?.tools && (boost || boostOnce || subagents.running().length) ? subagents : undefined")
   })
 
   test("the web server passes them only when the page asked for boost", () => {
     const text = fs.readFileSync(path.join(root, "web", "serve.ts"), "utf8")
-    expect(text).toContain("subagents: body.boost === true || subagents.running().length ? subagents : undefined")
+    expect(text).toContain("subagents: !profile?.tools && (body.boost === true || subagents.running().length) ? subagents : undefined")
   })
 })
 
