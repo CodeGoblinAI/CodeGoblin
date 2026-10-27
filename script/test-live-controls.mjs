@@ -31,7 +31,7 @@ const server = http.createServer((request, response) => {
     if (requests === 1) {
       response.end('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"live-test","function":{"name":"shell","arguments":"{\\"command\\":\\"echo live-control-ok\\"}"}}]}}]}\n\ndata: [DONE]\n\n')
     } else {
-      assert.ok(body.includes("live-control-ok"))
+      if (requests <= 3) assert.ok(body.includes("live-control-ok"))
       response.write('data: {"choices":[{"delta":{"content":"Still working for the live-control test."}}]}\n\n')
       held = response
     }
@@ -82,7 +82,27 @@ try {
   assert.equal(requests, 3)
   held.end("data: [DONE]\n\n")
   await until(() => output.includes("new conversation"), "queued clear after turn finishes")
-  console.log("PASS: live approvals, pending release, Shift-Tab, slash control, queued draft preservation, queued clear. Profile retained: " + profile)
+  await type("test queued model\r")
+  await until(() => requests === 4, "new conversation turn starts")
+  await type("/model local/fixture\r")
+  await type("UNSENT draft after model command")
+  held.end("data: [DONE]\n\n")
+  await until(() => output.includes("Local fixture"), "queued model command finishes")
+  output = ""
+  await type("\x1b[C")
+  await until(() => output.includes("UNSENT draft after model command"), "new draft survives queued model command")
+  assert.equal(requests, 4)
+  await type("\x15")
+  await type("test queued clear\r")
+  await until(() => requests === 5, "clear regression turn starts")
+  await type("/clear\r")
+  await type("UNSENT draft after clear")
+  output = ""
+  held.end("data: [DONE]\n\n")
+  await until(() => output.includes("new conversation"), "clear preserves a newer draft")
+  assert.ok(output.includes("UNSENT draft after clear"))
+  assert.equal(requests, 5)
+  console.log("PASS: live approvals, pending release, Shift-Tab, slash control, queued prompt/model/clear draft preservation. Profile retained: " + profile)
 } finally {
   term.write("\x03")
   await delay(1800)

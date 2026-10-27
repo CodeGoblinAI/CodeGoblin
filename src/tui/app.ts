@@ -2447,7 +2447,7 @@ async function send() {
       input = next
       cursor = next.length
       void send()
-      if (!isCommand(next)) {
+      if (!isCommand(next) || draft.text) {
         applyComposer(draft)
         refreshPalette()
         render()

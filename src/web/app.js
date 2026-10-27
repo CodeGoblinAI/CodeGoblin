@@ -1782,10 +1782,11 @@ async function submit() {
       const draftImages = attachments
       attachments = queuedImages
       sendText(text)
-      if (!text.startsWith("/")) {
+      if (!text.startsWith("/") || draft || draftImages.length) {
         input.value = draft
         attachments = draftImages
         renderAttached()
+        refreshPalette()
       }
     }, text || "attached images")
     return
