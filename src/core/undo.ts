@@ -1,5 +1,6 @@
 import fs from "node:fs/promises"
 import path from "node:path"
+import { realpathSync } from "node:fs"
 import { resolveInside } from "./tools"
 
 const BACKSLASH = String.fromCharCode(92)
@@ -33,6 +34,11 @@ export type Checkpoint = {
 
 /** Enough to walk back through an afternoon, not enough to hoard a tree. */
 const MAX_CHECKPOINTS = 20
+export type ReviewState = { root: string; files: Snapshot[]; truncated?: boolean }
+const REVIEW_FILES = 100
+const REVIEW_BYTES = 4 * 1024 * 1024
+const REVIEW_FILE_BYTES = 256 * 1024
+const rootIdentity = (root: string) => process.platform === "win32" ? realpathSync(root).toLowerCase() : realpathSync(root)
 
 /** The ancestors of a path that do not exist yet, outermost first. */
 async function missingAncestors(root: string, relative: string): Promise<string[]> {
@@ -92,6 +98,7 @@ export class History {
    * change because somebody undid something in the middle.
    */
   private origin = new Map<string, string | null>()
+  reviewNotice?: string
 
   /** Start a turn. Nothing is kept unless the turn actually writes something. */
   begin(label: string) {
@@ -127,6 +134,46 @@ export class History {
   /** Every file this session has touched, and how it looked to begin with. */
   origins(): Map<string, string | null> {
     return new Map(this.origin)
+  }
+
+  /** Read-only baselines, not executable undo checkpoints. Bound to this physical workspace. */
+  reviewState(root: string): ReviewState {
+    const files: Snapshot[] = []
+    let bytes = 0
+    let truncated = Boolean(this.reviewNotice)
+    for (const [relative, before] of this.origin) {
+      const size = before === null ? 0 : Buffer.byteLength(before)
+      if (files.length >= REVIEW_FILES || size > REVIEW_FILE_BYTES || bytes + size > REVIEW_BYTES) { truncated = true; continue }
+      try {
+        files.push({ path: path.relative(root, resolveInside(root, relative)), before })
+        bytes += size
+      } catch { truncated = true }
+    }
+    return { root: rootIdentity(root), files, ...(truncated ? { truncated: true } : {}) }
+  }
+
+  restoreReview(root: string, input: unknown) {
+    if (!input) return
+    const state = input as Partial<ReviewState>
+    if (state.root !== rootIdentity(root) || !Array.isArray(state.files) || state.files.length > REVIEW_FILES) {
+      this.reviewNotice = "Saved diff baseline unavailable for this workspace; no external paths were loaded."
+      return
+    }
+    const restored = new Map<string, string | null>()
+    let bytes = 0
+    for (const snapshot of state.files) {
+      if (!snapshot || typeof snapshot.path !== "string" || !snapshot.path || path.isAbsolute(snapshot.path) || (snapshot.before !== null && typeof snapshot.before !== "string")) {
+        this.reviewNotice = "Saved diff baseline invalid; no baseline was restored."
+        return
+      }
+      const size = snapshot.before === null ? 0 : Buffer.byteLength(snapshot.before)
+      if (size > REVIEW_FILE_BYTES || bytes + size > REVIEW_BYTES) { this.reviewNotice = "Saved diff baseline exceeds limits; no baseline was restored."; return }
+      try { resolveInside(root, snapshot.path) } catch { this.reviewNotice = "Saved diff path is outside this workspace; no baseline was restored."; return }
+      bytes += size
+      restored.set(snapshot.path, snapshot.before)
+    }
+    this.origin = restored
+    this.reviewNotice = state.truncated ? "Saved diff is incomplete: some baselines exceeded limits or were unavailable." : undefined
   }
 
   /** End a turn. A turn that changed nothing leaves no checkpoint to undo. */
@@ -166,6 +213,7 @@ export class History {
     this.undone = []
     this.open = undefined
     this.origin.clear()
+    this.reviewNotice = undefined
   }
 }
 
@@ -178,6 +226,7 @@ export class History {
 export function nothingToDo(history: History, forward: boolean): string {
   if (forward) return "nothing to redo"
   if (history.canRedo()) return "already back to how this session started - /redo to reapply"
+  if (history.origins().size) return "Undo checkpoints are not restored across restart/resume; /diff keeps the recorded baseline."
   return "nothing to undo - no file has been changed this session"
 }
 
