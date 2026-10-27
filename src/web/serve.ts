@@ -831,12 +831,12 @@ async function handle(request: Request): Promise<Response> {
           // Stopping mid-stream throws out of the loop. The TUI keeps the
           // conversation when that happens; here it used to vanish - the
           // prompt never reached Sessions and could not be resumed. A stop
-          // is also not an error worth reporting.
-          if (turn.signal.aborted) {
-            if (!session.messages.at(-1)?.stopped) session.messages.push({ role: "assistant", content: "", stopped: true })
-            await saveReviewSession(session).catch(() => {})
-            send({ type: "stopped" })
-          }
+          // is also not an error worth reporting. A provider failure is saved
+          // too: an approved write may already be on disk, and losing the
+          // conversation would lose the only record of it and its diff.
+          if (turn.signal.aborted && !session.messages.at(-1)?.stopped) session.messages.push({ role: "assistant", content: "", stopped: true })
+          await saveReviewSession(session).catch(() => {})
+          if (turn.signal.aborted) send({ type: "stopped" })
           else send({ type: "error", message: error instanceof Error ? error.message : "request failed" })
         } finally {
           edits.commit()
