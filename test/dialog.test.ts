@@ -16,6 +16,24 @@ import {
 const rows = (...labels: string[]): DialogRow[] => labels.map((label) => ({ label, value: label }))
 
 describe("moving through a dialog", () => {
+  test("a requested current value opens selected and scrolls into view", () => {
+    const dialog = open("test", "Models", rows(...Array.from({ length: 40 }, (_, index) => "model-" + index)), { selectedValue: "model-37" })
+    expect(selected(dialog)?.value).toBe("model-37")
+    const start = firstVisible(dialog, 10)
+    expect(dialog.index).toBeGreaterThanOrEqual(start)
+    expect(dialog.index).toBeLessThan(start + 10)
+  })
+
+  test("a missing or inert current value falls back to the first selectable row", () => {
+    const options: DialogRow[] = [{ label: "Heading", value: "heading", inert: true }, { label: "one", value: "one" }]
+    expect(selected(open("test", "T", options, { selectedValue: "missing" }))?.value).toBe("one")
+    expect(selected(open("test", "T", options, { selectedValue: "heading" }))?.value).toBe("one")
+  })
+
+  test("an omitted current value does not prefer an unvalued row", () => {
+    expect(selected(open("test", "T", [{ label: "one", value: "one" }, { label: "two" }]))?.value).toBe("one")
+  })
+
   test("it opens on the first row that can be chosen", () => {
     const dialog = open("test", "Title", [
       { label: "Heading", inert: true },

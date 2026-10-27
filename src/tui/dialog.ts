@@ -74,9 +74,10 @@ export function open(
   kind: string,
   title: string,
   rows: DialogRow[],
-  options: { footer?: string; size?: Dialog["size"] } = {},
+  options: { footer?: string; size?: Dialog["size"]; selectedValue?: string } = {},
 ): Dialog {
-  const first = selectable(rows)[0] ?? 0
+  const choices = selectable(rows)
+  const first = (options.selectedValue === undefined ? undefined : choices.find((index) => rows[index]!.value === options.selectedValue)) ?? choices[0] ?? 0
   return {
     kind,
     title,
