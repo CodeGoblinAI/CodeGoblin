@@ -1870,6 +1870,14 @@ async function send() {
 
   const text = normalizeCommand(input.trim())
   if (!text) return
+  // What was in the composer when this send began. Resolving an agent profile
+  // awaits, and a queued prompt restores the newer draft while that runs - so
+  // clearing afterwards must only take away the text being sent, never the
+  // draft typed since.
+  const sending = input
+  const clearSent = () => {
+    if (input === sending) { input = ""; cursor = 0 }
+  }
 
   // A custom command or a skill reads like a command but is a message: its
   // text is what the model gets, and the line typed is what the transcript shows.
@@ -2236,8 +2244,7 @@ async function send() {
   }
   const selectedKind = kindOf(selection.model)
   if (selectedKind !== "text") {
-    input = ""
-    cursor = 0
+    clearSent()
     palette = undefined
     history.push(text)
     historyIndex = -1
@@ -2257,8 +2264,7 @@ async function send() {
     return
   }
 
-  input = ""
-  cursor = 0
+  clearSent()
   palette = undefined
   scroll = 0
   history.push(text)
