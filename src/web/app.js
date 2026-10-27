@@ -1715,6 +1715,49 @@ function note(text) {
   scrollDown()
 }
 
+/** Only an explicit abort is a user stop; losing the server is not cancellation. */
+function chatFailure(aborted, started) {
+  if (aborted) return { message: "_stopped_", recover: false }
+  if (started) return {
+    message: "**Connection interrupted.** The answer may be incomplete. Check that the CG-Next server is running and use /resume before continuing; tools may already have run. Nothing was automatically retried.",
+    recover: false,
+  }
+  return {
+    message: "**Could not reach the CG-Next server.** Check that it is running, then review /resume before sending again; tools may have run if only the response was lost. Nothing was automatically retried.",
+    recover: true,
+  }
+}
+
+/** Keep both drafts when someone has already started typing the next message. */
+function recoverChatDraft(text, images, reply) {
+  if (!input.value.trim() && !attachments.length) {
+    input.value = text
+    attachments = images
+    renderAttached()
+    refreshPalette()
+    return
+  }
+  const button = document.createElement("button")
+  button.type = "button"
+  button.className = "pallow"
+  button.textContent = "Restore unsent message"
+  let showingFailed = false
+  button.onclick = () => {
+    const currentText = input.value
+    const currentImages = attachments
+    input.value = text
+    attachments = images
+    text = currentText
+    images = currentImages
+    showingFailed = !showingFailed
+    button.textContent = showingFailed ? "Restore newer draft" : "Restore unsent message"
+    renderAttached()
+    refreshPalette()
+    input.focus()
+  }
+  reply.appendChild(button)
+}
+
 async function submit() {
   const text = input.value.trim().replace(/^\/[^\s]+/, (name) => paletteData.aliases?.[name] || name)
   if (!text && !attachments.length) return
@@ -1789,7 +1832,8 @@ async function submit() {
   let raw = ""
   let thinking = null
   let thinkingRaw = ""
-  controller = new AbortController()
+  const request = new AbortController()
+  controller = request
 
   let response
   try {
@@ -1797,22 +1841,24 @@ async function submit() {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text, sessionId, provider: currentModel, agent: currentAgent, images: sending, mode: currentMode, planning, boost: boost || boostOnce }),
-      signal: controller.signal,
+      signal: request.signal,
     })
   } catch {
-    turn("agent", "_request cancelled_")
+    const failure = chatFailure(request.signal.aborted || stopRequested, false)
+    const reply = turn("agent", failure.message)
+    if (failure.recover) recoverChatDraft(text, sending, reply)
+    stopRequested = false
+    controller = null
     setBusy(false)
     return
   }
 
   if (!response.ok || !response.body) {
     const err = await response.json().catch(() => ({}))
-    turn("agent", err.error || "request failed")
-    if (response.status === 400 && !input.value) {
-      input.value = text
-      attachments = [...sending, ...attachments]
-      renderAttached()
-    }
+    const reply = turn("agent", err.error || "request failed")
+    if (!request.signal.aborted && !stopRequested) recoverChatDraft(text, sending, reply)
+    stopRequested = false
+    controller = null
     setBusy(false)
     return
   }
@@ -1820,6 +1866,8 @@ async function submit() {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
+  let finished = false
+  let interrupted = false
 
   try {
     for (;;) {
@@ -1970,8 +2018,9 @@ async function submit() {
         }
         if (event.type === "output_limit") note("The model reached its output-token limit. The answer is unfinished; ask it to continue or increase the server's output budget.")
         if (event.type === "checkpoint") note("paused at the autonomy checkpoint (" + event.toolCalls + " tool calls) - " + (event.stopped ? "stopped; ask it to continue." : "continuing."))
-        if (event.type === "error") turn("agent", "**Error:** " + event.message)
+        if (event.type === "error") { finished = true; turn("agent", "**Error:** " + event.message) }
         if (event.type === "saved") {
+          finished = true
           refreshSessions()
           void refreshFiles(true)
           boostOnce = false
@@ -1982,9 +2031,12 @@ async function submit() {
       }
     }
   } catch {
-    stopRequested = true
+    interrupted = true
   }
 
+  if (!stopRequested && !request.signal.aborted && (interrupted || !finished)) {
+    turn("agent", chatFailure(false, true).message)
+  }
   // The server can close the stream before the abort lands, so the read loop
   // ends quietly and a stopped answer used to look finished.
   if (stopRequested) {
