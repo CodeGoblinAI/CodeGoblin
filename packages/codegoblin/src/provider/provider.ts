@@ -29,6 +29,7 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
 import { modelNotFoundMessage } from "./model-error"
+import { fetchWithImageInputFallback } from "./image-input-fallback"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import {
   augmentAudioModelCatalog,
@@ -1831,11 +1832,14 @@ export const layer = Layer.effect(
             }
           }
 
-          const res = await fetchFn(input, {
+          const request = {
             ...opts,
-            // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
-            timeout: false,
-          })
+            timeout: false as const,
+          }
+          const res =
+            model.api.npm === "@ai-sdk/openai-compatible"
+              ? await fetchWithImageInputFallback(fetchFn, input, request)
+              : await fetchFn(input, request)
 
           if (!chunkAbortCtl) return res
           return wrapSSE(res, chunkTimeout, chunkAbortCtl)
