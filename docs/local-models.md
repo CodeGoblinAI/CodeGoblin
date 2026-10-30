@@ -29,8 +29,10 @@ Five small tasks through the real agent loop in a throwaway workspace: read a li
 |---|---|---|---|
 | Qwen3 1.7B Q8_0 | 4/5 | 3-203 s | Rename looped into the 8-turn cap (11 calls). The read-then-write took 9 calls and 17k output tokens. |
 | Bonsai 2 27B | 5/5 | 39-119 s (10 s load) | Minimal calls: one `read_file`, or `read_file` then `write_file`. Slow prefill, consistent with the model plus 32k context not fitting in free VRAM. |
+| Qwen3 4B Q4_K_M | 4/5 | 5-105 s (2.5 s load) | Faster than 1.7B, but on the read-then-write task it **wrote a shell command into `port.txt` and reported success**. |
+| **Qwen3 8B Q4_K_M** | **5/5** | 17-105 s (10 s load) | Clean: one to three calls per task, correct files, honest answers. |
 
-That is why tools are on by default only from 4 GB. Qwen3 4B and 8B (in `/local pull`) are the untested middle ground.
+Qwen3 8B is the local model to use for coding: as reliable as Bonsai 27B and much faster here. It is 4.7 GB, so it already gets tools by default. The 4 GB threshold stands: the 4B model's confident false success is worse than an honest failure. Both were downloaded through `/local pull` on 2026-10-30 (4B from the web UI; 8B with a deliberate cancel at 8% and a `206` Range resume) and re-hashed with `Get-FileHash`.
 
 ## An external server you run yourself (CODEGOBLIN_LOCAL_URL)
 
