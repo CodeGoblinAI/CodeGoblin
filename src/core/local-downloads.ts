@@ -38,6 +38,8 @@ export const sourceUrl = (entry: CatalogEntry) => `https://huggingface.co/${entr
 const TRUSTED = (host: string) => host === "huggingface.co" || host.endsWith(".huggingface.co") || host.endsWith(".hf.co")
 
 export const gb = (bytes: number) => (bytes / 1024 ** 3).toFixed(1) + " GB"
+/** Progress in MB until there is a whole gigabyte of it: "0.0 GB" for the first minutes read as stuck. */
+const amount = (bytes: number) => bytes < 1024 ** 3 ? Math.floor(bytes / 1024 ** 2) + " MB" : gb(bytes)
 
 export type Progress = { entry: CatalogEntry; received: number; total: number; bytesPerSecond: number; startedAt: number; resumedFrom: number }
 
@@ -58,7 +60,7 @@ export function progressText(progress: Progress): string {
   const percent = Math.floor((progress.received / progress.total) * 100)
   const speed = progress.bytesPerSecond ? ` · ${(progress.bytesPerSecond / 1024 ** 2).toFixed(0)} MB/s` : ""
   const left = progress.bytesPerSecond ? ` · ~${Math.max(1, Math.round((progress.total - progress.received) / progress.bytesPerSecond / 60))} min left` : ""
-  return `downloading ${progress.entry.label}: ${percent}% · ${gb(progress.received)} of ${gb(progress.total)}${speed}${left} · /local cancel stops it`
+  return `downloading ${progress.entry.label}: ${percent}% · ${amount(progress.received)} of ${gb(progress.total)}${speed}${left} · /local cancel stops it`
 }
 
 function ended(entry: CatalogEntry, error?: unknown): string {

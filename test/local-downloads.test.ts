@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import fs from "node:fs"
 import path from "node:path"
 import { createHash } from "node:crypto"
-import { cancelDownload, currentDownload, downloadModel, LOCAL_CATALOG, type CatalogEntry } from "../src/core/local-downloads"
+import { cancelDownload, currentDownload, downloadModel, LOCAL_CATALOG, progressText, type CatalogEntry } from "../src/core/local-downloads"
 
 const bytes = Buffer.from(Array.from({ length: 200_000 }, (_, index) => index % 251))
 const entry: CatalogEntry = {
@@ -87,6 +87,12 @@ test("a short body keeps its .part for later; cancel stops a stalled one and kee
   await expect(pending).rejects.toBeDefined()
   expect(currentDownload()).toBeUndefined()
   expect(fs.existsSync(path.join(stalled, entry.file + ".part"))).toBe(true)
+})
+
+test("progress reads in MB until a whole gigabyte has arrived", () => {
+  const at = (received: number) => progressText({ entry: { ...entry, bytes: 5 * 1024 ** 3 }, received, total: 5 * 1024 ** 3, bytesPerSecond: 3 * 1024 ** 2, startedAt: 0, resumedFrom: 0 })
+  expect(at(40 * 1024 ** 2)).toContain("0% · 40 MB of 5.0 GB · 3 MB/s")
+  expect(at(2.5 * 1024 ** 3)).toContain("50% · 2.5 GB of 5.0 GB")
 })
 
 test("too little disk space is refused up front", async () => {
