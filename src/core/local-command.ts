@@ -1,4 +1,5 @@
 import { contextFor, findEngine, installedModels, localRuntime, logPath, modelDirs, ownedEngineDir, readPrefs, savePrefs, toolsFor, type LocalRuntime } from "./local-runtime"
+import { LOCAL_CATALOG, cancelDownload, currentDownload, isInstalled, lastDownload, progressText } from "./local-downloads"
 
 /**
  * /local - what CG-Next's own llama.cpp runtime is doing, and the few things
@@ -13,7 +14,7 @@ const gb = (bytes: number) => (bytes / 1024 ** 3).toFixed(1) + " GB"
 const count = (value: number) => value.toLocaleString("en-US")
 const minutes = (ms: number) => ms < 60_000 ? Math.max(1, Math.round(ms / 1000)) + " s" : Math.round(ms / 60_000) + " min"
 
-export const LOCAL_USAGE = "usage: /local, /local stop, /local tools on|off|auto [model], /local context <tokens>|auto [model]"
+export const LOCAL_USAGE = "usage: /local, /local pull, /local cancel, /local stop, /local tools on|off|auto [model], /local context <tokens>|auto [model]"
 
 export async function localCommand(argument: string, current?: string, runtime: LocalRuntime = localRuntime): Promise<string> {
   const [action = "", value, named] = argument.trim().split(/\s+/).filter(Boolean)
@@ -29,6 +30,15 @@ export async function localCommand(argument: string, current?: string, runtime: 
     case "":
     case "status":
       return localStatus(runtime)
+    // The surfaces open a picker and ask before downloading; this is the typed fallback.
+    case "pull":
+      return "Downloads: " + LOCAL_CATALOG.map((entry) => `${entry.id} (${gb(entry.bytes)}${isInstalled(entry) ? ", installed" : ""})`).join(", ") + ". /local pull opens the list."
+    case "cancel": {
+      const download = currentDownload()
+      if (!download) return "No download is running."
+      cancelDownload()
+      return `Stopping the download of ${download.entry.label}; the partial file is kept and /local pull resumes it.`
+    }
     case "stop": {
       const status = runtime.status()
       if (status.state === "stopped") return "No local model server is running."
@@ -92,10 +102,14 @@ export function localStatus(runtime: LocalRuntime = localRuntime): string {
   }
   if (status.reclaimed.length) lines.push("Cleaned up servers an earlier CG-Next run left behind: " + status.reclaimed.join(", "))
 
+  const download = currentDownload()
+  if (download) lines.push("Download: " + progressText(download).replace(/^downloading /, ""))
+  else if (lastDownload() && Date.now() - lastDownload()!.at < 10 * 60_000) lines.push("Last download: " + lastDownload()!.message)
+
   const prefs = readPrefs()
   const models = installedModels({ fresh: true })
   lines.push("")
-  if (!models.length) lines.push("No GGUF models installed yet.")
+  if (!models.length) lines.push("No GGUF models installed yet. /local pull downloads one.")
   else {
     lines.push("Installed (/model llama/<id>, or Local models in the picker):")
     for (const model of models) {
@@ -104,6 +118,6 @@ export function localStatus(runtime: LocalRuntime = localRuntime): string {
     }
   }
   lines.push("Looked in:", ...modelDirs().map((entry) => "  " + entry.dir + (entry.source === "owned" ? " (CG-Next's own)" : "")))
-  lines.push("", "/local stop · /local tools on|off|auto [model] · /local context <tokens>|auto [model]")
+  lines.push("", "/local pull · /local stop · /local tools on|off|auto [model] · /local context <tokens>|auto [model]")
   return lines.join(NEWLINE)
 }

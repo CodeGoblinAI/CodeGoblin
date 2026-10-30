@@ -13,9 +13,24 @@ Every GGUF CG-Next can find appears under **Local models** in the TUI and web pi
 - **Tools**: models of 4 GB and up (and Bonsai) are offered CG's tools. Smaller ones get the lean chat prompt, since they mostly misuse tools. `/local tools on|off|auto` overrides it per model.
 - **Context**: 16,384 tokens by default (32,768 for Bonsai, with its Q4 KV cache). Use `/local context <tokens>|auto` to change it; a running, idle server restarts with the new size.
 
-`/local` shows the engine, the server (model, port, pid, context, uptime, log path), the installed models and where they were looked for. `/local stop` frees the memory and refuses while an answer is running.
+`/local` shows the engine, the server (model, port, pid, context, uptime, log path), any download, the installed models and where they were looked for. `/local stop` frees the memory and refuses while an answer is running.
 
-Not yet: downloading engines or models from inside the app (drop a `.gguf` into the models folder for now), and measured tool-use reliability.
+### Downloading models
+
+`/local pull` opens a list of official Qwen3 GGUFs (0.6B, 1.7B, 4B, 8B). Picking one shows its size, source (`huggingface.co/Qwen/...`) and destination, and nothing is fetched until you confirm. Each file is pinned to the size and SHA-256 the Hugging Face API reported on 2026-10-30. The download goes to `<file>.part` and is renamed only when both match; a mismatch is discarded. Redirects are followed only to Hugging Face hosts over HTTPS. Free disk space is checked first. One download runs at a time; `/local cancel` stops it and keeps the `.part`, and the next `/local pull` resumes it with a Range request. The web dialog can be closed while it runs; `/local` shows progress in both surfaces.
+
+Engine downloads are not built yet. The fork's CUDA engine is used read-only, or drop `llama-server.exe` and its DLLs into `<data>/local/engine`.
+
+### Measured tool use (2026-10-30)
+
+Five small tasks through the real agent loop in a throwaway workspace: read a line, write a file, rename a function in a file, count `.md` files, and read JSON then write one field to a file. Tools forced on, every call approved, 8-turn cap, on the RTX 4060 Ti with about 6 GB of VRAM free.
+
+| Model | Passed | Per task | Behaviour |
+|---|---|---|---|
+| Qwen3 1.7B Q8_0 | 4/5 | 3-203 s | Rename looped into the 8-turn cap (11 calls). The read-then-write took 9 calls and 17k output tokens. |
+| Bonsai 2 27B | 5/5 | 39-119 s (10 s load) | Minimal calls: one `read_file`, or `read_file` then `write_file`. Slow prefill, consistent with the model plus 32k context not fitting in free VRAM. |
+
+That is why tools are on by default only from 4 GB. Qwen3 4B and 8B (in `/local pull`) are the untested middle ground.
 
 ## An external server you run yourself (CODEGOBLIN_LOCAL_URL)
 

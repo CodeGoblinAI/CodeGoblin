@@ -12,7 +12,8 @@ import { fileURLToPath } from "node:url"
 import { localChatMessages, runAgent, type Message } from "../core/agent"
 import { cliStatuses } from "../core/cli-status"
 import { isLocalChat } from "../core/local-provider"
-import { findEngine } from "../core/local-runtime"
+import { findEngine, ownedModelsDir } from "../core/local-runtime"
+import { LOCAL_CATALOG, currentDownload, downloadModel, gb as gbOf, isInstalled, lastDownload, progressText } from "../core/local-downloads"
 import { localCommand } from "../core/local-command"
 import { resolveStartupModel } from "../core/model-selection"
 import { cliHandoff } from "../core/cli-handoff"
@@ -476,6 +477,31 @@ async function handle(request: Request): Promise<Response> {
     const response = json({ ...snapshot, rows: balanceRows(snapshot) })
     response.headers.set("cache-control", "no-store")
     return response
+  }
+
+  if (url.pathname === "/api/local/catalog" && request.method === "GET") {
+    const active = currentDownload()
+    return json({
+      dir: ownedModelsDir(),
+      active: active ? progressText(active) : undefined,
+      catalog: LOCAL_CATALOG.map((entry) => ({ id: entry.id, label: entry.label, repo: entry.repo, size: gbOf(entry.bytes), about: entry.about, installed: isInstalled(entry) })),
+    })
+  }
+
+  if (url.pathname === "/api/local/download" && request.method === "GET") {
+    const active = currentDownload()
+    return json({ active: active ? progressText(active) : undefined, last: lastDownload() })
+  }
+
+  // Starts and returns; the download runs in this server and the browser polls it.
+  if (url.pathname === "/api/local/pull" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { id?: unknown }
+    const entry = LOCAL_CATALOG.find((item) => item.id === body.id)
+    if (!entry) return json({ message: "Not a model CG-Next offers to download" }, 400)
+    if (isInstalled(entry)) return json({ message: entry.label + " is already installed; pick it under Local models." })
+    if (currentDownload()) return json({ message: "Already downloading " + currentDownload()!.entry.label + "; cancel it first." })
+    downloadModel(entry).catch(() => {})
+    return json({ started: true, message: "Downloading " + entry.label })
   }
 
   // /local runs against this server's own llama-server, which is the one the browser's prompts use.

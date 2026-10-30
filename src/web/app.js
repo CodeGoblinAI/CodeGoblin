@@ -1360,6 +1360,61 @@ async function openImportDialog(selectedId) {
   await page()
 }
 
+// The models CG-Next can download. Nothing is fetched until Download is
+// pressed on a second step that says how big, from where and to where.
+async function openLocalPullDialog(selectedId) {
+  const modal = makeDialog("Download a local model")
+  const status = document.createElement("p")
+  status.textContent = "Official Qwen files from Hugging Face, kept only if their size and SHA-256 match."
+  const list = document.createElement("div"); modal.append(status, list)
+  const data = await fetch("/api/local/catalog", { cache: "no-store" }).then((r) => r.json()).catch(() => null)
+  if (!modal.isConnected) return
+  if (!data) { status.textContent = "could not reach the server"; return }
+  const watch = () => {
+    const tick = async () => {
+      if (!modal.isConnected) return
+      const state = await fetch("/api/local/download", { cache: "no-store" }).then((r) => r.json()).catch(() => null)
+      if (!modal.isConnected) return
+      if (state?.active) { status.textContent = state.active; setTimeout(tick, 1000); return }
+      status.textContent = state?.last?.message || "Download finished."
+      cancel.remove()
+      if (state?.last?.ok) await loadProviders()
+    }
+    const cancel = document.createElement("button"); cancel.textContent = "Cancel download"
+    cancel.onclick = async () => {
+      const result = await fetch("/api/local", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ argument: "cancel" }) }).then((r) => r.json()).catch(() => null)
+      if (modal.isConnected && result) status.textContent = result.message
+    }
+    list.replaceChildren(cancel)
+    void tick()
+  }
+  const choose = (entry) => {
+    if (entry.installed) { status.textContent = entry.label + " is already installed; pick it under Local models."; return }
+    list.replaceChildren()
+    const about = document.createElement("p")
+    about.textContent = "Download " + entry.size + " from huggingface.co/" + entry.repo + " to " + data.dir + ". You can close this dialog; the download carries on, and /local shows its progress."
+    const confirm = document.createElement("button"); confirm.textContent = "Download " + entry.size
+    const back = document.createElement("button"); back.textContent = "Cancel"; back.onclick = () => modal.close()
+    confirm.onclick = async () => {
+      confirm.disabled = true
+      const result = await fetch("/api/local/pull", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: entry.id }) }).then((r) => r.json()).catch(() => null)
+      if (!modal.isConnected) return
+      if (!result?.started) { status.textContent = result?.message || "could not start the download"; confirm.disabled = false; return }
+      watch()
+    }
+    list.append(about, confirm, back)
+  }
+  if (data.active) { watch(); return }
+  const named = selectedId && data.catalog.find((entry) => entry.id === selectedId)
+  if (named) { choose(named); return }
+  for (const entry of data.catalog) {
+    const row = document.createElement("button"); row.className = "dialog-action"
+    row.textContent = entry.label + " · " + entry.size + " · " + entry.about + (entry.installed ? " · installed" : "")
+    row.onclick = () => choose(entry)
+    list.appendChild(row)
+  }
+}
+
 async function runCommand(text) {
   text = text.replace(/^\/[^\s]+/, (name) => paletteData.aliases?.[name] || name)
   const [name, ...rest] = text.split(" ")
@@ -1395,6 +1450,10 @@ async function runCommand(text) {
     const [source, id, extra] = argument.split(/\s+/)
     if (source !== "codex" || extra) { note("Use /import codex [session-id]; imports are new text-only conversations"); return true }
     await openImportDialog(id); return true
+  }
+  if (name === "/local" && /^pull\b/.test(argument)) {
+    await openLocalPullDialog(argument.split(/\s+/)[1])
+    return true
   }
   if (name === "/local") {
     const result = await fetch("/api/local", {

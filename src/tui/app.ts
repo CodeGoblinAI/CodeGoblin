@@ -19,6 +19,8 @@ import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } 
 import { selectionsByKind } from "../core/providers"
 import { isLocalChat } from "../core/local-provider"
 import { localCommand } from "../core/local-command"
+import { LOCAL_CATALOG, currentDownload, downloadModel, gb as gbOf, isInstalled, lastDownload, progressText } from "../core/local-downloads"
+import { ownedModelsDir } from "../core/local-runtime"
 import { normalizeCommand } from "../core/commands"
 import { cliAuthStatus, cliStatuses } from "../core/cli-status"
 import { cliHandoff } from "../core/cli-handoff"
@@ -1342,6 +1344,29 @@ function confirmImport(id: string, title: string) {
   ], { size: "large", footer: "enter confirms . esc cancels" })
 }
 
+/** The models CG-Next can download, as a list to pick from. */
+function openLocalPull() {
+  const running = currentDownload()
+  dialog = Dialogs.open("local-pull", "Download a local model", LOCAL_CATALOG.map((entry) => ({
+    label: `${entry.label} · ${gbOf(entry.bytes)} · ${entry.about}`,
+    value: entry.id,
+    hint: isInstalled(entry) ? "installed" : running?.entry.id === entry.id ? "downloading" : undefined,
+  })), { size: "large", footer: "enter chooses . esc closes . official Qwen files, checked against a pinned SHA-256" })
+}
+
+/** Nothing is fetched until this is answered: it says how big, from where, and to where. */
+function confirmLocalPull(entry: (typeof LOCAL_CATALOG)[number]) {
+  if (isInstalled(entry)) { status = entry.label + " is already installed; pick it under Local models"; return }
+  dialog = Dialogs.open("local-pull-confirm", "Download " + entry.label + "?", [
+    { label: `Download ${gbOf(entry.bytes)}`, value: entry.id },
+    { label: "Cancel", value: "cancel" },
+    { label: "From huggingface.co/" + entry.repo, inert: true },
+    { label: "To " + ownedModelsDir(), inert: true },
+    { label: "Kept only if size and SHA-256 match", inert: true },
+    { label: "/local cancel stops it; /local pull resumes it", inert: true },
+  ], { size: "large", footer: "enter confirms . esc cancels" })
+}
+
 /** Session, spend and servers beside the transcript on wide terminals. */
 function railLines(height: number): string[] {
   const context = contextUsage()
@@ -1667,6 +1692,24 @@ async function chooseInDialog() {
   if (dialog.kind === "codex-import") {
     if (row.value.startsWith("page:")) { await openImport(row.value.slice(5)); return }
     confirmImport(row.value, row.label)
+    render(); return
+  }
+  if (dialog.kind === "local-pull") {
+    const entry = LOCAL_CATALOG.find((item) => item.id === row.value)
+    closeDialog()
+    if (entry && isInstalled(entry)) status = entry.label + " is already installed; pick it under Local models"
+    else if (entry) confirmLocalPull(entry)
+    render(); return
+  }
+  if (dialog.kind === "local-pull-confirm") {
+    const entry = LOCAL_CATALOG.find((item) => item.id === row.value)
+    closeDialog()
+    if (!entry) { status = "Download cancelled; nothing was fetched"; render(); return }
+    status = "starting the download of " + entry.label + "…"
+    void downloadModel(entry, { onProgress: (progress) => { status = progressText(progress); render() } })
+      .then((file) => { transcript.push({ kind: "tool", state: "done", text: lastDownload()?.message ?? "downloaded " + file }); status = entry.label + " downloaded and verified" })
+      .catch((error: unknown) => { transcript.push({ kind: "tool", state: "failed", text: error instanceof Error ? error.message : String(error) }); status = "download of " + entry.label + " stopped" })
+      .finally(render)
     render(); return
   }
   if (dialog.kind === "codex-import-confirm") {
@@ -2224,6 +2267,12 @@ async function send() {
     }
     if (result.kind === "balance") {
       openUsage(result.provider || selection.provider.id, true)
+    }
+    if (result.kind === "local" && /^pull\b/.test(result.argument)) {
+      const named = LOCAL_CATALOG.find((entry) => entry.id === result.argument.split(/\s+/)[1])
+      if (named) confirmLocalPull(named)
+      else openLocalPull()
+      render(); return
     }
     if (result.kind === "local") {
       const text = await localCommand(result.argument, selection.provider.id + "/" + selection.model.id)
