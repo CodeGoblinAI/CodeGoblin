@@ -712,6 +712,17 @@ async function handle(request: Request): Promise<Response> {
     return json({ ok: true })
   }
 
+  // /fork: a saved copy of the conversation to carry on in; the original is not touched.
+  if (url.pathname === "/api/session/fork" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { id?: unknown }
+    const id = typeof body.id === "string" ? body.id : ""
+    if (id && activeTurns.has(id)) return json({ message: "An answer is still running; fork once it finishes" }, 409)
+    const source = id ? await sessions.load(id).catch(() => undefined) : undefined
+    if (!source || !source.messages.some((message) => message.role === "user")) return json({ message: "Nothing to fork yet - say something first" }, 400)
+    const copy = await sessions.fork(source)
+    return json({ id: copy.id, title: copy.title })
+  }
+
   // `!command` from the composer: run as the person, kept in the conversation for the next prompt.
   if (url.pathname === "/api/shell" && request.method === "POST") {
     const body = (await request.json().catch(() => ({}))) as { text?: unknown; sessionId?: unknown; provider?: unknown }

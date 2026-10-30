@@ -44,6 +44,8 @@ export type CommandResult =
   | { kind: "media"; media: MediaKind; line: string }
   | { kind: "memory"; action: "list" | "add" | "forget" | "clear"; text?: string }
   | { kind: "local"; argument: string }
+  | { kind: "fork" }
+  | { kind: "copy" }
   | { kind: "connect"; provider?: string }
   | { kind: "disconnect"; provider?: string }
   | { kind: "none" }
@@ -74,6 +76,8 @@ export const COMMANDS = [
   { name: "/boost", description: "let the model use subagents: /boost a hard task, or /boost to switch it on" },
   { name: "/export", description: "save as markdown: /export, or /export notes/chat.md" },
   { name: "/rename", description: "retitle this conversation: /rename plan review" },
+  { name: "/fork", description: "carry on in a copy of this conversation; the original stays as it is" },
+  { name: "/copy", description: "copy the last answer to the clipboard" },
   { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
   { name: "/effort", description: "how hard a reasoning model thinks: /effort high" },
@@ -201,6 +205,10 @@ export function runCommand(text: string): CommandResult {
       return { kind: "disconnect", provider: argument || undefined }
     case "/local":
       return { kind: "local", argument }
+    case "/fork":
+      return { kind: "fork" }
+    case "/copy":
+      return { kind: "copy" }
     case "/status":
       return { kind: "status" }
     case "/usage":

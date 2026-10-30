@@ -1479,6 +1479,24 @@ async function runCommand(text) {
     if (!source || extra) { note("Use /import codex or /import claude [session-id]; imports are new text-only conversations"); return true }
     await openImportDialog(source, id); return true
   }
+  if (name === "/copy") {
+    const answers = [...thread.querySelectorAll(".msg.agent, .turn.agent")]
+    const text = answers.at(-1)?.querySelector(".body, .content")?.innerText ?? answers.at(-1)?.innerText
+    if (!text?.trim()) { note("Nothing to copy yet - no answer in this conversation."); return true }
+    try { await navigator.clipboard.writeText(text.trim()); note("Copied the last answer.") }
+    catch { note("The browser would not allow clipboard access; select the answer and copy it instead.") }
+    return true
+  }
+  if (name === "/fork") {
+    if (!sessionId) { note("Nothing to fork yet - say something first."); return true }
+    const result = await fetch("/api/session/fork", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: sessionId }) })
+      .then(async (r) => ({ ok: r.ok, ...(await r.json()) })).catch(() => ({ ok: false, message: "could not reach the server" }))
+    if (!result.ok) { note(result.message); return true }
+    await openSession(result.id)
+    note("Forked: you are now in " + result.title + ". The original is unchanged; it is still in Sessions.")
+    refreshSessions()
+    return true
+  }
   if (name === "/local" && /^pull\b/.test(argument)) {
     await openLocalPullDialog(argument.split(/\s+/)[1])
     return true

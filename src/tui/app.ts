@@ -2306,6 +2306,32 @@ async function send() {
     if (result.kind === "balance") {
       openUsage(result.provider || selection.provider.id, true)
     }
+    if (result.kind === "copy") {
+      const answer = sessions.lastAnswer(messages)
+      if (!answer) status = "nothing to copy yet - no answer in this conversation"
+      else {
+        try { await copyText(answer); status = "copied the last answer (" + answer.length + " characters)" }
+        catch { status = "could not reach the clipboard" }
+      }
+      render(); return
+    }
+    if (result.kind === "fork") {
+      if (messages.filter((message) => message.role !== "system").length === 0) { status = "nothing to fork yet - say something first"; render(); return }
+      session.messages = messages
+      session.spend = spend
+      await sessions.save(session).catch(() => {})
+      try {
+        const copy = await sessions.fork(session)
+        session = copy
+        messages = copy.messages
+        spend = { input: 0, output: 0 }
+        edits.reset()
+        await refreshSessionCache()
+        transcript.push({ kind: "tool", text: "forked: you are now in a copy of this conversation; the original is unchanged (/resume to go back)" })
+        status = "now in " + copy.title
+      } catch { status = "could not fork this conversation" }
+      render(); return
+    }
     if (result.kind === "local" && /^pull\b/.test(result.argument)) {
       const named = LOCAL_CATALOG.find((entry) => entry.id === result.argument.split(/\s+/)[1])
       if (named) confirmLocalPull(named)

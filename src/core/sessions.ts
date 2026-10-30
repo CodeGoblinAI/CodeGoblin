@@ -28,6 +28,8 @@ export type Session = {
   review?: ReviewState
   activity?: SessionActivity
   importedFrom?: { provider: string; id: string; importedAt: number }
+  /** Set on a copy made with /fork: the conversation it branched from. */
+  forkedFrom?: { id: string; at: number }
 }
 
 const dir = path.join(Global.Path.state, "sessions")
@@ -61,6 +63,30 @@ export async function hasArchive(id: string): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * /fork: the conversation so far as a new session, saved, to carry on in.
+ *
+ * The original is left exactly as it was, so trying another direction costs
+ * nothing. Edit history and activity stay behind - undo in the copy must not
+ * take back the original's changes - and spend starts again. The compaction
+ * archive comes along, so /export of the copy still has every word.
+ */
+export async function fork(source: Session): Promise<Session> {
+  const now = Date.now()
+  const copy: Session = {
+    id: crypto.randomUUID(), title: ("Fork: " + source.title.replace(/^Fork: /, "")).slice(0, 120), created: now, updated: now,
+    provider: source.provider, ...(source.model ? { model: source.model } : {}), ...(source.agent ? { agent: source.agent } : {}),
+    messages: structuredClone(source.messages), forkedFrom: { id: source.id, at: now },
+  }
+  await fs.mkdir(dir, { recursive: true })
+  await fs.writeFile(file(copy.id), JSON.stringify(copy, null, 2), { flag: "wx", mode: 0o600 })
+  if (await hasArchive(source.id)) await fs.copyFile(archiveFile(source.id), archiveFile(copy.id))
+  return copy
+}
+
+/** The most recent answer worth copying: the last assistant message with words in it. */
+export const lastAnswer = (messages: Message[]) => [...messages].reverse().find((message) => message.role === "assistant" && message.content.trim())?.content
 
 /** How many messages a person reads on screen before older ones are left out. */
 export const DISPLAY_MESSAGES = 200
