@@ -163,7 +163,7 @@ test("empty or oversized imports are refused", () => {
 test("account, login and explicit import commands enforce their supported source", () => {
   expect(runCommand("/account codex")).toEqual({ kind: "account" })
   expect(runCommand("/login codex")).toEqual({ kind: "login" })
-  expect(runCommand("/import codex session-1")).toEqual({ kind: "import", id: "session-1" })
+  expect(runCommand("/import codex session-1")).toEqual({ kind: "import", source: "codex", id: "session-1" })
   expect(runCommand("/import codex a b").kind).toBe("message")
   expect(runCommand("/import cursor").kind).toBe("message")
 })

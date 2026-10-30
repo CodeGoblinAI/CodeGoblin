@@ -28,7 +28,7 @@ import { fetchBalance, balanceRows } from "../core/balance"
 import { codexAccount, cachedCodexAccount, accountRows, startCodexLogin } from "../core/codex-account"
 import { subscriptionAccount, cachedSubscriptionAccount, subscriptionRows } from "../core/subscription-account"
 import { startCursorLogin } from "../core/cursor-sdk"
-import { listCodexSessions, importCodexSession } from "../core/codex-import"
+import { IMPORTERS, type ImportSource } from "../core/conversation-import"
 import { openCodexLogin, openCursorLogin } from "../core/open-browser"
 import * as Dialogs from "./dialog"
 import { changesIn, summarise, countsOf, statusLetter, type Changes } from "../core/changes"
@@ -1314,31 +1314,43 @@ async function beginLogin(source: "codex" | "cursor" = "codex") {
   render()
 }
 
-async function openImport(cursor?: string) {
-  const view = Dialogs.open("codex-import", "Import a Codex text conversation", [{ label: "Reading this project's conversations…", inert: true }])
+/** Which CLI the open import picker and its confirmation are about. */
+let importFrom: ImportSource = "codex"
+
+async function openImport(source: ImportSource, cursor?: string) {
+  importFrom = source
+  const name = IMPORTERS[source].label
+  const view = Dialogs.open("codex-import", "Import a " + name + " text conversation", [{ label: "Reading this project's conversations…", inert: true }])
   dialog = view
-  status = "reading this project's Codex conversation list…"
+  status = "reading this project's " + name + " conversation list…"
   render()
   try {
-    const result = await listCodexSessions(process.cwd(), cursor)
+    const result = await IMPORTERS[source].list(process.cwd(), cursor)
     if (dialog !== view) return
-    dialog = Dialogs.open("codex-import", "Import a Codex text conversation (new copy)", [
-      ...result.sessions.map((entry) => ({ label: entry.title, hint: (entry.updatedAt === undefined ? "" : new Date(entry.updatedAt * 1000).toLocaleString() + " · ") + entry.id.slice(-8), value: entry.id })),
+    dialog = Dialogs.open("codex-import", "Import a " + name + " text conversation (new copy)", [
+      // Titles are often a whole first prompt; capped so the date and id that
+      // tell same-named conversations apart are not the part that gets cut.
+      ...result.sessions.map((entry) => ({
+        label: entry.title.length > 56 ? entry.title.slice(0, 55) + "…" : entry.title,
+        hint: (entry.updatedAt === undefined ? "" : new Date(entry.updatedAt * 1000).toLocaleDateString() + " · ") + entry.id.slice(-8),
+        value: entry.id,
+      })),
       ...(result.next ? [{ label: "More conversations…", value: "page:" + result.next }] : []),
-      ...(!result.sessions.length ? [{ label: "No Codex conversations for this project", inert: true }] : []),
+      ...(!result.sessions.length ? [{ label: "No " + name + " conversations for this project", inert: true }] : []),
     ], { size: "large", footer: "enter selects . confirmation before copying . esc closes" })
     status = "Choose a conversation; source stays unchanged"
-  } catch { if (dialog === view) status = "Could not list Codex sessions; check CLI compatibility" }
+  } catch { if (dialog === view) status = "Could not list " + name + " sessions; check CLI compatibility" }
   render()
 }
 
-function confirmImport(id: string, title: string) {
-  dialog = Dialogs.open("codex-import-confirm", "Copy selected Codex conversation?", [
+function confirmImport(source: ImportSource, id: string, title: string) {
+  importFrom = source
+  dialog = Dialogs.open("codex-import-confirm", "Copy selected " + IMPORTERS[source].label + " conversation?", [
     { label: "Copy as a new text conversation", value: id },
     { label: "Cancel", value: "cancel" },
     { label: title, inert: true },
     { label: "Source ID ends in " + id.slice(-8), inert: true },
-    { label: "Native tools, images, reasoning and hidden prompts omitted", inert: true },
+    { label: IMPORTERS[source].omitted, inert: true },
     { label: "Source untouched; current conversation not replaced", inert: true },
     { label: "Continuing sends copied text to your selected model", inert: true },
   ], { size: "large", footer: "enter confirms . esc cancels" })
@@ -1690,8 +1702,8 @@ async function chooseInDialog() {
     render(); return
   }
   if (dialog.kind === "codex-import") {
-    if (row.value.startsWith("page:")) { await openImport(row.value.slice(5)); return }
-    confirmImport(row.value, row.label)
+    if (row.value.startsWith("page:")) { await openImport(importFrom, row.value.slice(5)); return }
+    confirmImport(importFrom, row.value, row.label)
     render(); return
   }
   if (dialog.kind === "local-pull") {
@@ -1719,7 +1731,7 @@ async function chooseInDialog() {
     status = "Copying selected text conversation…"
     render()
     try {
-      const result = await importCodexSession(id, process.cwd(), selection.provider.id)
+      const result = await IMPORTERS[importFrom].copy(id, process.cwd(), selection.provider.id)
       await refreshSessionCache()
       status = "Copied " + result.messages + " messages; use /resume to open the new copy"
     } catch { status = "Import failed; source and current conversation unchanged" }
@@ -2260,10 +2272,10 @@ async function send() {
     if (result.kind === "import") {
       if (kindOf(selection.model) !== "text") { status = "Select a text model before importing"; render(); return }
       if (result.id) {
-        confirmImport(result.id, "Selected Codex conversation")
+        confirmImport(result.source, result.id, "Selected " + IMPORTERS[result.source].label + " conversation")
         render(); return
       }
-      await openImport(); return
+      await openImport(result.source); return
     }
     if (result.kind === "balance") {
       openUsage(result.provider || selection.provider.id, true)

@@ -21,7 +21,7 @@ import { fetchBalance, balanceRows } from "../core/balance"
 import { codexAccount, cachedCodexAccount, accountRows, startCodexLogin } from "../core/codex-account"
 import { startCursorLogin } from "../core/cursor-sdk"
 import { subscriptionAccount, cachedSubscriptionAccount, subscriptionRows } from "../core/subscription-account"
-import { listCodexSessions, importCodexSession } from "../core/codex-import"
+import { IMPORTERS, importSource } from "../core/conversation-import"
 import { addSpend, priceOf, usage } from "../core/context"
 import {
   PROVIDERS,
@@ -251,17 +251,21 @@ async function handle(request: Request): Promise<Response> {
       return json({ cancelled: true })
     }
   }
-  if (url.pathname === "/api/codex/import") {
+  // /api/codex/import is the original path; /api/import?source= serves every importer.
+  if (url.pathname === "/api/import" || url.pathname === "/api/codex/import") {
+    const source = url.pathname === "/api/codex/import" ? "codex" : importSource(url.searchParams.get("source") ?? undefined)
+    if (!source) return json({ message: "Unknown import source" }, 400)
+    const importer = IMPORTERS[source]
     try {
-      if (request.method === "GET") return json(await listCodexSessions(root, url.searchParams.get("cursor") || undefined))
+      if (request.method === "GET") return json(await importer.list(root, url.searchParams.get("cursor") || undefined))
       if (request.method === "POST") {
         const body = await request.json() as { id?: string; model?: string }
         const selected = exactSelection(String(body.model || ""))
         if (!selected || kindOf(selected.model) !== "text") return json({ message: "Select a text model before importing" }, 400)
-        const imported = await importCodexSession(String(body.id || ""), root, selected.provider.id)
-        return json({ ...imported, message: "Imported a new text conversation; tools, images, reasoning and hidden prompts were omitted. Source untouched." })
+        const imported = await importer.copy(String(body.id || ""), root, selected.provider.id)
+        return json({ ...imported, message: "Imported a new text conversation. " + importer.omitted + ". Source untouched." })
       }
-    } catch { return json({ message: "Could not read/import this project's Codex conversation; check CLI compatibility and selected session" }, 400) }
+    } catch { return json({ message: "Could not read/import this project's " + importer.label + " conversation; check CLI compatibility and selected session" }, 400) }
   }
 
   if (url.pathname === "/api/cli/login" && request.method === "GET") {

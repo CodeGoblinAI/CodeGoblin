@@ -2,3 +2,11 @@
 # This is not optional - see test/preload.ts for what happened without it.
 [test]
 preload = ["./test/preload.ts"]
+
+# Peers are not installed. The Claude Agent SDK is here only for its session
+# readers (listSessions, getSessionMessages), which load none of its peers -
+# the MCP SDK alone would bring 100 packages, Express and Hono among them. No
+# other dependency declares a peer. If one ever needs its peers, add them
+# explicitly rather than turning this back on.
+[install]
+peer = false

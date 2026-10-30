@@ -1323,9 +1323,12 @@ function openCodexLoginDialog(source = "codex") {
   }
 }
 
-async function openImportDialog(selectedId) {
-  const modal = makeDialog("Import Codex text conversation")
-  const status = document.createElement("p"); status.textContent = "Choose a conversation for this project. A new text-only copy is created; your source and current conversation stay unchanged. Native tools, images, reasoning and hidden prompts are omitted. Continuing the copy sends its text to your selected model."
+async function openImportDialog(source, selectedId) {
+  const name = source === "claude" ? "Claude Code" : "Codex"
+  const omitted = source === "claude" ? "Tool calls and results, thinking, subagents and injected reminders are omitted." : "Native tools, images, reasoning and hidden prompts are omitted."
+  const endpoint = "/api/import?source=" + source
+  const modal = makeDialog("Import " + name + " text conversation")
+  const status = document.createElement("p"); status.textContent = "Choose a conversation for this project. A new text-only copy is created; your source and current conversation stay unchanged. " + omitted + " Continuing the copy sends its text to your selected model."
   const list = document.createElement("div"); modal.append(status, list)
   const choose = (entry) => {
     list.replaceChildren()
@@ -1333,7 +1336,7 @@ async function openImportDialog(selectedId) {
     const confirm = document.createElement("button"); confirm.textContent = "Copy as new conversation"
     confirm.onclick = async () => {
       confirm.disabled = true
-      const result = await fetch("/api/codex/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: entry.id, model: currentModel }) }).then((r) => r.json()).catch(() => null)
+      const result = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: entry.id, model: currentModel }) }).then((r) => r.json()).catch(() => null)
       if (!modal.isConnected) return
       status.textContent = result?.message || "Import failed; source and current conversation unchanged"
       if (!result?.id) { confirm.disabled = false; return }
@@ -1346,7 +1349,7 @@ async function openImportDialog(selectedId) {
   if (selectedId) { choose({ id: selectedId, title: selectedId }); return }
   const page = async (cursor) => {
     list.textContent = "Reading official CLI session list…"
-    const data = await fetch("/api/codex/import" + (cursor ? "?cursor=" + encodeURIComponent(cursor) : "")).then((r) => r.json()).catch(() => null)
+    const data = await fetch(endpoint + (cursor ? "&cursor=" + encodeURIComponent(cursor) : "")).then((r) => r.json()).catch(() => null)
     if (!modal.isConnected) return
     list.replaceChildren()
     for (const entry of data?.sessions || []) {
@@ -1355,7 +1358,7 @@ async function openImportDialog(selectedId) {
       row.textContent = entry.title + " · " + time; row.onclick = () => choose(entry); list.appendChild(row)
     }
     if (data?.next) { const more = document.createElement("button"); more.textContent = "More conversations"; more.onclick = () => { void page(data.next) }; list.appendChild(more) }
-    if (!list.children.length) list.textContent = data?.message || "No Codex conversations for this project."
+    if (!list.children.length) list.textContent = data?.message || "No " + name + " conversations for this project."
   }
   await page()
 }
@@ -1447,9 +1450,10 @@ async function runCommand(text) {
     openCodexLoginDialog(); return true
   }
   if (name === "/import") {
-    const [source, id, extra] = argument.split(/\s+/)
-    if (source !== "codex" || extra) { note("Use /import codex [session-id]; imports are new text-only conversations"); return true }
-    await openImportDialog(id); return true
+    const [word, id, extra] = argument.split(/\s+/)
+    const source = word === "codex" ? "codex" : word === "claude" || word === "claude-code" ? "claude" : undefined
+    if (!source || extra) { note("Use /import codex or /import claude [session-id]; imports are new text-only conversations"); return true }
+    await openImportDialog(source, id); return true
   }
   if (name === "/local" && /^pull\b/.test(argument)) {
     await openLocalPullDialog(argument.split(/\s+/)[1])

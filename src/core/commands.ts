@@ -2,6 +2,9 @@ import { PROVIDERS, allSelections, resolveSelection, selectionsOfKind, KIND_LABE
 import { THEMES, isTheme } from "./theme"
 import { isEffort, type Effort } from "./settings"
 import { MEDIA_KINDS, type MediaKind } from "./media"
+import { importSource, type ImportSource } from "./conversation-import"
+
+export const IMPORT_USAGE = "Use /import codex or /import claude [session-id]; imports are new text-only conversations"
 
 /**
  * Slash commands.
@@ -21,7 +24,7 @@ export type CommandResult =
   | { kind: "account"; source?: "claude" | "cursor" }
   | { kind: "login"; source?: "cursor" }
   | { kind: "cli-login"; source: "claude" | "cursor" }
-  | { kind: "import"; id?: string }
+  | { kind: "import"; source: ImportSource; id?: string }
   | { kind: "undo" }
   | { kind: "redo" }
   | { kind: "status" }
@@ -50,7 +53,7 @@ export const COMMANDS = [
   { name: "/balance", description: "refresh balance/quota: deepseek, moonshotai, tripo or elevenlabs" },
   { name: "/account", description: "subscription snapshots: codex, claude or cursor (dashboard)" },
   { name: "/login", description: "official sign-in: /login codex, /login claude or /login cursor" },
-  { name: "/import", description: "copy a selected Codex text conversation for this project: /import codex" },
+  { name: "/import", description: "copy a Codex or Claude Code text conversation for this project: /import codex, /import claude" },
   { name: "/help", description: "show these commands" },
   { name: "/clear", description: "start a fresh conversation" },
   { name: "/model", description: "switch provider: /model zai" },
@@ -130,8 +133,9 @@ export function runCommand(text: string): CommandResult {
       if (argument === "claude" || argument === "claude-code" || argument === "cursor-cli") return { kind: "cli-login", source: argument === "cursor-cli" ? "cursor" : "claude" }
       return argument === "codex" ? { kind: "login" } : { kind: "message", text: "Use /login codex, /login claude or /login cursor" }
     case "/import": {
-      const [source, id, extra] = argument.split(/\s+/)
-      return source === "codex" && !extra ? { kind: "import", id } : { kind: "message", text: "Use /import codex [session-id]; imports are new text-only conversations" }
+      const [word, id, extra] = argument.split(/\s+/)
+      const source = importSource(word)
+      return source && !extra ? { kind: "import", source, id } : { kind: "message", text: IMPORT_USAGE }
     }
     case "/balance":
       return { kind: "balance", provider: argument || undefined }

@@ -1,3 +1,23 @@
+# Phase 2 wrap-up — October 30, 2026
+
+Rechecked after both official CLIs upgraded (Claude Code 2.1.270 → 2.1.314, Codex → 0.164.0), in a throwaway profile:
+
+- **Fixed: Codex inference was refused on 0.164.0.** The CLI now starts its user agent with the client's name (`cg_next/0.164.0 (...)`). The version check only knew `codex_cli_rs/` and `Codex Desktop/`, so every Codex turn failed with "requires CLI 0.153.3 or later". After the fix: one-shot `CODEX_CLI_OK`, and a CG-owned `read_file` tool turn answered correctly. Older or missing versions are still refused.
+- **Claude plan quota is now live.** The same no-prompt `get_usage` control now returns real windows on 2.1.314 with a claude.ai Pro sign-in (5h 0%, week 29%, with reset times). It shows in the web `/account claude`. 2.1.270 reported them as unavailable. No code change was needed.
+- **Claude bridge on 2.1.314:** haiku one-shot `CLAUDE_CLI_OK`, and the same CG-owned tool turn passed.
+- **New: `/import claude`** (also `claude-code`), approved by Shawn. It reads this project's Claude Code conversations through the official Agent SDK readers (`listSessions`, `getSessionInfo`, `getSessionMessages`), pinned `@anthropic-ai/claude-agent-sdk@0.3.301`, a release about two weeks old. Only the readers are loaded. `bunfig.toml` sets `peer = false`, which keeps out the 100 packages its peers would bring (the MCP SDK, Express, Hono); its own 301 MB native binary installs but is never run. Like the Codex import: a picker, a confirmation, then a new session with provenance, and the source untouched. It keeps typed prompts and the assistant's text. It drops tool calls and results, thinking, subagent turns, `<system-reminder>`, command wrappers and task notifications, and merges replies that were split across entries back together. Live: the TUI copied "CG Next project overview" (2 messages) and the web copied "Latest skill review" (660 entries → 12 messages), which reopened cleanly. The source's modified time was unchanged.
+- **New: `/balance moonshotai`** (Kimi), from the documented `GET https://api.moonshot.ai/v1/users/me/balance`: available, voucher and cash USD, with owed cash shown. Fixture-tested; no Moonshot key is connected, so there has been no live read.
+- Already live-verified on 10-27: ElevenLabs characters, Tripo credits (0/0), DeepSeek, Codex windows, Cursor API-key inference. Long Codex imports are fixed on `main` (`3f6b5d3`).
+
+Still open, and why:
+
+| Item | Blocker |
+|---|---|
+| Cursor user-plan SDK login + one inference | Needs Shawn to sign in at cursor.com; creates a key named "CG-Next user-plan access". |
+| Notion MCP OAuth consent + one harmless read | Needs Shawn to sign in and grant consent in Notion. |
+| Cursor personal plan quota | No official interface; `/account cursor` links the Spending dashboard. |
+| Other providers' balances | Z.ai, xAI, OpenAI, Google and Qwen publish no key-scoped balance API. |
+
 # Phase 2 checkpoint — October 4, 2026
 
 Hands-on follow-up: [October 4 user pass](user-pass-2026-10-04.md). A real Codex
