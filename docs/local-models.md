@@ -1,6 +1,25 @@
-# Local models (first integration)
+# Local models
 
-CG-Next can use an already-running, unauthenticated OpenAI-compatible server on localhost. It does not yet install engines/models or automatically start, stop, or swap servers. It does not change the fork's runtime state.
+There are two routes. Most of the time you want the first.
+
+## CG-Next's own runtime (Local models in the picker)
+
+Every GGUF CG-Next can find appears under **Local models** in the TUI and web pickers as `llama/<file name>`. Pick one and send a prompt: CG-Next starts `llama-server` for it (a few seconds on the GPU), swaps it when another local model is picked, and stops it when CG-Next exits. Nothing to launch by hand.
+
+- **Models** are read from CG-Next's own folder (`<data>/local/models`) plus, read-only, `~/.local/share/cg-next/models` (earlier test downloads) and the fork's `~/.local/share/codegoblin/runtime/models`. `CODEGOBLIN_LOCAL_MODEL_DIRS` (path-separated) replaces the shared folders; empty means none. Projector (`mmproj`) files and later parts of split models are not offered.
+- **Engine**: `CODEGOBLIN_LOCAL_ENGINE` if set (and only that), else `<data>/local/engine/llama-server.exe`, else the fork's engine, run read-only. A CUDA build (`ggml-cuda.dll` beside it) offloads all layers to the GPU; `CODEGOBLIN_LOCAL_GPU=0` forces CPU.
+- **Ownership**: one server per CG-Next process, as its child, on a free loopback port. Each start gets a random API key (passed in `LLAMA_API_KEY`, not on the command line); a server counts as CG-Next's only if it answers to that key. The fork's `runtime.json` and port 8787 are never read as ours, stopped or swapped. If a CG-Next process is killed outright, the next one stops the server it left behind, but only if that server still answers to the recorded key.
+- **Concurrency**: a running answer leases the server, compaction and subagents included. Another conversation asking for a different local model meanwhile gets a clear refusal rather than a swap mid-answer.
+- **Tools**: models of 4 GB and up (and Bonsai) are offered CG's tools. Smaller ones get the lean chat prompt, since they mostly misuse tools. `/local tools on|off|auto` overrides it per model.
+- **Context**: 16,384 tokens by default (32,768 for Bonsai, with its Q4 KV cache). Use `/local context <tokens>|auto` to change it; a running, idle server restarts with the new size.
+
+`/local` shows the engine, the server (model, port, pid, context, uptime, log path), the installed models and where they were looked for. `/local stop` frees the memory and refuses while an answer is running.
+
+Not yet: downloading engines or models from inside the app (drop a `.gguf` into the models folder for now), and measured tool-use reliability.
+
+## An external server you run yourself (CODEGOBLIN_LOCAL_URL)
+
+CG-Next can also use an already-running, unauthenticated OpenAI-compatible server on localhost. It appears as **Local server** in the picker. CG-Next never starts, stops or swaps that server, and it does not change the fork's runtime state.
 
 ## Test the TUI normally (PowerShell)
 

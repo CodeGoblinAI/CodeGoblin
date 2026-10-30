@@ -1,8 +1,11 @@
 import type { Provider } from "./providers"
+import { installedModels, toolsFor } from "./local-runtime"
 
 export async function verifyLocalModel(provider: Provider, modelId: string, signal?: AbortSignal) {
   if (!provider.local || !provider.baseUrl) return
   const response = await fetch(provider.baseUrl.replace(/\/chat\/completions$/, "/models"), {
+    // CG-Next's own server answers only to the key it was started with.
+    headers: provider.auth?.("") ?? {},
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000),
   }).catch((error: unknown) => {
     if (signal?.aborted) throw error
@@ -13,6 +16,19 @@ export async function verifyLocalModel(provider: Provider, modelId: string, sign
   if (!Array.isArray(catalog.data) || !catalog.data.some((model) => model.id === modelId || model.aliases?.includes(modelId))) {
     throw new Error(`Local model mismatch: selected ${modelId}, but the server reports ${(catalog.data ?? []).map((model) => model.id).join(", ") || "no models"}. Check the port/model alias; no chat request was sent.`)
   }
+}
+
+/**
+ * Whether a local model gets the lean chat prompt and no tools.
+ *
+ * The external server decides once, by environment. CG-Next's own runtime
+ * decides per model, since it serves whichever one was picked.
+ */
+export function isLocalChat(provider: Provider, modelId: string): boolean {
+  if (!provider.local) return false
+  if (!provider.runtime) return !provider.localTools
+  const file = installedModels().find((model) => model.id === modelId)
+  return !(file && toolsFor(file).on)
 }
 
 /** Opt-in only: never discover or take ownership of the fork's running server. */
@@ -31,7 +47,7 @@ export function localProvider(env: Record<string, string | undefined> = process.
   if (env.CODEGOBLIN_LOCAL_TOOLS && !["0", "1"].includes(env.CODEGOBLIN_LOCAL_TOOLS)) throw new Error("CODEGOBLIN_LOCAL_TOOLS must be 0 or 1")
   if (env.CODEGOBLIN_LOCAL_THINKING && !["0", "1"].includes(env.CODEGOBLIN_LOCAL_THINKING)) throw new Error("CODEGOBLIN_LOCAL_THINKING must be 0 or 1")
   return {
-    id: "local", label: "Local", baseUrl: url.href, local: true,
+    id: "local", label: "Local server", baseUrl: url.href, local: true,
     localTools: env.CODEGOBLIN_LOCAL_TOOLS === "1",
     ...(env.CODEGOBLIN_LOCAL_THINKING ? { localThinking: env.CODEGOBLIN_LOCAL_THINKING === "1" } : {}),
     auth: () => ({}),

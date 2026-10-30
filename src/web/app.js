@@ -1396,6 +1396,17 @@ async function runCommand(text) {
     if (source !== "codex" || extra) { note("Use /import codex [session-id]; imports are new text-only conversations"); return true }
     await openImportDialog(id); return true
   }
+  if (name === "/local") {
+    const result = await fetch("/api/local", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ argument, model: currentModel }),
+    }).then((r) => r.json()).catch(() => ({ message: "could not reach the server" }))
+    note(result.message)
+    // A tools or context choice changes how the model is listed.
+    if (/^(tools|context)\b/.test(argument)) await loadProviders()
+    return true
+  }
   if (paletteData.pending?.[name]) { note(paletteData.pending[name]); return true }
   if (name === "/quit") { note("Close this browser tab to exit the Web UI; the local server keeps running."); return true }
   if (name === "/mouse") { note("The browser supports mouse selection and Ctrl+C natively."); return true }
@@ -2069,6 +2080,20 @@ async function submit() {
           note.innerHTML = "<span class=\"spin\">✓</span><span class=\"tname\">compacted</span>"
           note.append(" " + event.before + " → " + event.after + " messages")
           thread.appendChild(note)
+          scrollDown()
+        }
+        // CG-Next's own llama-server loading the picked model: a row that spins
+        // while it loads and ticks when it is ready, so a cold start is not silence.
+        if (event.type === "runtime") {
+          let row = thread.querySelector(".tool.runtime-load.running")
+          if (!row) {
+            row = toolChip("local model", "")
+            row.classList.add("runtime-load")
+          }
+          row.querySelector(".targs").textContent = event.state === "loading"
+            ? "loading " + event.model + " into llama.cpp…"
+            : event.model + " loaded in " + ((event.ms || 0) / 1000).toFixed(1) + " s " + (event.gpu ? "on the GPU" : "on the CPU")
+          if (event.state === "ready") { row.classList.remove("running"); row.classList.add("done"); row.querySelector(".spin").textContent = "✓" }
           scrollDown()
         }
         // The loop ran out of turns with the model still working, so the

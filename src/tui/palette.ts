@@ -4,8 +4,7 @@ import {
   selectionsByKind,
   selectionsOfKind,
   kindFromWord,
-  kindOf,
-  KIND_LABEL,
+  pickerSection,
   CONNECTABLE,
 } from "../core/providers"
 import { findMention } from "../core/mention"
@@ -119,8 +118,8 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
       .map((s) => ({
         value: `/model ${s.provider.id}/${s.model.id}`,
         hint:
-          `${KIND_LABEL[kindOf(s.model)]} \u00b7 ${s.provider.label} ${s.model.label}` +
-          (connectedIds.has(s.provider.id) ? "" : "  \u00b7 no key"),
+          `${pickerSection(s)} \u00b7 ${s.provider.label} ${s.model.label}` +
+          (s.provider.local || connectedIds.has(s.provider.id) ? "" : "  \u00b7 no key"),
       }))
       .filter(
         (item) =>

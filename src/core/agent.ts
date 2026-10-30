@@ -1,5 +1,6 @@
 import { authHeaders, type Provider } from "./providers"
-import { verifyLocalModel } from "./local-provider"
+import { isLocalChat, verifyLocalModel } from "./local-provider"
+import { localRuntime, type Lease } from "./local-runtime"
 import { cliCompletion } from "./cli-completion"
 import { TOOL_SCHEMA, runTool, isConcurrent } from "./tools"
 import { checkpointEvery } from "./config"
@@ -106,6 +107,11 @@ export type AgentEvent =
   | { type: "checkpoint"; toolCalls: number; stopped: boolean }
   /** Subagents finished and their results were handed to the model, which carries on. */
   | { type: "subagents_collected" }
+  /**
+   * CG-Next's own llama-server is loading the picked model, then has it.
+   * A cold load takes from a second to a minute, which is too long to say nothing.
+   */
+  | { type: "runtime"; model: string; state: "loading" | "ready"; ms?: number; gpu?: boolean }
   | { type: "turn_end" }
 
 /**
@@ -241,8 +247,39 @@ function offeredTools(input: { permissions?: Permissions; extraTools?: ExtraTool
  *
  * Tool calls arrive in fragments like text does - the name in one chunk, the
  * arguments across several - so they are accumulated by index before running.
+ *
+ * A model CG-Next serves itself is leased for the whole run, compaction and
+ * subagents included, so another conversation cannot swap it out mid-answer.
  */
-export async function* runAgent(input: {
+export async function* runAgent(input: AgentInput): AsyncGenerator<AgentEvent, void, unknown> {
+  if (!input.provider.runtime) return yield* runTurns(input)
+  const started = Date.now()
+  const loading = !localRuntime.serving(input.modelId)
+  if (loading) yield { type: "runtime", model: input.modelId, state: "loading" }
+  let lease: Lease
+  try {
+    lease = await localRuntime.acquire(input.modelId, { signal: input.signal })
+  } catch (error) {
+    // Stopped while loading: the same marker a stop anywhere else leaves.
+    if (input.signal?.aborted) input.messages.push({ role: "assistant", content: "", stopped: true })
+    throw error
+  }
+  try {
+    const status = localRuntime.status()
+    if (loading) yield { type: "runtime", model: input.modelId, state: "ready", ms: Date.now() - started, gpu: status.state !== "stopped" && status.gpu }
+    const key = lease.key
+    yield* runTurns({
+      ...input,
+      provider: { ...input.provider, baseUrl: lease.baseUrl + "/chat/completions", localTools: lease.tools, auth: () => ({ authorization: "Bearer " + key }) },
+    })
+  } finally {
+    lease.release()
+  }
+}
+
+type AgentInput = Parameters<typeof runTurns>[0]
+
+async function* runTurns(input: {
   provider: Provider
   modelId: string
   apiKey: string
@@ -298,7 +335,7 @@ export async function* runAgent(input: {
   const maxTurns = input.maxTurns ?? Number.POSITIVE_INFINITY
   const configured = configuredInstructions(input.root)
   input = { ...input, instructions: [configured, input.instructions].filter(Boolean).join("\n\n") || undefined }
-  const localChat = input.provider.local && !input.provider.localTools
+  const localChat = isLocalChat(input.provider, input.modelId)
   let partial = ""
   let checkpointStopped = false
   try {
@@ -383,7 +420,8 @@ export async function* runAgent(input: {
       signal: input.signal,
     }).catch((error: unknown) => {
       if (!input.provider.local || input.signal?.aborted) throw error
-      throw new Error(`Cannot reach the local model server at ${input.provider.baseUrl}. Start the server, wait until it is ready, and try again. CG-Next does not start local servers automatically yet.`, { cause: error })
+      if (input.provider.runtime) throw new Error(localRuntime.status().lastError ?? `CG-Next's local model server stopped answering; /local shows its state.`, { cause: error })
+      throw new Error(`Cannot reach the local model server at ${input.provider.baseUrl}. Start the server, wait until it is ready, and try again. CG-Next starts servers only for installed models under Local.`, { cause: error })
     })
 
     if (!response.ok || !response.body) {

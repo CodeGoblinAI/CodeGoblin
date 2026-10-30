@@ -1,5 +1,6 @@
 import { authHeaders, type Provider } from "./providers"
 import { verifyLocalModel } from "./local-provider"
+import { localRuntime } from "./local-runtime"
 import { claudeChat } from "./claude-cli"
 import { cliCompletion } from "./cli-completion"
 
@@ -27,6 +28,13 @@ export async function* streamChat(input: {
   }
   if (input.provider.cli) {
     for await (const event of cliCompletion({ ...input, cli: input.provider.cli, tools: [] })) if (event.type === "text") yield event.delta
+    return
+  }
+  if (input.provider.runtime) {
+    const lease = await localRuntime.acquire(input.modelId, { signal: input.signal })
+    try {
+      yield* streamChat({ ...input, provider: { ...input.provider, runtime: false, baseUrl: lease.baseUrl + "/chat/completions", auth: () => ({ authorization: "Bearer " + lease.key }) } })
+    } finally { lease.release() }
     return
   }
   if (!input.provider.baseUrl) {

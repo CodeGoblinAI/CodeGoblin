@@ -87,7 +87,7 @@ try {
   await type("/model local/fixture\r")
   await type("UNSENT draft after model command")
   held.end("data: [DONE]\n\n")
-  await until(() => output.includes("Local fixture"), "queued model command finishes")
+  await until(() => output.includes("Local server fixture"), "queued model command finishes")
   output = ""
   await type("\x1b[C")
   await until(() => output.includes("UNSENT draft after model command"), "new draft survives queued model command")

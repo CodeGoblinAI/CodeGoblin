@@ -11,6 +11,9 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { localChatMessages, runAgent, type Message } from "../core/agent"
 import { cliStatuses } from "../core/cli-status"
+import { isLocalChat } from "../core/local-provider"
+import { findEngine } from "../core/local-runtime"
+import { localCommand } from "../core/local-command"
 import { resolveStartupModel } from "../core/model-selection"
 import { cliHandoff } from "../core/cli-handoff"
 import { fetchBalance, balanceRows } from "../core/balance"
@@ -30,7 +33,7 @@ import {
   effortFor,
   takesEffort,
   exactSelection,
-  KIND_LABEL,
+  pickerSection,
   CONNECTABLE,
 } from "../core/providers"
 import { apiKey } from "../core/auth"
@@ -266,16 +269,18 @@ async function handle(request: Request): Promise<Response> {
   }
   if (url.pathname === "/api/providers") {
     const cli = await cliStatuses()
+    const engine = findEngine()
     return json({
       providers: selectionsByKind().map((s) => ({
         kind: kindOf(s.model),
-        section: KIND_LABEL[kindOf(s.model)],
+        section: pickerSection(s),
         id: s.provider.id + "/" + s.model.id,
         label: s.provider.label + " " + s.model.label,
         reasoning: Boolean(s.model.reasoning),
         effort: takesEffort(s.model),
-        ready: s.provider.cli ? cli[s.provider.id]?.ready === true : apiKey(s.provider.id) !== undefined,
-        connectionHint: s.provider.cli ? cli[s.provider.id]?.detail : undefined,
+        ready: s.provider.cli ? cli[s.provider.id]?.ready === true : s.provider.runtime ? Boolean(engine) : apiKey(s.provider.id) !== undefined,
+        connectionHint: s.provider.cli ? cli[s.provider.id]?.detail
+          : s.provider.runtime ? (engine ? "Runs on this machine; CG-Next starts llama.cpp for it" : "No llama-server found; /local says where to put one") : undefined,
         /** Can be shown a picture, as distinct from one that draws them. */
         vision: acceptsImages(s),
         /**
@@ -407,7 +412,7 @@ async function handle(request: Request): Promise<Response> {
       hiddenMessages: shown!.hidden,
       archived: await sessions.hasArchive(session.id),
       selection: selected ? selected.provider.id + "/" + selected.model.id : undefined,
-      context: selected ? usage(selected.provider.local && !selected.provider.localTools ? localChatMessages(session.messages) : session.messages, selected.model.contextWindow) : undefined,
+      context: selected ? usage(isLocalChat(selected.provider, selected.model.id) ? localChatMessages(session.messages) : session.messages, selected.model.contextWindow) : undefined,
       reviewNotice: editsFor(session.id, session.review).reviewNotice,
     }) : json({ error: "not found" }, 404)
   }
@@ -469,6 +474,16 @@ async function handle(request: Request): Promise<Response> {
     if (!Object.hasOwn(PROVIDERS, provider)) return json({ message: "Unknown provider" }, 400)
     const snapshot = await fetchBalance(provider, apiKey(provider))
     const response = json({ ...snapshot, rows: balanceRows(snapshot) })
+    response.headers.set("cache-control", "no-store")
+    return response
+  }
+
+  // /local runs against this server's own llama-server, which is the one the browser's prompts use.
+  if (url.pathname === "/api/local" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { argument?: unknown; model?: unknown }
+    const argument = typeof body.argument === "string" ? body.argument.slice(0, 200) : ""
+    const model = typeof body.model === "string" ? body.model.slice(0, 200) : undefined
+    const response = json({ message: await localCommand(argument, model) })
     response.headers.set("cache-control", "no-store")
     return response
   }
@@ -827,7 +842,7 @@ async function handle(request: Request): Promise<Response> {
             if (event.type === "spend" || event.type === "turn_end") send({
               type: "usage",
               spend: session.spend,
-              context: usage(provider.local && !provider.localTools ? localChatMessages(session.messages) : session.messages, model.contextWindow),
+              context: usage(isLocalChat(provider, model.id) ? localChatMessages(session.messages) : session.messages, model.contextWindow),
             })
           }
           await saveReviewSession(session)

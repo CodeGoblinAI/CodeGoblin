@@ -40,6 +40,7 @@ export type CommandResult =
   | { kind: "diff" }
   | { kind: "media"; media: MediaKind; line: string }
   | { kind: "memory"; action: "list" | "add" | "forget" | "clear"; text?: string }
+  | { kind: "local"; argument: string }
   | { kind: "connect"; provider?: string }
   | { kind: "disconnect"; provider?: string }
   | { kind: "none" }
@@ -57,6 +58,7 @@ export const COMMANDS = [
   { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/undo", description: "put back the files the last turn changed" },
   { name: "/redo", description: "reapply what /undo took back" },
+  { name: "/local", description: "local llama.cpp models: status, /local stop, /local tools on|off, /local context" },
   { name: "/connect", description: "connect a provider - pick one, paste its key" },
   { name: "/disconnect", description: "remove a CG API key, not a CLI/SDK sign-in - /disconnect tripo" },
   { name: "/memory", description: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
@@ -193,6 +195,8 @@ export function runCommand(text: string): CommandResult {
     case "/disconnect":
       if (argument === "cursor") return { kind: "message", text: "Revoke the SDK user-plan key in Cursor's account dashboard. /disconnect cursor-api only removes a CG-stored API key, not SDK/CLI sign-in." }
       return { kind: "disconnect", provider: argument || undefined }
+    case "/local":
+      return { kind: "local", argument }
     case "/status":
       return { kind: "status" }
     case "/usage":

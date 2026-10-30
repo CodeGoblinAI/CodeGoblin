@@ -17,6 +17,7 @@
  * Absent means text in, text out - the ordinary case.
  */
 import { localProvider } from "./local-provider"
+import { contextFor, installedModels, readPrefs, toolsFor } from "./local-runtime"
 
 export type Capabilities = {
   input?: { text?: boolean; image?: boolean; audio?: boolean }
@@ -52,6 +53,12 @@ export type Model = {
 export type Provider = {
   cli?: "claude-code" | "codex" | "cursor" | "cursor-api"
   local?: boolean
+  /**
+   * Served by CG-Next's own llama-server, started for whichever model is
+   * picked. Its endpoint exists only once that server is up, so baseUrl is
+   * absent until a turn leases it - see local-runtime.ts.
+   */
+  runtime?: boolean
   localTools?: boolean
   localThinking?: boolean
   id: string
@@ -264,6 +271,28 @@ export const PROVIDERS: Record<string, Provider> = {
 
 const local = localProvider()
 if (local) PROVIDERS.local = local
+PROVIDERS.llama = { id: "llama", label: "Local", local: true, runtime: true, auth: () => ({}), models: [] }
+
+/**
+ * The installed GGUFs, as models.
+ *
+ * Read from disk rather than declared: a model dropped into the folder is
+ * pickable on the next look, and one deleted stops being offered. The scan is
+ * cached for two seconds, so calling this from every lookup costs nothing.
+ */
+export function refreshLocalModels() {
+  const provider = PROVIDERS.llama
+  if (!provider) return
+  const prefs = readPrefs()
+  provider.models = installedModels().map((file) => ({
+    id: file.id,
+    label: `${file.id} · ${(file.sizeBytes / 1024 ** 3).toFixed(1)} GB · ${toolsFor(file, prefs).on ? "tools" : "chat only"}`,
+    contextWindow: contextFor(file, prefs),
+    price: { input: 0, output: 0 },
+  }))
+}
+refreshLocalModels()
+
 PROVIDERS["claude-code"] = {
   id: "claude-code", label: "Claude CLI (CG tools)", cli: "claude-code",
   // Aliases resolve inside the CLI; its effective context window is not reported here.
@@ -295,6 +324,7 @@ function firstUsable(provider: Provider): Model | undefined {
 /** Accepts "zai", "glm-5.3", or "zai/glm-5.3". */
 export function resolveSelection(input?: string): Selection | undefined {
   if (!input) return defaultSelection()
+  refreshLocalModels()
   const slash = input.indexOf("/")
   const [head, tail] = slash >= 0 ? [input.slice(0, slash), input.slice(slash + 1)] : [input, undefined]
 
@@ -346,7 +376,7 @@ export function kindOf(model: Model): ModelKind {
 
 /** Only a chat model can answer a question, and only it has somewhere to send one. */
 export function isChatModel(selection: Selection): boolean {
-  return kindOf(selection.model) === "text" && Boolean(selection.provider.baseUrl || selection.provider.cli)
+  return kindOf(selection.model) === "text" && Boolean(selection.provider.baseUrl || selection.provider.cli || selection.provider.runtime)
 }
 
 /**
@@ -423,9 +453,23 @@ export function kindFromWord(word: string): ModelKind | undefined {
   return KIND_ALIASES[word.trim().toLowerCase()]
 }
 
-/** Every model, text first, then the generators, each section together. */
+/**
+ * Every model, text first, then the generators, each section together.
+ *
+ * Local text models close the text section under their own heading: picking
+ * one is picking to run it on this machine, which is a different choice from
+ * picking a hosted chat model.
+ */
 export function selectionsByKind(): Selection[] {
-  return KIND_ORDER.flatMap((kind) => selectionsOfKind(kind))
+  return KIND_ORDER.flatMap((kind) => {
+    const rows = selectionsOfKind(kind)
+    return kind === "text" ? [...rows.filter((row) => !row.provider.local), ...rows.filter((row) => row.provider.local)] : rows
+  })
+}
+
+/** The picker heading a model sits under. */
+export function pickerSection(selection: Selection): string {
+  return selection.provider.local && kindOf(selection.model) === "text" ? "Local models" : KIND_LABEL[kindOf(selection.model)]
 }
 
 export function selectionsOfKind(kind: ModelKind): Selection[] {
@@ -433,6 +477,7 @@ export function selectionsOfKind(kind: ModelKind): Selection[] {
 }
 
 export function allSelections(): Selection[] {
+  refreshLocalModels()
   return Object.values(PROVIDERS).flatMap((provider) =>
     provider.models.map((model) => ({ provider, model })),
   )

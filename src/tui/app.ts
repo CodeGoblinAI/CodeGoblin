@@ -16,7 +16,9 @@ import { resolveStartupModel } from "../core/model-selection"
 import { isLiveCommand } from "./live-commands"
 import { footerHeight } from "./layout"
 import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
-import { allSelections } from "../core/providers"
+import { selectionsByKind } from "../core/providers"
+import { isLocalChat } from "../core/local-provider"
+import { localCommand } from "../core/local-command"
 import { normalizeCommand } from "../core/commands"
 import { cliAuthStatus, cliStatuses } from "../core/cli-status"
 import { cliHandoff } from "../core/cli-handoff"
@@ -146,7 +148,7 @@ const SYSTEM: Message = { role: "system", content: systemPrompt("terminal") }
 
 let messages: Message[] = [SYSTEM]
 const contextUsage = () => usage(
-  selection.provider.local && !selection.provider.localTools ? localChatMessages(messages) : messages,
+  isLocalChat(selection.provider, selection.model.id) ? localChatMessages(messages) : messages,
   selection.model.contextWindow,
 )
 /**
@@ -575,10 +577,18 @@ function entryLines(entry: Entry, width: number): string[] {
 function drawEntry(entry: Entry, width: number): string[] {
   const out: string[] = []
   if (entry.kind === "tool") {
-    for (const [i, line] of entry.text.split(String.fromCharCode(10)).entries()) {
-      // Every row used to start with "x", so a read that worked looked like one that failed.
-      const mark = entry.state === "done" ? "✓" : entry.state === "failed" ? "✗" : entry.state === "running" ? "…" : "·"
-      out.push(theme.muted + (i === 0 ? "  " + mark + " " : "    ") + line.slice(0, width) + ansi.reset)
+    // Every row used to start with "x", so a read that worked looked like one that failed.
+    const mark = entry.state === "done" ? "✓" : entry.state === "failed" ? "✗" : entry.state === "running" ? "…" : "·"
+    let first = true
+    for (const line of entry.text.split(String.fromCharCode(10))) {
+      // Wrapped under its own indent rather than cut: command output such as
+      // /local or /skills is mostly paths and sentences, and the end was lost.
+      const indent = /^ */.exec(line)![0].slice(0, 12)
+      const pieces = wrapWords(line.slice(indent.length), Math.max(10, width - indent.length - 2))
+      for (const [index, piece] of pieces.entries()) {
+        out.push(theme.muted + (first ? "  " + mark + " " : "    ") + indent + (index ? "  " : "") + piece + ansi.reset)
+        first = false
+      }
     }
     out.push("")
     return out
@@ -2215,6 +2225,13 @@ async function send() {
     if (result.kind === "balance") {
       openUsage(result.provider || selection.provider.id, true)
     }
+    if (result.kind === "local") {
+      const text = await localCommand(result.argument, selection.provider.id + "/" + selection.model.id)
+      transcript.push({ kind: "tool", text })
+      // A tools or context choice changes the model's label and window.
+      if (selection.provider.runtime) selection = resolveSelection(selection.provider.id + "/" + selection.model.id) ?? selection
+      status = result.argument ? text.split("\n")[0]!.slice(0, 90) : "local runtime"
+    }
     if (result.kind === "undo" || result.kind === "redo") {
       const forward = result.kind === "redo"
       try {
@@ -2428,6 +2445,10 @@ async function send() {
       if (event.type === "compacted") {
         historyArchived = true
         transcript.push({ kind: "tool", text: "compacted context: " + event.before + " -> " + event.after + " messages" })
+      }
+      if (event.type === "runtime") {
+        if (event.state === "loading") status = "loading " + event.model + " into llama.cpp..."
+        else transcript.push({ kind: "tool", text: `local model ${event.model} loaded in ${((event.ms ?? 0) / 1000).toFixed(1)} s${event.gpu ? " on the GPU" : " on the CPU"}` })
       }
       // The loop ran out of turns while the model was still calling tools, so
       // whatever is above is unfinished. It used to end exactly like a
@@ -2756,10 +2777,10 @@ process.stdin.on("data", (chunk) => {
       if (target === "attach") dialog = Dialogs.open("attach", "Add to the prompt", [{ label: "Mention a project file", value: "file" }, { label: "Paste image from clipboard", value: "image" }, { label: "Run a slash command", value: "command" }])
       if (target === "model") {
         const current = selection.provider.id + "/" + selection.model.id
-        dialog = Dialogs.open("model-picker", "Choose model", allSelections().map((s) => ({
+        dialog = Dialogs.open("model-picker", "Choose model", selectionsByKind().map((s) => ({
           label: s.provider.label + " " + s.model.label,
           value: s.provider.id + "/" + s.model.id,
-          hint: s.provider.id + "/" + s.model.id === current ? "current" : undefined,
+          hint: s.provider.id + "/" + s.model.id === current ? "current" : s.provider.runtime ? "runs here" : undefined,
         })), { size: "large", selectedValue: current })
       }
       if (target === "settings") openSettings()
