@@ -166,7 +166,12 @@ type Entry = {
   state?: "running" | "done" | "failed"
   /** Who wrote an answer. Every answer used to take the current model's name, so switching relabelled the past. */
   by?: string
+  /** Thinking only: when the first and the latest reasoning arrived, for "thought for Ns". */
+  started?: number
+  last?: number
 }
+/** Ctrl+O: finished thinking shown in full rather than folded to one line. A view, not a setting. */
+let expandThinking = false
 let transcript: Entry[] = []
 /** Readable messages of a resumed conversation left out of the drawn transcript. */
 let hiddenEarlier = 0
@@ -570,7 +575,9 @@ const RAIL_MIN_COLS = 150
  */
 const drawnRows = new WeakMap<Entry, { key: string; rows: string[] }>()
 function entryLines(entry: Entry, width: number): string[] {
-  const key = [width, settings.theme, settings.thinking, entry.kind, entry.state ?? "", entry.by ?? selection.provider.label, entry.text.length].join("|")
+  const key = [width, settings.theme, settings.thinking, entry.kind, entry.state ?? "", entry.by ?? selection.provider.label, entry.text.length,
+    // Thinking folds once it is finished, and Ctrl+O flips every fold.
+    entry.kind === "thinking" ? String(expandThinking) + (entry === transcript.at(-1) && streaming) : ""].join("|")
   const cached = drawnRows.get(entry)
   if (cached && cached.key === key) return cached.rows
   const rows = drawEntry(entry, width)
@@ -601,8 +608,18 @@ function drawEntry(entry: Entry, width: number): string[] {
     // Hiding reasoning is a view, not a filter on what is collected -
     // turning it back on should show what was said while it was off.
     if (!settings.thinking) return out
-    out.push(dim + "  thinking" + ansi.reset)
-    for (const line of entry.text.split(String.fromCharCode(10)).slice(-6)) {
+    // Finished reasoning folds to one line, the way the fork showed it: the
+    // answer is what matters, and a page of "the user said hi" pushed it off
+    // screen. Live reasoning still shows its latest lines, so progress is visible.
+    const done = entry !== transcript.at(-1) || !streaming
+    if (done && !expandThinking) {
+      const seconds = entry.started && entry.last ? Math.max(0.1, (entry.last - entry.started) / 1000) : undefined
+      out.push(dim + "  ◆ thought" + (seconds ? " for " + seconds.toFixed(1) + "s" : "") + " · ctrl+o expands" + ansi.reset)
+      out.push("")
+      return out
+    }
+    out.push(dim + "  thinking" + (done ? " · ctrl+o folds" : "...") + ansi.reset)
+    for (const line of entry.text.split(String.fromCharCode(10)).slice(done ? 0 : -6)) {
       out.push(dim + "  | " + line.slice(0, width) + ansi.reset)
     }
     out.push("")
@@ -1358,6 +1375,27 @@ function confirmImport(source: ImportSource, id: string, title: string) {
   ], { size: "large", footer: "enter confirms . esc cancels" })
 }
 
+/**
+ * A picture from the clipboard, attached to the next message.
+ *
+ * Reached from the + menu and from Ctrl+V. Windows Terminal keeps Ctrl+V for
+ * its own paste, and with only an image on the clipboard that paste arrives
+ * empty - so an empty paste means "look for a picture", the way the fork did it.
+ */
+async function attachClipboardImage(fromPaste = false) {
+  status = "reading the clipboard…"
+  render()
+  try {
+    const picture = await readClipboardImage()
+    pendingImages.push(picture)
+    status = "attached " + picture.name + " - sends with the next message" + (acceptsImages(selection) ? "" : " (this model cannot see images; pick a vision model)")
+  } catch (error) {
+    // Ctrl+V with nothing pasteable is not worth an error message.
+    status = fromPaste ? "nothing to paste - the clipboard has no text or image" : error instanceof Error ? error.message : "could not read the clipboard"
+  }
+  render()
+}
+
 /** The models CG-Next can download, as a list to pick from. */
 function openLocalPull() {
   const running = currentDownload()
@@ -1742,16 +1780,7 @@ async function chooseInDialog() {
   if (dialog.kind === "attach") {
     closeDialog()
     if (row.value === "image") {
-      status = "reading the clipboard…"
-      render()
-      try {
-        const picture = await readClipboardImage()
-        pendingImages.push(picture)
-        status = "attached " + picture.name + " - sends with the next message"
-      } catch (error) {
-        status = error instanceof Error ? error.message : "could not read the clipboard"
-      }
-      render()
+      await attachClipboardImage()
       return
     }
     applyComposer(insertText(composerState(), row.value === "file" ? "@" : "/"), true)
@@ -2528,10 +2557,11 @@ async function send() {
       recordActivity(session.activity, event)
       if (event.type === "thinking") {
         if (!current || current.kind !== "thinking") {
-          current = { kind: "thinking", text: "" }
+          current = { kind: "thinking", text: "", started: Date.now() }
           transcript.push(current)
         }
         current.text += event.delta
+        current.last = Date.now()
       }
       if (event.type === "text") {
         if (!current || current.kind !== "agent") {
@@ -3039,6 +3069,8 @@ process.stdin.on("data", (chunk) => {
     switch (pressed.type) {
       // Escape clears the line; it never exits. Quitting is ctrl+c.
       case "paste": {
+        // An empty paste is Windows Terminal's Ctrl+V with only a picture on the clipboard.
+        if (!pressed.value.trim()) { void attachClipboardImage(true); break }
         // Newlines inside a paste are content. A paste that is only one
         // short line is just typing, and goes in as it is - unless it is a
         // file dropped from Explorer, which becomes a mention instead.
@@ -3118,6 +3150,9 @@ process.stdin.on("data", (chunk) => {
       case "pageup": scroll += 5; dirty = true; break
       case "pagedown": scroll = Math.max(0, scroll - 5); dirty = true; break
       case "ctrl":
+        // Terminals that hand Ctrl+V to the app (rather than pasting text themselves): picture paste.
+        if (pressed.value === "v") void attachClipboardImage(true)
+        if (pressed.value === "o") { expandThinking = !expandThinking; status = expandThinking ? "showing reasoning in full" : "reasoning folded to one line"; dirty = true }
         if (pressed.value === "u") { applyComposer({ text: "", cursor: 0 }, true); dirty = true; refreshPalette() }
         if (pressed.value === "k") { applyComposer(deleteRange(composerState(), "toEnd"), true); dirty = true; refreshPalette() }
         if (pressed.value === "z") {
