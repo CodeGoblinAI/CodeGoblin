@@ -14,7 +14,7 @@ async function withServer(body: unknown, status = 200, headers: Record<string, s
     return new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers })
   } })
   const transport = (url: string, init: RequestInit) => {
-    expect(["https://api.deepseek.com/user/balance", "https://openapi.tripo3d.ai/v3/account/balance"]).toContain(url)
+    expect(["https://api.deepseek.com/user/balance", "https://openapi.tripo3d.ai/v3/account/balance", "https://api.moonshot.ai/v1/users/me/balance"]).toContain(url)
     expect(init.redirect).toBe("error")
     return fetch(server.url, init)
   }
@@ -81,6 +81,30 @@ describe("account balances", () => {
       expect(result.entries[0]?.amount).toBe("0.00")
       expect(result.detail).toContain("insufficient")
     } finally { fixture.server.stop(true) }
+  })
+
+  test("Kimi reports available, voucher and cash USD, and owed cash is not hidden", async () => {
+    const fixture = await withServer({ code: 0, data: { available_balance: 49.58894, voucher_balance: 46.58893, cash_balance: 3.00001 }, scode: "0x0", status: true })
+    try {
+      const result = await fetchBalance("moonshotai", "fixture-key", fixture.transport)
+      expect(result.state).toBe("ready")
+      expect(result.entries).toEqual([
+        { label: "Available", amount: "49.58894", unit: "USD" },
+        { label: "Vouchers", amount: "46.58893", unit: "USD" },
+        { label: "Cash", amount: "3.00001", unit: "USD" },
+      ])
+      expect(result.detail).toBe("Available for API calls (provider)")
+    } finally { fixture.server.stop(true) }
+    const owed = await withServer({ code: 0, data: { available_balance: 5, voucher_balance: 5, cash_balance: -2.5 }, scode: "0x0", status: true })
+    try {
+      const result = await fetchBalance("moonshotai", "fixture-key", owed.transport)
+      expect(result.entries[2]).toEqual({ label: "Cash", amount: "-2.5", unit: "USD" })
+      expect(result.detail).toContain("cash balance is owed")
+    } finally { owed.server.stop(true) }
+    const empty = await withServer({ code: 0, data: { available_balance: 0, voucher_balance: 0, cash_balance: 0 }, scode: "0x0", status: true })
+    try { expect((await fetchBalance("moonshotai", "fixture-key", empty.transport)).detail).toContain("insufficient") } finally { empty.server.stop(true) }
+    const refused = await withServer({ code: 1, data: {}, status: false })
+    try { expect((await fetchBalance("moonshotai", "fixture-key", refused.transport)).state).toBe("unavailable") } finally { refused.server.stop(true) }
   })
 
   test("Tripo keeps frozen credits separate from available credits and dollars", async () => {

@@ -7,7 +7,9 @@ for await (const line of createInterface({ input: process.stdin })) {
     if (input.method === "initialized") continue
     if (input.method === "initialize") {
       if (process.argv[2] === "bad-init") { process.stdout.write('not JSON\n'); continue }
-      process.stdout.write(JSON.stringify({ id: input.id, result: { userAgent: process.argv[2] === "old-version" ? "Codex Desktop/0.100.0" : "Codex Desktop/0.153.3" } }) + "\n")
+      // A third argument "ua=..." replays a real CLI's user agent verbatim.
+      const ua = process.argv[3]?.startsWith("ua=") ? process.argv[3].slice(3) : undefined
+      process.stdout.write(JSON.stringify({ id: input.id, result: { userAgent: ua ?? (process.argv[2] === "old-version" ? "Codex Desktop/0.100.0" : "Codex Desktop/0.153.3") } }) + "\n")
       continue
     }
     if (input.method === "fixture/hang") continue

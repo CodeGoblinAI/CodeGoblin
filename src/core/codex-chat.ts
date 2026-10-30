@@ -67,7 +67,10 @@ export async function* codexChat(input: {
   input.signal?.addEventListener("abort", abort, { once: true })
   try {
     input.signal?.throwIfAborted()
-    const version = /(?:codex_cli_rs|codex(?: Desktop)?)\/(\d+)\.(\d+)\.(\d+)/i.exec(rpc.userAgent)
+    // The leading product token is the originator: "codex_cli_rs" or "Codex Desktop"
+    // on older CLIs, the client's own name ("cg_next") from 0.164.0 on. Its version
+    // is the CLI's either way; the client's own version is the parenthesised tail.
+    const version = /^\s*(?:codex_cli_rs|codex(?: Desktop)?|cg_next)\/(\d+)\.(\d+)\.(\d+)/i.exec(rpc.userAgent)
     if (!version || (Number(version[1]) === 0 && (Number(version[2]) < 153 || (Number(version[2]) === 153 && Number(version[3]) < 3)))) throw new Error("Codex inference requires CLI 0.153.3 or later with environment access controls; no compatibility fallback is used")
     const account = object(object(await rpc.call("account/read", { refreshToken: false })).account)
     if (account.type !== "chatgpt" && account.type !== "apiKey") throw new Error("Run /login codex or codex login before selecting Codex CLI")

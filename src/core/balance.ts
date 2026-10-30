@@ -12,6 +12,8 @@ const ENDPOINTS: Record<string, string> = {
   deepseek: "https://api.deepseek.com/user/balance",
   tripo: "https://openapi.tripo3d.ai/v3/account/balance",
   elevenlabs: "https://api.elevenlabs.io/v1/user/subscription",
+  // https://platform.kimi.ai/docs/api/balance - USD; keys from the .com platform are a different account.
+  moonshotai: "https://api.moonshot.ai/v1/users/me/balance",
 }
 
 export async function fetchBalance(
@@ -86,6 +88,18 @@ function parseBalance(provider: string, input: unknown) {
       { label: "Used", amount: String(used), unit: "characters" },
       { label: "Included limit", amount: String(limit), unit: "characters" },
       { label: "Included remaining", amount: String(Math.max(0, limit - used)), unit: "characters" },
+    ] }
+  }
+  if (provider === "moonshotai") {
+    if (raw.code !== 0 || raw.status !== true) throw new Error("Provider refused balance")
+    const data = record(raw.data)
+    const available = amount(data.available_balance)
+    // Cash can go below zero - money owed - and then only vouchers are spendable.
+    const cash = amount(data.cash_balance)
+    return { detail: Number(available) > 0 ? "Available for API calls (provider)" + (Number(cash) < 0 ? "; cash balance is owed" : "") : "insufficient balance for API calls (provider)", entries: [
+      { label: "Available", amount: available, unit: "USD" },
+      { label: "Vouchers", amount: amount(data.voucher_balance), unit: "USD" },
+      { label: "Cash", amount: cash, unit: "USD" },
     ] }
   }
   if (provider === "tripo") {

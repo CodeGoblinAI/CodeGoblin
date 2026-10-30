@@ -23,6 +23,19 @@ test("ephemeral Codex inference disables environment/native capabilities, scopes
   expect(await collect({ modelId: "default", prompt: "Fixture", system: "Fixture", effort: effortFor(resolveSelection("codex/default")!.model, "high"), start: start("effort-inference") })).toEqual(events)
 })
 
+// CLI 0.164.0 names the client, not itself, at the front of its user agent.
+// The version check matched only "codex..." and refused every turn on it.
+test("the CLI version is read whichever originator leads the user agent", async () => {
+  const withUa = (ua: string) => () => CodexRpc.start([process.execPath, fixture, "inference", "ua=" + ua], 3000, true)
+  const expected = [{ type: "text", delta: "CODEX_FIXTURE" }, { type: "spend", input: 15, output: 5 }]
+  for (const ua of ["cg_next/0.164.0 (Windows 10.0.26200; x86_64) unknown (cg_next; 0.0.0)", "codex_cli_rs/0.153.3 (Windows 10.0.26200; x86_64)", "Codex Desktop/0.153.3"]) {
+    expect(await collect({ modelId: "default", prompt: "Fixture", system: "Fixture", start: withUa(ua) })).toEqual(expected)
+  }
+  for (const ua of ["cg_next/0.152.9 (Windows 10.0.26200; x86_64) unknown (cg_next; 0.0.0)", "unknown (cg_next; 0.0.0)", ""]) {
+    await expect(collect({ modelId: "default", prompt: "Fixture", system: "Fixture", start: withUa(ua) })).rejects.toThrow("0.153.3 or later")
+  }
+})
+
 test("official model catalog exposes effort only where reported, including the default alias", async () => {
   expect((await codexAuthStatus(start())).ready).toBe(true)
   expect(effortFor(resolveSelection("codex/default")!.model, "high")).toBe("high")
