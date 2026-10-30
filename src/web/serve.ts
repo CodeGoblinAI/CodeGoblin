@@ -41,7 +41,8 @@ import { apiKey } from "../core/auth"
 import * as auth from "../core/auth"
 import * as sessions from "../core/sessions"
 import { normaliseActivity, recordActivity } from "../core/session-activity"
-import { DECISIONS, MODES, askedFor, refusalLabel, type Decision, type PermissionMode, type Permissions } from "../core/permission"
+import { DECISIONS, MODES, Permissions, askedFor, refusalLabel, type Decision, type PermissionMode } from "../core/permission"
+import { runTypedCommand, typedCommand } from "../core/user-shell"
 import { BrowserConsent } from "./consent"
 import { McpManager } from "../core/mcp"
 import { SubagentManager, listAgents, selectedAgent, agentSelection, type SubagentContext } from "../core/subagents"
@@ -709,6 +710,28 @@ async function handle(request: Request): Promise<Response> {
       return json({ ok: false, error: "no pending request" }, 404)
     }
     return json({ ok: true })
+  }
+
+  // `!command` from the composer: run as the person, kept in the conversation for the next prompt.
+  if (url.pathname === "/api/shell" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { text?: unknown; sessionId?: unknown; provider?: unknown }
+    const command = typedCommand(typeof body.text === "string" ? body.text : "")
+    if (!command) return json({ error: "Type ! and then a command" }, 400)
+    const sessionId = typeof body.sessionId === "string" ? body.sessionId : ""
+    if (sessionId && activeTurns.has(sessionId)) return json({ error: "An answer is still running in this conversation; the command waits for it" }, 409)
+    const loaded = sessionId ? await sessions.load(sessionId) : undefined
+    const selection = (typeof body.provider === "string" ? exactSelection(body.provider) : undefined)
+      ?? (loaded ? exactSelection(loaded.provider + "/" + loaded.model) : undefined)
+      ?? defaultSelection()
+    const session = loaded ?? sessions.create(selection.provider.id, selection.model.id)
+    if (session.messages.length === 0) session.messages.push({ role: "system", content: systemPrompt("browser") })
+    // Only the deny rules matter here; nothing is asked about a command the person typed.
+    const run = await runTypedCommand(command, root, Permissions.withConfig(async () => "reject"), request.signal)
+    if (run.message) {
+      session.messages.push(run.message)
+      await saveReviewSession(session)
+    }
+    return json({ sessionId: session.id, display: run.message?.display ?? "! " + command + "\n\n" + run.output, refused: run.refused })
   }
 
   if (url.pathname === "/api/chat" && request.method === "POST") {

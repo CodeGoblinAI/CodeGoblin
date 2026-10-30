@@ -644,6 +644,29 @@ function chipFor(id) {
   )
 }
 
+/**
+ * A command typed with ! and what it printed: a tool row with the output under
+ * it. `done` false is the row while it runs; passing `existing` fills it in.
+ */
+function typedRow(display, done, existing) {
+  const [first, ...rest] = String(display).split("\n")
+  const row = existing ?? toolChip("$", "")
+  row.classList.add("typed")
+  row.classList.toggle("running", done === false && !existing)
+  row.classList.toggle("done", done !== false)
+  row.classList.toggle("failed", Boolean(existing) && done === false)
+  row.querySelector(".spin").textContent = done === false && !existing ? "" : done ? "✓" : "✗"
+  row.querySelector(".targs").textContent = first.replace(/^!\s*/, "")
+  let output = row.querySelector("pre.typed-output")
+  const body = rest.join("\n").trim()
+  if (body) {
+    if (!output) { output = document.createElement("pre"); output.className = "typed-output"; row.after(output) }
+    output.textContent = body
+  }
+  scrollDown()
+  return row
+}
+
 function toolChip(name, args, id) {
   if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
   const chip = document.createElement("div")
@@ -911,7 +934,8 @@ async function openSession(id) {
     // A long conversation opens at its recent end, like the terminal does.
     if (data.hiddenMessages || data.archived) note(earlierNotice(data.hiddenMessages, data.archived))
     for (const m of data.session.messages) {
-      if (m.role === "user") turn("user", m.display || m.content)
+      if (m.role === "user" && m.typed) typedRow(m.display || m.content, true)
+      else if (m.role === "user") turn("user", m.display || m.content)
       else if (m.role === "assistant" && m.content) turn("agent", m.content)
       if (m.stopped) turn("agent", "_stopped_")
     }
@@ -1932,6 +1956,34 @@ async function submit() {
     renderPalette()
     if (await runCommand(text)) { setBusy(false); return }
   }
+  // `!command` runs it on this machine as you, no model involved; the output
+  // joins the conversation so the next prompt can refer to it.
+  if (/^!\s*\S/.test(text)) {
+    input.value = ""
+    paletteItems = []
+    renderPalette()
+    const row = typedRow("! " + text.replace(/^!\s*/, ""), false)
+    setBusy(true)
+    const result = await fetch("/api/shell", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, sessionId, provider: currentModel }),
+    }).then(async (r) => ({ ok: r.ok, ...(await r.json()) })).catch(() => ({ ok: false, error: "could not reach the server" }))
+    setBusy(false)
+    if (!result.ok) {
+      row.remove()
+      if (!input.value) input.value = text
+      note(result.error + " - your command is back in the composer.")
+      updateSendButton()
+      return
+    }
+    sessionId = result.sessionId
+    typedRow(result.display, !result.refused, row)
+    if (result.refused) note("Not run: a deny rule in codegoblin.jsonc blocks that command.")
+    refreshSessions()
+    return
+  }
+
   // A generation model has no conversation to join, so a plain prompt is a
   // generation request. Picking one and typing is the whole interaction.
   const selected = modelOptions.find((option) => option.value === currentModel)

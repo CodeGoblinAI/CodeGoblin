@@ -4,6 +4,7 @@ import { Global } from "../platform/paths"
 import { runCommand } from "./commands"
 import { parseFrontmatter } from "./frontmatter"
 import { invokedSkillText, listSkills } from "./skills"
+import { PROMPT_COMMANDS } from "./prompt-commands"
 
 /**
  * Slash commands that are really messages: custom commands and skills.
@@ -28,7 +29,8 @@ export type CustomCommand = {
   argumentHint?: string
   template: string
   location: string
-  scope: "project" | "global"
+  /** "built-in" is one of the prompts CG-Next ships (prompt-commands.ts). */
+  scope: "project" | "global" | "built-in"
 }
 
 export type Invocation = { kind: "skill" | "command"; name: string; args: string; content: string }
@@ -103,6 +105,11 @@ export function customCommands(cwd: string = process.cwd()): CustomCommand[] {
         })
       }
     }
+  }
+  // The shipped prompts fill in last, so a file of the same name replaces one.
+  for (const prompt of PROMPT_COMMANDS) {
+    if (found.has(prompt.name)) continue
+    found.set(prompt.name, { ...prompt, location: "built-in", scope: "built-in" })
   }
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name))
 }

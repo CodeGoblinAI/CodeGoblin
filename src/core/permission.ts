@@ -559,6 +559,17 @@ export class Permissions {
     return !HARMLESS.has(tool)
   }
 
+  /**
+   * A command the person typed with `!` is theirs, so nothing is asked - but a
+   * deny rule still stops it. A rule written to keep `rm -rf` from ever
+   * running should not be one keystroke from irrelevant.
+   */
+  typedCommandVerdict(command: string): Verdict {
+    const rule = ruleFor(command, this.rules())
+    if (rule?.action !== "deny") return { allowed: true }
+    return { allowed: false, by: "rule", rule: rule.pattern, reason: `not run: blocked by a rule in codegoblin.jsonc - "${rule.pattern}" denies this command` }
+  }
+
   /** Re-evaluate a waiting request after a mode change, without prompting again. */
   automaticVerdict(tool: string, detail: string): Verdict | undefined {
     if (!this.needsConsent(tool)) return { allowed: true }

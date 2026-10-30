@@ -50,6 +50,8 @@ export type Message = {
   tool_call_id?: string
   /** UI/session metadata; never forwarded as an API field. */
   stopped?: boolean
+  /** A command the person ran with `!`; shown as its output, not as something they said. Metadata only. */
+  typed?: boolean
 }
 
 function continuationContent(message: Message) {

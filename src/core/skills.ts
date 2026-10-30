@@ -13,7 +13,7 @@ import { clip } from "./tools"
  * so the one skill store on this machine serves all of them:
  *
  *   <project>/.codegoblin/skills, <project>/.claude/skills, <project>/.agents/skills
- *   <config>/skills, ~/.claude/skills, ~/.agents/skills
+ *   <config>/skills, ~/.claude/skills, ~/.agents/skills, ~/.codex/skills
  *
  * A name found twice keeps the first, so a project's own skill wins over a
  * global one of the same name. Read fresh each time, so a skill written during
@@ -48,6 +48,8 @@ export function skillRoots(cwd: string): Root[] {
     { dir: path.join(Global.Path.config, "skills"), scope: "global" },
     { dir: path.join(home, ".claude", "skills"), scope: "global" },
     { dir: path.join(home, ".agents", "skills"), scope: "global" },
+    // Codex's store; the fork read it too, so skills made there show up here.
+    { dir: path.join(home, ".codex", "skills"), scope: "global" },
   ]
   const same = new Set(global.map((root) => path.resolve(root.dir).toLowerCase()))
   const project: Root[] = [

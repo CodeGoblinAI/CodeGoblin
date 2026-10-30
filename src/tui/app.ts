@@ -19,6 +19,7 @@ import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } 
 import { selectionsByKind } from "../core/providers"
 import { isLocalChat } from "../core/local-provider"
 import { localCommand } from "../core/local-command"
+import { runTypedCommand, typedCommand } from "../core/user-shell"
 import { LOCAL_CATALOG, currentDownload, downloadModel, gb as gbOf, isInstalled, lastDownload, progressText } from "../core/local-downloads"
 import { ownedModelsDir } from "../core/local-runtime"
 import { normalizeCommand } from "../core/commands"
@@ -333,7 +334,8 @@ let spinnerTimer: ReturnType<typeof setInterval> | undefined
 function fromMessages(list: Message[]): Entry[] {
   const out: Entry[] = []
   for (const message of list) {
-    if (message.role === "user") out.push({ kind: "user", text: message.content })
+    if (message.role === "user" && message.typed) out.push({ kind: "tool", state: "done", text: (message.display ?? message.content).replace(/^! /, "$ ") })
+    else if (message.role === "user") out.push({ kind: "user", text: message.content })
     else if (message.role === "assistant" && message.content) out.push({ kind: "agent", text: message.content })
     if (message.stopped) out.push({ kind: "tool", text: "stopped", state: "failed" })
   }
@@ -2001,6 +2003,30 @@ async function send() {
     status = replaced
       ? "replaced queued prompt - sending when this turn ends . Ctrl+S sends now"
       : "queued - sending when this turn ends . Ctrl+S sends now"
+    render()
+    return
+  }
+
+  // `!command` runs it here, as you: no model, nothing asked, deny rules still apply.
+  const typed = typedCommand(text)
+  if (typed) {
+    clearSent()
+    palette = undefined
+    history.push(text)
+    const row: Entry = { kind: "tool", state: "running", text: "$ " + typed }
+    transcript.push(row)
+    status = "running " + typed.slice(0, 60) + " ... (yours, not the model's)"
+    render()
+    const run = await runTypedCommand(typed, process.cwd(), permissions)
+    row.state = run.refused ? "failed" : "done"
+    row.text = run.message?.display?.replace(/^! /, "$ ") ?? "$ " + typed + "\n" + run.output
+    if (run.message) {
+      messages.push(run.message)
+      session.messages = messages
+      void sessions.save(session).then(refreshSessionCache).catch(() => {})
+      void refreshFileCache(true)
+    }
+    status = run.refused ? "not run: a deny rule in codegoblin.jsonc blocks it" : "ran " + typed.slice(0, 60) + " - the output is in the conversation for your next prompt"
     render()
     return
   }
