@@ -13,7 +13,7 @@ async function workspace() {
   return fs.mkdtemp(path.join(Global.Path.home, "review-"))
 }
 
-test("saved baselines survive a new process-equivalent History without restoring undo writes", async () => {
+test("saved baselines survive a new process; a checkpoint with no record of how its turn ended is not restored", async () => {
   const root = await workspace()
   await fs.writeFile(path.join(root, "example.txt"), "before\n")
   const original = new History()
@@ -32,7 +32,7 @@ test("saved baselines survive a new process-equivalent History without restoring
   restored.restoreReview(root, restoredSession.review)
   expect(await changesIn(root, restored)).toEqual(await changesIn(root, original))
   expect(restored.canUndo()).toBe(false)
-  expect(nothingToDo(restored, false)).toContain("not restored")
+  expect(nothingToDo(restored, false)).toContain("/diff shows what this session changed")
   expect(restoredSession.activity?.items[0]).toMatchObject({ state: "done" })
   expect(restoredSession.activity?.items[0]?.label).toContain("edit_file · example.txt")
 })

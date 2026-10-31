@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
-import { realpathSync } from "node:fs"
+import crypto from "node:crypto"
+import { readFileSync, realpathSync } from "node:fs"
 import { resolveInside } from "./tools"
 
 const BACKSLASH = String.fromCharCode(92)
@@ -13,9 +14,12 @@ const BACKSLASH = String.fromCharCode(92)
  * was never committed. Every turn that touches a file opens a checkpoint,
  * the state before each file is captured once, and /undo puts it all back.
  *
- * Snapshots live in memory for the life of the process. They are not a
- * backup: closing the app loses them, which is the honest trade for not
- * scattering copies of someone's source tree across a state directory.
+ * Snapshots live in memory, and the recent ones are saved with the
+ * conversation (within the same limits as the diff baseline), so /undo still
+ * works after a restart or a resume. Each checkpoint remembers what the files
+ * looked like when its turn ended: if one has changed since - edited by hand,
+ * or by a later turn that is no longer in memory - undo refuses rather than
+ * overwrite work it never saw.
  */
 
 /** before is null when the file did not exist, so undo removes it again. */
@@ -23,6 +27,11 @@ export type Snapshot = { path: string; before: string | null }
 export type Checkpoint = {
   label: string
   files: Snapshot[]
+  /**
+   * A hash of each file as the turn left it, in the same order as files; null
+   * for a file the turn left absent. Undo checks the tree still matches.
+   */
+  after?: (string | null)[]
   /**
    * Directories that did not exist before this turn.
    *
@@ -34,7 +43,11 @@ export type Checkpoint = {
 
 /** Enough to walk back through an afternoon, not enough to hoard a tree. */
 const MAX_CHECKPOINTS = 20
-export type ReviewState = { root: string; files: Snapshot[]; truncated?: boolean }
+export type ReviewState = { root: string; files: Snapshot[]; truncated?: boolean; checkpoints?: { done: Checkpoint[]; undone: Checkpoint[] } }
+/** What is saved of the undo stacks: newest first until either limit, so the most recent turns always survive. */
+const SAVED_UNDO_BYTES = 4 * 1024 * 1024
+const SAVED_UNDO_FILE_BYTES = 512 * 1024
+const HASH = /^[0-9a-f]{64}$/
 const REVIEW_FILES = 100
 const REVIEW_BYTES = 4 * 1024 * 1024
 const REVIEW_FILE_BYTES = 256 * 1024
@@ -55,6 +68,16 @@ async function missingAncestors(root: string, relative: string): Promise<string[
   return missing
 }
 
+const hashOf = (text: string | null) => (text === null ? null : crypto.createHash("sha256").update(text).digest("hex"))
+
+function readOrNullSync(root: string, relative: string): string | null {
+  try {
+    return readFileSync(resolveInside(root, relative), "utf8")
+  } catch {
+    return null
+  }
+}
+
 async function readOrNull(root: string, relative: string): Promise<string | null> {
   try {
     return await fs.readFile(resolveInside(root, relative), "utf8")
@@ -65,6 +88,16 @@ async function readOrNull(root: string, relative: string): Promise<string | null
 
 /** Put a checkpoint's files back, returning what was there so it can be replayed. */
 async function restore(root: string, checkpoint: Checkpoint): Promise<Checkpoint> {
+  // Checked before anything is written, so a refusal leaves every file as it was.
+  if (checkpoint.after) {
+    const changed: string[] = []
+    for (const [index, snapshot] of checkpoint.files.entries()) {
+      if (hashOf(await readOrNull(root, snapshot.path)) !== checkpoint.after[index]) changed.push(snapshot.path)
+    }
+    if (changed.length) {
+      throw new Error(`${changed.slice(0, 3).join(", ")}${changed.length > 3 ? ` and ${changed.length - 3} more` : ""} changed since that turn - nothing was put back, so those edits are safe`)
+    }
+  }
   const inverse: Snapshot[] = []
   for (const snapshot of checkpoint.files) {
     inverse.push({ path: snapshot.path, before: await readOrNull(root, snapshot.path) })
@@ -82,7 +115,28 @@ async function restore(root: string, checkpoint: Checkpoint): Promise<Checkpoint
     await fs.rmdir(resolveInside(root, dir)).catch(() => {})
   }
 
-  return { label: checkpoint.label, files: inverse, dirs: checkpoint.dirs }
+  // What the tree now holds is what was just written: the redo checks against that.
+  return { label: checkpoint.label, files: inverse, dirs: checkpoint.dirs, after: checkpoint.files.map((snapshot) => hashOf(snapshot.before)) }
+}
+
+const sizeOf = (checkpoint: Checkpoint) => checkpoint.files.reduce((sum, snapshot) => sum + (snapshot.before === null ? 0 : Buffer.byteLength(snapshot.before)), 0)
+
+/** A saved checkpoint, checked field by field: anything off and it is not used. */
+function validCheckpoint(root: string, value: unknown): Checkpoint | undefined {
+  const raw = value as Partial<Checkpoint> | null
+  if (!raw || typeof raw.label !== "string" || !Array.isArray(raw.files) || !raw.files.length || !Array.isArray(raw.dirs) || !Array.isArray(raw.after)) return undefined
+  if (raw.after.length !== raw.files.length) return undefined
+  const inside = (relative: unknown) => {
+    if (typeof relative !== "string" || !relative || path.isAbsolute(relative)) return false
+    try { resolveInside(root, relative); return true } catch { return false }
+  }
+  for (const snapshot of raw.files) {
+    if (!snapshot || !inside(snapshot.path) || (snapshot.before !== null && typeof snapshot.before !== "string")) return undefined
+    if (snapshot.before !== null && Buffer.byteLength(snapshot.before) > SAVED_UNDO_FILE_BYTES) return undefined
+  }
+  if (!raw.dirs.every(inside)) return undefined
+  if (!raw.after.every((hash) => hash === null || (typeof hash === "string" && HASH.test(hash)))) return undefined
+  return { label: raw.label.slice(0, 60), files: raw.files.map((snapshot) => ({ path: snapshot.path, before: snapshot.before })), dirs: [...raw.dirs], after: [...raw.after] }
 }
 
 export class History {
@@ -136,8 +190,32 @@ export class History {
     return new Map(this.origin)
   }
 
-  /** Read-only baselines, not executable undo checkpoints. Bound to this physical workspace. */
+  /**
+   * What is saved with the conversation: the diff baselines, and the undo and
+   * redo stacks newest first until the size limit. Bound to this physical
+   * workspace; a different folder gets neither back.
+   */
   reviewState(root: string): ReviewState {
+    const state = this.baselineState(root)
+    let budget = SAVED_UNDO_BYTES
+    const keep = (stack: Checkpoint[]) => {
+      const kept: Checkpoint[] = []
+      for (const checkpoint of [...stack].reverse()) {
+        const size = sizeOf(checkpoint)
+        // An older checkpoint cannot be undone without the newer ones, so the
+        // first that does not fit ends the stack.
+        if (!checkpoint.after || size > budget || checkpoint.files.some((s) => s.before !== null && Buffer.byteLength(s.before) > SAVED_UNDO_FILE_BYTES)) break
+        budget -= size
+        kept.unshift(checkpoint)
+      }
+      return kept
+    }
+    const done = keep(this.done)
+    const undone = keep(this.undone)
+    return done.length || undone.length ? { ...state, checkpoints: { done, undone } } : state
+  }
+
+  private baselineState(root: string): ReviewState {
     const files: Snapshot[] = []
     let bytes = 0
     let truncated = Boolean(this.reviewNotice)
@@ -174,11 +252,23 @@ export class History {
     }
     this.origin = restored
     this.reviewNotice = state.truncated ? "Saved diff is incomplete: some baselines exceeded limits or were unavailable." : undefined
+    const saved = state.checkpoints
+    if (saved && Array.isArray(saved.done) && Array.isArray(saved.undone) && saved.done.length + saved.undone.length <= MAX_CHECKPOINTS * 2) {
+      const done = saved.done.map((each) => validCheckpoint(root, each))
+      const undone = saved.undone.map((each) => validCheckpoint(root, each))
+      if (done.every(Boolean) && undone.every(Boolean)) {
+        this.done = done as Checkpoint[]
+        this.undone = undone as Checkpoint[]
+      } else this.reviewNotice = "Saved undo history was invalid, so /undo starts fresh; /diff keeps the baseline."
+    }
   }
 
   /** End a turn. A turn that changed nothing leaves no checkpoint to undo. */
-  commit() {
+  commit(root?: string) {
     if (this.open && this.open.files.length) {
+      // How the turn left each file, so a later undo can tell whether anything
+      // has touched them since. Without a root nothing is checked, as before.
+      if (root) this.open.after = this.open.files.map((snapshot) => hashOf(readOrNullSync(root, snapshot.path)))
       this.done.push(this.open)
       if (this.done.length > MAX_CHECKPOINTS) this.done.shift()
       // New work forks the timeline: what was undone can no longer be redone.
@@ -197,14 +287,25 @@ export class History {
   async undo(root: string): Promise<Checkpoint | undefined> {
     const checkpoint = this.done.pop()
     if (!checkpoint) return undefined
-    this.undone.push(await restore(root, checkpoint))
+    try {
+      this.undone.push(await restore(root, checkpoint))
+    } catch (error) {
+      // Refused, so it stays where it was: fixing the file and trying again works.
+      this.done.push(checkpoint)
+      throw error
+    }
     return checkpoint
   }
 
   async redo(root: string): Promise<Checkpoint | undefined> {
     const checkpoint = this.undone.pop()
     if (!checkpoint) return undefined
-    this.done.push(await restore(root, checkpoint))
+    try {
+      this.done.push(await restore(root, checkpoint))
+    } catch (error) {
+      this.undone.push(checkpoint)
+      throw error
+    }
     return checkpoint
   }
 
@@ -226,7 +327,7 @@ export class History {
 export function nothingToDo(history: History, forward: boolean): string {
   if (forward) return "nothing to redo"
   if (history.canRedo()) return "already back to how this session started - /redo to reapply"
-  if (history.origins().size) return "Undo checkpoints are not restored across restart/resume; /diff keeps the recorded baseline."
+  if (history.origins().size) return "nothing left to undo - older turns were past the saved limit; /diff shows what this session changed"
   return "nothing to undo - no file has been changed this session"
 }
 

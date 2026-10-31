@@ -2517,6 +2517,11 @@ async function send() {
         status = checkpoint
           ? (forward ? "redid " : "undid ") + describeCheckpoint(checkpoint)
           : nothingToDo(edits, forward)
+        // Saved straight away, so a restart does not undo the same turn twice.
+        if (checkpoint && messages.some((message) => message.role === "user")) {
+          session.review = edits.reviewState(process.cwd())
+          void sessions.save(session).catch(() => {})
+        }
       } catch (error) {
         status = "undo failed: " + (error instanceof Error ? error.message.slice(0, 90) : "unknown")
       }
@@ -2809,7 +2814,7 @@ async function send() {
     streaming = false
     stopSpinner()
     turn = undefined
-    edits.commit()
+    edits.commit(process.cwd())
     session.messages = messages
     session.spend = spend
     session.review = edits.reviewState(process.cwd())

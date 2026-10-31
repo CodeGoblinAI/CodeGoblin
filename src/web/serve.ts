@@ -690,12 +690,17 @@ async function handle(request: Request): Promise<Response> {
   }
   if (url.pathname === "/api/undo" && request.method === "POST") {
     const body = (await request.json()) as { sessionId?: string; direction?: string }
-    const edits = editsBySession.get(body.sessionId ?? "")
+    const id = body.sessionId ?? ""
+    // After a restart the conversation's undo history comes back from its saved file.
+    const saved = /^[a-zA-Z0-9_-]+$/.test(id) ? await sessions.load(id).catch(() => undefined) : undefined
+    const edits = editsBySession.get(id) || (saved ? editsFor(id, saved.review) : undefined)
     const forward = body.direction === "redo"
     if (!edits) return json({ message: "nothing to undo - no file has been changed this session" })
     try {
       const checkpoint = forward ? await edits.redo(root) : await edits.undo(root)
       if (!checkpoint) return json({ message: nothingToDo(edits, forward) })
+      // Saved straight away, so a restart does not undo the same turn twice.
+      if (saved) await saveReviewSession(saved).catch(() => {})
       return json({ message: (forward ? "redid " : "undid ") + describeCheckpoint(checkpoint) })
     } catch (error) {
       return json({ message: "undo failed: " + (error instanceof Error ? error.message : "unknown") }, 500)
@@ -957,6 +962,8 @@ async function handle(request: Request): Promise<Response> {
               context: usage(isLocalChat(provider, model.id) ? localChatMessages(session.messages) : session.messages, model.contextWindow),
             })
           }
+          // Committed before saving, so the turn's undo checkpoint is saved with it.
+          edits.commit(root)
           await saveReviewSession(session)
           if (session.messages.at(-1)?.stopped) send({ type: "stopped" })
           send({ type: "saved", id: session.id, title: session.title })
@@ -968,11 +975,12 @@ async function handle(request: Request): Promise<Response> {
           // too: an approved write may already be on disk, and losing the
           // conversation would lose the only record of it and its diff.
           if (turn.signal.aborted && !session.messages.at(-1)?.stopped) session.messages.push({ role: "assistant", content: "", stopped: true })
+          edits.commit(root)
           await saveReviewSession(session).catch(() => {})
           if (turn.signal.aborted) send({ type: "stopped" })
           else send({ type: "error", message: error instanceof Error ? error.message : "request failed" })
         } finally {
-          edits.commit()
+          edits.commit(root)
           clearInterval(heartbeat)
           activeTurns.delete(session.id)
           controller.close()
