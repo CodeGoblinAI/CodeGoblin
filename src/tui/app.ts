@@ -16,7 +16,12 @@ import { resolveStartupModel } from "../core/model-selection"
 import { isLiveCommand } from "./live-commands"
 import { footerHeight } from "./layout"
 import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
-import { selectionsByKind } from "../core/providers"
+import { refreshExperientialModels, refreshLiveModels, selectionsByKind } from "../core/providers"
+import { apiKey as storedKey } from "../core/auth"
+
+// Model lists that change often are read live once, without holding up startup.
+void refreshExperientialModels()
+void refreshLiveModels(storedKey)
 import { isLocalChat } from "../core/local-provider"
 import { localCommand } from "../core/local-command"
 import { runTypedCommand, typedCommand } from "../core/user-shell"

@@ -1,4 +1,4 @@
-import { authHeaders, type Provider } from "./providers"
+import { authHeaders, kindOf, type Provider } from "./providers"
 import { isLocalChat, verifyLocalModel } from "./local-provider"
 import { localRuntime, type Lease } from "./local-runtime"
 import { cliCompletion } from "./cli-completion"
@@ -124,8 +124,10 @@ export type AgentEvent =
  * generators before it gets this far; this is the backstop, and it says what
  * happened rather than posting to undefined.
  */
-function chatEndpoint(provider: Provider): string {
-  if (!provider.baseUrl) {
+function chatEndpoint(provider: Provider, modelId?: string): string {
+  // A provider can both chat and draw (OpenAI): its image model still has no conversation.
+  const model = modelId ? provider.models.find((entry) => entry.id === modelId) : undefined
+  if (!provider.baseUrl || (model && kindOf(model) !== "text")) {
     throw new Error(
       `${provider.label} generates media, not conversation - pick a text model with /model to chat`,
     )
@@ -398,7 +400,7 @@ async function* runTurns(input: {
         yield event
       }
     } else {
-    const response = await fetch(chatEndpoint(input.provider), {
+    const response = await fetch(chatEndpoint(input.provider, input.modelId), {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders(input.provider, input.apiKey) },
       body: JSON.stringify({
@@ -416,7 +418,7 @@ async function* runTurns(input: {
         // llama.cpp omits usage on streams unless asked; without this a local
         // turn never records spend and /usage reads "nothing yet" forever.
         // Local-only: hosted providers get nothing they did not ask for.
-        ...(input.provider.local ? { stream_options: { include_usage: true } } : {}),
+        ...(input.provider.local || input.provider.usageOnStream ? { stream_options: { include_usage: true } } : {}),
         ...(input.effort ? { reasoning_effort: input.effort } : {}),
       }),
       signal: input.signal,
@@ -698,7 +700,7 @@ async function* summarise(
   messages: Message[],
 ): AsyncGenerator<AgentEvent, string> {
   try {
-    const response = await fetch(chatEndpoint(input.provider), {
+    const response = await fetch(chatEndpoint(input.provider, input.modelId), {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders(input.provider, input.apiKey) },
       body: JSON.stringify({

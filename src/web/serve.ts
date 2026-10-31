@@ -35,6 +35,8 @@ import {
   takesEffort,
   exactSelection,
   pickerSection,
+  refreshExperientialModels,
+  refreshLiveModels,
   CONNECTABLE,
 } from "../core/providers"
 import { apiKey } from "../core/auth"
@@ -95,6 +97,9 @@ function withMode(permissions: Permissions, body: { mode?: string; planning?: bo
  * connected in the background from startup. /mcp says how each is doing.
  */
 const mcp = McpManager.fromConfig()
+// Experiential Labs' list changes often; read it live once, without holding up startup.
+void refreshExperientialModels()
+void refreshLiveModels(apiKey)
 void mcp.start()
 
 /**

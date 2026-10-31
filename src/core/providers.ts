@@ -18,6 +18,7 @@
  */
 import { localProvider } from "./local-provider"
 import { contextFor, installedModels, readPrefs, toolsFor } from "./local-runtime"
+import { cachedExperientialModels, fetchExperientialModels } from "./experiential"
 
 export type Capabilities = {
   input?: { text?: boolean; image?: boolean; audio?: boolean }
@@ -59,6 +60,15 @@ export type Provider = {
    * absent until a turn leases it - see local-runtime.ts.
    */
   runtime?: boolean
+  /** Sends stream_options.include_usage: OpenAI-style APIs omit usage on streams unless asked, and spend stays unknown. */
+  usageOnStream?: boolean
+  /**
+   * Ask the API which models this key may call (GET /models) and list those:
+   * catalog entries keep their limits and prices, newly listed chat models are
+   * added unpriced with this context window. Catalogs lag - Xiaomi's listed
+   * v2.5 while keys could only call v2.6.
+   */
+  liveModels?: { context: number }
   localTools?: boolean
   localThinking?: boolean
   id: string
@@ -198,7 +208,19 @@ export const PROVIDERS: Record<string, Provider> = {
   openai: {
     id: "openai",
     label: "OpenAI",
+    // Chat and pictures from one key. The image model still goes to its
+    // generator - what a prompt becomes is decided by the model's kind.
+    baseUrl: "https://api.openai.com/v1/chat/completions",
+    usageOnStream: true,
     models: [
+      { id: "gpt-5.6", label: "GPT-5.6", reasoning: true, contextWindow: 1_050_000, price: { input: 4, output: 20 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", reasoning: true, contextWindow: 1_050_000, price: { input: 2, output: 12 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", reasoning: true, contextWindow: 1_050_000, price: { input: 0.2, output: 1.2 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", reasoning: true, contextWindow: 1_050_000, price: { input: 4, output: 20 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-6-astra", label: "GPT-6 Astra", reasoning: true, contextWindow: 1_050_000, price: { input: 10, output: 50 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.5", label: "GPT-5.5", reasoning: true, contextWindow: 1_050_000, price: { input: 5, output: 30 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.4-mini", label: "GPT-5.4 mini", reasoning: true, contextWindow: 400_000, price: { input: 0.75, output: 4.5 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.4-nano", label: "GPT-5.4 nano", reasoning: true, contextWindow: 400_000, price: { input: 0.2, output: 1.25 }, capabilities: { input: { text: true, image: true } } },
       {
         id: "gpt-image-1",
         label: "GPT Image 1",
@@ -206,6 +228,41 @@ export const PROVIDERS: Record<string, Provider> = {
         capabilities: { input: { text: true, image: true }, output: { image: true } },
       },
     ],
+  },
+  // Models, limits and prices from the fork's models.dev catalog (2026-10).
+  xiaomi: {
+    id: "xiaomi",
+    label: "Xiaomi MiMo",
+    baseUrl: "https://api.xiaomimimo.com/v1/chat/completions",
+    liveModels: { context: 262_144 },
+    models: [
+      { id: "mimo-v2.5-pro", label: "V2.5 Pro", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.435, output: 0.87 } },
+      { id: "mimo-v2.5", label: "V2.5", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.14, output: 0.28 }, capabilities: { input: { text: true, image: true } } },
+      { id: "mimo-v2.5-pro-ultraspeed", label: "V2.5 Pro Ultraspeed", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 1.305, output: 2.61 } },
+      { id: "mimo-v2-pro", label: "V2 Pro", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.435, output: 0.87 } },
+      { id: "mimo-v2-flash", label: "V2 Flash", reasoning: true, effort: false, contextWindow: 262_144, price: { input: 0.14, output: 0.28 } },
+      { id: "mimo-v2-omni", label: "V2 Omni", reasoning: true, effort: false, contextWindow: 262_144, price: { input: 0.14, output: 0.28 }, capabilities: { input: { text: true, image: true } } },
+    ],
+  },
+  meta: {
+    id: "meta",
+    label: "Meta Muse Spark",
+    baseUrl: "https://api.meta.ai/v1/chat/completions",
+    liveModels: { context: 1_048_576 },
+    models: [
+      { id: "muse-spark-1.3", label: "1.3", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 1.25, output: 4.25 }, capabilities: { input: { text: true, image: true } } },
+      { id: "muse-spark-1.3-contributor", label: "1.3 Contributor", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.1, output: 0.2 }, capabilities: { input: { text: true, image: true } } },
+      { id: "muse-spark-1.2", label: "1.2", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 1.25, output: 4.25 }, capabilities: { input: { text: true, image: true } } },
+      { id: "muse-spark-1.2-contributor", label: "1.2 Contributor", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.1, output: 0.2 }, capabilities: { input: { text: true, image: true } } },
+    ],
+  },
+  // Filled from Experiential Labs' live catalog; the last good copy is cached.
+  explabs: {
+    id: "explabs",
+    label: "Experiential Labs",
+    baseUrl: "https://api.experientiallabs.ai/v1/chat/completions",
+    usageOnStream: true,
+    models: [],
   },
   qwen: {
     id: "qwen",
@@ -292,6 +349,53 @@ export function refreshLocalModels() {
   }))
 }
 refreshLocalModels()
+
+PROVIDERS.explabs!.models = cachedExperientialModels()
+let experientialRefresh: Promise<number> | undefined
+/**
+ * Experiential Labs' current models from its public catalog, once per run.
+ * The surfaces start it without waiting; a failure keeps the cached list.
+ */
+export function refreshExperientialModels(fetcher?: typeof fetch): Promise<number> {
+  experientialRefresh ??= fetchExperientialModels(fetcher)
+    .then((models) => { PROVIDERS.explabs!.models = models; return models.length })
+    .catch(() => PROVIDERS.explabs!.models.length)
+  return experientialRefresh
+}
+
+/** Listed by /models but not chat: speech, images, transcription, embeddings. */
+const NOT_CHAT = /(asr|tts|voice|transcribe|whisper|embed|image|dall-e|sam-\d|moderation|realtime|audio)/i
+
+/**
+ * The models a provider's key may actually call, for providers marked liveModels.
+ * A key with no access, a refused request or an empty answer keeps the catalog.
+ */
+export async function discoverModels(provider: Provider, key: string, fetcher: typeof fetch = fetch): Promise<boolean> {
+  if (!provider.liveModels || !provider.baseUrl || !key) return false
+  try {
+    const response = await fetcher(provider.baseUrl.replace(/\/chat\/completions$/, "/models"), {
+      headers: authHeaders(provider, key), signal: AbortSignal.timeout(10_000), redirect: "error",
+    })
+    if (!response.ok) return false
+    const body = await response.json() as { data?: { id?: unknown }[] }
+    const listed = (body.data ?? []).map((entry) => entry.id).filter((id): id is string => typeof id === "string" && /^[A-Za-z0-9._:/-]{1,160}$/.test(id) && !NOT_CHAT.test(id))
+    if (!listed.length) return false
+    const known = new Map(provider.models.map((model) => [model.id, model]))
+    provider.models = listed.map((id) => known.get(id) ?? { id, label: id, contextWindow: provider.liveModels!.context })
+      .sort((a, b) => Number(Boolean(b.price)) - Number(Boolean(a.price)) || a.id.localeCompare(b.id))
+    return true
+  } catch { return false }
+}
+
+let liveRefresh: Promise<void> | undefined
+/** Discovery for every provider that has a key here, once per run, without holding up startup. */
+export function refreshLiveModels(keyFor: (id: string) => string | undefined): Promise<void> {
+  liveRefresh ??= Promise.all(Object.values(PROVIDERS).filter((provider) => provider.liveModels).map((provider) => {
+    const key = keyFor(provider.id)
+    return key ? discoverModels(provider, key) : false
+  })).then(() => {})
+  return liveRefresh
+}
 
 PROVIDERS["claude-code"] = {
   id: "claude-code", label: "Claude CLI (CG tools)", cli: "claude-code",

@@ -49,13 +49,26 @@ describe("what a model is for", () => {
 })
 
 describe("only a chat model can hold a conversation", () => {
-  test("generation providers have no chat endpoint", () => {
+  // A provider may both chat and draw (OpenAI does); its generators still never chat.
+  test("generation models are never chat models, even beside a chat endpoint", () => {
     for (const kind of ["image", "audio", "model3d"] as const) {
       for (const selection of selectionsOfKind(kind)) {
-        expect([selection.provider.id, selection.provider.baseUrl]).toEqual([selection.provider.id, undefined])
-        expect(isChatModel(selection)).toBe(false)
+        expect([selection.provider.id + "/" + selection.model.id, isChatModel(selection)]).toEqual([selection.provider.id + "/" + selection.model.id, false])
       }
     }
+  })
+
+  test("an image model's prompt is refused by the chat loop, not posted to the chat endpoint", async () => {
+    const { runAgent } = await import("../src/core/agent")
+    const openai = PROVIDERS.openai!
+    const posted: string[] = []
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async (url: string) => { posted.push(String(url)); return new Response("") }) as typeof fetch
+    try {
+      const run = async () => { for await (const _ of runAgent({ provider: openai, modelId: "gpt-image-1", apiKey: "k", root: process.cwd(), messages: [{ role: "user", content: "draw" }] })) {} }
+      await expect(run()).rejects.toThrow("generates media")
+      expect(posted).toEqual([])
+    } finally { globalThis.fetch = realFetch }
   })
 
   test("every text model has somewhere to send a message", () => {
