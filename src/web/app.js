@@ -1355,15 +1355,28 @@ async function openAgentsDialog() {
 async function openMcpDialog() {
   const modal = makeDialog("MCP servers")
   const status = document.createElement("pre"); status.style.whiteSpace = "pre-wrap"; status.textContent = "Loading configured servers…"; modal.append(status)
-  const data = await fetch("/api/mcp", { cache: "no-store" }).then(r => r.json()).catch(() => null)
+  const data = await fetch("/api/mcp?sessionId=" + encodeURIComponent(sessionId || ""), { cache: "no-store" }).then(r => r.json()).catch(() => null)
   if (!modal.isConnected) return
   if (!data?.servers?.length) { status.textContent = "No MCP servers; add them under mcp in " + (data?.config || "codegoblin.jsonc"); return }
-  status.textContent = data.servers.map(server => server.name + ": " + server.status + (server.error ? " — " + server.error : "") + (server.tools.length ? "\n" + server.tools.join(", ") : "")).join("\n\n")
+  const off = new Set(data.off || [])
+  status.textContent = data.servers.map(server => server.name + ": " + server.status + (off.has(server.name) ? " · off in this conversation" : "") + (server.error ? " — " + server.error : "") + (server.tools.length ? "\n" + server.tools.join(", ") : "")).join("\n\n")
+  // On or off for this conversation only; codegoblin.jsonc is not touched.
+  for (const server of data.servers) {
+    const button = document.createElement("button"); button.className = "dialog-action"
+    button.textContent = (off.has(server.name) ? "Turn on " : "Turn off ") + server.name + " for this conversation"
+    button.onclick = async () => { await setMcpForSession(server.name, off.has(server.name)); modal.close(); void openMcpDialog() }
+    modal.append(button)
+  }
   for (const server of data.servers.filter(server => server.oauth)) {
     const button = document.createElement("button"); button.textContent = "Sign in to " + server.name
     button.onclick = () => { modal.close(); openMcpLoginDialog(server.name, server.target) }
     modal.append(button)
   }
+}
+
+async function setMcpForSession(server, on) {
+  const data = await fetch("/api/mcp/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: sessionId || "", server, on }) }).then(r => r.json()).catch(() => null)
+  note(data?.ok ? (on ? "Turned on " : "Turned off ") + server + " for this conversation." : (data?.message || "Could not change that server."))
 }
 
 function openMcpLoginDialog(server, target) {
@@ -1969,6 +1982,9 @@ async function runCommand(text) {
   }
 
   if (name === "/mcp") {
+    const [verb, server] = argument.split(/\s+/).filter(Boolean)
+    if ((verb === "off" || verb === "on") && server) { await setMcpForSession(server, verb === "on"); return true }
+    if (verb) { note("Use /mcp to see servers, or /mcp off <server> / /mcp on <server> for this conversation."); return true }
     await openMcpDialog()
     return true
   }

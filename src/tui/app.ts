@@ -101,7 +101,7 @@ import {
 } from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
 import { Permissions, decisionsFor, MODES, nextMode, askedFor, refusalLabel, decisionHints, type Decision, type PermissionMode } from "../core/permission"
-import { McpManager } from "../core/mcp"
+import { McpManager, withoutServers } from "../core/mcp"
 import { SubagentManager, listAgents, selectedAgent, agentSelection, type SubagentEvent } from "../core/subagents"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
@@ -251,7 +251,7 @@ const subagents = new SubagentManager(
     contextWindow: selection.model.contextWindow,
     permissions,
     history: edits,
-    mcp,
+    mcp: withoutServers(mcp, session.mcpOff ?? []),
     instructions: skillIndex(listSkills(process.cwd())),
     effort: effortFor(selection.model, currentEffort()),
   }),
@@ -1356,12 +1356,24 @@ let codexLogin: Awaited<ReturnType<typeof startCodexLogin>> | undefined
 let cursorLogin: Awaited<ReturnType<typeof startCursorLogin>> | undefined
 let mcpLogin: Awaited<ReturnType<McpManager["login"]>> | undefined
 
-function openMcp() {
+function openMcp(selectedValue?: string) {
   const servers = mcp.statuses()
+  const off = new Set(session.mcpOff ?? [])
   dialog = Dialogs.open("mcp", "MCP servers", servers.length ? servers.flatMap(server => [
-    { label: server.name + ": " + server.status, hint: server.tools.length ? server.tools.length + " tools" : server.error, inert: true },
+    { label: server.name + ": " + server.status + (off.has(server.name) ? " · off in this conversation" : ""), hint: server.tools.length ? server.tools.length + " tools" : server.error, inert: true },
+    { label: (off.has(server.name) ? "Turn on " : "Turn off ") + server.name + " for this conversation", value: "toggle:" + server.name },
     ...(server.oauth ? [{ label: "Sign in to " + server.name, value: server.name }] : []),
-  ]) : [{ label: "No servers; add mcp entries in " + configPath(), inert: true }], { footer: "enter opens sign-in options · esc closes", size: "large" })
+  ]) : [{ label: "No servers; add mcp entries in " + configPath(), inert: true }], { footer: "enter turns a server on or off, or opens sign-in · esc closes", size: "large", ...(selectedValue ? { selectedValue } : {}) })
+}
+
+/** Switches a server off or on for this conversation only; saved with it. */
+function setMcpForSession(server: string, on: boolean) {
+  const off = new Set(session.mcpOff ?? [])
+  if (on) off.delete(server)
+  else off.add(server)
+  session.mcpOff = [...off]
+  status = (on ? "turned on " : "turned off ") + server + " for this conversation"
+  if (messages.some((message) => message.role === "user")) void sessions.save(session).catch(() => {})
 }
 
 function openMcpLogin(name: string) {
@@ -1819,6 +1831,11 @@ async function chooseInDialog() {
     closeDialog()
     await chooseAgent(row.value === "ui:default-agent" ? undefined : row.value)
     render(); return
+  }
+  if (dialog.kind === "mcp" && row.value.startsWith("toggle:")) {
+    const server = row.value.slice("toggle:".length)
+    setMcpForSession(server, (session.mcpOff ?? []).includes(server))
+    openMcp(row.value); render(); return
   }
   if (dialog.kind === "mcp") { openMcpLogin(row.value); render(); return }
   if (dialog.kind === "mcp-login-start") {
@@ -2440,6 +2457,11 @@ async function send() {
         )
       }
     }
+    if (result.kind === "mcp" && result.toggle) {
+      if (!mcp.statuses().some((server) => server.name === result.toggle!.server)) status = "no MCP server called " + result.toggle.server + " - /mcp lists them"
+      else setMcpForSession(result.toggle.server, result.toggle.on)
+      render(); return
+    }
     if (result.kind === "mcp") {
       openMcp()
     }
@@ -2792,7 +2814,7 @@ async function send() {
       history: edits,
       // Compaction archives what it replaces, so /export still has every word.
       archive: sessions.appendArchive.bind(null, session.id),
-      extraTools: mcp,
+      extraTools: withoutServers(mcp, session.mcpOff ?? []),
       askUser,
       // Offered only with /boost - or while subagents started under it are still out.
       subagents: !profile?.tools && (boost || boostOnce || subagents.running().length) ? subagents : undefined,
@@ -2802,7 +2824,7 @@ async function send() {
       effort: effortFor(selection.model, currentEffort()),
       signal: turn.signal,
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
-      instructions: [profile ? "Active agent: " + profile.name + "\n" + profile.prompt : undefined, skillIndex(listSkills(process.cwd())), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
+      instructions: [profile ? "Active agent: " + profile.name + "\n" + profile.prompt : undefined, skillIndex(listSkills(process.cwd())), withoutServers(mcp, session.mcpOff ?? []).notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
     })) {
       session.activity ??= normaliseActivity(undefined)
       recordActivity(session.activity, event)

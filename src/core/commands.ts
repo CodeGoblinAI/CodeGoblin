@@ -28,7 +28,7 @@ export type CommandResult =
   | { kind: "undo" }
   | { kind: "redo" }
   | { kind: "status" }
-  | { kind: "mcp" }
+  | { kind: "mcp"; toggle?: { server: string; on: boolean } }
   | { kind: "skills" }
   | { kind: "plan"; text?: string }
   | { kind: "approvals" }
@@ -86,7 +86,7 @@ export const COMMANDS = [
   { name: "/disconnect", description: "remove a CG API key, not a CLI/SDK sign-in - /disconnect tripo" },
   { name: "/memory", description: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
   { name: "/status", description: "what this session is using right now" },
-  { name: "/mcp", description: "MCP servers from codegoblin.jsonc, and the tools each offers" },
+  { name: "/mcp", description: "MCP servers and their tools; /mcp off <server> switches one off for this conversation" },
   { name: "/skills", description: "skills and custom commands, and where each comes from" },
   { name: "/plan", description: "plan before changing anything: /plan add dark mode, or /plan to switch it" },
   { name: "/approvals", description: "how much to ask before acting - opens a picker" },
@@ -258,8 +258,12 @@ export function runCommand(text: string): CommandResult {
       return { kind: "status" }
     case "/usage":
       return { kind: "usage" }
-    case "/mcp":
+    case "/mcp": {
+      const [verb, name] = argument.split(/\s+/).filter(Boolean)
+      if ((verb === "off" || verb === "on") && name) return { kind: "mcp", toggle: { server: name, on: verb === "on" } }
+      if (verb) return { kind: "message", text: "usage: /mcp (servers and their tools), /mcp off <server> or /mcp on <server> for this conversation" }
       return { kind: "mcp" }
+    }
     case "/skills":
       return { kind: "skills" }
     case "/plan":

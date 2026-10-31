@@ -48,7 +48,7 @@ import { normaliseActivity, recordActivity } from "../core/session-activity"
 import { DECISIONS, MODES, Permissions, askedFor, refusalLabel, type Decision, type PermissionMode } from "../core/permission"
 import { runTypedCommand, typedCommand } from "../core/user-shell"
 import { BrowserConsent } from "./consent"
-import { McpManager } from "../core/mcp"
+import { McpManager, withoutServers } from "../core/mcp"
 import { SubagentManager, agentMention, listAgents, selectedAgent, agentSelection, type SubagentContext } from "../core/subagents"
 import { configPath, checkpointEvery } from "../core/config"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
@@ -168,6 +168,8 @@ let cursorLoginsStarting = 0
  * would otherwise undo each other's work.
  */
 const editsBySession = new Map<string, History>()
+/** MCP servers switched off before a conversation is first saved, by session id ("" for a new one). */
+const pendingMcpOff = new Map<string, string[]>()
 function editsFor(sessionId: string, review?: unknown): History {
   const existing = editsBySession.get(sessionId)
   if (existing) return existing
@@ -457,7 +459,22 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
   }
 
   if (url.pathname === "/api/mcp" && request.method === "GET") {
-    return json({ servers: mcp.statuses(), config: configPath() })
+    const id = url.searchParams.get("sessionId") ?? ""
+    const saved = /^[a-zA-Z0-9_-]+$/.test(id) ? await sessions.load(id).catch(() => undefined) : undefined
+    return json({ servers: mcp.statuses(), config: configPath(), off: saved?.mcpOff ?? pendingMcpOff.get(id) ?? [] })
+  }
+  // /mcp off|on <server>: for this conversation only, saved with it.
+  if (url.pathname === "/api/mcp/session" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { sessionId?: unknown; server?: unknown; on?: unknown }
+    if (typeof body.server !== "string" || !mcp.statuses().some((server) => server.name === body.server)) return json({ ok: false, message: "No MCP server called " + String(body.server) })
+    const id = typeof body.sessionId === "string" && /^[a-zA-Z0-9_-]+$/.test(body.sessionId) ? body.sessionId : ""
+    const saved = id ? await sessions.load(id).catch(() => undefined) : undefined
+    const off = new Set(saved?.mcpOff ?? pendingMcpOff.get(id) ?? [])
+    if (body.on === true) off.delete(body.server)
+    else off.add(body.server)
+    if (saved) { saved.mcpOff = [...off]; await sessions.save(saved) }
+    else pendingMcpOff.set(id, [...off])
+    return json({ ok: true, off: [...off] })
   }
   if (url.pathname === "/api/mcp/login") {
     if (request.method === "GET") return json({ state: mcpLogins.get(url.searchParams.get("id") || "")?.status() || "expired", servers: mcp.statuses() })
@@ -947,6 +964,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
 
     const session =
       loaded ?? sessions.create(provider.id, model.id, root)
+    // Switched off before the conversation had been saved: carried into it now.
+    if (!loaded && pendingMcpOff.has("")) { session.mcpOff = pendingMcpOff.get(""); pendingMcpOff.delete("") }
     session.provider = provider.id
     session.model = model.id
     session.agent = profile?.name
@@ -1037,8 +1056,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
           contextWindow: model.contextWindow,
           permissions,
           history: edits,
-          mcp,
-          instructions: [skillIndex(listSkills(root)), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
+          mcp: withoutServers(mcp, session.mcpOff ?? []),
+          instructions: [skillIndex(listSkills(root)), withoutServers(mcp, session.mcpOff ?? []).notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
           effort: effortFor(model, settingsStore.effortForModel(await settingsStore.load(), provider.id + "/" + model.id)),
         })
         let subagents = subagentsBySession.get(session.id)
@@ -1068,12 +1087,12 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
             // Offered only with /boost - or while subagents started under it are still out.
             subagents: !profile?.tools && (body.boost === true || subagents.running().length) ? subagents : undefined,
             tools: profile?.tools,
-            extraTools: mcp,
+            extraTools: withoutServers(mcp, session.mcpOff ?? []),
             askUser,
             memory: await memory.recall({ project: root, session: session.id }),
             // Servers that are configured but down are named, so the model says so
             // rather than reaching for an unrelated tool in their place.
-            instructions: [profile ? "Active agent: " + profile.name + "\n" + profile.prompt : undefined, skillIndex(listSkills(root)), mcp.notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
+            instructions: [profile ? "Active agent: " + profile.name + "\n" + profile.prompt : undefined, skillIndex(listSkills(root)), withoutServers(mcp, session.mcpOff ?? []).notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
             history: edits,
             // Compaction archives what it replaces, so /export still has every word.
             archive: sessions.appendArchive.bind(null, session.id),

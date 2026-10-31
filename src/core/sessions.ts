@@ -32,6 +32,8 @@ export type Session = {
   forkedFrom?: { id: string; at: number }
   /** The folder it was working in; older conversations do not say. */
   root?: string
+  /** MCP servers switched off for this conversation (/mcp). */
+  mcpOff?: string[]
 }
 
 const dir = path.join(Global.Path.state, "sessions")

@@ -614,6 +614,29 @@ export type McpServerStatus = {
  * One server failing - a typo in its command, a remote that is down - leaves
  * the others working; it is reported by /mcp rather than stopping anything.
  */
+/**
+ * The servers one conversation has switched off, as the fork's per-session
+ * MCP toggle: their tools are not offered to the model in this conversation,
+ * and nothing about the server or codegoblin.jsonc changes.
+ */
+export function withoutServers(manager: McpManager, off: Iterable<string>): McpManager {
+  const hidden = new Set(off)
+  if (!hidden.size) return manager
+  const shown = () => manager.entries().filter((entry) => !hidden.has(entry.server))
+  return Object.assign(Object.create(manager) as McpManager, {
+    entries: shown,
+    schema: () => manager.schema().filter((tool) => shown().some((entry) => entry.name === tool.function.name)),
+    has: (name: string) => shown().some((entry) => entry.name === name),
+    call: (name: string, args: unknown) => (shown().some((entry) => entry.name === name) ? manager.call(name, args) : Promise.resolve(`error: the ${name.split("__")[1] ?? ""} MCP server is switched off in this conversation - /mcp turns it back on`)),
+    notice: () => {
+      const base = manager.notice()
+      const named = manager.clients.filter((client) => hidden.has(client.name)).map((client) => client.name)
+      const off = named.length ? `The user switched these MCP servers off for this conversation: ${named.join(", ")}. Do not use them or anything in their place unless asked.` : ""
+      return [base, off].filter(Boolean).join("\n") || undefined
+    },
+  })
+}
+
 export class McpManager {
   readonly clients: McpClient[]
   /** Called when a server finishes connecting, fails, or changes its tools. */
