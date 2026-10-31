@@ -165,5 +165,6 @@ test("account, login and explicit import commands enforce their supported source
   expect(runCommand("/login codex")).toEqual({ kind: "login" })
   expect(runCommand("/import codex session-1")).toEqual({ kind: "import", source: "codex", id: "session-1" })
   expect(runCommand("/import codex a b").kind).toBe("message")
-  expect(runCommand("/import cursor").kind).toBe("message")
+  expect(runCommand("/import windsurf").kind).toBe("message")
+  expect(runCommand("/import cursor")).toEqual({ kind: "import", source: "cursor", id: undefined })
 })

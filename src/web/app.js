@@ -1650,8 +1650,12 @@ function openCodexLoginDialog(source = "codex") {
 }
 
 async function openImportDialog(source, selectedId) {
-  const name = source === "claude" ? "Claude Code" : "Codex"
-  const omitted = source === "claude" ? "Tool calls and results, thinking, subagents and injected reminders are omitted." : "Native tools, images, reasoning and hidden prompts are omitted."
+  const name = { claude: "Claude Code", antigravity: "Antigravity", cursor: "Cursor" }[source] || "Codex"
+  const omitted = {
+    claude: "Tool calls and results, thinking, subagents and injected reminders are omitted.",
+    antigravity: "Copied from Antigravity's search index: what was said only; tool steps, files and subagents are omitted.",
+    cursor: "Cursor agent CLI chats: your queries and the answers only; context blocks, reasoning and tool calls are omitted.",
+  }[source] || "Native tools, images, reasoning and hidden prompts are omitted."
   const endpoint = "/api/import?source=" + source
   const modal = makeDialog("Import " + name + " text conversation")
   const status = document.createElement("p"); status.textContent = "Choose a conversation for this project. A new text-only copy is created; your source and current conversation stay unchanged. " + omitted + " Continuing the copy sends its text to your selected model."
@@ -1777,8 +1781,9 @@ async function runCommand(text) {
   }
   if (name === "/import") {
     const [word, id, extra] = argument.split(/\s+/)
-    const source = word === "codex" ? "codex" : word === "claude" || word === "claude-code" ? "claude" : undefined
-    if (!source || extra) { note("Use /import codex or /import claude [session-id]; imports are new text-only conversations"); return true }
+    const source = word === "codex" ? "codex" : word === "claude" || word === "claude-code" ? "claude"
+      : word === "antigravity" || word === "agy" ? "antigravity" : word === "cursor" || word === "cursor-agent" ? "cursor" : undefined
+    if (!source || extra) { note("Use /import codex, claude, antigravity or cursor [session-id]; imports are new text-only conversations"); return true }
     await openImportDialog(source, id); return true
   }
   if (name === "/copy" && argument && argument !== "last" && argument !== "all") { note("Use /copy for the whole conversation, or /copy last for the latest answer."); return true }

@@ -83,5 +83,5 @@ test("another project's, missing, malformed or empty conversations are refused",
 test("/import claude and claude-code parse; anything else explains both sources", () => {
   expect(runCommand("/import claude")).toEqual({ kind: "import", source: "claude", id: undefined })
   expect(runCommand("/import claude-code " + ID)).toEqual({ kind: "import", source: "claude", id: ID })
-  expect(runCommand("/import cursor")).toMatchObject({ kind: "message", text: expect.stringContaining("/import claude") })
+  expect(runCommand("/import windsurf")).toMatchObject({ kind: "message", text: expect.stringContaining("claude") })
 })
