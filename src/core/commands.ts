@@ -46,6 +46,7 @@ export type CommandResult =
   | { kind: "local"; argument: string }
   | { kind: "fork" }
   | { kind: "copy"; what: "all" | "last" }
+  | { kind: "favourite"; id?: string }
   | { kind: "connect"; provider?: string }
   | { kind: "disconnect"; provider?: string }
   | { kind: "none" }
@@ -59,6 +60,7 @@ export const COMMANDS = [
   { name: "/help", description: "show these commands" },
   { name: "/clear", description: "start a fresh conversation" },
   { name: "/model", description: "switch provider: /model zai" },
+  { name: "/favourite", description: "star a model so it sits at the top of the picker: /favourite, or pick one" },
   { name: "/resume", description: "reopen a saved conversation" },
   { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/undo", description: "put back the files the last turn changed" },
@@ -97,6 +99,7 @@ export const COMMAND_ALIASES: Record<string, string> = {
   "/logout": "/disconnect", "/remove-key": "/disconnect", "/memories": "/memory",
   "/mcps": "/mcp", "/reasoning": "/effort", "/set": "/settings", "/changes": "/diff",
   "/exit": "/quit", "/q": "/quit",
+  "/favorite": "/favourite", "/fav": "/favourite", "/star": "/favourite",
   "/credits": "/balance",
   "/market": "/plugins", "/mcp-market": "/plugins", "/skills-market": "/plugins",
   "/upgrade": "/update", "/version": "/update", "/orgs": "/org", "/switch-org": "/org",
@@ -210,6 +213,8 @@ export function runCommand(text: string): CommandResult {
     case "/copy":
       if (argument && argument !== "last" && argument !== "all") return { kind: "message", text: "usage: /copy (the whole conversation) or /copy last (the latest answer)" }
       return { kind: "copy", what: argument === "last" ? "last" : "all" }
+    case "/favourite":
+      return argument ? { kind: "favourite", id: argument } : { kind: "favourite" }
     case "/status":
       return { kind: "status" }
     case "/usage":

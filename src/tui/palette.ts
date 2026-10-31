@@ -7,6 +7,7 @@ import {
   pickerSection,
   CONNECTABLE,
 } from "../core/providers"
+import { pickerRows } from "../core/favourites"
 import { findMention } from "../core/mention"
 import { theme, dim, ansi } from "./ansi"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
@@ -19,6 +20,12 @@ import { displayWidth, truncateToWidth, padToWidth } from "./width"
  */
 export type PaletteItem = { value: string; hint: string }
 
+
+/** Favourite and recent models, so the model list can put them first. */
+let modelLists: { favourites: string[]; recents: string[] } = { favourites: [], recents: [] }
+export function setModelLists(lists: { favourites: string[]; recents: string[] }) {
+  modelLists = { favourites: [...lists.favourites], recents: [...lists.recents] }
+}
 
 /** Which providers already have a key, so the list can say so. */
 let connectedIds = new Set<string>()
@@ -104,21 +111,24 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
     return matches.length ? matches.slice(0, LIST_LIMIT) : undefined
   }
 
-  // "/model " with an argument lists models instead of commands.
-  if (/^\/model\s+/.test(input)) {
+  // "/model " with an argument lists models instead of commands; "/favourite "
+  // lists the same models, to star or unstar one.
+  const modelCommand = /^\/(model|favourite)\s+/.exec(input)?.[1]
+  if (modelCommand) {
     const query = input.slice(input.indexOf(" ") + 1).trim().toLowerCase()
-    // One list of models, in sections. Typing a section name narrows to it,
-    // so typing image is how you get to the models that draw.
+    // One list of models, in sections, favourites and recents first. Typing a
+    // section name narrows to it, so typing image is how you get to the
+    // models that draw.
     const kind = kindFromWord(query)
-    const pool = kind ? selectionsOfKind(kind) : selectionsByKind()
+    const pool = pickerRows(kind ? selectionsOfKind(kind) : selectionsByKind(), modelLists)
     return pool
       // Whether a model can actually run is the first thing worth knowing
       // about it. Without this every model read as available and the only way
       // to find out otherwise was to pick one and send a prompt.
-      .map((s) => ({
-        value: `/model ${s.provider.id}/${s.model.id}`,
+      .map(({ selection: s, section, favourite }) => ({
+        value: `/${modelCommand} ${s.provider.id}/${s.model.id}`,
         hint:
-          `${pickerSection(s)} \u00b7 ${s.provider.label} ${s.model.label}` +
+          `${favourite ? "\u2605 " : ""}${section} \u00b7 ${s.provider.label} ${s.model.label}` +
           (s.provider.local || connectedIds.has(s.provider.id) ? "" : "  \u00b7 no key"),
       }))
       .filter(
@@ -128,7 +138,7 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
           item.value.toLowerCase().includes(query) ||
           item.hint.toLowerCase().includes(query),
       )
-      .sort((a, b) => Number(b.value.toLowerCase() === "/model " + query) - Number(a.value.toLowerCase() === "/model " + query))
+      .sort((a, b) => Number(b.value.toLowerCase() === `/${modelCommand} ` + query) - Number(a.value.toLowerCase() === `/${modelCommand} ` + query))
       .slice(0, LIST_LIMIT)
   }
 

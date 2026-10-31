@@ -37,6 +37,10 @@ export type Settings = {
   effort: Effort
   /** Exact provider/model identity. Unset models use auto after the first scoped save. */
   effortByModel: Record<string, Effort>
+  /** Models pinned to the top of the picker, "provider/model", in the order they were added. */
+  favourites: string[]
+  /** Models most recently switched to, newest first. */
+  recents: string[]
 }
 
 /**
@@ -63,6 +67,8 @@ export const defaults = (): Settings => ({
   mouse: true,
   effort: "auto",
   effortByModel: {},
+  favourites: [],
+  recents: [],
 })
 
 export function normalise(raw: unknown): Settings {
@@ -77,7 +83,15 @@ export function normalise(raw: unknown): Settings {
     effortByModel: value.effortByModel && typeof value.effortByModel === "object" && !Array.isArray(value.effortByModel)
       ? Object.fromEntries(Object.entries(value.effortByModel).filter(([id, level]) => modelKey(id) && isEffort(level)).slice(0, 256))
       : {},
+    favourites: modelList(value.favourites),
+    recents: modelList(value.recents),
   }
+}
+
+/** A list of model ids, cleaned: valid ids, no repeats, at most 50. */
+function modelList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return [...new Set(raw.filter((id): id is string => typeof id === "string" && modelKey(id)))].slice(0, 50)
 }
 
 const modelKey = (id: string) => /^[A-Za-z0-9._:-]+\/[A-Za-z0-9._:/-]{1,160}$/.test(id)
@@ -104,7 +118,26 @@ export async function load(): Promise<Settings> {
   }
 }
 
+/**
+ * Writes the preferences, keeping the favourite and recent models already on
+ * disk. Both surfaces share this file and each holds its own copy of the rest;
+ * a terminal that loaded at startup must not wipe a favourite starred in the
+ * browser since. Those two lists change only through saveModelLists.
+ */
 export async function save(settings: Settings): Promise<void> {
+  const disk = await load()
+  await write({ ...settings, favourites: disk.favourites, recents: disk.recents })
+}
+
+/** Changes the favourite or recent models, read fresh and written straight back. */
+export async function saveModelLists(lists: { favourites?: string[]; recents?: string[] }): Promise<Settings> {
+  const disk = await load()
+  const next = normalise({ ...disk, ...lists })
+  await write(next)
+  return next
+}
+
+async function write(settings: Settings): Promise<void> {
   try {
     await fs.mkdir(path.dirname(file), { recursive: true })
     await fs.writeFile(file, JSON.stringify(settings, null, 2), "utf8")

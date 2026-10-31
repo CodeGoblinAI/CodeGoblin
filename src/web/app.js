@@ -43,6 +43,17 @@ function renderModelMenu() {
     row.id = "model-option-" + index
     row.setAttribute("aria-selected", String(option.value === currentModel))
     row.textContent = option.label
+    // A star to pin the model to the top, as ctrl+f does in the terminal. Its
+    // own button, so starring a model does not also switch to it.
+    const star = document.createElement("button")
+    star.type = "button"
+    star.className = "picker-star" + (option.favourite ? " on" : "")
+    star.textContent = option.favourite ? "\u2605" : "\u2606"
+    star.title = option.favourite ? "Remove from favourites" : "Add to favourites"
+    star.setAttribute("aria-label", (option.favourite ? "Unfavourite " : "Favourite ") + option.label)
+    star.tabIndex = -1
+    star.onclick = (event) => { event.stopPropagation(); void toggleFavourite(option.value, true) }
+    row.prepend(star)
     if (!option.ready) {
       const tag = document.createElement("span")
       tag.className = "picker-tag"
@@ -50,10 +61,28 @@ function renderModelMenu() {
       row.appendChild(tag)
       row.title = option.connectionHint || "No API key for this provider yet - add one with /connect"
     }
-    row.onclick = () => { setModel(option.value); closeModelMenu(true) }
+    row.onclick = () => { if (setModel(option.value)) rememberRecent(option.value); closeModelMenu(true) }
     providerMenu.appendChild(row)
   }
   if (!providerMenu.hidden) highlightModel(modelIndex)
+}
+
+/** Stars or unstars a model and redraws the list; `reopen` keeps the menu open on the same model. */
+async function toggleFavourite(value, reopen = false) {
+  const result = await fetch("/api/favourite", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: value }) })
+    .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+  if (!result) { note("Could not save the favourite."); return }
+  const option = modelOptions.find((o) => o.value === value)
+  await loadProviders()
+  void refreshModelPalette()
+  // Redrawing the list drops focus with the old rows; give it back so the keys keep working.
+  if (reopen && !providerMenu.hidden) { highlightModel(Math.max(0, modelOptions.findIndex((o) => o.value === value))); providerMenu.focus() }
+  if (!reopen) note((result.favourite ? "\u2605 Favourite: " : "No longer a favourite: ") + (option ? option.label : value))
+}
+
+/** A model chosen by the person goes to the top of Recent, in both surfaces. */
+function rememberRecent(value) {
+  void fetch("/api/recent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: value }) }).catch(() => {})
 }
 
 function setModel(value) {
@@ -107,14 +136,22 @@ providerBtn.addEventListener("keydown", (event) => {
 })
 providerMenu.addEventListener("keydown", (event) => {
   if (event.key === "Tab") { closeModelMenu(true); return }
-  if (!["ArrowDown", "ArrowUp", "Home", "End", "PageDown", "PageUp", "Enter", " ", "Escape"].includes(event.key)) return
+  if (!["ArrowDown", "ArrowUp", "Home", "End", "PageDown", "PageUp", "Enter", " ", "Escape", "f", "F"].includes(event.key)) return
+  if ((event.key === "f" || event.key === "F") && !(event.ctrlKey || event.metaKey)) return
   event.preventDefault()
   event.stopPropagation()
   if (event.key === "Escape") { closeModelMenu(true); return }
   if (event.key === "Enter" || event.key === " ") {
     const option = modelOptions[modelIndex]
-    if (option) setModel(option.value)
+    if (option && setModel(option.value)) rememberRecent(option.value)
     closeModelMenu(true)
+    return
+  }
+  // ctrl+f stars the highlighted model, as in the terminal.
+  if (event.key.toLowerCase() === "f" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault()
+    const option = modelOptions[modelIndex]
+    if (option) void toggleFavourite(option.value, true)
     return
   }
   highlightModel(event.key === "Home" ? 0 : event.key === "End" ? modelOptions.length - 1
@@ -1567,11 +1604,18 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/favourite") {
+    // Bare, it lists the models to pick one; with a model, it stars or unstars that one.
+    if (!argument) { input.value = "/favourite "; refreshPalette(); return true }
+    if (!modelOptions.some((o) => o.value === argument)) { note("unknown model: " + argument + " - /favourite lists them"); return true }
+    await toggleFavourite(argument)
+    return true
+  }
   if (name === "/model") {
     if (!argument) { input.value = "/model "; refreshPalette(); return true }
     const option = modelOptions.find((o) => o.value === argument)
     if (option) {
-      setModel(argument)
+      if (setModel(argument)) rememberRecent(argument)
       note("switched to " + option.label)
     } else note("unknown model: " + argument)
     return true
@@ -2330,6 +2374,7 @@ async function loadProviders() {
     defaultEffort: p.defaultEffort,
     kind: p.kind,
     section: p.section,
+    favourite: Boolean(p.favourite),
     ready: p.ready,
     connectionHint: p.connectionHint,
     settings: p.settings || [],
@@ -2491,6 +2536,13 @@ paletteEl.className = "palette"
 paletteEl.hidden = true
 document.querySelector(".composer").prepend(paletteEl)
 
+/** Only the model list behind /model and /favourite, after a star changes its order. */
+async function refreshModelPalette() {
+  const data = await fetch("/api/commands").then((r) => r.json()).catch(() => null)
+  if (data && Array.isArray(data.models)) paletteData.models = data.models
+  if (input.value.trim().startsWith("/")) refreshPalette()
+}
+
 async function loadCommands() {
   paletteData = await fetch("/api/commands").then((r) => r.json()).catch(() => paletteData)
   // Someone quick types "/connect " before this arrives; show what it completes to now.
@@ -2527,8 +2579,14 @@ function itemsFor(text, cursor) {
 
   if (head === "/model" && hasArgument) {
     const q = text.slice(7).trim().toLowerCase()
-    return paletteData.models.filter((m) => !q || m.value.toLowerCase().includes(q))
+    return paletteData.models.filter((m) => !q || m.value.toLowerCase().includes(q) || m.hint.toLowerCase().includes(q))
       .sort((a, b) => Number(b.value.toLowerCase() === "/model " + q) - Number(a.value.toLowerCase() === "/model " + q)).slice(0, 8)
+  }
+  // The same models, to star or unstar one.
+  if (head === "/favourite" && hasArgument) {
+    const q = text.slice(11).trim().toLowerCase()
+    return paletteData.models.map((m) => ({ ...m, value: "/favourite " + m.value.slice(7) }))
+      .filter((m) => !q || m.value.toLowerCase().includes(q) || m.hint.toLowerCase().includes(q)).slice(0, 8)
   }
   if (head === "/theme" && hasArgument) {
     const q = text.slice(7).trim().toLowerCase()

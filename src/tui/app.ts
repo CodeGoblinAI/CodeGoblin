@@ -104,7 +104,8 @@ import { McpManager } from "../core/mcp"
 import { SubagentManager, listAgents, selectedAgent, agentSelection, type SubagentEvent } from "../core/subagents"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
-import { setInvocations } from "./palette"
+import { setInvocations, setModelLists } from "./palette"
+import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
 import { systemPrompt } from "../core/system-prompt"
 import { configPath, checkpointEvery, spendLimitPerPrompt } from "../core/config"
 
@@ -1641,6 +1642,57 @@ function toFile(dialog: Dialogs.Dialog, direction: number): Dialogs.Dialog {
   return { ...dialog, index: headers[next]!, armed: undefined }
 }
 
+/**
+ * The model picker: favourites, then recent models, then everything by
+ * section. Headings are rows the cursor skips. Read fresh from disk, so a
+ * model starred in the browser shows here too.
+ */
+function modelPickerRows(): Dialogs.DialogRow[] {
+  const current = selection.provider.id + "/" + selection.model.id
+  const rows: Dialogs.DialogRow[] = []
+  let section = ""
+  for (const row of pickerRows(selectionsByKind(), settings)) {
+    if (row.section !== section) {
+      section = row.section
+      rows.push({ label: section, tone: "heading", inert: true })
+    }
+    const s = row.selection
+    const id = s.provider.id + "/" + s.model.id
+    rows.push({
+      label: (row.favourite ? "\u2605 " : "  ") + s.provider.label + " " + s.model.label,
+      value: id,
+      hint: id === current ? "current" : s.provider.runtime ? "runs here" : undefined,
+    })
+  }
+  return rows
+}
+
+function openModelPicker(selectedValue = selection.provider.id + "/" + selection.model.id) {
+  dialog = Dialogs.open("model-picker", "Choose model", modelPickerRows(), {
+    size: "large",
+    selectedValue,
+    footer: "enter choose . ctrl+f favourite . esc close",
+  })
+}
+
+/** Stars or unstars a model; the change is written straight to the shared settings file. */
+async function starModel(id: string) {
+  try {
+    const { favourite, favourites } = await toggleFavourite(id)
+    settings = { ...settings, favourites }
+    setModelLists(settings)
+    status = (favourite ? "\u2605 favourite: " : "no longer a favourite: ") + id
+  } catch (error) {
+    status = "could not save the favourite: " + (error instanceof Error ? error.message : "unknown")
+  }
+}
+
+/** The model just switched to goes to the top of Recent. */
+function rememberRecent() {
+  const id = selection.provider.id + "/" + selection.model.id
+  void markRecent(id).then((recents) => { settings = { ...settings, recents }; setModelLists(settings) })
+}
+
 function closeDialog() {
   if (dialog?.kind === "mcp-login" && mcpLogin) { mcpLogin.cancel(); mcpLogin = undefined }
   if (dialog?.kind === "codex-login" && codexLogin) {
@@ -1803,7 +1855,7 @@ async function chooseInDialog() {
     const next = resolveSelection(row.value)
     if (next) {
       if (streaming) { queued = "/model " + row.value; status = "model switch queued until this turn ends" }
-      else { selection = next; resumeModelMissing = false; key = apiKey(next.provider.id); status = next.provider.label + " " + next.model.label }
+      else { selection = next; resumeModelMissing = false; key = apiKey(next.provider.id); status = next.provider.label + " " + next.model.label; rememberRecent() }
     }
     closeDialog(); render(); return
   }
@@ -2404,7 +2456,14 @@ async function send() {
         resumeModelMissing = false
         key = apiKey(selection.provider.id)
         status = selection.provider.label + " " + selection.model.label
+        rememberRecent()
       }
+    }
+    if (result.kind === "favourite") {
+      const target = result.id ? resolveSelection(result.id) : selection
+      if (!target) { status = "no such model: " + result.id + " - /favourite lists them"; render(); return }
+      await starModel(target.provider.id + "/" + target.model.id)
+      render(); return
     }
     if (result.kind === "compact") {
       const window = selection.model.contextWindow
@@ -2798,6 +2857,7 @@ refreshConnected()
 
 async function loadSettings() {
   settings = await settingsStore.load()
+  setModelLists(settings)
   media = await loadMedia()
   applyTheme(settings.theme)
   applyMouse()
@@ -2931,14 +2991,7 @@ process.stdin.on("data", (chunk) => {
       if (pressed.row !== toolbarRow || secret) { render(); continue }
       const target = toolbarTargets.find((item) => pressed.col >= item.from && pressed.col <= item.to)?.command
       if (target === "attach") dialog = Dialogs.open("attach", "Add to the prompt", [{ label: "Mention a project file", value: "file" }, { label: "Paste image from clipboard", value: "image" }, { label: "Run a slash command", value: "command" }])
-      if (target === "model") {
-        const current = selection.provider.id + "/" + selection.model.id
-        dialog = Dialogs.open("model-picker", "Choose model", selectionsByKind().map((s) => ({
-          label: s.provider.label + " " + s.model.label,
-          value: s.provider.id + "/" + s.model.id,
-          hint: s.provider.id + "/" + s.model.id === current ? "current" : s.provider.runtime ? "runs here" : undefined,
-        })), { size: "large", selectedValue: current })
-      }
+      if (target === "model") openModelPicker()
       if (target === "settings") openSettings()
       if (target === "sessions") {
         if (streaming) { status = "sessions cannot change during a turn; use /resume to queue" }
@@ -2968,6 +3021,12 @@ process.stdin.on("data", (chunk) => {
       if (pressed.type === "end") { dialog = Dialogs.move(dialog, dialog.rows.length); render(); continue }
       if (pressed.type === "enter") { void chooseInDialog(); continue }
       if (pressed.type === "ctrl" && pressed.value === "d") { void deleteInDialog(); continue }
+      // ctrl+f stars the highlighted model, as in the fork's model dialog.
+      if (dialog.kind === "model-picker" && pressed.type === "ctrl" && pressed.value === "f") {
+        const value = Dialogs.selected(dialog)?.value
+        if (value) void starModel(value).then(() => { if (dialog?.kind === "model-picker") openModelPicker(value); render() })
+        continue
+      }
       // q closes the diff viewer, the way the original binds it - reviewing
       // is a mode you leave, and reaching for escape every time is a tell
       // that nobody who reads diffs was asked.

@@ -60,6 +60,7 @@ import { History, describe as describeCheckpoint, nothingToDo } from "../core/un
 import { changesIn, summarise } from "../core/changes"
 import { THEMES, paletteOf } from "../core/theme"
 import * as settingsStore from "../core/settings"
+import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
 import { exportSession, sessionMarkdown } from "../core/export"
 import { runMedia, MEDIA_KINDS, withinMediaOutput } from "../core/media"
 import {
@@ -280,13 +281,26 @@ async function handle(request: Request): Promise<Response> {
     const source = url.searchParams.get("source")
     return source === "claude" || source === "cursor" ? json(cliHandoff(source)) : json({ message: "Unknown CLI sign-in handoff" }, 400)
   }
+  // Favourites and recents are shared with the terminal through the settings file.
+  if (url.pathname === "/api/favourite" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { id?: unknown }
+    if (typeof body.id !== "string" || !exactSelection(body.id)) return json({ message: "Select a model to favourite" }, 400)
+    return json(await toggleFavourite(body.id))
+  }
+  if (url.pathname === "/api/recent" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { id?: unknown }
+    if (typeof body.id !== "string" || !exactSelection(body.id)) return json({ message: "Unknown model" }, 400)
+    return json({ recents: await markRecent(body.id) })
+  }
+
   if (url.pathname === "/api/providers") {
     const cli = await cliStatuses()
     const engine = findEngine()
     return json({
-      providers: selectionsByKind().map((s) => ({
+      providers: pickerRows(selectionsByKind(), await settingsStore.load()).map(({ selection: s, section, favourite }) => ({
         kind: kindOf(s.model),
-        section: pickerSection(s),
+        section,
+        favourite,
         id: s.provider.id + "/" + s.model.id,
         label: s.provider.label + " " + s.model.label,
         reasoning: Boolean(s.model.reasoning),
@@ -322,15 +336,15 @@ async function handle(request: Request): Promise<Response> {
   // The web composer needs the same command set the TUI has, so it comes
   // from one place rather than being duplicated in the browser.
   if (url.pathname === "/api/commands") {
-    const models = allSelections().map((s) => ({
+    const models = pickerRows(selectionsByKind(), await settingsStore.load()).map(({ selection: s, section, favourite }) => ({
       value: "/model " + s.provider.id + "/" + s.model.id,
-      hint: s.provider.label + " " + s.model.label,
+      hint: (favourite ? "\u2605 " : "") + section + " \u00b7 " + s.provider.label + " " + s.model.label,
     }))
     const saved = await sessions.list(20)
     return json({
       project: path.basename(root),
       commands: [
-        ...COMMANDS.filter((c) => !["/quit"].includes(c.name)).map((c) => ({ value: c.name, hint: c.description, expands: ["/model", "/resume", "/connect", "/disconnect", "/theme", "/effort"].includes(c.name) })),
+        ...COMMANDS.filter((c) => !["/quit"].includes(c.name)).map((c) => ({ value: c.name, hint: c.description, expands: ["/model", "/favourite", "/resume", "/connect", "/disconnect", "/theme", "/effort"].includes(c.name) })),
         // Marked, so the page sends them to the model rather than calling them unknown.
         ...invocationItems(root).map((item) => ({ ...item, invocation: true })),
       ],

@@ -89,6 +89,8 @@ describe("settings", () => {
       mouse: true,
       effort: "auto",
       effortByModel: {},
+      favourites: [],
+      recents: [],
     })
     expect(normalise({ theme: "not-a-theme", thinking: "yes" })).toEqual(defaults())
     expect(normalise(null)).toEqual(defaults())
