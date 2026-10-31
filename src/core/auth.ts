@@ -51,6 +51,30 @@ async function writeStore(store: Record<string, StoredAuth>): Promise<void> {
 }
 
 /**
+ * Every secret value CG-Next knows of: each string in the key store (keys,
+ * OAuth access and refresh tokens) and each environment variable whose name
+ * says it is a key, a secret, a token or a password. Short values are left
+ * out - masking "true" or "api" everywhere would garble ordinary output.
+ *
+ * Tool output is scrubbed of these before the model sees it. A real run did
+ * `type auth.json` and sent every stored key to the provider, into the saved
+ * conversation, and onto the screen.
+ */
+export function storedSecrets(env: NodeJS.ProcessEnv = process.env): string[] {
+  const found = new Set<string>()
+  // By field name, so a stored base URL or account label is not masked in code the model reads.
+  const SECRET_FIELD = /key|token|secret|access|refresh|password/i
+  const collect = (value: unknown, secret: boolean) => {
+    if (typeof value === "string") { if (secret && value.length >= 16) found.add(value); return }
+    if (value && typeof value === "object") for (const [name, inner] of Object.entries(value)) collect(inner, SECRET_FIELD.test(name))
+  }
+  for (const entry of Object.values(readStore())) collect(entry, false)
+  for (const [name, value] of Object.entries(env)) collect(value, SECRET_FIELD.test(name))
+  // Longest first, so a key that contains another is masked whole.
+  return [...found].sort((a, b) => b.length - a.length)
+}
+
+/**
  * Resolves a provider API key.
  *
  * The environment wins, so a key can be supplied for one run without being

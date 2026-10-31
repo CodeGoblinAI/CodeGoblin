@@ -1493,6 +1493,16 @@ async function runCommand(text) {
     if (!source || extra) { note("Use /import codex or /import claude [session-id]; imports are new text-only conversations"); return true }
     await openImportDialog(source, id); return true
   }
+  if (name === "/copy" && argument && argument !== "last" && argument !== "all") { note("Use /copy for the whole conversation, or /copy last for the latest answer."); return true }
+  if (name === "/copy" && argument !== "last") {
+    if (!sessionId) { note("Nothing to copy yet - say something first."); return true }
+    const result = await fetch("/api/session/transcript", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: sessionId }) })
+      .then(async (r) => ({ ok: r.ok, ...(await r.json()) })).catch(() => ({ ok: false, message: "could not reach the server" }))
+    if (!result.ok) { note(result.message); return true }
+    try { await navigator.clipboard.writeText(result.text); note("Copied the whole conversation (" + result.text.length.toLocaleString() + " characters). /copy last copies just the latest answer.") }
+    catch { note("The browser would not allow clipboard access; /export saves the conversation as a file instead.") }
+    return true
+  }
   if (name === "/copy") {
     const answers = [...thread.querySelectorAll(".msg.agent, .turn.agent")]
     const text = answers.at(-1)?.querySelector(".body, .content")?.innerText ?? answers.at(-1)?.innerText
@@ -2231,7 +2241,7 @@ async function submit() {
           note("stopped after " + event.turns + " tool turns - the answer may be unfinished. Ask it to continue.")
         }
         if (event.type === "output_limit") note("The model reached its output-token limit. The answer is unfinished; ask it to continue or increase the server's output budget.")
-        if (event.type === "checkpoint") note("paused at the autonomy checkpoint (" + event.toolCalls + " tool calls) - " + (event.stopped ? "stopped; ask it to continue." : "continuing."))
+        if (event.type === "checkpoint") note("paused at the autonomy checkpoint (" + (event.spent !== undefined ? "$" + event.spent.toFixed(2) + " spent on this prompt" : event.toolCalls + " tool calls") + ") - " + (event.stopped ? "stopped; ask it to continue." : "continuing."))
         if (event.type === "error") { finished = true; turn("agent", "**Error:** " + event.message) }
         if (event.type === "saved") {
           finished = true

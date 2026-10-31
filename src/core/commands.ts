@@ -45,7 +45,7 @@ export type CommandResult =
   | { kind: "memory"; action: "list" | "add" | "forget" | "clear"; text?: string }
   | { kind: "local"; argument: string }
   | { kind: "fork" }
-  | { kind: "copy" }
+  | { kind: "copy"; what: "all" | "last" }
   | { kind: "connect"; provider?: string }
   | { kind: "disconnect"; provider?: string }
   | { kind: "none" }
@@ -77,8 +77,7 @@ export const COMMANDS = [
   { name: "/export", description: "save as markdown: /export, or /export notes/chat.md" },
   { name: "/rename", description: "retitle this conversation: /rename plan review" },
   { name: "/fork", description: "carry on in a copy of this conversation; the original stays as it is" },
-  { name: "/copy", description: "copy the last answer to the clipboard" },
-  { name: "/theme", description: "change colours: /theme midnight" },
+  { name: "/copy", description: "copy the whole conversation to the clipboard; /copy last for the latest answer" },  { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
   { name: "/effort", description: "how hard this model thinks, in its own levels - /effort lists them" },
   { name: "/agents", description: "choose a named agent profile; /agents default resets" },
@@ -207,8 +206,10 @@ export function runCommand(text: string): CommandResult {
       return { kind: "local", argument }
     case "/fork":
       return { kind: "fork" }
+    // The whole conversation, like the fork's /copy; "last" for just the latest answer.
     case "/copy":
-      return { kind: "copy" }
+      if (argument && argument !== "last" && argument !== "all") return { kind: "message", text: "usage: /copy (the whole conversation) or /copy last (the latest answer)" }
+      return { kind: "copy", what: argument === "last" ? "last" : "all" }
     case "/status":
       return { kind: "status" }
     case "/usage":

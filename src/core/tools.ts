@@ -276,13 +276,14 @@ export const EXTRA_TOOLS: Tool[] = [
       },
       required: ["query"],
     },
-    run: async (args, root) => {
-      const { grepFiles } = await import("./search")
-      const { matches, truncated, skipped, total } = await grepFiles(root, String(args.query ?? ""), args.include)
+    run: async (args, root, signal) => {
+      const { grepFiles, walkNote } = await import("./search")
+      const { matches, truncated, skipped, total, end } = await grepFiles(root, String(args.query ?? ""), args.include, signal)
       const notSearched = skipped.length ? NEWLINE + "not searched, too large: " + skipped.slice(0, 10).join(", ") : ""
-      if (!matches.length) return "no matches" + notSearched
+      const partway = walkNote(end) ? NEWLINE + walkNote(end) : ""
+      if (!matches.length) return "no matches" + notSearched + partway
       const more = truncated ? NEWLINE + `... ${total} matching lines in all; the first ${matches.length} are shown` : ""
-      return clip(matches.join(NEWLINE) + more + notSearched)
+      return clip(matches.join(NEWLINE) + more + notSearched + partway)
     },
   },
   {
@@ -296,14 +297,16 @@ export const EXTRA_TOOLS: Tool[] = [
       properties: { pattern: { type: "string", description: "e.g. src/**/*.ts or src/{tui,web}/*.ts" } },
       required: ["pattern"],
     },
-    run: async (args, root) => {
-      const { globFiles } = await import("./search")
+    run: async (args, root, signal) => {
+      const { globFiles, walkNote } = await import("./search")
       const pattern = String(args.pattern ?? "*")
-      const files = await globFiles(root, pattern)
+      const end = { stopped: false, capped: false }
+      const files = await globFiles(root, pattern, 200, signal, end)
+      const partway = walkNote(end) ? NEWLINE + walkNote(end) : ""
       // Naming the pattern back is the difference between "these files are not
       // here" and "this pattern found nothing". A bare "no files matched" reads
       // as the first, and a model that believes it stops looking.
-      return files.length ? clip(files.join(NEWLINE)) : `no files matched ${pattern}`
+      return (files.length ? clip(files.join(NEWLINE)) : `no files matched ${pattern}`) + partway
     },
   },
   {
@@ -422,6 +425,13 @@ async function runShell(command: string, root: string, timeoutMs: number, signal
 }
 
 
+
+/** Every occurrence of a known secret, replaced by a marker that says what was there. */
+export function redactSecrets(text: string, secrets: string[]): string {
+  let out = text
+  for (const secret of secrets) if (out.includes(secret)) out = out.split(secret).join("[stored secret hidden by CG-Next]")
+  return out
+}
 
 export const ALL_TOOLS: Tool[] = [...TOOLS, ...EXTRA_TOOLS]
 

@@ -82,21 +82,25 @@ describe("reading codegoblin.jsonc", () => {
     expect(loadConfig(file).permission.bash).toEqual({ "*rimraf*": "deny" })
   })
 
-  test("autonomy checkpoint is a positive integer or off", async () => {
-    const { checkpointEvery } = await import("../src/core/config")
-    expect(parseConfig(`{}`).autonomy).toEqual({ checkpoint: 0 })
-    expect(parseConfig(`{ "autonomy": { "checkpoint": 20 } }`).autonomy).toEqual({ checkpoint: 20 })
+  test("both autonomy brakes are on by default; 0 turns one off, and a malformed value keeps the default", async () => {
+    const { checkpointEvery, spendLimitPerPrompt, DEFAULT_CHECKPOINT, DEFAULT_SPEND_LIMIT } = await import("../src/core/config")
+    const defaults = { checkpoint: DEFAULT_CHECKPOINT, spend: DEFAULT_SPEND_LIMIT }
+    expect(DEFAULT_CHECKPOINT).toBeGreaterThan(0)
+    expect(DEFAULT_SPEND_LIMIT).toBeGreaterThan(0)
+    expect(parseConfig(`{}`).autonomy).toEqual(defaults)
+    expect(parseConfig(`{ "autonomy": { "checkpoint": 20, "spend": 1.5 } }`).autonomy).toEqual({ checkpoint: 20, spend: 1.5 })
+    expect(parseConfig(`{ "autonomy": { "checkpoint": 0, "spend": 0 } }`).autonomy).toEqual({ checkpoint: 0, spend: 0 })
     for (const text of [
-      `{ "autonomy": { "checkpoint": 0 } }`,
-      `{ "autonomy": { "checkpoint": -5 } }`,
-      `{ "autonomy": { "checkpoint": 2.5 } }`,
+      `{ "autonomy": { "checkpoint": -5, "spend": -1 } }`,
+      `{ "autonomy": { "checkpoint": 2.5, "spend": "lots" } }`,
       `{ "autonomy": { "checkpoint": "twenty" } }`,
       `{ "autonomy": "twenty" }`,
-    ]) expect(parseConfig(text).autonomy).toEqual({ checkpoint: 0 })
+    ]) expect(parseConfig(text).autonomy).toEqual(defaults)
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cg-config-"))
     const file = path.join(dir, "codegoblin.jsonc")
-    fs.writeFileSync(file, `{ "autonomy": { "checkpoint": 7 } }`)
+    fs.writeFileSync(file, `{ "autonomy": { "checkpoint": 7, "spend": 0.1 } }`)
     expect(checkpointEvery(file)).toBe(7)
-    expect(checkpointEvery(path.join(dir, "missing.jsonc"))).toBe(0)
+    expect(spendLimitPerPrompt(file)).toBe(0.1)
+    expect(checkpointEvery(path.join(dir, "missing.jsonc"))).toBe(DEFAULT_CHECKPOINT)
   })
 })

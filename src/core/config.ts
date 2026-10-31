@@ -42,13 +42,15 @@ export type Config = {
   mcp: Record<string, McpServer>
   instructions: string[]
   /**
-   * Pause and ask to continue after this many tool calls in a turn.
+   * Pause and ask to continue after this many tool calls in one prompt
+   * (`checkpoint`), and after this many dollars spent on one prompt (`spend`).
    *
-   * 0 or absent means never - turns run unbounded, which is the default. A
-   * value of the wrong shape is dropped rather than coerced, like everything
-   * else here: a guardrail guessed into existence is worse than a missing one.
+   * Both are on by default; 0 turns one off. They used to be off unless set,
+   * and a real "what effort are you on?" ran 84 steps and spent a dollar with
+   * nothing to stop it but a person noticing. A value of the wrong shape falls
+   * back to the default rather than to off: a typo must not remove the brake.
    */
-  autonomy: { checkpoint: number }
+  autonomy: { checkpoint: number; spend: number }
   /** Why the file did not parse cleanly, so a broken config is reported rather than read as empty. */
   problems: string[]
 }
@@ -103,10 +105,21 @@ function servers(value: unknown): Record<string, McpServer> {
   return out
 }
 
-/** Tool calls per turn before asking to continue; anything else means never. */
+/** Tool calls in one prompt before CG-Next asks whether to keep going. */
+export const DEFAULT_CHECKPOINT = 40
+/** Dollars spent on one prompt before CG-Next asks whether to keep going. */
+export const DEFAULT_SPEND_LIMIT = 0.25
+
+/** Tool calls per turn before asking to continue; 0 means never, anything malformed the default. */
 function checkpoint(value: unknown): number {
   const found = isRecord(value) ? value.checkpoint : undefined
-  return typeof found === "number" && Number.isInteger(found) && found > 0 ? found : 0
+  return typeof found === "number" && Number.isInteger(found) && found >= 0 ? found : DEFAULT_CHECKPOINT
+}
+
+/** Dollars per prompt before asking to continue; 0 means never, anything malformed the default. */
+function spendLimit(value: unknown): number {
+  const found = isRecord(value) ? value.spend : undefined
+  return typeof found === "number" && Number.isFinite(found) && found >= 0 ? found : DEFAULT_SPEND_LIMIT
 }
 
 /**
@@ -115,6 +128,11 @@ function checkpoint(value: unknown): number {
  */
 export function checkpointEvery(file?: string): number {
   return loadConfig(file).autonomy.checkpoint
+}
+
+/** Dollars one prompt may spend before asking to continue, read fresh like the checkpoint. 0 means never. */
+export function spendLimitPerPrompt(file?: string): number {
+  return loadConfig(file).autonomy.spend
 }
 
 export function parseConfig(text: string): Config {
@@ -128,7 +146,7 @@ export function parseConfig(text: string): Config {
     instructions: Array.isArray(root.instructions)
       ? root.instructions.filter((entry): entry is string => typeof entry === "string")
       : [],
-    autonomy: { checkpoint: checkpoint(root.autonomy) },
+    autonomy: { checkpoint: checkpoint(root.autonomy), spend: spendLimit(root.autonomy) },
     problems: errors.map((error) => printParseErrorCode(error.error) + " at offset " + error.offset),
   }
 }

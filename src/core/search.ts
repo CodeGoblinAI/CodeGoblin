@@ -103,7 +103,18 @@ function splitAlternatives(body: string): string[] {
   return parts
 }
 
-async function* walk(root: string, dir: string): AsyncGenerator<string> {
+/**
+ * Files one search looks at before giving up and saying so. A real model,
+ * started in the home folder, grepped all of it - AppData, OneDrive, every
+ * editor extension - and the turn could not be stopped while it did.
+ */
+export const MAX_FILES_SCANNED = 50_000
+
+/** Why a walk ended early, if it did. */
+export type WalkEnd = { stopped: boolean; capped: boolean }
+
+async function* walk(root: string, dir: string, signal?: AbortSignal): AsyncGenerator<string> {
+  if (signal?.aborted) return
   let entries
   try {
     entries = await fs.readdir(dir, { withFileTypes: true })
@@ -111,18 +122,52 @@ async function* walk(root: string, dir: string): AsyncGenerator<string> {
     return
   }
   for (const entry of entries) {
+    if (signal?.aborted) return
     if (SKIP_DIRS.has(entry.name)) continue
     const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) yield* walk(root, full)
+    if (entry.isDirectory()) yield* walk(root, full, signal)
     else yield path.relative(root, full).split(path.sep).join("/")
   }
 }
 
-export async function globFiles(root: string, pattern: string, limit = 200): Promise<string[]> {
-  const matcher = globToRegExp(pattern)
+/** The walk, counted: ends at the cap or on stop, and says which. */
+async function* bounded(root: string, end: WalkEnd, signal?: AbortSignal, cap = MAX_FILES_SCANNED): AsyncGenerator<string> {
+  let seen = 0
+  for await (const relative of walk(root, root, signal)) {
+    if (++seen > cap) { end.capped = true; return }
+    yield relative
+  }
+  if (signal?.aborted) end.stopped = true
+}
+
+/** The sentence a search adds when it did not look everywhere. */
+export function walkNote(end: WalkEnd, cap = MAX_FILES_SCANNED): string {
+  if (end.stopped) return "stopped by the user part way through"
+  if (end.capped) return `searched the first ${cap.toLocaleString("en-US")} files and stopped - narrow it with a folder or pattern`
+  return ""
+}
+
+/**
+ * A pattern written as an absolute path, made relative to the root it is
+ * matched against. Paths are matched relative, so `C:/Users/x/proj/src/**`
+ * matched nothing - after walking every file to find that out. A real run lost
+ * its last minutes, and its stop button, to exactly that.
+ */
+export function relativePattern(root: string, pattern: string): string {
+  const slashed = pattern.split(BACKSLASH).join("/")
+  if (!path.isAbsolute(slashed)) return slashed
+  const rootSlashed = path.resolve(root).split(BACKSLASH).join("/").replace(/\/$/, "")
+  const lower = slashed.toLowerCase()
+  if (lower === rootSlashed.toLowerCase()) return "**"
+  if (lower.startsWith(rootSlashed.toLowerCase() + "/")) return slashed.slice(rootSlashed.length + 1)
+  throw new Error(`the pattern ${pattern} is outside the working directory (${root}); patterns are relative to it`)
+}
+
+export async function globFiles(root: string, pattern: string, limit = 200, signal?: AbortSignal, end: WalkEnd = { stopped: false, capped: false }): Promise<string[]> {
+  const matcher = globToRegExp(relativePattern(root, pattern))
   const found: { file: string; mtime: number }[] = []
 
-  for await (const relative of walk(root, root)) {
+  for await (const relative of bounded(root, end, signal)) {
     if (!matcher.test(relative)) continue
     const stat = await fs.stat(path.join(root, relative)).catch(() => undefined)
     found.push({ file: relative, mtime: stat?.mtimeMs ?? 0 })
@@ -137,7 +182,9 @@ export async function grepFiles(
   root: string,
   query: string,
   include?: string,
-): Promise<{ matches: string[]; truncated: boolean; skipped: string[]; total: number }> {
+  signal?: AbortSignal,
+): Promise<{ matches: string[]; truncated: boolean; skipped: string[]; total: number; end: WalkEnd }> {
+  const end: WalkEnd = { stopped: false, capped: false }
   let pattern: RegExp
   try {
     pattern = new RegExp(query, "i")
@@ -146,12 +193,12 @@ export async function grepFiles(
     pattern = new RegExp(escapeRegExp(query), "i")
   }
 
-  const filter = include ? globToRegExp(include) : undefined
+  const filter = include ? globToRegExp(relativePattern(root, include)) : undefined
   const matches: string[] = []
   const skipped: string[] = []
   let total = 0
 
-  for await (const relative of walk(root, root)) {
+  for await (const relative of bounded(root, end, signal)) {
     if (filter && !filter.test(relative)) continue
 
     let absolute: string
@@ -183,7 +230,7 @@ export async function grepFiles(
     }
   }
 
-  return { matches, truncated: total > matches.length, skipped, total }
+  return { matches, truncated: total > matches.length, skipped, total, end }
 }
 
 /** Kept here so the search tools share the sandbox check with the file tools. */

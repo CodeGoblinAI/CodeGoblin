@@ -77,7 +77,7 @@ import {
   type MediaSettings,
   type MediaChoice,
 } from "../core/media-settings"
-import { exportSession } from "../core/export"
+import { exportSession, sessionMarkdown } from "../core/export"
 import { runMedia, describeMedia, type MediaKind } from "../core/media"
 import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
@@ -106,7 +106,7 @@ import { customCommands, invocationItems, resolveInvocation } from "../core/invo
 import { listSkills, skillIndex } from "../core/skills"
 import { setInvocations } from "./palette"
 import { systemPrompt } from "../core/system-prompt"
-import { configPath, checkpointEvery } from "../core/config"
+import { configPath, checkpointEvery, spendLimitPerPrompt } from "../core/config"
 
 const argv = process.argv.slice(2)
 
@@ -1225,8 +1225,13 @@ function earlierNotice(hidden: number, archived: boolean): string {
  */
 function checkpointStatus(): string {
   const every = checkpointEvery()
-  if (every <= 0) return "off"
-  return "ask every " + every + " tool calls" + (permissions.checkpointsOff ? "  (off for this session)" : "")
+  const spend = spendLimitPerPrompt()
+  const parts = [
+    ...(every > 0 ? ["every " + every + " tool calls"] : []),
+    ...(spend > 0 ? ["at " + formatSpend({ input: 0, output: 0, dollars: spend }) + " per prompt"] : []),
+  ]
+  if (!parts.length) return "off"
+  return "ask " + parts.join(" and ") + (permissions.checkpointsOff ? "  (off for this session)" : "")
 }
 
 /** The focused spend readout: tokens, cost, context - not session config. */
@@ -1428,6 +1433,7 @@ function confirmLocalPull(entry: (typeof LOCAL_CATALOG)[number]) {
 function railLines(height: number): string[] {
   const context = contextUsage()
   const every = checkpointEvery()
+  const spendLimit = spendLimitPerPrompt()
   const filled = Math.max(0, Math.min(10, Math.round(context.percent / 10)))
   const barTone = context.percent >= 90 ? theme.error : context.percent >= 70 ? theme.gold : theme.text
   const bar = barTone + "█".repeat(filled) + "░".repeat(10 - filled) + ansi.reset
@@ -1439,7 +1445,7 @@ function railLines(height: number): string[] {
     ["tokens", spend.input.toLocaleString() + " in / " + spend.output.toLocaleString() + " out"],
     ["cost", spend.dollars === undefined ? "unknown" : formatSpend(spend)],
     ["mode", permissions.mode + (permissions.planning ? " +planning" : "") + (boost || boostOnce ? " +boost" : "")],
-    ["checkpoints", every > 0 ? "every " + every + (permissions.checkpointsOff ? " (off)" : "") : "off"],
+    ["checkpoints", permissions.checkpointsOff ? "off this session" : [every > 0 ? "every " + every : "", spendLimit > 0 ? formatSpend({ input: 0, output: 0, dollars: spendLimit }) : ""].filter(Boolean).join(" · ") || "off"],
     ["activity", (session.activity?.items.length || 0) + " recent tool calls"],
     ["mcp", servers.length ? "" : "none yet"],
     ...servers.slice(0, 4).map((server): [string, string] => [
@@ -2332,13 +2338,20 @@ async function send() {
     if (result.kind === "balance") {
       openUsage(result.provider || selection.provider.id, true)
     }
-    if (result.kind === "copy") {
+    if (result.kind === "copy" && result.what === "last") {
       const answer = sessions.lastAnswer(messages)
       if (!answer) status = "nothing to copy yet - no answer in this conversation"
       else {
         try { await copyText(answer); status = "copied the last answer (" + answer.length + " characters)" }
         catch { status = "could not reach the clipboard" }
       }
+      render(); return
+    }
+    if (result.kind === "copy") {
+      if (!messages.some((message) => message.role === "user")) { status = "nothing to copy yet - say something first"; render(); return }
+      const text = await sessionMarkdown({ ...session, messages }, Date.now())
+      try { await copyText(text); status = "copied the whole conversation (" + text.length.toLocaleString("en-US") + " characters); /copy last copies just the latest answer" }
+      catch { status = "could not reach the clipboard - /export saves it to a file instead" }
       render(); return
     }
     if (result.kind === "fork") {
@@ -2610,9 +2623,10 @@ async function send() {
       // keep going. Either way the transcript says what happened, because a
       // turn that stopped here is unfinished work, not a finished answer.
       if (event.type === "checkpoint") {
+        const why = event.spent !== undefined ? formatSpend({ input: 0, output: 0, dollars: event.spent }) + " spent on this prompt" : event.toolCalls + " tool calls"
         transcript.push({
           kind: "tool",
-          text: "paused at the autonomy checkpoint (" + event.toolCalls + " tool calls) - " +
+          text: "paused at the autonomy checkpoint (" + why + ") - " +
             (event.stopped ? "stopped; ask it to continue" : "continuing"),
         })
         if (event.stopped) status = "stopped at the autonomy checkpoint"

@@ -413,7 +413,7 @@ describe("showing a model a picture", () => {
 
   test("a vision model gets the picture in the shape it reads", async () => {
     const body = await bodySentWith(true)
-    const content = body.messages[0].content
+    const content = body.messages.find((message: { role: string }) => message.role === "user").content
 
     expect(Array.isArray(content)).toBe(true)
     expect(content[0]).toEqual({ type: "text", text: "what is this" })
@@ -422,7 +422,7 @@ describe("showing a model a picture", () => {
 
   test("a model that cannot see is told one was attached, and not sent it", async () => {
     const body = await bodySentWith(false)
-    const content = body.messages[0].content
+    const content = body.messages.find((message: { role: string }) => message.role === "user").content
 
     expect(typeof content).toBe("string")
     expect(content).toContain("what is this")
@@ -436,7 +436,7 @@ describe("showing a model a picture", () => {
     for (const images of [true, false]) {
       globalThis.fetch = (async (_url: string, init: RequestInit) => {
         const body = JSON.parse(String(init.body))
-        expect(body.messages[0].content).toBe("plain")
+        expect(body.messages.find((message: { role: string }) => message.role === "user").content).toBe("plain")
         return answers("ok")
       }) as unknown as typeof fetch
 
@@ -791,7 +791,7 @@ describe("autonomy checkpoints", () => {
     expect(calls).toBe(3)
   })
 
-  test("unset means unbounded, as before", async () => {
+  test("with nobody to ask, the turn carries on", async () => {
     const served = serve(twoReads, () => answers("done"))
     const events: AgentEvent[] = []
     for await (const event of runAgent({

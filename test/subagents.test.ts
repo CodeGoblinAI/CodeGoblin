@@ -137,8 +137,8 @@ describe("starting a subagent", () => {
       sub: () => say("done"),
     })
     await drive(manager())
-    const mainTools = bodies.find((body) => !String(body.messages[0]?.content).includes("subagent"))!.tools.map((tool) => tool.function.name)
-    const subTools = bodies.find((body) => String(body.messages[0]?.content).includes("subagent"))!.tools.map((tool) => tool.function.name)
+    const mainTools = bodies.find((body) => !/You are the \S+ subagent/.test(String(body.messages[0]?.content)))!.tools.map((tool) => tool.function.name)
+    const subTools = bodies.find((body) => /You are the \S+ subagent/.test(String(body.messages[0]?.content)))!.tools.map((tool) => tool.function.name)
     expect(mainTools).toEqual(expect.arrayContaining(["task", "task_result"]))
     expect(subTools).not.toContain("task")
   })

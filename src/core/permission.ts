@@ -649,6 +649,14 @@ export class Permissions {
     return decision === "reject" ? "stop" : "continue"
   }
 
+  /** The same question when one prompt has spent `spent` (already formatted, "$0.25"). */
+  async spendCheckpoint(spent: string): Promise<"continue" | "stop"> {
+    if (this.checkpointsOff) return "continue"
+    const decision = await this.ask(CHECKPOINT_TOOL, `${spent} spent on this prompt - keep going`, "future checkpoints")
+    if (decision === "always") this.checkpointsOff = true
+    return decision === "reject" ? "stop" : "continue"
+  }
+
   summary(): string[] {
     return [...this.granted].sort()
   }

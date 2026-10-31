@@ -37,5 +37,11 @@ test("/copy takes the last answer with words in it", () => {
   expect(sessions.lastAnswer([{ role: "assistant", content: "first" }, { role: "user", content: "q" }, { role: "assistant", content: "second" }, { role: "assistant", content: "  " }])).toBe("second")
   expect(sessions.lastAnswer([{ role: "user", content: "only a question" }])).toBeUndefined()
   expect(runCommand("/fork")).toEqual({ kind: "fork" })
-  expect(runCommand("/copy")).toEqual({ kind: "copy" })
+  expect(runCommand("/copy last")).toEqual({ kind: "copy", what: "last" })
+})
+
+test("/copy alone copies the whole conversation, like the fork's; anything else gets its usage", () => {
+  expect(runCommand("/copy")).toEqual({ kind: "copy", what: "all" })
+  expect(runCommand("/copy all")).toEqual({ kind: "copy", what: "all" })
+  expect(runCommand("/copy everything")).toMatchObject({ kind: "message" })
 })

@@ -2,6 +2,8 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { loadArchive, type Session } from "./sessions"
 import type { Message } from "./agent"
+import { redactSecrets } from "./tools"
+import { storedSecrets } from "./auth"
 
 /**
  * A conversation as a file someone can keep.
@@ -61,6 +63,7 @@ export function toMarkdown(session: Session, when: number, archived: Message[] =
       }
     }
     if (message.content.trim()) lines.push("", "## Goblin", "", message.content.trim())
+    if (message.stopped) lines.push("", "*stopped by the user*")
   }
 
   return lines.join(NEWLINE).replace(new RegExp(NEWLINE + "{3,}", "g"), BLANK) + NEWLINE
@@ -75,6 +78,15 @@ export function toMarkdown(session: Session, when: number, archived: Message[] =
  * asking for the file, and refusing to put their own export on their own
  * desktop would be protecting them from themselves.
  */
+/**
+ * The whole record - compacted messages too - with stored keys scrubbed, for
+ * /export and /copy. A conversation saved before tool output was scrubbed can
+ * still hold a key a model printed, and these are made to be pasted elsewhere.
+ */
+export async function sessionMarkdown(session: Session, when: number): Promise<string> {
+  return redactSecrets(toMarkdown(session, when, await loadArchive(session.id).catch(() => [])), storedSecrets())
+}
+
 export async function exportSession(
   session: Session,
   root: string,
@@ -84,6 +96,6 @@ export async function exportSession(
   const name = target?.trim() || `codegoblin-${slug(session.title)}.md`
   const absolute = path.resolve(root, name)
   await fs.mkdir(path.dirname(absolute), { recursive: true })
-  await fs.writeFile(absolute, toMarkdown(session, when, await loadArchive(session.id).catch(() => [])), "utf8")
+  await fs.writeFile(absolute, await sessionMarkdown(session, when), "utf8")
   return path.relative(root, absolute).startsWith("..") ? absolute : path.relative(root, absolute)
 }

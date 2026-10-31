@@ -2,11 +2,13 @@ import { authHeaders, kindOf, type Provider } from "./providers"
 import { isLocalChat, verifyLocalModel } from "./local-provider"
 import { localRuntime, type Lease } from "./local-runtime"
 import { cliCompletion } from "./cli-completion"
-import { TOOL_SCHEMA, runTool, isConcurrent } from "./tools"
-import { checkpointEvery } from "./config"
+import { TOOL_SCHEMA, runTool, isConcurrent, redactSecrets } from "./tools"
+import { storedSecrets } from "./auth"
+import { checkpointEvery, spendLimitPerPrompt } from "./config"
 import { configuredInstructions } from "./instructions"
 import type { Permissions } from "./permission"
-import { shouldCompact, planCompaction, applyCompaction, boundSummaryInput, SUMMARY_PROMPT, estimateTokens } from "./context"
+import { shouldCompact, planCompaction, applyCompaction, boundSummaryInput, SUMMARY_PROMPT, estimateTokens, priceOf, formatSpend } from "./context"
+import { sessionFacts } from "./session-facts"
 import { parseTodos, type Todo } from "./todo"
 import type { History } from "./undo"
 
@@ -106,7 +108,7 @@ export type AgentEvent =
    * `stopped` says how the person answered - the turn ended here, or it
    * carries on and asks again after another full window of calls.
    */
-  | { type: "checkpoint"; toolCalls: number; stopped: boolean }
+  | { type: "checkpoint"; toolCalls: number; stopped: boolean; /** Set when it was the spend limit that paused the turn, in dollars. */ spent?: number }
   /** Subagents finished and their results were handed to the model, which carries on. */
   | { type: "subagents_collected" }
   /**
@@ -323,10 +325,11 @@ async function* runTurns(input: {
    * Pause and ask to continue after this many tool calls in the turn.
    *
    * An explicit value wins (which is what tests use); otherwise the config
-   * file is read fresh, so an edit applies to the next turn. 0 or absent
-   * means never - turns run unbounded, which is the default.
+   * file is read fresh, so an edit applies to the next turn. 0 means never.
    */
   checkpoint?: number
+  /** Pause and ask after this many dollars on one prompt; config's autonomy.spend when unset, 0 never. */
+  spendLimit?: number
   maxTurns?: number
   signal?: AbortSignal
   /** An internal inference transport seam; never exposed through UI/config. Consent stays here. */
@@ -338,8 +341,15 @@ async function* runTurns(input: {
   // A person stops a turn that is going nowhere; that is what stop is for.
   const maxTurns = input.maxTurns ?? Number.POSITIVE_INFINITY
   const configured = configuredInstructions(input.root)
-  input = { ...input, instructions: [configured, input.instructions].filter(Boolean).join("\n\n") || undefined }
   const localChat = isLocalChat(input.provider, input.modelId)
+  // Facts about the session ride with the instructions, so the model can answer
+  // "which model / what effort are you?" from what it was given.
+  const facts = localChat ? undefined : sessionFacts({ provider: input.provider, modelId: input.modelId, effort: input.effort, mode: input.permissions?.mode, root: input.root })
+  input = { ...input, instructions: [configured, input.instructions, facts].filter(Boolean).join("\n\n") || undefined }
+  const price = input.provider.models.find((model) => model.id === input.modelId)?.price
+  const priced = Boolean(price && (price.input > 0 || price.output > 0))
+  let spentThisPrompt = 0
+  let nextSpendCheck = 0
   let partial = ""
   let checkpointStopped = false
   try {
@@ -359,9 +369,9 @@ async function* runTurns(input: {
   // Compact before the first request rather than after a failure: the
   // provider rejects an oversized conversation outright.
   const windowOf = () => input.checkpoint ?? checkpointEvery()
-  // Autonomy guardrail, opt-in: every tool call this turn counts - spawns too,
-  // because a task call is a tool call in this turn - and at each full window
-  // the person is asked whether the turn may keep going. 0 means never.
+  // Autonomy guardrail, on by default (autonomy.checkpoint): every tool call this
+  // turn counts - spawns too, because a task call is a tool call in this turn -
+  // and at each full window the person is asked whether to keep going. 0 means never.
   let toolCallsThisTurn = 0
   let nextCheckpoint = windowOf()
   for (let turn = 0; turn < maxTurns; turn++) {
@@ -397,6 +407,7 @@ async function* runTurns(input: {
         if (event.type === "calls") { event.calls.forEach((call, index) => calls.set(index, call)); continue }
         if (event.type === "text") { text += event.delta; partial = text }
         if (event.type === "output_limit") { outputLimited = true; continue }
+        if (event.type === "spend" && priced) spentThisPrompt += priceOf(event, price) ?? 0
         yield event
       }
     } else {
@@ -462,11 +473,9 @@ async function* runTurns(input: {
         // money.
         const used = chunk?.usage
         if (used && (used.prompt_tokens || used.completion_tokens)) {
-          yield {
-            type: "spend",
-            input: Number(used.prompt_tokens ?? 0),
-            output: Number(used.completion_tokens ?? 0),
-          }
+          const spend = { input: Number(used.prompt_tokens ?? 0), output: Number(used.completion_tokens ?? 0) }
+          if (priced) spentThisPrompt += priceOf(spend, price) ?? 0
+          yield { type: "spend", ...spend }
         }
 
         const delta = chunk?.choices?.[0]?.delta
@@ -606,6 +615,11 @@ async function* runTurns(input: {
       results.set(entry.call.id, await run(entry))
     }
 
+    // Stored keys never reach the model, the saved conversation or the screen,
+    // whichever tool printed them - a shell `type auth.json` did once.
+    const secrets = storedSecrets()
+    for (const [id, result] of results) results.set(id, redactSecrets(result, secrets))
+
     // Reported in the order the model asked for them, whatever order they
     // finished in, so a transcript reads the same way twice.
     for (const { call, args, allowed, refusal } of decided) {
@@ -651,6 +665,27 @@ async function* runTurns(input: {
           return
         }
         nextCheckpoint = toolCallsThisTurn + every
+      }
+    }
+
+    // The money brake, next to the call-count one. Calls are a poor proxy for
+    // cost: each step resends the whole conversation, so late steps cost far
+    // more than early ones. Asked again each time the spend passes another
+    // full limit; "for this session" turns both brakes off.
+    const limit = input.spendLimit ?? spendLimitPerPrompt()
+    if (priced && limit > 0 && input.permissions && !input.permissions.checkpointsOff) {
+      if (nextSpendCheck <= 0) nextSpendCheck = limit
+      if (spentThisPrompt >= nextSpendCheck) {
+        if (input.signal?.aborted) return
+        const spent = formatSpend({ input: 0, output: 0, dollars: spentThisPrompt })
+        const stopped = (await input.permissions.spendCheckpoint(spent)) === "stop" || input.signal?.aborted === true
+        yield { type: "checkpoint", toolCalls: toolCallsThisTurn, stopped, spent: spentThisPrompt }
+        if (stopped) {
+          checkpointStopped = true
+          yield { type: "turn_end" }
+          return
+        }
+        while (nextSpendCheck <= spentThisPrompt) nextSpendCheck += limit
       }
     }
   }

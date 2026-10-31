@@ -60,7 +60,7 @@ import { History, describe as describeCheckpoint, nothingToDo } from "../core/un
 import { changesIn, summarise } from "../core/changes"
 import { THEMES, paletteOf } from "../core/theme"
 import * as settingsStore from "../core/settings"
-import { exportSession } from "../core/export"
+import { exportSession, sessionMarkdown } from "../core/export"
 import { runMedia, MEDIA_KINDS, withinMediaOutput } from "../core/media"
 import {
   MEDIA_OPTIONS,
@@ -737,6 +737,15 @@ async function handle(request: Request): Promise<Response> {
     if (!source || !source.messages.some((message) => message.role === "user")) return json({ message: "Nothing to fork yet - say something first" }, 400)
     const copy = await sessions.fork(source)
     return json({ id: copy.id, title: copy.title })
+  }
+
+  // /copy: the whole conversation as Markdown, stored keys scrubbed - the same text /export writes.
+  if (url.pathname === "/api/session/transcript" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { id?: unknown }
+    const id = typeof body.id === "string" ? body.id : ""
+    const source = id ? await sessions.load(id).catch(() => undefined) : undefined
+    if (!source || !source.messages.some((message) => message.role === "user")) return json({ message: "Nothing to copy yet - say something first" }, 400)
+    return json({ text: await sessionMarkdown(source, Date.now()) })
   }
 
   // `!command` from the composer: run as the person, kept in the conversation for the next prompt.
