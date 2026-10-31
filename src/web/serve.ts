@@ -49,7 +49,7 @@ import { DECISIONS, MODES, Permissions, askedFor, refusalLabel, type Decision, t
 import { runTypedCommand, typedCommand } from "../core/user-shell"
 import { BrowserConsent } from "./consent"
 import { McpManager } from "../core/mcp"
-import { SubagentManager, listAgents, selectedAgent, agentSelection, type SubagentContext } from "../core/subagents"
+import { SubagentManager, agentMention, listAgents, selectedAgent, agentSelection, type SubagentContext } from "../core/subagents"
 import { configPath, checkpointEvery } from "../core/config"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
@@ -405,6 +405,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
         // Marked, so the page sends them to the model rather than calling them unknown.
         ...invocationItems(root).map((item) => ({ ...item, invocation: true })),
       ],
+      agents: listAgents(root).map(({ name, description }) => ({ name, description })),
       models,
       aliases: COMMAND_ALIASES,
       pending: PENDING_COMMANDS,
@@ -772,6 +773,19 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
    * in a remote URL. This endpoint exists to show generated media and now it
    * can do nothing else.
    */
+  // /open: a project file's text, for the person to read in the page. Inside
+  // the project only, text only, and cut at 1 MB.
+  if (url.pathname === "/api/view" && request.method === "GET") {
+    const target = url.searchParams.get("path") ?? ""
+    let absolute: string
+    try { absolute = resolveInside(root, target) } catch { return json({ ok: false, message: "outside the project" }) }
+    const handle = file(absolute)
+    if (!(await handle.exists())) return json({ ok: false, message: "no such file: " + target })
+    const bytes = new Uint8Array(await handle.slice(0, 1_000_000).arrayBuffer())
+    if (bytes.includes(0)) return json({ ok: false, message: target + " is not a text file" })
+    return json({ ok: true, path: target, text: new TextDecoder().decode(bytes), truncated: handle.size > 1_000_000 })
+  }
+
   if (url.pathname === "/api/file" && request.method === "GET") {
     const target = url.searchParams.get("path") ?? ""
     let absolute: string
@@ -910,6 +924,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
       boost?: boolean
       /** Long pastes the page folded to tokens; the text shown keeps the tokens. */
       pastes?: unknown
+      /** Text files attached in the page: sent to the model as their contents. */
+      files?: { name?: unknown; text?: unknown }[]
     }
     const text = (body.text ?? "").trim()
     if (!text) return json({ error: "empty prompt" }, 400)
@@ -945,7 +961,10 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     // resumed conversation still has the context it was answered with.
     // A custom command or a skill is sent as its text; the line typed is what is shown.
     const invoked = whole.startsWith("/") ? resolveInvocation(whole, root) : undefined
-    const mentioned = await expandMentions(invoked ? invoked.content : whole, root)
+    // "@explore <task>" hands the task to that agent, with subagents on for this message.
+    const delegated = invoked ? undefined : agentMention(whole, root)
+    if (delegated) body.boost = true
+    const mentioned = await expandMentions(invoked ? invoked.content : delegated ? delegated.content : whole, root)
 
     // Pictures arrive two ways and mean the same thing once they are here:
     // attached in the page, or @mentioned by path like any other file.
@@ -954,9 +973,22 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
       .slice(0, 10)
       .map((image) => ({ name: String(image.name ?? "image"), dataUrl: String(image.dataUrl) }))
     const images = [...pasted, ...mentioned.images]
+    // Attached text files go to the model as their contents, after what was typed.
+    let budget = 2_000_000
+    const attachedFiles = (Array.isArray(body.files) ? body.files : []).slice(0, 10).flatMap((entry) => {
+      const name = typeof entry?.name === "string" ? entry.name.replace(/[\r\n`]/g, "").slice(0, 120) : ""
+      const content = typeof entry?.text === "string" ? entry.text : undefined
+      if (!name || content === undefined || content.includes("\u0000") || content.length > 512_000 || content.length > budget) return []
+      budget -= content.length
+      return [{ name, content }]
+    })
+    if (attachedFiles.length) {
+      const fence = "````"
+      mentioned.content += attachedFiles.map((file) => `\n\nAttached file ${file.name}:\n${fence}\n${file.content}\n${fence}`).join("")
+    }
 
     session.messages.push(
-      mentioned.files.length || images.length || invoked || whole !== text
+      mentioned.files.length || images.length || invoked || delegated || attachedFiles.length || whole !== text
         ? { role: "user", content: mentioned.content, display: text, images, at: Date.now() }
         : { role: "user", content: text, at: Date.now() },
     )

@@ -110,7 +110,12 @@ export function removeWorktree(folder: string, target: string, options: { recycl
     git(repo, ["worktree", "prune"])
   } else if (process.platform === "win32") {
     const script = "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:CG_TARGET, 'OnlyErrorDialogs', 'SendToRecycleBin')"
-    const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, CG_TARGET: resolved }, windowsHide: true, encoding: "utf8", timeout: 60_000 })
+    // Windows can hold a just-used folder for a moment (git, the indexer), so a few tries.
+    let result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, CG_TARGET: resolved }, windowsHide: true, encoding: "utf8", timeout: 60_000 })
+    for (let attempt = 0; attempt < 3 && fs.existsSync(resolved); attempt++) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700)
+      result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, CG_TARGET: resolved }, windowsHide: true, encoding: "utf8", timeout: 60_000 })
+    }
     if (result.status !== 0 || fs.existsSync(resolved)) throw new Error("could not move it to the Recycle Bin: " + ((result.stderr ?? "").trim().split(/\r?\n/).at(-1) || "unknown"))
     git(repo, ["worktree", "prune"])
   } else {

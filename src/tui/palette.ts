@@ -21,6 +21,12 @@ import { displayWidth, truncateToWidth, padToWidth } from "./width"
 export type PaletteItem = { value: string; hint: string }
 
 
+/** Named agents, so @ can offer them before files. */
+let agentItems: { name: string; description: string }[] = []
+export function setAgents(agents: { name: string; description: string }[]) {
+  agentItems = agents.map(({ name, description }) => ({ name, description }))
+}
+
 /** Favourite and recent models, so the model list can put them first. */
 let modelLists: { favourites: string[]; recents: string[] } = { favourites: [], recents: [] }
 export function setModelLists(lists: { favourites: string[]; recents: string[] }) {
@@ -88,12 +94,17 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
   // starts a command, so it is only meaningful at the beginning of the line.
   const mention = findMention(input, cursor)
   if (mention) {
-    const files = rankFiles(mention.query)
-    if (!files.length) return undefined
-    return files.map((file) => ({
+    // At the start of a message, an agent's name hands the task to that agent.
+    const atStart = input.slice(0, cursor).trimStart().startsWith("@") && !input.slice(0, cursor).trimStart().includes(" ")
+    const agents = atStart
+      ? agentItems.filter((agent) => agent.name.toLowerCase().startsWith(mention.query.toLowerCase())).map((agent) => ({ value: "@" + agent.name, hint: "agent - " + agent.description }))
+      : []
+    const files = rankFiles(mention.query).map((file) => ({
       value: "@" + file,
       hint: file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "in this folder",
     }))
+    const items = [...agents, ...files]
+    return items.length ? items : undefined
   }
 
   // A / that starts a word mid-prompt completes command names too, the way @

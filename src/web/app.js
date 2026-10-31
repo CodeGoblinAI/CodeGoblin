@@ -345,6 +345,8 @@ let attachments = []
 /** Matches the server's cap, so nothing is accepted here that is refused there. */
 const MAX_IMAGE_BYTES = 5_000_000
 const MAX_IMAGES = 10
+/** A text file attached rides with the message as its contents; past this it is better @mentioned. */
+const MAX_TEXT_BYTES = 512_000
 
 function updateSendButton() {
   // Grow with prose/code, then scroll inside the composer rather than moving
@@ -361,11 +363,17 @@ function renderAttached() {
   attachments.forEach((image, index) => {
     const cell = document.createElement("div")
     cell.className = "shot"
-    const thumb = document.createElement("img")
-    thumb.src = image.dataUrl
-    thumb.alt = image.name
     cell.title = image.name
-    cell.appendChild(thumb)
+    if (image.text !== undefined) {
+      // A text file shows as its name: its contents go to the model with the message.
+      cell.classList.add("textfile")
+      cell.textContent = "📄 " + image.name
+    } else {
+      const thumb = document.createElement("img")
+      thumb.src = image.dataUrl
+      thumb.alt = image.name
+      cell.appendChild(thumb)
+    }
     const drop = document.createElement("button")
     drop.type = "button"
     drop.textContent = "×"
@@ -385,8 +393,21 @@ function modelSees() {
 
 function addFiles(files) {
   for (const file of files) {
-    if (attachments.length >= MAX_IMAGES) { note("at most " + MAX_IMAGES + " images per message"); break }
-    if (!file.type.startsWith("image/")) { note(file.name + " is not an image"); continue }
+    if (attachments.length >= MAX_IMAGES) { note("at most " + MAX_IMAGES + " attachments per message"); break }
+    // Any other file is read as text and sent as its contents. A binary file
+    // (a NUL in it) is refused rather than sent as noise.
+    if (!file.type.startsWith("image/")) {
+      if (file.size > MAX_TEXT_BYTES) { note(file.name + " is " + Math.round(file.size / 1024) + " KB - too big to attach; @mention it if it is in the project"); continue }
+      const reader = new FileReader()
+      reader.onload = () => {
+        const text = String(reader.result)
+        if (text.includes("\u0000")) { note(file.name + " is not a text file; only images and text files can be attached"); return }
+        attachments.push({ name: file.name, text })
+        renderAttached()
+      }
+      reader.readAsText(file)
+      continue
+    }
     if (file.size > MAX_IMAGE_BYTES) {
       note(file.name + " is " + Math.round(file.size / 1024) + " KB, over the " + (MAX_IMAGE_BYTES / 1e6) + " MB limit")
       continue
@@ -405,7 +426,7 @@ function addFiles(files) {
 attachBtn.onclick = () => {
   const modal = makeDialog("Add to the prompt")
   for (const [label, action] of [
-    ["Attach an image", () => filePicker.click()],
+    ["Attach an image or a text file", () => filePicker.click()],
     ["Mention a project file", () => { input.value += (input.value && !input.value.endsWith(" ") ? " " : "") + "@"; input.focus(); refreshPalette() }],
     ["Browse slash commands", () => { void runCommand("/help") }],
   ]) {
@@ -672,10 +693,13 @@ function turn(kind, text, images, at = Date.now()) {
       const cell = document.createElement("div")
       cell.className = "shot"
       cell.title = image.name
-      const thumb = document.createElement("img")
-      thumb.src = image.dataUrl
-      thumb.alt = image.name
-      cell.appendChild(thumb)
+      if (image.text !== undefined || !image.dataUrl) { cell.classList.add("textfile"); cell.textContent = "📄 " + image.name }
+      else {
+        const thumb = document.createElement("img")
+        thumb.src = image.dataUrl
+        thumb.alt = image.name
+        cell.appendChild(thumb)
+      }
       row.appendChild(cell)
     }
     body.appendChild(row)
@@ -1233,6 +1257,58 @@ async function chooseAgent(name = "") {
   note("Agent: " + (currentAgent || "default") + " · " + data.model)
 }
 
+/** /open: type to find a project file, enter to read it. */
+function openQuickOpen() {
+  const modal = makeDialog("Open a file")
+  const search = document.createElement("input")
+  search.type = "search"
+  search.placeholder = "type part of a file name"
+  search.setAttribute("aria-label", "Find a file")
+  search.className = "quick-open"
+  const list = document.createElement("div")
+  modal.append(search, list)
+  let shown = []
+  let active = 0
+  const draw = () => {
+    shown = rankFiles(search.value.trim()).slice(0, 40)
+    active = Math.min(active, Math.max(0, shown.length - 1))
+    list.innerHTML = ""
+    shown.forEach((file, index) => {
+      const button = document.createElement("button")
+      button.className = "dialog-action" + (index === active ? " active" : "")
+      button.textContent = file
+      button.onclick = () => { modal.close(); void viewFile(file) }
+      list.appendChild(button)
+    })
+    if (!shown.length) list.textContent = "No matching files."
+  }
+  search.oninput = () => { active = 0; draw() }
+  search.onkeydown = (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); active = Math.max(0, Math.min(shown.length - 1, active + (event.key === "ArrowDown" ? 1 : -1))); draw() }
+    if (event.key === "Enter" && shown[active]) { event.preventDefault(); modal.close(); void viewFile(shown[active]) }
+  }
+  draw()
+  search.focus()
+}
+
+/** A project file, read-only, with line numbers - and a way to mention it in the prompt. */
+async function viewFile(file) {
+  const data = await fetch("/api/view?path=" + encodeURIComponent(file)).then((r) => r.json()).catch(() => null)
+  if (!data?.ok) { note(data?.message || "Could not open " + file); return }
+  const modal = makeDialog(file + (data.truncated ? " (first 1 MB)" : ""))
+  modal.classList.add("file-view")
+  const mention = document.createElement("button")
+  mention.className = "dialog-action"
+  mention.textContent = "Mention @" + file + " in the prompt"
+  mention.onclick = () => { modal.close(); input.value += (input.value && !input.value.endsWith(" ") ? " " : "") + "@" + file + " "; input.focus(); updateSendButton() }
+  const pre = document.createElement("pre")
+  pre.className = "file-text"
+  const lines = data.text.split("\n")
+  const width = String(lines.length).length
+  pre.textContent = lines.map((line, index) => String(index + 1).padStart(width, " ") + "  " + line).join("\n")
+  modal.append(mention, pre)
+}
+
 /** /timeline: your messages, newest first; choosing one scrolls the conversation to it. */
 function openTimeline() {
   const asked = [...thread.querySelectorAll(".turn.user")].reverse()
@@ -1751,6 +1827,7 @@ async function runCommand(text) {
     return true
   }
   if (name === "/timeline") { openTimeline(); return true }
+  if (name === "/open") { if (argument) void viewFile(argument.replace(/^@/, "")); else openQuickOpen(); return true }
   // The browser's composer is already a full editor.
   if (name === "/editor") { note("The message box here is already an editor - Shift+Enter adds a line. /editor opens your own editor in the terminal app."); return true }
   if (name === "/terminal") {
@@ -2280,7 +2357,7 @@ async function submit() {
     response = await fetch("/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, sessionId, provider: currentModel, agent: currentAgent, images: sending, mode: currentMode, planning, boost: boost || boostOnce, pastes: sendingPastes }),
+      body: JSON.stringify({ text, sessionId, provider: currentModel, agent: currentAgent, images: sending.filter((each) => each.dataUrl), files: sending.filter((each) => each.text !== undefined), mode: currentMode, planning, boost: boost || boostOnce, pastes: sendingPastes }),
       signal: request.signal,
     })
   } catch {
@@ -2933,10 +3010,15 @@ function itemsFor(text, cursor) {
   // @ opens the file picker wherever the caret is; / only starts a command.
   const mention = findMention(text, cursor)
   if (mention) {
-    return rankFiles(mention.query).map((file) => ({
+    // At the start of a message, an agent's name hands the task to that agent.
+    const before = text.slice(0, cursor).trimStart()
+    const agents = before.startsWith("@") && !before.includes(" ")
+      ? (paletteData.agents || []).filter((agent) => agent.name.toLowerCase().startsWith(mention.query.toLowerCase())).map((agent) => ({ value: "@" + agent.name, hint: "agent - " + agent.description }))
+      : []
+    return [...agents, ...rankFiles(mention.query).map((file) => ({
       value: "@" + file,
       hint: file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "in this folder",
-    }))
+    }))]
   }
 
   if (!text.startsWith("/")) {

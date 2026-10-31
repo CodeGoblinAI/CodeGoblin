@@ -21,7 +21,15 @@ function repo(): string {
 }
 /** Stands in for the Recycle Bin in tests: moves the folder aside rather than deleting it. */
 const trash = fs.mkdtempSync(path.join(os.tmpdir(), "cg-trash-"))
-const recycle = (dir: string) => fs.renameSync(dir, path.join(trash, path.basename(dir) + "-" + Date.now()))
+// Windows can hold a just-made folder for a moment (git, the indexer): retry as the real move does.
+const recycle = (dir: string) => {
+  for (let attempt = 0; ; attempt++) {
+    try { return fs.renameSync(dir, path.join(trash, path.basename(dir) + "-" + Date.now())) } catch (error) {
+      if (attempt >= 20 || (error as NodeJS.ErrnoException).code !== "EBUSY") throw error
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150)
+    }
+  }
+}
 
 describe("recent projects", () => {
   test("newest first, no repeats, and folders that are gone drop out", () => {

@@ -105,7 +105,8 @@ import { McpManager } from "../core/mcp"
 import { SubagentManager, listAgents, selectedAgent, agentSelection, type SubagentEvent } from "../core/subagents"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
-import { setInvocations, setModelLists } from "./palette"
+import { setAgents, setInvocations, setModelLists } from "./palette"
+import { agentMention } from "../core/subagents"
 import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
 import { formatterStatus } from "../core/formatter"
 import { systemPrompt } from "../core/system-prompt"
@@ -260,6 +261,7 @@ const subagents = new SubagentManager(
 // Custom commands and skills join the slash picker. Read once here for the
 // picker; a message reads them fresh, so one written mid-session still runs.
 setInvocations(invocationItems(process.cwd()))
+setAgents(listAgents(process.cwd()))
 
 /**
  * Text that was pasted rather than typed.
@@ -2727,7 +2729,10 @@ async function send() {
   // Mentions are read here rather than in the agent so the stored message
   // carries the files with it: a resumed conversation keeps its context.
   // What was folded away goes back before anything sees it.
-  const whole = invoked ? invoked.content : unfoldPastes(text)
+  // "@explore <task>" hands the task to that agent, with subagents on for this message.
+  const delegated = invoked ? undefined : agentMention(unfoldPastes(text), process.cwd())
+  if (delegated) boostOnce = true
+  const whole = invoked ? invoked.content : delegated ? delegated.content : unfoldPastes(text)
   const mentioned = await expandMentions(whole, process.cwd())
   const seeing = acceptsImages(selection)
   const images = [...mentioned.images, ...pendingImages]

@@ -153,6 +153,25 @@ export function listAgents(cwd: string = process.cwd()): AgentProfile[] {
   return [...found.values()]
 }
 
+/**
+ * "@explore find where the theme is set": a message that starts by naming an
+ * agent hands that task to it, as in the fork. Naming one is the opt-in that
+ * /boost otherwise is, for this message only. A name that is not an agent is
+ * an ordinary @mention of a file.
+ */
+export function agentMention(text: string, cwd: string = process.cwd()): { agent: AgentProfile; task: string; content: string } | undefined {
+  const match = /^@([A-Za-z0-9][A-Za-z0-9._-]*)\s+([\s\S]+)$/.exec(text.trim())
+  if (!match) return undefined
+  const agent = listAgents(cwd).find((each) => each.name === match[1])
+  if (!agent) return undefined
+  const task = match[2]!.trim()
+  return {
+    agent,
+    task,
+    content: `Start the ${agent.name} subagent with the task tool for this, and report what it finds: ${task}`,
+  }
+}
+
 export function selectedAgent(name: string | undefined, root: string): AgentProfile | undefined {
   if (!name) return
   const agent = listAgents(root).find(agent => agent.name === name)

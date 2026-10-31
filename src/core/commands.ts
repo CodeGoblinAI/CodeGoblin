@@ -72,6 +72,7 @@ export const COMMANDS = [
   { name: "/worktree", description: "git worktrees: /worktree lists them, /worktree new <name> makes one on cg/<name>" },
   { name: "/branch", description: "git branches: /branch lists them, /branch <name> switches (nothing uncommitted)" },
   { name: "/terminal", description: "a shell in the project folder, in the browser (ctrl+`)" },
+  { name: "/open", description: "find a project file and read it (web); /open <path> opens one" },
   { name: "/timeline", description: "jump to an earlier message in this conversation - ctrl+x g" },
   { name: "/fold", description: "fold every answer to its first lines, or unfold them" },
   { name: "/timestamps", description: "show or hide when each message was written" },
@@ -245,6 +246,8 @@ export function runCommand(text: string): CommandResult {
       return { kind: "editor" }
     case "/timeline":
       return { kind: "timeline" }
+    case "/open":
+      return { kind: "message", text: "/open is the browser's file viewer; here, @path mentions a file and the model can read_file it" }
     case "/fold":
       return { kind: "fold" }
     case "/timestamps":
