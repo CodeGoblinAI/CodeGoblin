@@ -60,6 +60,8 @@ import { History, describe as describeCheckpoint, nothingToDo } from "../core/un
 import { changesIn, summarise } from "../core/changes"
 import { THEMES, paletteOf } from "../core/theme"
 import * as settingsStore from "../core/settings"
+import { isDirectory, recentProjects, rememberProject, sameFolder } from "../core/projects"
+import { createWorktree, currentBranch, listWorktrees, localBranches, removeWorktree, repoRoot, switchBranch } from "../core/worktrees"
 import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
 import { exportSession, sessionMarkdown } from "../core/export"
 import { runMedia, MEDIA_KINDS, withinMediaOutput } from "../core/media"
@@ -79,7 +81,37 @@ import { resolveInside } from "../core/tools"
 // fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..."
 // with a leading slash, which fails to open.
 const page = fileURLToPath(new URL("./index.html", import.meta.url))
-const root = process.cwd()
+/**
+ * The project this server works in. It starts as the folder it was launched
+ * from and changes with the project switcher; the process's own working
+ * directory follows it, so everything that reads process.cwd() agrees.
+ */
+let root = process.cwd()
+rememberProject(root)
+
+/** Opens another project: only between turns, and only an existing folder. */
+function switchProject(target: string): string | undefined {
+  if (activeTurns.size) return "an answer is still running; switch once it finishes"
+  const resolved = path.resolve(target)
+  if (!isDirectory(resolved)) return "no such folder: " + target
+  process.chdir(resolved)
+  root = resolved
+  // Undo history and the file list belong to the old tree.
+  editsBySession.clear()
+  fileList = { files: [], at: 0 }
+  rememberProject(root)
+  return undefined
+}
+
+function projectInfo() {
+  const repo = repoRoot(root)
+  return {
+    current: { path: root, name: path.basename(root) || root, branch: repo ? currentBranch(root) : undefined, repo: Boolean(repo) },
+    recent: recentProjects().filter((project) => !sameFolder(project.path, root)).slice(0, 12),
+    worktrees: repo ? listWorktrees(root) : [],
+    branches: repo ? localBranches(root) : [],
+  }
+}
 
 /** Consent for every browser conversation; web/consent.ts says why it lives there. */
 const consent = new BrowserConsent()
@@ -340,7 +372,7 @@ async function handle(request: Request): Promise<Response> {
       value: "/model " + s.provider.id + "/" + s.model.id,
       hint: (favourite ? "\u2605 " : "") + section + " \u00b7 " + s.provider.label + " " + s.model.label,
     }))
-    const saved = await sessions.list(20)
+    const saved = await sessions.list(20, root)
     return json({
       project: path.basename(root),
       commands: [
@@ -425,8 +457,50 @@ async function handle(request: Request): Promise<Response> {
     }
   }
 
+  // The project switcher, worktrees and branches. Each change is refused while
+  // a turn is running, so no answer ever finds its folder moved under it.
+  if (url.pathname === "/api/projects" && request.method === "GET") return json(projectInfo())
+  if (url.pathname === "/api/project" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { path?: unknown }
+    // A refusal is an answer, not a failure: ok:false with words, so the page says it in place.
+    if (typeof body.path !== "string" || !body.path.trim()) return json({ ok: false, message: "Choose a folder" })
+    const problem = switchProject(body.path.trim())
+    return problem ? json({ ok: false, message: problem }) : json({ ok: true, ...projectInfo() })
+  }
+  if (url.pathname === "/api/worktree" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { action?: unknown; name?: unknown; path?: unknown }
+    if (activeTurns.size) return json({ ok: false, message: "an answer is still running; try once it finishes" })
+    try {
+      if (body.action === "create" && typeof body.name === "string") {
+        const made = createWorktree(root, body.name.trim())
+        const problem = switchProject(made.path)
+        return problem ? json({ ok: false, message: problem }) : json({ ok: true, message: `made worktree ${body.name.trim()} on ${made.branch} and opened it`, ...projectInfo() })
+      }
+      if (body.action === "remove" && typeof body.path === "string") {
+        if (sameFolder(body.path, root)) return json({ ok: false, message: "open another project before removing this one" })
+        removeWorktree(root, body.path)
+        return json({ ok: true, message: "removed the worktree" + (process.platform === "win32" ? " (its folder is in the Recycle Bin)" : ""), ...projectInfo() })
+      }
+      return json({ ok: false, message: "Unknown worktree action" })
+    } catch (error) {
+      return json({ ok: false, message: error instanceof Error ? error.message : "worktree failed" })
+    }
+  }
+  if (url.pathname === "/api/branch" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { name?: unknown }
+    if (activeTurns.size) return json({ ok: false, message: "an answer is still running; switch once it finishes" })
+    if (typeof body.name !== "string") return json({ ok: false, message: "Choose a branch" })
+    try {
+      switchBranch(root, body.name)
+      fileList = { files: [], at: 0 }
+      return json({ ok: true, message: "switched to " + body.name, ...projectInfo() })
+    } catch (error) {
+      return json({ ok: false, message: error instanceof Error ? error.message : "switch failed" })
+    }
+  }
+
   if (url.pathname === "/api/sessions") {
-    const all = await sessions.list()
+    const all = await sessions.list(30, root)
     return json({ sessions: all.map(({ id, title, updated }) => ({ id, title, updated })) })
   }
 
@@ -785,7 +859,7 @@ async function handle(request: Request): Promise<Response> {
     const selection = (typeof body.provider === "string" ? exactSelection(body.provider) : undefined)
       ?? (loaded ? exactSelection(loaded.provider + "/" + loaded.model) : undefined)
       ?? defaultSelection()
-    const session = loaded ?? sessions.create(selection.provider.id, selection.model.id)
+    const session = loaded ?? sessions.create(selection.provider.id, selection.model.id, root)
     if (session.messages.length === 0) session.messages.push({ role: "system", content: systemPrompt("browser") })
     // Only the deny rules matter here; nothing is asked about a command the person typed.
     const run = await runTypedCommand(command, root, Permissions.withConfig(async () => "reject"), request.signal)
@@ -828,7 +902,7 @@ async function handle(request: Request): Promise<Response> {
     if (key === undefined) return json({ error: `No API key for ${provider.label}.` }, 400)
 
     const session =
-      loaded ?? sessions.create(provider.id, model.id)
+      loaded ?? sessions.create(provider.id, model.id, root)
     session.provider = provider.id
     session.model = model.id
     session.agent = profile?.name

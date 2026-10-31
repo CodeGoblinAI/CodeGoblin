@@ -30,6 +30,8 @@ export type Session = {
   importedFrom?: { provider: string; id: string; importedAt: number }
   /** Set on a copy made with /fork: the conversation it branched from. */
   forkedFrom?: { id: string; at: number }
+  /** The folder it was working in; older conversations do not say. */
+  root?: string
 }
 
 const dir = path.join(Global.Path.state, "sessions")
@@ -181,7 +183,12 @@ export function ago(ms: number, now = Date.now()): string {
   return Math.round(seconds / 86400) + "d"
 }
 
-export async function list(limit = 30): Promise<Session[]> {
+/**
+ * Saved conversations, newest first. Given a folder, only that project's -
+ * and older conversations that never recorded one, so nothing goes missing.
+ */
+export async function list(limit = 30, root?: string): Promise<Session[]> {
+  const same = (a: string, b: string) => (process.platform === "win32" ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase() : path.resolve(a) === path.resolve(b))
   try {
     const names = await fs.readdir(dir)
     const sessions = await Promise.all(
@@ -189,6 +196,7 @@ export async function list(limit = 30): Promise<Session[]> {
     )
     return sessions
       .filter((session): session is Session => Boolean(session))
+      .filter((session) => !root || !session.root || same(session.root, root))
       .sort((a, b) => b.updated - a.updated)
       .slice(0, limit)
   } catch {
@@ -214,7 +222,7 @@ export async function rename(id: string, title: string): Promise<boolean> {
   return true
 }
 
-export function create(provider: string, model?: string): Session {
+export function create(provider: string, model?: string, root: string = process.cwd()): Session {
   return {
     id: newSessionId(),
     title: "New session",
@@ -223,5 +231,6 @@ export function create(provider: string, model?: string): Session {
     provider,
     model,
     messages: [],
+    root,
   }
 }

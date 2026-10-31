@@ -1682,6 +1682,18 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/project" || name === "/worktree" || name === "/branch") {
+    const words = argument.split(/\s+/).filter(Boolean)
+    if (name === "/project" && argument) { await projectAction("/api/project", { path: argument }); return true }
+    if (name === "/branch" && argument) { await projectAction("/api/branch", { name: argument }); return true }
+    if (name === "/worktree" && (words[0] === "new" || words[0] === "add") && words[1]) { await projectAction("/api/worktree", { action: "create", name: words[1] }); return true }
+    if (name === "/worktree" && words.length && words[0] !== "list") { note("Use /worktree to list them, or /worktree new <name> to make one."); return true }
+    // Bare: the panel lists them all, in the sidebar.
+    paintPanel("sessions", false)
+    syncPanelLayout()
+    toggleProjectPanel(true)
+    return true
+  }
   if (name === "/favourite") {
     // Bare, it lists the models to pick one; with a model, it stars or unstars that one.
     if (!argument) { input.value = "/favourite "; refreshPalette(); return true }
@@ -2622,11 +2634,119 @@ async function refreshModelPalette() {
   if (input.value.trim().startsWith("/")) refreshPalette()
 }
 
+/**
+ * The project switcher: the Project row opens a panel with this repository's
+ * branches and worktrees, recent projects, and a folder to open. Switching
+ * reloads the page, because everything on it - sessions, files, commands -
+ * belongs to the project it was loaded for.
+ */
+const projectRow = document.getElementById("project-name")
+const projectPanel = document.getElementById("project-panel")
+let projectData = null
+
+async function refreshProjectName() {
+  projectData = await fetch("/api/projects").then((r) => (r.ok ? r.json() : null)).catch(() => null)
+  if (!projectData) return
+  const current = projectData.current
+  projectRow.textContent = current.name
+  projectRow.title = current.path + " - switch project, branch or worktree"
+  if (current.branch) {
+    const tag = document.createElement("span")
+    tag.className = "branch"
+    tag.textContent = current.branch
+    projectRow.appendChild(tag)
+  }
+  if (!projectPanel.hidden) renderProjectPanel()
+}
+
+async function projectAction(url, body) {
+  if (busy) { projectMessage("An answer is still running; switch once it finishes."); return }
+  const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null)
+  const data = response ? await response.json().catch(() => ({})) : {}
+  if (!response || !response.ok || !data.ok) { projectMessage(data.message || "That did not work."); return }
+  // A different folder or branch: start over on it.
+  location.reload()
+}
+
+function projectMessage(text) {
+  if (projectPanel.hidden) { note(text); return }
+  let line = projectPanel.querySelector(".pp-message")
+  if (!line) { line = document.createElement("div"); line.className = "pp-message"; projectPanel.appendChild(line) }
+  line.textContent = text
+}
+
+function renderProjectPanel() {
+  projectPanel.innerHTML = ""
+  if (!projectData) { projectPanel.textContent = "Loading…"; return }
+  const head = (text) => { const el = document.createElement("div"); el.className = "pp-head"; el.textContent = text; projectPanel.appendChild(el) }
+  const item = (label, note, onClick, current = false) => {
+    const button = document.createElement("button")
+    button.type = "button"
+    button.className = "pp-item" + (current ? " current" : "")
+    const name = document.createElement("span"); name.className = "pp-label"; name.textContent = label
+    button.appendChild(name)
+    if (note) { const extra = document.createElement("span"); extra.className = "pp-note"; extra.textContent = note; button.appendChild(extra) }
+    if (current) button.setAttribute("aria-current", "true")
+    else button.onclick = onClick
+    projectPanel.appendChild(button)
+    return button
+  }
+  const { current, recent, worktrees, branches } = projectData
+  if (current.repo && branches.length) {
+    head("Branch")
+    for (const branch of branches.slice(0, 8)) item(branch, branch === current.branch ? "current" : "", () => projectAction("/api/branch", { name: branch }), branch === current.branch)
+  }
+  if (current.repo) {
+    head("Worktrees")
+    for (const tree of worktrees) {
+      const here = tree.path.toLowerCase() === current.path.toLowerCase()
+      const row = item(tree.main ? "main checkout" : tree.path.split(/[\\/]/).pop(), tree.branch || tree.head || "", () => projectAction("/api/project", { path: tree.path }), here)
+      row.title = tree.path
+      if (tree.ours && !here) {
+        const remove = document.createElement("button")
+        remove.type = "button"
+        remove.className = "pp-remove"
+        remove.textContent = "×"
+        remove.title = "Remove this worktree (only with no uncommitted changes; the folder goes to the Recycle Bin)"
+        remove.setAttribute("aria-label", "Remove worktree " + tree.path)
+        remove.onclick = async (event) => {
+          event.stopPropagation()
+          const response = await fetch("/api/worktree", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "remove", path: tree.path }) }).catch(() => null)
+          const data = response ? await response.json().catch(() => ({})) : {}
+          if (response?.ok && data.ok) { projectData = data; renderProjectPanel(); projectMessage(data.message) }
+          else projectMessage(data.message || "Could not remove it.")
+        }
+        row.appendChild(remove)
+      }
+    }
+    const form = document.createElement("form")
+    form.innerHTML = '<input placeholder="new worktree name" aria-label="New worktree name" maxlength="40"><button type="submit">New</button>'
+    form.onsubmit = (event) => { event.preventDefault(); const name = form.querySelector("input").value.trim(); if (name) void projectAction("/api/worktree", { action: "create", name }) }
+    projectPanel.appendChild(form)
+  }
+  if (recent.length) {
+    head("Recent projects")
+    for (const project of recent) item(project.name, "", () => projectAction("/api/project", { path: project.path })).title = project.path
+  }
+  head("Open a folder")
+  const open = document.createElement("form")
+  open.innerHTML = '<input placeholder="C:\\path\\to\\project" aria-label="Folder to open"><button type="submit">Open</button>'
+  open.onsubmit = (event) => { event.preventDefault(); const folder = open.querySelector("input").value.trim(); if (folder) void projectAction("/api/project", { path: folder }) }
+  projectPanel.appendChild(open)
+}
+
+function toggleProjectPanel(show = projectPanel.hidden) {
+  projectPanel.hidden = !show
+  projectRow.setAttribute("aria-expanded", String(show))
+  if (show) { renderProjectPanel(); void refreshProjectName() }
+}
+projectRow.onclick = () => toggleProjectPanel()
+
 async function loadCommands() {
   paletteData = await fetch("/api/commands").then((r) => r.json()).catch(() => paletteData)
   // Someone quick types "/connect " before this arrives; show what it completes to now.
   if (input.value.trim().startsWith("/")) refreshPalette()
-  if (paletteData.project) document.getElementById("project-name").textContent = paletteData.project
+  if (paletteData.project) void refreshProjectName()
   if (paletteData.settings) {
     webSettings = paletteData.settings
     const chosen = (paletteData.themes || []).find((t) => t.value === "/theme " + webSettings.theme)

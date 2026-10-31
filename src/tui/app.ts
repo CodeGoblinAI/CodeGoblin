@@ -2402,6 +2402,41 @@ async function send() {
     if (result.kind === "mcp") {
       openMcp()
     }
+    // The terminal works in the folder it was started in, so worktrees and
+    // branches are listed and made here, and opened by starting cgn there.
+    if (result.kind === "project") {
+      status = "the terminal works in the folder it started in - run cgn in another folder, or use /project in the web app"
+      render(); return
+    }
+    if (result.kind === "worktree") {
+      const { createWorktree, listWorktrees, repoRoot } = await import("../core/worktrees")
+      if (!repoRoot(process.cwd())) { status = "this folder is not in a git repository"; render(); return }
+      if (result.action === "new") {
+        if (streaming) { status = "wait for the answer to finish first"; render(); return }
+        try {
+          const made = createWorktree(process.cwd(), result.name!)
+          transcript.push({ kind: "tool", text: `made worktree ${result.name} on ${made.branch}: ${made.path}  - open it with: cgn "${made.path}"` })
+          status = "worktree ready"
+        } catch (error) { status = "worktree failed: " + (error instanceof Error ? error.message : "unknown") }
+        render(); return
+      }
+      const trees = listWorktrees(process.cwd())
+      overlay = { title: "Worktrees  (/worktree new <name> makes one)", rows: trees.map((tree) => [tree.main ? "main" : tree.ours ? "cg" : "other", (tree.branch ?? tree.head ?? "") + "  " + tree.path] as [string, string]) }
+      render(); return
+    }
+    if (result.kind === "branch") {
+      const { currentBranch, localBranches, repoRoot, switchBranch } = await import("../core/worktrees")
+      if (!repoRoot(process.cwd())) { status = "this folder is not in a git repository"; render(); return }
+      if (result.name) {
+        if (streaming) { status = "wait for the answer to finish first"; render(); return }
+        try { switchBranch(process.cwd(), result.name); status = "switched to " + result.name; void refreshFileCache(true) }
+        catch (error) { status = "could not switch: " + (error instanceof Error ? error.message : "unknown") }
+        render(); return
+      }
+      const here = currentBranch(process.cwd())
+      overlay = { title: "Branches  (/branch <name> switches)", rows: localBranches(process.cwd()).map((branch) => [branch === here ? "current" : "", branch] as [string, string]) }
+      render(); return
+    }
     if (result.kind === "status") {
       const cli = selection.provider.cli ? await cliAuthStatus(selection.provider.id) : undefined
       const context = contextUsage()

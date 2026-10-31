@@ -150,6 +150,22 @@
   .media-caption:hover { color: var(--goblin); text-decoration: underline; }
 
   /* sidebar rows */
+  button.row { display: block; width: 100%; text-align: left; background: none; border: 0; border-left: 2px solid transparent; font: inherit; }
+  #project-name .branch { color: var(--goblin); margin-left: 6px; font-size: 12px; }
+  #project-panel { margin: 2px 10px 8px; padding: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); font-size: 12.5px; max-height: 55vh; overflow-y: auto; }
+  #project-panel .pp-head { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); opacity: .7; margin: 8px 2px 4px; }
+  #project-panel .pp-head:first-child { margin-top: 0; }
+  #project-panel .pp-item { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 6px; border-radius: 5px; background: none; border: 0; color: var(--muted); font: inherit; text-align: left; cursor: pointer; }
+  #project-panel .pp-item:hover { background: var(--panel2); color: var(--text); }
+  #project-panel .pp-item.current { color: var(--goblin); cursor: default; }
+  #project-panel .pp-item .pp-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #project-panel .pp-item .pp-note { font-size: 11px; opacity: .7; }
+  #project-panel .pp-remove { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 13px; }
+  #project-panel .pp-remove:hover { color: var(--red, #e06c75); }
+  #project-panel form { display: flex; gap: 6px; margin-top: 4px; }
+  #project-panel input { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 4px 7px; font: inherit; }
+  #project-panel form button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; font: inherit; cursor: pointer; }
+  #project-panel .pp-message { margin-top: 6px; color: var(--gold); }
   .row.session { display: flex; align-items: center; gap: 8px; }
   .row.session .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   button.row, .row.session .label { background: none; border: 0; font: inherit; text-align: left; color: inherit; cursor: pointer; }
@@ -224,7 +240,8 @@
   <button class="row" id="new-session" type="button">+ New session</button>
   <div id="session-list"></div>
   <div class="group">Project</div>
-  <div class="row muted" id="project-name">Local workspace</div>
+  <button class="row muted" id="project-name" type="button" aria-expanded="false" aria-controls="project-panel" title="Switch project, branch or worktree">Local workspace</button>
+  <div id="project-panel" hidden></div>
   <footer><button id="settings-open" class="icon">Settings</button> · <button id="help-open" class="icon">Help</button></footer>
 </aside>
 

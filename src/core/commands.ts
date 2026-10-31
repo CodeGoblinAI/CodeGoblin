@@ -47,6 +47,9 @@ export type CommandResult =
   | { kind: "fork" }
   | { kind: "copy"; what: "all" | "last" }
   | { kind: "favourite"; id?: string }
+  | { kind: "project"; path?: string }
+  | { kind: "worktree"; action: "list" | "new"; name?: string }
+  | { kind: "branch"; name?: string }
   | { kind: "connect"; provider?: string }
   | { kind: "disconnect"; provider?: string }
   | { kind: "none" }
@@ -61,6 +64,9 @@ export const COMMANDS = [
   { name: "/clear", description: "start a fresh conversation" },
   { name: "/model", description: "switch provider: /model zai" },
   { name: "/favourite", description: "star a model so it sits at the top of the picker: /favourite, or pick one" },
+  { name: "/project", description: "switch project (web): recent projects, or /project <folder>" },
+  { name: "/worktree", description: "git worktrees: /worktree lists them, /worktree new <name> makes one on cg/<name>" },
+  { name: "/branch", description: "git branches: /branch lists them, /branch <name> switches (nothing uncommitted)" },
   { name: "/resume", description: "reopen a saved conversation" },
   { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/undo", description: "put back the files the last turn changed" },
@@ -100,6 +106,7 @@ export const COMMAND_ALIASES: Record<string, string> = {
   "/mcps": "/mcp", "/reasoning": "/effort", "/set": "/settings", "/changes": "/diff",
   "/exit": "/quit", "/q": "/quit",
   "/favorite": "/favourite", "/fav": "/favourite", "/star": "/favourite",
+  "/projects": "/project", "/worktrees": "/worktree", "/branches": "/branch",
   "/credits": "/balance",
   "/market": "/plugins", "/mcp-market": "/plugins", "/skills-market": "/plugins",
   "/upgrade": "/update", "/version": "/update", "/orgs": "/org", "/switch-org": "/org",
@@ -215,6 +222,16 @@ export function runCommand(text: string): CommandResult {
       return { kind: "copy", what: argument === "last" ? "last" : "all" }
     case "/favourite":
       return argument ? { kind: "favourite", id: argument } : { kind: "favourite" }
+    case "/project":
+      return argument ? { kind: "project", path: argument } : { kind: "project" }
+    case "/worktree": {
+      const [verb, ...rest] = argument.split(/\s+/).filter(Boolean)
+      if (!verb || verb === "list") return { kind: "worktree", action: "list" }
+      if ((verb === "new" || verb === "add") && rest[0]) return { kind: "worktree", action: "new", name: rest[0] }
+      return { kind: "message", text: "usage: /worktree (list them), or /worktree new <name>" }
+    }
+    case "/branch":
+      return argument ? { kind: "branch", name: argument } : { kind: "branch" }
     case "/status":
       return { kind: "status" }
     case "/usage":
