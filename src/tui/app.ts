@@ -99,7 +99,7 @@ import {
   type Spend,
 } from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
-import { Permissions, DECISIONS, MODES, nextMode, askedFor, refusalLabel, decisionHints, type Decision, type PermissionMode } from "../core/permission"
+import { Permissions, decisionsFor, MODES, nextMode, askedFor, refusalLabel, decisionHints, type Decision, type PermissionMode } from "../core/permission"
 import { McpManager } from "../core/mcp"
 import { SubagentManager, listAgents, selectedAgent, agentSelection, type SubagentEvent } from "../core/subagents"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
@@ -715,7 +715,7 @@ function render() {
    */
   const footer = {
     prompt: promptHeight,
-    pending: pending && !input ? DECISIONS.length + 3 : 0,
+    pending: pending && !input ? decisionsFor(pending.tool).length + 3 : 0,
     queued: Boolean(queued && !secret),
     images: Boolean(pendingImages.length && !secret),
     scrolled: scroll > 3,
@@ -795,11 +795,12 @@ function render() {
     const asked = askedFor(pending.tool, pending.detail).replace(/\s+/g, " ")
     const title = " " + (pending.from ? pending.from + " subagent: " : "") + "allow " + pending.tool + ": " + asked + "?"
     const worded = decisionHints(pending.tool, pending.cover)
-    const hints = DECISIONS.map((d) => worded[d.id])
+    const choices = decisionsFor(pending.tool)
+    const hints = choices.map((d) => worded[d.id])
     // One width for every row, padded after colouring - displayWidth skips
     // escape sequences, so the box lines up whatever colour the text is. As
     // wide as the words need, but never wider than the terminal.
-    const labelWidth = Math.max(...DECISIONS.map((d) => displayWidth(d.label))) + 2
+    const labelWidth = Math.max(...choices.map((d) => displayWidth(d.label))) + 2
     const wanted = Math.max(3 + labelWidth + Math.max(...hints.map((hint) => displayWidth(hint))), displayWidth(title)) + 1
     const inner = Math.max(24, Math.min(wanted, cols - 6))
 
@@ -809,7 +810,7 @@ function render() {
         theme.gold + padToWidth(truncateToWidth(title, inner), inner) + ansi.reset +
         theme.border + "│" + ansi.reset,
     )
-    for (const [index, choice] of DECISIONS.entries()) {
+    for (const [index, choice] of choices.entries()) {
       const active = index === pendingChoice
       const marker = active ? theme.goblin + " ❯ " + ansi.reset : "   "
       const label = (active ? theme.text : theme.muted) + padToWidth(choice.label, labelWidth) + ansi.reset
@@ -2300,6 +2301,7 @@ async function send() {
             : currentEffort() + (effortFor(selection.model, currentEffort()) ? "" : "  (not sent - not one of this model's levels)"),
         ],
         ["approved", approved.length ? approved.join(", ") : "nothing yet"],
+        ...(permissions.refusedSummary().length ? [["never", permissions.refusedSummary().join(", ")] as [string, string]] : []),
         ["checkpoints", checkpointStatus()],
         ["undo", edits.canUndo() ? "available" : "nothing to take back"],
         ["working in", process.cwd()],
@@ -3002,8 +3004,9 @@ process.stdin.on("data", (chunk) => {
         render()
       }
       if (pressed.type === "up") { pendingChoice = Math.max(0, pendingChoice - 1); render(); continue }
-      if (pressed.type === "down") { pendingChoice = Math.min(DECISIONS.length - 1, pendingChoice + 1); render(); continue }
-      if (pressed.type === "enter") { answer(DECISIONS[pendingChoice]!.id); continue }
+      const choices = decisionsFor(pending.tool)
+      if (pressed.type === "down") { pendingChoice = Math.min(choices.length - 1, pendingChoice + 1); render(); continue }
+      if (pressed.type === "enter") { answer(choices[pendingChoice]!.id); continue }
       if (pressed.type === "escape") { answer("reject"); continue }
       // Anything else is ignored: a stray key must not answer for the user.
       continue

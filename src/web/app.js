@@ -698,11 +698,13 @@ function permissionPrompt(event) {
   box.dataset.permissionState = "pending"
   // Three answers, the same three the TUI offers. "Allow once" first,
   // because the least committal choice should be the easiest to reach.
-  const choices = paletteData.decisions || [
+  // Mirrors decisionsFor(): a checkpoint has no "never", since rejecting it already stops the turn.
+  const choices = (paletteData.decisions || [
     { id: "once", label: "Allow once", hint: "just this one call" },
     { id: "always", label: "Allow for this session", hint: "stop asking about calls like this" },
     { id: "reject", label: "Reject", hint: "refuse, and tell the model so" },
-  ]
+    { id: "never", label: "Never for this session", hint: "refuse calls like this without asking" },
+  ]).filter((choice) => event.tool !== "autonomous run" || choice.id !== "never")
   box.innerHTML =
     '<div class="ptext">Allow <strong></strong>?<span class="pdetail"></span><span class="pcover"></span></div><div class="pactions"></div>'
   box.querySelector("strong").textContent = event.tool
@@ -756,11 +758,11 @@ function permissionPrompt(event) {
 
   for (const choice of choices) {
     const button = document.createElement("button")
-    button.className = choice.id === "reject" ? "pdeny" : "pallow"
+    button.className = choice.id === "reject" || choice.id === "never" ? "pdeny" : "pallow"
     button.textContent = choice.label
     button.title = event.tool === "autonomous run"
       ? CHECKPOINT_HINTS[choice.id]
-      : choice.id === "always" && cover ? cover : choice.hint
+      : choice.id === "always" && cover ? cover : choice.id === "never" && event.cover ? "refuse " + event.cover + " without asking" : choice.hint
     button.onclick = () => answer(choice.id)
     actions.appendChild(button)
   }

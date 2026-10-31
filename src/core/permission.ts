@@ -21,17 +21,29 @@ import { isSecretPath, pathArgument, secretPathsIn } from "./secret-files"
  * Above all of that sit the rules in codegoblin.jsonc. A deny rule is never
  * asked about and no mode or earlier approval gets past it.
  */
-export type Decision = "once" | "always" | "reject"
+export type Decision = "once" | "always" | "reject" | "never"
 
-/** What each answer is called where a person has to read it. */
+/**
+ * What each answer is called where a person has to read it.
+ *
+ * "Never" is the mirror of "for this session", as in the fork: without it the
+ * only answer that sticks is the permissive one, so a model that keeps asking
+ * for the same thing wears people down into allowing it.
+ */
 export const DECISIONS: { id: Decision; label: string; hint: string }[] = [
   { id: "once", label: "Allow once", hint: "just this one call" },
   { id: "always", label: "Allow for this session", hint: "stop asking about calls like this" },
   { id: "reject", label: "Reject", hint: "refuse, and tell the model so" },
+  { id: "never", label: "Never for this session", hint: "refuse calls like this without asking" },
 ]
 
 /** What an autonomy checkpoint asks under, in place of a tool name. */
 export const CHECKPOINT_TOOL = "autonomous run"
+
+/** The answers offered for this question. A checkpoint has no "never": rejecting it already stops the turn. */
+export function decisionsFor(tool: string): typeof DECISIONS {
+  return tool === CHECKPOINT_TOOL ? DECISIONS.filter((choice) => choice.id !== "never") : DECISIONS
+}
 
 /**
  * The hint beside each answer, worded for what is being asked.
@@ -42,9 +54,14 @@ export const CHECKPOINT_TOOL = "autonomous run"
  */
 export function decisionHints(tool: string, cover?: string): Record<Decision, string> {
   if (tool === CHECKPOINT_TOOL) {
-    return { once: "keep going until the next checkpoint", always: "stop asking about checkpoints this session", reject: "stop the turn here" }
+    return { once: "keep going until the next checkpoint", always: "stop asking about checkpoints this session", reject: "stop the turn here", never: "stop the turn here" }
   }
-  return { once: "just this one call", always: "stop asking about " + (cover || "calls like this"), reject: "refuse, and tell the model so" }
+  return {
+    once: "just this one call",
+    always: "stop asking about " + (cover || "calls like this"),
+    reject: "refuse, and tell the model so",
+    never: "refuse " + (cover || "calls like this") + " without asking",
+  }
 }
 
 /** Patterns and what to do when a shell command matches one. */
@@ -528,6 +545,8 @@ export function nextMode(mode: PermissionMode): PermissionMode {
 
 export class Permissions {
   private granted = new Set<string>()
+  /** Scopes answered "never", with their words: refused without asking until the session is reset. */
+  private refused = new Map<string, string>()
   mode: PermissionMode = "ask"
   /** Set by /plan: nothing that changes anything runs until the plan is agreed. */
   planning = false
@@ -568,6 +587,7 @@ export class Permissions {
     const parent = this
     const child = new Permissions((tool, detail, cover) => parent.ask(tool, detail, cover, name), this.rules)
     child.granted = this.granted
+    child.refused = this.refused
     Object.defineProperty(child, "mode", { get: () => parent.mode, set: (value: PermissionMode) => (parent.mode = value) })
     Object.defineProperty(child, "planning", { get: () => parent.planning, set: (value: boolean) => (parent.planning = value) })
     Object.defineProperty(child, "checkpointsOff", { get: () => parent.checkpointsOff, set: (value: boolean) => (parent.checkpointsOff = value) })
@@ -607,6 +627,12 @@ export class Permissions {
       }
     }
 
+    // "Never" holds in every mode, like a rule, but only for this session.
+    const never = scopesFor(tool, detail).find((scope) => this.refused.has(scope.key))
+    if (never) {
+      return { allowed: false, by: "user", reason: `refused: the user said never to ${never.words} for this session - do not ask for it again` }
+    }
+
     // Planning refuses before anything is asked: the point is that nothing
     // changes until the plan is agreed. Looking still works - a read-only
     // command, or a page - so the plan can rest on what is actually there.
@@ -641,6 +667,10 @@ export class Permissions {
     const scopes = scopesFor(tool, detail)
     const decision = await this.ask(tool, detail, inWords(scopes))
     if (decision === "reject") return { allowed: false, by: "user", reason: "refused by the user" }
+    if (decision === "never") {
+      for (const scope of scopes) this.refused.set(scope.key, scope.words)
+      return { allowed: false, by: "user", reason: `refused by the user, who said never to ${inWords(scopes)} for this session - do not ask for it again` }
+    }
     if (decision === "always") for (const scope of scopes) this.granted.add(scope.key)
     return { allowed: true }
   }
@@ -653,6 +683,7 @@ export class Permissions {
   /** A new conversation starts with no standing approvals. */
   reset() {
     this.granted.clear()
+    this.refused.clear()
     this.checkpointsOff = false
   }
 
@@ -671,7 +702,7 @@ export class Permissions {
       "future checkpoints",
     )
     if (decision === "always") this.checkpointsOff = true
-    return decision === "reject" ? "stop" : "continue"
+    return decision === "reject" || decision === "never" ? "stop" : "continue"
   }
 
   /** The same question when one prompt has spent `spent` (already formatted, "$0.25"). */
@@ -679,11 +710,16 @@ export class Permissions {
     if (this.checkpointsOff) return "continue"
     const decision = await this.ask(CHECKPOINT_TOOL, `${spent} spent on this prompt - keep going`, "future checkpoints")
     if (decision === "always") this.checkpointsOff = true
-    return decision === "reject" ? "stop" : "continue"
+    return decision === "reject" || decision === "never" ? "stop" : "continue"
   }
 
   summary(): string[] {
     return [...this.granted].sort()
+  }
+
+  /** What was answered "never", in the words the prompt used. */
+  refusedSummary(): string[] {
+    return [...this.refused.values()].sort()
   }
 }
 
