@@ -107,6 +107,7 @@ import { customCommands, invocationItems, resolveInvocation } from "../core/invo
 import { listSkills, skillIndex } from "../core/skills"
 import { setInvocations, setModelLists } from "./palette"
 import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
+import { formatterStatus } from "../core/formatter"
 import { systemPrompt } from "../core/system-prompt"
 import { configPath, checkpointEvery, spendLimitPerPrompt } from "../core/config"
 
@@ -2426,6 +2427,7 @@ async function send() {
         ],
         ["approved", approved.length ? approved.join(", ") : "nothing yet"],
         ...(permissions.refusedSummary().length ? [["never", permissions.refusedSummary().join(", ")] as [string, string]] : []),
+        ["formatter", formatterStatus(process.cwd())],
         ["checkpoints", checkpointStatus()],
         ["undo", edits.canUndo() ? "available" : "nothing to take back"],
         ["working in", process.cwd()],

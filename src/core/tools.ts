@@ -481,11 +481,16 @@ export async function runTool(
   const tool = ALL_TOOLS.find((candidate) => candidate.name === name)
   if (!tool) return `unknown tool: ${name}`
   try {
-    if (tool.writes && onWrite) {
-      const target = (args as { path?: unknown }).path
-      if (typeof target === "string") await onWrite(target)
+    const target = tool.writes ? (args as { path?: unknown }).path : undefined
+    if (tool.writes && onWrite && typeof target === "string") await onWrite(target)
+    const result = await tool.run(args, root, signal)
+    // A write that landed is formatted in the project's style, when the config says to.
+    if (tool.writes && typeof target === "string" && !result.startsWith("error")) {
+      const { formatAfterWrite } = await import("./formatter")
+      const note = await formatAfterWrite(root, resolveInside(root, target), { signal }).catch(() => "")
+      if (note) return result + NEWLINE + note
     }
-    return await tool.run(args, root, signal)
+    return result
   } catch (error) {
     return `error: ${error instanceof Error ? error.message : String(error)}`
   }

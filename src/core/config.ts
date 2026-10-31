@@ -37,8 +37,17 @@ export type McpServer =
       timeout?: number
     }
 
+/**
+ * `"formatter"` in the fork's shape: true turns the built-ins on, an object
+ * turns them on with overrides by name (`disabled`, `command`, `extensions`),
+ * and false or nothing leaves them off.
+ */
+export type FormatterEntry = { disabled?: boolean; command?: string[]; extensions?: string[] }
+export type FormatterConfig = { enabled: boolean; entries: Record<string, FormatterEntry> }
+
 export type Config = {
   permission: { bash: Record<string, RuleAction> }
+  formatter: FormatterConfig
   mcp: Record<string, McpServer>
   instructions: string[]
   /**
@@ -147,8 +156,27 @@ export function parseConfig(text: string): Config {
       ? root.instructions.filter((entry): entry is string => typeof entry === "string")
       : [],
     autonomy: { checkpoint: checkpoint(root.autonomy), spend: spendLimit(root.autonomy) },
+    formatter: formatter(root.formatter),
     problems: errors.map((error) => printParseErrorCode(error.error) + " at offset " + error.offset),
   }
+}
+
+function formatter(value: unknown): FormatterConfig {
+  if (value === true) return { enabled: true, entries: {} }
+  if (!isRecord(value)) return { enabled: false, entries: {} }
+  const entries: Record<string, FormatterEntry> = {}
+  const strings = (list: unknown) => (Array.isArray(list) && list.length && list.every((each) => typeof each === "string" && each) ? (list as string[]) : undefined)
+  for (const [name, raw] of Object.entries(value)) {
+    if (!isRecord(raw) || !/^[A-Za-z0-9_.-]{1,40}$/.test(name)) continue
+    const entry: FormatterEntry = {}
+    if (raw.disabled === true) entry.disabled = true
+    const command = strings(raw.command)
+    if (command) entry.command = command
+    const extensions = strings(raw.extensions)?.map((each) => (each.startsWith(".") ? each : "." + each).toLowerCase())
+    if (extensions) entry.extensions = extensions
+    entries[name] = entry
+  }
+  return { enabled: true, entries }
 }
 
 /** Where it lives. Moves with CODEGOBLIN_DIR, like everything else under the config directory. */
