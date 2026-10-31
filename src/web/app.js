@@ -1167,6 +1167,7 @@ function applyLook() {
   const chosen = (paletteData.themes || []).find((t) => t.value === "/theme " + name)
   if (chosen) applyPalette(chosen.palette, true)
   document.body.classList.toggle("no-animations", webSettings.animations === false)
+  document.body.classList.toggle("diff-wrap", webSettings.diffWrap === true)
 }
 prefersLight.addEventListener("change", () => { if (webSettings.appearance === "system") applyLook() })
 
@@ -1222,6 +1223,7 @@ function openSettingsDialog() {
   select("Appearance", [["dark", "Dark"], ["light", "Light"], ["system", "Follow the system"]], webSettings.appearance || "dark", (appearance) => saveSettings({ appearance }))
   select("Paste summary", [["on", "Fold long pastes to [Pasted ~N lines]"], ["off", "Paste in whole"]], webSettings.pasteSummary === false ? "off" : "on", (value) => saveSettings({ pasteSummary: value === "on" }))
   select("Animations", [["on", "On"], ["off", "Off"]], webSettings.animations === false ? "off" : "on", (value) => saveSettings({ animations: value === "on" }))
+  select("Diff wrapping", [["off", "Long lines scroll"], ["on", "Long lines wrap"]], webSettings.diffWrap ? "on" : "off", (value) => saveSettings({ diffWrap: value === "on" }))
   select("Reasoning effort (this model)", effortChoices().choices, currentEffort(), (effort) => saveSettings({ effort }))
   for (const option of modelSettings()) {
     if (!option.choices?.length) continue

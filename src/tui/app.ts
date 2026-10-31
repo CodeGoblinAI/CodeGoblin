@@ -1217,11 +1217,13 @@ function diffRows(changes: Changes): Dialogs.DialogRow[] {
       for (const line of hunk.lines) {
         const sign = line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " "
         const number = String(line.after ?? line.before ?? "").padStart(5)
-        rows.push({
-          label: "  " + number + " " + sign + line.text,
-          tone: line.kind === "add" ? "added" : line.kind === "remove" ? "removed" : "muted",
-          inert: true,
-        })
+        const tone = line.kind === "add" ? "added" as const : line.kind === "remove" ? "removed" as const : "muted" as const
+        // Diff wrapping on: a long line continues under itself instead of being cut at the box's edge.
+        const room = Math.max(20, Math.min(size().cols - 6, 88) - 14)
+        const pieces = settings.diffWrap && displayWidth(line.text) > room ? wrapWords(line.text, room) : [line.text]
+        for (const [index, piece] of pieces.entries()) {
+          rows.push({ label: (index ? "        " : "  " + number + " " + sign) + piece, tone, inert: true })
+        }
       }
     }
     if (!file.hunks.length) {
@@ -1699,6 +1701,7 @@ function settingsRows(): Dialogs.DialogRow[] {
     { label: "Appearance", hint: settings.appearance + (settings.appearance === "system" ? " (" + (terminalLooksLight() ? "light" : "dark") + " here)" : ""), value: "ui:appearance" },
     { label: "Paste summary", hint: settings.pasteSummary ? "on - long pastes fold to [Pasted ~N lines]" : "off - pastes go in whole", value: "ui:pasteSummary" },
     { label: "Animations", hint: settings.animations ? "on" : "off - a still marker while working", value: "ui:animations" },
+    { label: "Diff wrapping", hint: settings.diffWrap ? "on - long lines wrap" : "off - long lines are cut at the edge", value: "ui:diffWrap" },
     { label: "Reasoning effort", hint: currentEffort() + (currentEffort() === "auto" && selection.model.defaultEffort ? " (" + selection.model.defaultEffort + ")" : ""), value: "ui:effort" },
     { label: "Approvals", hint: permissions.mode, value: "ui:approvals" },
     { label: "Agent profile", hint: agentName || "default", value: "ui:agents" },
@@ -2101,7 +2104,7 @@ async function chooseInDialog() {
       if (action === "effort") openEffortPicker()
       if (action === "approvals") openApprovalsPicker()
       if (action === "agents") openAgents()
-      if (action === "thinking" || action === "mouse" || action === "pasteSummary" || action === "animations") {
+      if (action === "thinking" || action === "mouse" || action === "pasteSummary" || action === "animations" || action === "diffWrap") {
         settings = { ...settings, [action]: !settings[action] }
         void settingsStore.save(settings)
         if (action === "mouse") applyMouse()

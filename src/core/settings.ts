@@ -43,6 +43,8 @@ export type Settings = {
   pasteSummary: boolean
   /** The working spinner and other motion; off draws a still marker. */
   animations: boolean
+  /** Long lines in the diff viewer wrap rather than being cut at the edge. */
+  diffWrap: boolean
   /** Models pinned to the top of the picker, "provider/model", in the order they were added. */
   favourites: string[]
   /** Models most recently switched to, newest first. */
@@ -76,6 +78,7 @@ export const defaults = (): Settings => ({
   appearance: "dark",
   pasteSummary: true,
   animations: true,
+  diffWrap: false,
   favourites: [],
   recents: [],
 })
@@ -95,6 +98,7 @@ export function normalise(raw: unknown): Settings {
     appearance: APPEARANCES.includes(value.appearance as Appearance) ? (value.appearance as Appearance) : base.appearance,
     pasteSummary: typeof value.pasteSummary === "boolean" ? value.pasteSummary : base.pasteSummary,
     animations: typeof value.animations === "boolean" ? value.animations : base.animations,
+    diffWrap: typeof value.diffWrap === "boolean" ? value.diffWrap : base.diffWrap,
     favourites: modelList(value.favourites),
     recents: modelList(value.recents),
   }

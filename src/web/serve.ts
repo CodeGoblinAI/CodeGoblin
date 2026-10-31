@@ -582,7 +582,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
   // Preferences live on the server so the TUI and the browser agree about
   // which theme is current rather than each remembering its own.
   if (url.pathname === "/api/settings" && request.method === "POST") {
-    const body = (await request.json()) as { theme?: unknown; thinking?: unknown; effort?: unknown; model?: string; appearance?: unknown; pasteSummary?: unknown; animations?: unknown }
+    const body = (await request.json()) as { theme?: unknown; thinking?: unknown; effort?: unknown; model?: string; appearance?: unknown; pasteSummary?: unknown; animations?: unknown; diffWrap?: unknown }
     const current = await settingsStore.load()
     if (body.effort !== undefined && (!settingsStore.isEffort(body.effort) || !exactSelection(body.model || ""))) return json({ message: "Select a valid model and effort level" }, 400)
     if (body.effort !== undefined) {
@@ -598,6 +598,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
       appearance: body.appearance ?? current.appearance,
       pasteSummary: body.pasteSummary ?? current.pasteSummary,
       animations: body.animations ?? current.animations,
+      diffWrap: body.diffWrap ?? current.diffWrap,
     }
     const next = body.effort !== undefined
       ? settingsStore.withModelEffort(settingsStore.normalise(changed), body.model!, body.effort)

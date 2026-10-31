@@ -92,6 +92,7 @@ describe("settings", () => {
       appearance: "dark",
       pasteSummary: true,
       animations: true,
+      diffWrap: false,
       favourites: [],
       recents: [],
     })
