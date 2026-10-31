@@ -168,7 +168,7 @@ const contextUsage = () => usage(
  * being true once reads in a turn started overlapping.
  */
 type Entry = {
-  kind: "user" | "agent" | "tool" | "thinking"
+  kind: "user" | "agent" | "tool" | "thinking" | "worked"
   text: string
   call?: string
   state?: "running" | "done" | "failed"
@@ -265,22 +265,17 @@ let pastes: Pasted[] = []
 /** Clipboard pictures waiting to ride with the next message. Shown, so they never sneak in unseen. */
 let pendingImages: Attachment[] = []
 
-/** Long enough to be worth folding away; below this it just reads as typing. */
-const PASTE_FOLD_LINES = 4
-
+/** A paste of four lines or more folds to a token (sessions.pasteToken); below that it just reads as typing. */
 function foldPaste(text: string): string {
-  const lines = text.split(String.fromCharCode(10)).length
-  if (lines < PASTE_FOLD_LINES) return text
-  const token = `[Pasted ~${lines} lines]`
-  pastes.push({ token, text, lines })
+  const token = sessions.pasteToken(text, pastes)
+  if (!token) return text
+  pastes.push({ token, text, lines: text.split(String.fromCharCode(10)).length })
   return token
 }
 
 /** Put the real text back, for the model rather than the screen. */
 function unfoldPastes(text: string): string {
-  let out = text
-  for (const paste of pastes) out = out.split(paste.token).join(paste.text)
-  return out
+  return sessions.unfoldPastes(text, pastes)
 }
 let settings = settingsStore.defaults()
 const currentEffort = () => settingsStore.effortForModel(settings, selection.provider.id + "/" + selection.model.id)
@@ -643,6 +638,12 @@ function drawEntry(entry: Entry, width: number): string[] {
         first = false
       }
     }
+    out.push("")
+    return out
+  }
+  // The fork's line under a finished answer: how long it worked, and on what.
+  if (entry.kind === "worked") {
+    out.push(dim + "  ▣ " + entry.text + ansi.reset)
     out.push("")
     return out
   }
@@ -2404,6 +2405,10 @@ async function send() {
     }
     // The terminal works in the folder it was started in, so worktrees and
     // branches are listed and made here, and opened by starting cgn there.
+    if (result.kind === "editor") {
+      openEditor()
+      return
+    }
     if (result.kind === "project") {
       status = "the terminal works in the folder it started in - run cgn in another folder, or use /project in the web app"
       render(); return
@@ -2701,6 +2706,7 @@ async function send() {
 
   let current: Entry | undefined
   turn = new AbortController()
+  const turnStarted = Date.now()
   // Every stop path must wake consent, not only the Ctrl+S interrupt path.
   turn.signal.addEventListener("abort", cancelPending, { once: true })
   // Everything this turn writes is captured under one checkpoint, so /undo
@@ -2848,6 +2854,7 @@ async function send() {
   } finally {
     if (turn?.signal.aborted && !messages.at(-1)?.stopped) messages.push({ role: "assistant", content: "", stopped: true })
     if (messages.at(-1)?.stopped) transcript.push({ kind: "tool", text: "stopped", state: "failed" })
+    else transcript.push({ kind: "worked", text: "worked for " + sessions.workedFor(Date.now() - turnStarted) + " · " + selection.provider.label + " " + selection.model.label })
     streaming = false
     stopSpinner()
     turn = undefined
@@ -3012,10 +3019,93 @@ function changePermissionMode(mode: PermissionMode) {
   }
 }
 
+/**
+ * The fork's leader keys: ctrl+x, then a letter, within a second and a half.
+ * Each is a shortcut for something a slash command already does, so nothing
+ * here behaves differently from typing the command.
+ */
+const LEADER: Record<string, { label: string; run: () => void | Promise<void> }> = {
+  m: { label: "model", run: () => openModelPicker() },
+  l: { label: "sessions", run: () => runQuick("/resume") },
+  n: { label: "new", run: () => runQuick("/clear") },
+  s: { label: "status", run: () => runQuick("/status") },
+  t: { label: "theme", run: () => { applyComposer({ text: "/theme ", cursor: 7 }, true); refreshPalette() } },
+  a: { label: "agents", run: () => runQuick("/agents") },
+  c: { label: "compact", run: () => runQuick("/compact") },
+  u: { label: "undo", run: () => runQuick("/undo") },
+  r: { label: "redo", run: () => runQuick("/redo") },
+  y: { label: "copy answer", run: () => runQuick("/copy last") },
+  x: { label: "export", run: () => runQuick("/export") },
+  e: { label: "editor", run: () => openEditor() },
+  q: { label: "quit", run: () => shutdown() },
+}
+let leaderUntil = 0
+
+/** Runs a slash command as if typed, keeping whatever was being written. */
+async function runQuick(command: string) {
+  const draft = { text: input, cursor }
+  input = command
+  cursor = command.length
+  palette = undefined
+  await send()
+  if (!input && draft.text) { input = draft.text; cursor = draft.cursor }
+  render()
+}
+
+/**
+ * /editor: the prompt in an editor of your own. $VISUAL or $EDITOR, else
+ * Notepad on Windows and vi elsewhere. The terminal is handed over while it
+ * runs - out of the app's screen and raw mode - and taken back after, with
+ * what was written in the composer, unsent, to read before pressing enter.
+ */
+function openEditor() {
+  if (secret) return
+  const fsMod = require("node:fs") as typeof import("node:fs")
+  const os = require("node:os") as typeof import("node:os")
+  const pathMod = require("node:path") as typeof import("node:path")
+  const { spawnSync } = require("node:child_process") as typeof import("node:child_process")
+  const file = pathMod.join(os.tmpdir(), "cg-prompt-" + process.pid + ".md")
+  fsMod.writeFileSync(file, input)
+  const editor = process.env.VISUAL || process.env.EDITOR || (process.platform === "win32" ? "notepad.exe" : "vi")
+  out.write(ansi.pasteOff + "\x1b[?1002l\x1b[?1006l" + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
+  process.stdin.setRawMode?.(false)
+  const result = spawnSync(editor, [file], { stdio: "inherit", shell: process.platform === "win32" && !/\.exe$/i.test(editor) })
+  process.stdin.setRawMode?.(true)
+  out.write(ansi.altScreen + ansi.ownMouse + ansi.pasteOn)
+  applyMouse()
+  if (result.error || result.status !== 0) status = "the editor did not finish cleanly (" + (result.error?.message ?? "exit " + result.status) + "); the draft is unchanged"
+  else {
+    const text = fsMod.readFileSync(file, "utf8").replace(/\r\n/g, String.fromCharCode(10)).replace(/\s+$/, "")
+    applyComposer({ text, cursor: text.length }, true)
+    // Named by its program: VISUAL may be "code --wait" or a quoted path with arguments.
+    const program = pathMod.basename(editor.match(/^"([^"]+)"/)?.[1] ?? editor.split(" ")[0] ?? editor).replace(/\.(exe|cmd|bat)$/i, "")
+    status = text ? "edited in " + program + " - enter sends it" : "the editor came back empty"
+  }
+  try { fsMod.rmSync(file, { force: true }) } catch {}
+  render()
+}
+
 process.stdin.on("data", (chunk) => {
   let dirty = false
 
   for (const pressed of readKeys(chunk.toString())) {
+    // ctrl+x arms the leader; the next letter picks the shortcut.
+    if (pressed.type === "ctrl" && pressed.value === "x" && !secret) {
+      leaderUntil = Date.now() + 1500
+      status = "ctrl+x  " + Object.entries(LEADER).map(([key, entry]) => key + " " + entry.label).join(" · ")
+      render(); continue
+    }
+    if (leaderUntil) {
+      const armed = Date.now() < leaderUntil
+      leaderUntil = 0
+      if (armed && pressed.type === "char" && LEADER[pressed.value.toLowerCase()]) {
+        status = ""
+        dialog = undefined
+        void LEADER[pressed.value.toLowerCase()]!.run()
+        render(); continue
+      }
+      if (armed) { status = ""; render(); continue }
+    }
     if (pressed.type === "ctrl" && pressed.value === "c") {
       const span = composerSelection(composerState())
       const action = ctrlCAction({ selected: Boolean(span), busy: streaming, draft: Boolean(input), secret: Boolean(secret) })

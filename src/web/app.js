@@ -417,6 +417,18 @@ attachBtn.onclick = () => {
 }
 filePicker.onchange = () => { addFiles([...filePicker.files]); filePicker.value = "" }
 
+/** Long pastes folded to a token, as the terminal does; expanded when sent. Mirrors sessions.pasteToken. */
+let pastes = []
+function pasteTokenFor(text) {
+  const lines = text.split("\n").length
+  if (lines < 4) return undefined
+  const base = "[Pasted ~" + lines + " lines]"
+  if (!pastes.some((paste) => paste.token === base)) return base
+  let n = 2
+  while (pastes.some((paste) => paste.token === "[Pasted ~" + lines + " lines #" + n + "]")) n++
+  return "[Pasted ~" + lines + " lines #" + n + "]"
+}
+
 input.addEventListener("paste", (event) => {
   const files = [...(event.clipboardData?.items ?? [])]
     .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
@@ -424,7 +436,19 @@ input.addEventListener("paste", (event) => {
     .filter(Boolean)
   // Only swallow the paste when it really was a picture; pasted text still
   // has to reach the composer.
-  if (files.length) { event.preventDefault(); addFiles(files) }
+  if (files.length) { event.preventDefault(); addFiles(files); return }
+  // A long paste becomes "[Pasted ~42 lines]": the box stays readable, and
+  // the model still gets every line.
+  const text = (event.clipboardData?.getData("text/plain") ?? "").replace(/\r\n?/g, "\n")
+  const token = text ? pasteTokenFor(text) : undefined
+  if (!token) return
+  event.preventDefault()
+  pastes.push({ token, text })
+  const start = input.selectionStart ?? input.value.length
+  const end = input.selectionEnd ?? start
+  input.value = input.value.slice(0, start) + token + input.value.slice(end)
+  input.selectionStart = input.selectionEnd = start + token.length
+  input.dispatchEvent(new Event("input"))
 })
 
 for (const name of ["dragover", "drop"]) {
@@ -1682,6 +1706,8 @@ async function runCommand(text) {
     return true
   }
 
+  // The browser's composer is already a full editor.
+  if (name === "/editor") { note("The message box here is already an editor - Shift+Enter adds a line. /editor opens your own editor in the terminal app."); return true }
   if (name === "/terminal") {
     if (!terminalPanel.hidden && argument === "close") closeTerminal()
     else void openTerminal()
@@ -2019,6 +2045,21 @@ async function runCommand(text) {
 }
 
 /** A short system line in the thread, styled like a tool row. */
+/** The fork's line under a finished answer: how long it worked, and on what. Mirrors sessions.workedFor. */
+function workedLine(ms) {
+  const seconds = Math.round(ms / 1000)
+  const took = ms < 10000 ? (Math.max(0, ms) / 1000).toFixed(1) + "s"
+    : seconds < 60 ? seconds + "s"
+    : seconds < 3600 ? Math.floor(seconds / 60) + "m " + String(seconds % 60).padStart(2, "0") + "s"
+    : Math.floor(seconds / 3600) + "h " + String(Math.floor(seconds / 60) % 60).padStart(2, "0") + "m"
+  const model = modelOptions.find((o) => o.value === currentModel)
+  const row = document.createElement("div")
+  row.className = "worked"
+  row.textContent = "▣ worked for " + took + (model ? " · " + model.label.replace(/ \(reasoning\)$/, "") : "")
+  thread.appendChild(row)
+  scrollDown()
+}
+
 function note(text) {
   if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
   const row = document.createElement("div")
@@ -2175,6 +2216,8 @@ async function submit() {
   setBusy(true)
   // Taken now, so removing one mid-flight cannot change what was sent.
   const sending = attachments
+  const sendingPastes = pastes.filter((paste) => text.includes(paste.token))
+  pastes = []
   attachments = []
   renderAttached()
   turn("user", text, sending)
@@ -2185,13 +2228,14 @@ async function submit() {
   let thinkingRaw = ""
   const request = new AbortController()
   controller = request
+  const turnStarted = Date.now()
 
   let response
   try {
     response = await fetch("/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, sessionId, provider: currentModel, agent: currentAgent, images: sending, mode: currentMode, planning, boost: boost || boostOnce }),
+      body: JSON.stringify({ text, sessionId, provider: currentModel, agent: currentAgent, images: sending, mode: currentMode, planning, boost: boost || boostOnce, pastes: sendingPastes }),
       signal: request.signal,
     })
   } catch {
@@ -2387,6 +2431,7 @@ async function submit() {
         if (event.type === "error") { finished = true; turn("agent", "**Error:** " + event.message) }
         if (event.type === "saved") {
           finished = true
+          workedLine(Date.now() - turnStarted)
           refreshSessions()
           void refreshFiles(true)
           boostOnce = false

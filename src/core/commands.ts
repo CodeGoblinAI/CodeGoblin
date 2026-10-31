@@ -50,6 +50,7 @@ export type CommandResult =
   | { kind: "project"; path?: string }
   | { kind: "worktree"; action: "list" | "new"; name?: string }
   | { kind: "branch"; name?: string }
+  | { kind: "editor" }
   | { kind: "connect"; provider?: string }
   | { kind: "disconnect"; provider?: string }
   | { kind: "none" }
@@ -68,6 +69,7 @@ export const COMMANDS = [
   { name: "/worktree", description: "git worktrees: /worktree lists them, /worktree new <name> makes one on cg/<name>" },
   { name: "/branch", description: "git branches: /branch lists them, /branch <name> switches (nothing uncommitted)" },
   { name: "/terminal", description: "a shell in the project folder, in the browser (ctrl+`)" },
+  { name: "/editor", description: "write the prompt in your editor ($VISUAL / $EDITOR, else Notepad) - ctrl+x e" },
   { name: "/resume", description: "reopen a saved conversation" },
   { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/undo", description: "put back the files the last turn changed" },
@@ -116,7 +118,6 @@ export const PENDING_COMMANDS: Record<string, string> = {
   "/variants": "Model-specific variants are not wired yet; /effort controls supported reasoning models.",
   "/plugins": "The plugin marketplace is not wired yet; /mcp and /skills show configured integrations.",
   "/update": "CG-Next's installer/updater is not wired yet. This is the source checkout, not the original cg installation.",
-  "/editor": "External prompt editor is not wired yet.",
   "/warp": "Prompt warp is not wired yet.",
   "/widget": "The native status widget is not wired into CG-Next yet.",
   "/widget-settings": "Native widget settings are not wired yet.",
@@ -233,6 +234,8 @@ export function runCommand(text: string): CommandResult {
     }
     case "/branch":
       return argument ? { kind: "branch", name: argument } : { kind: "branch" }
+    case "/editor":
+      return { kind: "editor" }
     case "/terminal":
       return { kind: "message", text: "/terminal is the browser's built-in shell; here, ! runs a command (!git status), or use another terminal tab" }
     case "/status":

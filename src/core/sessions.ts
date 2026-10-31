@@ -171,6 +171,49 @@ export async function load(id: string): Promise<Session | undefined> {
 }
 
 /**
+ * A long paste, folded to a token in the composer the way the fork shows it:
+ * "[Pasted ~42 lines]", with " #2" when another paste of the same length is
+ * already waiting, so two never expand to the same text.
+ */
+export const PASTE_FOLD_LINES = 4
+export type Paste = { token: string; text: string }
+const PASTE_TOKEN = /^\[Pasted ~\d+ lines(?: #\d+)?\]$/
+
+export function pasteToken(text: string, waiting: Paste[]): string | undefined {
+  const lines = text.split(String.fromCharCode(10)).length
+  if (lines < PASTE_FOLD_LINES) return undefined
+  const base = `[Pasted ~${lines} lines]`
+  if (!waiting.some((paste) => paste.token === base)) return base
+  let n = 2
+  while (waiting.some((paste) => paste.token === `[Pasted ~${lines} lines #${n}]`)) n++
+  return `[Pasted ~${lines} lines #${n}]`
+}
+
+/** The real text back in place of each token, for the model rather than the screen. Junk tokens are ignored. */
+export function unfoldPastes(text: string, pastes: unknown): string {
+  if (!Array.isArray(pastes)) return text
+  let out = text
+  for (const paste of pastes.slice(0, 20)) {
+    if (!paste || typeof paste.token !== "string" || typeof paste.text !== "string" || !PASTE_TOKEN.test(paste.token) || paste.text.length > 2_000_000) continue
+    out = out.split(paste.token).join(paste.text)
+  }
+  return out
+}
+
+/**
+ * How long a turn took, the way the fork's "worked for" line says it:
+ * "0.8s", "12s", "3m 05s", "1h 02m".
+ */
+export function workedFor(ms: number): string {
+  if (ms < 10_000) return (Math.max(0, ms) / 1000).toFixed(1) + "s"
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 60) return seconds + "s"
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return minutes + "m " + String(seconds % 60).padStart(2, "0") + "s"
+  return Math.floor(minutes / 60) + "h " + String(minutes % 60).padStart(2, "0") + "m"
+}
+
+/**
  * How long ago, in the web sidebar's words: "just now", "5m", "3h", "2d".
  * Conversations often share a title ("fix the test"), and the age is what
  * tells them apart in a picker.

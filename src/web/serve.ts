@@ -908,9 +908,12 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
       planning?: boolean
       /** Subagents are offered only when the page asks for them with /boost. */
       boost?: boolean
+      /** Long pastes the page folded to tokens; the text shown keeps the tokens. */
+      pastes?: unknown
     }
     const text = (body.text ?? "").trim()
     if (!text) return json({ error: "empty prompt" }, 400)
+    const whole = sessions.unfoldPastes(text, body.pastes)
 
     const loaded = body.sessionId ? await sessions.load(body.sessionId) : undefined
     if (body.agent !== undefined && (typeof body.agent !== "string" || body.agent.length > 128)) return json({error:"Invalid agent profile"},400)
@@ -941,8 +944,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     // Mentions are read here, so the stored message carries its files and a
     // resumed conversation still has the context it was answered with.
     // A custom command or a skill is sent as its text; the line typed is what is shown.
-    const invoked = text.startsWith("/") ? resolveInvocation(text, root) : undefined
-    const mentioned = await expandMentions(invoked ? invoked.content : text, root)
+    const invoked = whole.startsWith("/") ? resolveInvocation(whole, root) : undefined
+    const mentioned = await expandMentions(invoked ? invoked.content : whole, root)
 
     // Pictures arrive two ways and mean the same thing once they are here:
     // attached in the page, or @mentioned by path like any other file.
@@ -953,7 +956,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     const images = [...pasted, ...mentioned.images]
 
     session.messages.push(
-      mentioned.files.length || images.length || invoked
+      mentioned.files.length || images.length || invoked || whole !== text
         ? { role: "user", content: mentioned.content, display: text, images }
         : { role: "user", content: text },
     )
