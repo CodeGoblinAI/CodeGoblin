@@ -66,3 +66,23 @@ describe("timestamps, fold and timeline", () => {
     expect(runCommand("/timestamps")).toEqual({ kind: "timestamps" })
   })
 })
+
+describe("appearance", () => {
+  test("light, dark or the system's, using the chosen theme when it suits", async () => {
+    const { effectiveTheme, terminalLooksLight } = await import("../src/core/theme")
+    expect(effectiveTheme("dracula", "dark", true)).toBe("dracula")
+    expect(effectiveTheme("dracula", "light", false)).toBe("paper")
+    expect(effectiveTheme("paper", "dark", false)).toBe("goblin")
+    expect(effectiveTheme("midnight", "system", true)).toBe("paper")
+    expect(effectiveTheme("midnight", "system", false)).toBe("midnight")
+    expect(terminalLooksLight({ COLORFGBG: "0;15" })).toBe(true)
+    expect(terminalLooksLight({ COLORFGBG: "15;0" })).toBe(false)
+    expect(terminalLooksLight({})).toBe(false)
+  })
+
+  test("saved and checked like every other setting", async () => {
+    const { normalise } = await import("../src/core/settings")
+    expect(normalise({ appearance: "system", pasteSummary: false, animations: false })).toMatchObject({ appearance: "system", pasteSummary: false, animations: false })
+    expect(normalise({ appearance: "neon", pasteSummary: "no" })).toMatchObject({ appearance: "dark", pasteSummary: true })
+  })
+})

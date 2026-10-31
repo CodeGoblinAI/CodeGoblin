@@ -67,6 +67,29 @@ export const THEMES: Record<string, { label: string; palette: Palette }> = {
 }
 
 export const DEFAULT_THEME = "goblin"
+/** The light theme; every other one is dark. */
+export const LIGHT_THEME = "paper"
+
+/**
+ * Appearance, as in the fork's light/dark lock: "dark" keeps a dark theme,
+ * "light" a light one, and "system" follows the browser or the terminal. The
+ * chosen theme is used whenever it suits; otherwise its counterpart is.
+ */
+export type Appearance = "dark" | "light" | "system"
+export const APPEARANCES: Appearance[] = ["dark", "light", "system"]
+
+export function effectiveTheme(theme: string, appearance: Appearance, prefersLight: boolean): string {
+  const wantsLight = appearance === "light" || (appearance === "system" && prefersLight)
+  const isLight = theme === LIGHT_THEME
+  if (wantsLight) return isLight ? theme : LIGHT_THEME
+  return isLight ? DEFAULT_THEME : theme
+}
+
+/** Whether the terminal says its background is light: COLORFGBG "fg;bg" with a light bg (7 or 15). */
+export function terminalLooksLight(env: NodeJS.ProcessEnv = process.env): boolean {
+  const bg = Number((env.COLORFGBG ?? "").split(";").at(-1))
+  return bg === 7 || bg === 15
+}
 
 export function themeNames(): string[] {
   return Object.keys(THEMES)

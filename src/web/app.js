@@ -461,7 +461,7 @@ input.addEventListener("paste", (event) => {
   // A long paste becomes "[Pasted ~42 lines]": the box stays readable, and
   // the model still gets every line.
   const text = (event.clipboardData?.getData("text/plain") ?? "").replace(/\r\n?/g, "\n")
-  const token = text ? pasteTokenFor(text) : undefined
+  const token = text && webSettings.pasteSummary !== false ? pasteTokenFor(text) : undefined
   if (!token) return
   event.preventDefault()
   pastes.push({ token, text })
@@ -1150,8 +1150,30 @@ async function openSession(id) {
  * The stylesheet only ever refers to these custom properties, so a theme is
  * twelve assignments rather than a second stylesheet to keep in step.
  */
-function applyPalette(palette) {
+/**
+ * Appearance: the chosen theme, or its light or dark counterpart when the
+ * setting says so - "system" follows the browser and changes with it.
+ * Mirrors effectiveTheme in core/theme.ts.
+ */
+const prefersLight = matchMedia("(prefers-color-scheme: light)")
+function lookFor(theme) {
+  const appearance = webSettings.appearance || "dark"
+  const wantsLight = appearance === "light" || (appearance === "system" && prefersLight.matches)
+  const isLight = theme === "paper"
+  return wantsLight ? (isLight ? theme : "paper") : isLight ? "goblin" : theme
+}
+function applyLook() {
+  const name = lookFor(webSettings.theme)
+  const chosen = (paletteData.themes || []).find((t) => t.value === "/theme " + name)
+  if (chosen) applyPalette(chosen.palette, true)
+  document.body.classList.toggle("no-animations", webSettings.animations === false)
+}
+prefersLight.addEventListener("change", () => { if (webSettings.appearance === "system") applyLook() })
+
+function applyPalette(palette, looked = false) {
   if (!palette) return
+  // A palette from anywhere but applyLook is a preview of a theme; Appearance still decides light or dark.
+  if (!looked && webSettings.appearance && webSettings.appearance !== "dark") { applyLook(); return }
   const root = document.documentElement.style
   root.setProperty("--step1", palette.step1)
   root.setProperty("--step2", palette.step2)
@@ -1197,6 +1219,9 @@ function openSettingsDialog() {
   }
   select("Theme", paletteData.themes.map((t) => [t.value.slice(7), t.hint]), webSettings.theme, (theme) => saveSettings({ theme }))
   select("Thinking", [["on", "Shown"], ["off", "Hidden"]], webSettings.thinking ? "on" : "off", (value) => saveSettings({ thinking: value === "on" }))
+  select("Appearance", [["dark", "Dark"], ["light", "Light"], ["system", "Follow the system"]], webSettings.appearance || "dark", (appearance) => saveSettings({ appearance }))
+  select("Paste summary", [["on", "Fold long pastes to [Pasted ~N lines]"], ["off", "Paste in whole"]], webSettings.pasteSummary === false ? "off" : "on", (value) => saveSettings({ pasteSummary: value === "on" }))
+  select("Animations", [["on", "On"], ["off", "Off"]], webSettings.animations === false ? "off" : "on", (value) => saveSettings({ animations: value === "on" }))
   select("Reasoning effort (this model)", effortChoices().choices, currentEffort(), (effort) => saveSettings({ effort }))
   for (const option of modelSettings()) {
     if (!option.choices?.length) continue
@@ -1465,7 +1490,7 @@ async function saveSettings(change) {
   }).then((r) => r.json()).catch(() => null)
   if (!result?.settings) { note(result?.message || "Could not save settings. Please try again."); return null }
   webSettings = result.settings
-  applyPalette(result.palette)
+  applyLook()
   document.body.classList.toggle("hide-thinking", !webSettings.thinking)
   return result
 }
@@ -3016,8 +3041,7 @@ async function loadCommands() {
   if (paletteData.project) void refreshProjectName()
   if (paletteData.settings) {
     webSettings = paletteData.settings
-    const chosen = (paletteData.themes || []).find((t) => t.value === "/theme " + webSettings.theme)
-    applyPalette(chosen && chosen.palette)
+    applyLook()
     document.body.classList.toggle("hide-thinking", !webSettings.thinking)
   }
 }
@@ -3183,8 +3207,7 @@ function previewTheme(item) {
 }
 
 function endPreview() {
-  const chosen = (paletteData.themes || []).find((t) => t.value === "/theme " + webSettings.theme)
-  if (chosen) applyPalette(chosen.palette)
+  applyLook()
 }
 
 paletteEl.onmouseleave = endPreview

@@ -89,6 +89,9 @@ describe("settings", () => {
       mouse: true,
       effort: "auto",
       effortByModel: {},
+      appearance: "dark",
+      pasteSummary: true,
+      animations: true,
       favourites: [],
       recents: [],
     })

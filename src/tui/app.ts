@@ -6,7 +6,8 @@
  *
  * Raw ANSI, no framework.
  */
-import { ansi, theme, dim, invert, noInvert, applyTheme } from "./ansi"
+import { ansi, theme, dim, invert, noInvert, applyTheme as paintTheme } from "./ansi"
+import { APPEARANCES, effectiveTheme, terminalLooksLight } from "../core/theme"
 import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { THEMES } from "../core/theme"
 import { EFFORTS } from "../core/settings"
@@ -278,6 +279,7 @@ let pendingImages: Attachment[] = []
 
 /** A paste of four lines or more folds to a token (sessions.pasteToken); below that it just reads as typing. */
 function foldPaste(text: string): string {
+  if (!settings.pasteSummary) return text
   const token = sessions.pasteToken(text, pastes)
   if (!token) return text
   pastes.push({ token, text, lines: text.split(String.fromCharCode(10)).length })
@@ -289,6 +291,14 @@ function unfoldPastes(text: string): string {
   return sessions.unfoldPastes(text, pastes)
 }
 let settings = settingsStore.defaults()
+/** The theme drawn: the chosen one, swapped for its light or dark counterpart when Appearance says so. */
+function applyTheme(name: string) {
+  paintTheme(effectiveTheme(name, settings.appearance, terminalLooksLight()))
+}
+function applyLook() {
+  applyTheme(settings.theme)
+  render()
+}
 const currentEffort = () => settingsStore.effortForModel(settings, selection.provider.id + "/" + selection.model.id)
 /** How generation should come out. Separate file, separate lifetime. */
 let media: MediaSettings = {}
@@ -365,7 +375,7 @@ function spinnerFrame() {
 }
 
 function startSpinner() {
-  if (spinnerTimer) return
+  if (spinnerTimer || !settings.animations) return
   spinnerTimer = setInterval(() => {
     spinnerTick++
     render()
@@ -1635,10 +1645,12 @@ function openEffortPicker() {
 }
 
 /** How generation comes out. A popup, because a settings screen should be one. */
-function openSettings() {
+/** Opens Settings; `selectedValue` keeps the cursor on the row just changed. */
+function openSettings(selectedValue?: string) {
   dialog = Dialogs.open("settings", "Settings  ·  " + selection.provider.label + " " + selection.model.label, settingsRows(), {
     footer: "enter changes this setting . esc closes",
     size: "large",
+    ...(selectedValue ? { selectedValue } : {}),
   })
 }
 
@@ -1681,6 +1693,9 @@ function settingsRows(): Dialogs.DialogRow[] {
     { label: "Theme", hint: settings.theme, value: "ui:theme" },
     { label: "Show thinking", hint: settings.thinking ? "on" : "off", value: "ui:thinking" },
     { label: "Mouse controls", hint: settings.mouse ? "on (Shift+drag selects)" : "off (terminal selection)", value: "ui:mouse" },
+    { label: "Appearance", hint: settings.appearance + (settings.appearance === "system" ? " (" + (terminalLooksLight() ? "light" : "dark") + " here)" : ""), value: "ui:appearance" },
+    { label: "Paste summary", hint: settings.pasteSummary ? "on - long pastes fold to [Pasted ~N lines]" : "off - pastes go in whole", value: "ui:pasteSummary" },
+    { label: "Animations", hint: settings.animations ? "on" : "off - a still marker while working", value: "ui:animations" },
     { label: "Reasoning effort", hint: currentEffort() + (currentEffort() === "auto" && selection.model.defaultEffort ? " (" + selection.model.defaultEffort + ")" : ""), value: "ui:effort" },
     { label: "Approvals", hint: permissions.mode, value: "ui:approvals" },
     { label: "Agent profile", hint: agentName || "default", value: "ui:agents" },
@@ -2083,11 +2098,17 @@ async function chooseInDialog() {
       if (action === "effort") openEffortPicker()
       if (action === "approvals") openApprovalsPicker()
       if (action === "agents") openAgents()
-      if (action === "thinking" || action === "mouse") {
+      if (action === "thinking" || action === "mouse" || action === "pasteSummary" || action === "animations") {
         settings = { ...settings, [action]: !settings[action] }
         void settingsStore.save(settings)
         if (action === "mouse") applyMouse()
-        openSettings()
+        openSettings(row.value)
+      }
+      if (action === "appearance") {
+        settings = { ...settings, appearance: APPEARANCES[(APPEARANCES.indexOf(settings.appearance) + 1) % APPEARANCES.length]! }
+        void settingsStore.save(settings)
+        applyLook()
+        openSettings(row.value)
       }
       render(); return
     }

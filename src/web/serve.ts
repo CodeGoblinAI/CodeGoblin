@@ -578,7 +578,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
   // Preferences live on the server so the TUI and the browser agree about
   // which theme is current rather than each remembering its own.
   if (url.pathname === "/api/settings" && request.method === "POST") {
-    const body = (await request.json()) as { theme?: unknown; thinking?: unknown; effort?: unknown; model?: string }
+    const body = (await request.json()) as { theme?: unknown; thinking?: unknown; effort?: unknown; model?: string; appearance?: unknown; pasteSummary?: unknown; animations?: unknown }
     const current = await settingsStore.load()
     if (body.effort !== undefined && (!settingsStore.isEffort(body.effort) || !exactSelection(body.model || ""))) return json({ message: "Select a valid model and effort level" }, 400)
     if (body.effort !== undefined) {
@@ -587,9 +587,17 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
       const problem = effortProblem(chosen.model, chosen.provider.label + " " + chosen.model.label, String(body.effort))
       if (problem) return json({ message: problem }, 400)
     }
+    const changed = {
+      ...current,
+      theme: body.theme ?? current.theme,
+      thinking: body.thinking ?? current.thinking,
+      appearance: body.appearance ?? current.appearance,
+      pasteSummary: body.pasteSummary ?? current.pasteSummary,
+      animations: body.animations ?? current.animations,
+    }
     const next = body.effort !== undefined
-      ? settingsStore.withModelEffort(settingsStore.normalise({ ...current, theme: body.theme ?? current.theme, thinking: body.thinking ?? current.thinking }), body.model!, body.effort)
-      : settingsStore.normalise({ ...current, theme: body.theme ?? current.theme, thinking: body.thinking ?? current.thinking })
+      ? settingsStore.withModelEffort(settingsStore.normalise(changed), body.model!, body.effort)
+      : settingsStore.normalise(changed)
     await settingsStore.save(next)
     return json({ settings: next, palette: paletteOf(next.theme) })
   }

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Global } from "../platform/paths"
-import { DEFAULT_THEME, isTheme } from "./theme"
+import { APPEARANCES, DEFAULT_THEME, isTheme, type Appearance } from "./theme"
 
 /**
  * The handful of preferences worth remembering.
@@ -37,6 +37,12 @@ export type Settings = {
   effort: Effort
   /** Exact provider/model identity. Unset models use auto after the first scoped save. */
   effortByModel: Record<string, Effort>
+  /** Light, dark, or follow the system - the fork's light/dark lock. */
+  appearance: Appearance
+  /** Fold long pastes to "[Pasted ~N lines]" in the composer. */
+  pasteSummary: boolean
+  /** The working spinner and other motion; off draws a still marker. */
+  animations: boolean
   /** Models pinned to the top of the picker, "provider/model", in the order they were added. */
   favourites: string[]
   /** Models most recently switched to, newest first. */
@@ -67,6 +73,9 @@ export const defaults = (): Settings => ({
   mouse: true,
   effort: "auto",
   effortByModel: {},
+  appearance: "dark",
+  pasteSummary: true,
+  animations: true,
   favourites: [],
   recents: [],
 })
@@ -83,6 +92,9 @@ export function normalise(raw: unknown): Settings {
     effortByModel: value.effortByModel && typeof value.effortByModel === "object" && !Array.isArray(value.effortByModel)
       ? Object.fromEntries(Object.entries(value.effortByModel).filter(([id, level]) => modelKey(id) && isEffort(level)).slice(0, 256))
       : {},
+    appearance: APPEARANCES.includes(value.appearance as Appearance) ? (value.appearance as Appearance) : base.appearance,
+    pasteSummary: typeof value.pasteSummary === "boolean" ? value.pasteSummary : base.pasteSummary,
+    animations: typeof value.animations === "boolean" ? value.animations : base.animations,
     favourites: modelList(value.favourites),
     recents: modelList(value.recents),
   }
