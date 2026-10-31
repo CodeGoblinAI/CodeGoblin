@@ -1,4 +1,5 @@
 import { Permissions, DECISIONS, askedFor, type Decision, type PermissionMode } from "../core/permission"
+import type { AskUser } from "../core/question"
 
 /**
  * Consent for browser conversations.
@@ -63,6 +64,11 @@ export class BrowserConsent {
 
   /** Refuses whatever a conversation is still waiting on, so an abandoned turn cannot hang. */
   abandon(sessionId: string) {
+    for (const [id, waiting] of this.questions) {
+      if (waiting.sessionId !== sessionId) continue
+      this.questions.delete(id)
+      waiting.resolve(undefined)
+    }
     for (const [id, waiting] of this.waiting) {
       if (waiting.sessionId === sessionId) {
         waiting.resolve("reject")
@@ -74,6 +80,38 @@ export class BrowserConsent {
   /** The questions still waiting on an answer. */
   pending(): string[] {
     return [...this.waiting.keys()]
+  }
+
+  private questions = new Map<string, { sessionId: string; resolve: (answer: string[] | undefined) => void }>()
+
+  /**
+   * The model's question tool for a conversation: the question goes down the
+   * stream of the message running now, and waits for /api/question. A stopped
+   * turn, or an abandoned one, takes its question with it.
+   */
+  askerFor(sessionId: string, send: (event: unknown) => void): AskUser {
+    this.streams.set(sessionId, send)
+    return (question, signal) =>
+      new Promise((resolve) => {
+        if (signal?.aborted) return resolve(undefined)
+        const id = sessionId + ":question:" + ++this.asked
+        this.questions.set(id, { sessionId, resolve })
+        signal?.addEventListener("abort", () => { if (this.questions.delete(id)) resolve(undefined) }, { once: true })
+        this.streams.get(sessionId)?.({ type: "question", id, question })
+      })
+  }
+
+  /**
+   * The browser's answer: the labels picked or the words typed, or nothing for
+   * dismissed. Anything that is not a list of short strings counts as dismissed.
+   */
+  answerQuestion(id: string, answer: unknown): boolean {
+    const waiting = this.questions.get(id)
+    if (!waiting) return false
+    this.questions.delete(id)
+    const valid = Array.isArray(answer) && answer.length > 0 && answer.length <= 6 && answer.every((each) => typeof each === "string" && each.trim() && each.length <= 2000)
+    waiting.resolve(valid ? (answer as string[]).map((each) => each.trim()) : undefined)
+    return true
   }
 
   setMode(sessionId: string, mode: PermissionMode): boolean {

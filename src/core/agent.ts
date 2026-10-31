@@ -16,6 +16,8 @@ import type { History } from "./undo"
  * Tools from outside the built-in table - MCP servers today. The loop offers
  * them next to its own and routes a call back; consent is the same for both.
  */
+import { QUESTION_TOOL, answerText, parseQuestion, type AskUser } from "./question"
+
 export type ExtraTools = {
   schema(): { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }[]
   has(name: string): boolean
@@ -235,13 +237,15 @@ const SUBAGENTS_OFF =
 /** Tools that change files. Planning does not offer them, so the model never tries one and gets refused. */
 const CHANGES_FILES = new Set(["write_file", "edit_file"])
 
-function offeredTools(input: { permissions?: Permissions; extraTools?: ExtraTools; subagents?: Subagents; tools?: string[] }) {
+function offeredTools(input: { permissions?: Permissions; extraTools?: ExtraTools; subagents?: Subagents; tools?: string[]; askUser?: AskUser }) {
   const planning = input.permissions?.planning === true
   const listed = (name: string) => !input.tools || input.tools.includes(name)
   const own = TOOL_SCHEMA.filter((tool) => listed(tool.function.name) && !(planning && CHANGES_FILES.has(tool.function.name)))
   // MCP tools can do anything, and nothing says which of them only read.
   const mcp = planning || !listed("mcp") ? [] : (input.extraTools?.schema() ?? [])
-  return [...own, ...mcp, ...(input.subagents?.schema() ?? [])]
+  // Only where someone is there to answer.
+  const asking = input.askUser && listed("question") ? [QUESTION_TOOL] : []
+  return [...own, ...asking, ...mcp, ...(input.subagents?.schema() ?? [])]
 }
 
 /**
@@ -313,6 +317,8 @@ async function* runTurns(input: {
   subagents?: Subagents
   /** The built-in tools this agent may use, by name; "mcp" allows MCP tools. Everything when unset. */
   tools?: string[]
+  /** Asks the person a question and waits; the question tool is offered only when this is set. */
+  askUser?: AskUser
   /**
    * How hard the model should think, for models that take it.
    *
@@ -584,6 +590,17 @@ async function* runTurns(input: {
         ? Promise.resolve(`error: ${entry.call.name} is not available to this agent`)
         : (entry.call.name === "task" || entry.call.name === "task_result") && !input.subagents
           ? Promise.resolve(SUBAGENTS_OFF)
+          : entry.call.name === "question"
+          ? (input.askUser
+              ? (async () => {
+                  try {
+                    const question = parseQuestion(entry.args)
+                    return answerText(question, await input.askUser!(question, input.signal))
+                  } catch (error) {
+                    return "error: " + (error instanceof Error ? error.message : String(error))
+                  }
+                })()
+              : Promise.resolve("error: there is no one to ask here - decide, or say what you need in your reply"))
           : input.subagents?.has(entry.call.name)
           ? input.subagents.call(entry.call.name, entry.args)
           : input.extraTools?.has(entry.call.name)

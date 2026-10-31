@@ -742,6 +742,13 @@ async function handle(request: Request): Promise<Response> {
     return json({ ok: true })
   }
 
+  // The answer to the model's question tool: labels picked, words typed, or null for dismissed.
+  if (url.pathname === "/api/question" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { id?: string; answer?: unknown }
+    if (!consent.answerQuestion(body.id ?? "", body.answer)) return json({ ok: false, error: "no pending question" }, 404)
+    return json({ ok: true })
+  }
+
   // /fork: a saved copy of the conversation to carry on in; the original is not touched.
   if (url.pathname === "/api/session/fork" && request.method === "POST") {
     const body = (await request.json().catch(() => ({}))) as { id?: unknown }
@@ -877,6 +884,7 @@ async function handle(request: Request): Promise<Response> {
         // mention that worked would otherwise look exactly the same.
         if (mentioned.files.length) send({ type: "attached", files: mentioned.files })
         const permissions = withMode(consent.forSession(session.id, send), body)
+        const askUser = consent.askerFor(session.id, send)
         // Register live controls before waiting for external servers to start.
         await mcp.settled(10_000)
         subagentContexts.set(session.id, {
@@ -920,6 +928,7 @@ async function handle(request: Request): Promise<Response> {
             subagents: !profile?.tools && (body.boost === true || subagents.running().length) ? subagents : undefined,
             tools: profile?.tools,
             extraTools: mcp,
+            askUser,
             memory: await memory.recall({ project: root, session: session.id }),
             // Servers that are configured but down are named, so the model says so
             // rather than reaching for an unrelated tool in their place.

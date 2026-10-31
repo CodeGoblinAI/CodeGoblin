@@ -84,6 +84,7 @@ import { globFiles } from "../core/search"
 import { defaultSelection, resolveSelection, acceptsImages, effortFor, effortHint, effortLevels, effortProblem, takesEffort, type Selection, kindOf } from "../core/providers"
 import { apiKey, connect, disconnect, connections, storePath, envVariable } from "../core/auth"
 import { localChatMessages, runAgent, type Attachment, type Message } from "../core/agent"
+import type { AskUser, Question } from "../core/question"
 import { COMMANDS, isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
 import { normaliseActivity, recordActivity } from "../core/session-activity"
@@ -377,6 +378,40 @@ let pending: { tool: string; detail: string; cover: string; from?: string; resol
 const waitingAsks: NonNullable<typeof pending>[] = []
 /** Which answer is highlighted. Starts on "allow once", the least committal. */
 let pendingChoice = 0
+
+/**
+ * A question from the model (its question tool), waiting on the person.
+ *
+ * Drawn where approvals are: the options to move through, then "Type your
+ * own answer", which hands the composer over until enter sends the words.
+ */
+type Asking = { question: Question; resolve: (answer: string[] | undefined) => void; picked: Set<number>; typing: boolean }
+let asking: Asking | undefined
+const waitingQuestions: Asking[] = []
+let askingChoice = 0
+
+const askUser: AskUser = (question, signal) =>
+  new Promise((resolve) => {
+    if (signal?.aborted) return resolve(undefined)
+    const entry: Asking = { question, resolve, picked: new Set(), typing: false }
+    // A stopped turn takes its question with it.
+    signal?.addEventListener("abort", () => settleQuestion(entry, undefined), { once: true })
+    if (asking) waitingQuestions.push(entry)
+    else { asking = entry; askingChoice = 0 }
+    render()
+  })
+
+function settleQuestion(entry: Asking, answer: string[] | undefined) {
+  if (asking === entry) { asking = waitingQuestions.shift(); askingChoice = 0 }
+  else {
+    const at = waitingQuestions.indexOf(entry)
+    if (at < 0) return
+    waitingQuestions.splice(at, 1)
+  }
+  entry.resolve(answer)
+  if (answer) status = "answered: " + answer.join(", ").slice(0, 80)
+  render()
+}
 
 function cancelPending() {
   const asks = pending ? [pending, ...waitingAsks] : [...waitingAsks]
@@ -716,7 +751,7 @@ function render() {
    */
   const footer = {
     prompt: promptHeight,
-    pending: pending && !input ? decisionsFor(pending.tool).length + 3 : 0,
+    pending: pending && !input ? decisionsFor(pending.tool).length + 3 : !pending && asking && !asking.typing ? asking.question.options.length + 5 : 0,
     queued: Boolean(queued && !secret),
     images: Boolean(pendingImages.length && !secret),
     scrolled: scroll > 3,
@@ -788,6 +823,34 @@ function render() {
 
   // Consent is a list you move through, not a letter you have to know. It
   // sits where the palette does, so the answer is next to the question.
+  if (!pending && asking && !asking.typing) {
+    const entry = asking
+    const options = entry.question.options
+    const title = " " + entry.question.question
+    const rows = [
+      ...options.map((option, index) => ({
+        label: (entry.question.multiple ? (entry.picked.has(index) ? "[x] " : "[ ] ") : "") + option.label,
+        hint: option.description ?? "",
+      })),
+      { label: "Type your own answer", hint: "" },
+    ]
+    const keys = entry.question.multiple ? "space picks . enter sends . esc dismisses" : "enter picks . esc dismisses"
+    const labelWidth = Math.max(...rows.map((row) => displayWidth(row.label))) + 2
+    const wanted = Math.max(3 + labelWidth + Math.max(0, ...rows.map((row) => displayWidth(row.hint))), displayWidth(title), displayWidth(keys) + 2) + 1
+    const inner = Math.max(24, Math.min(wanted, cols - 6))
+    body.push(theme.border + "  ╭" + "─".repeat(inner) + "╮" + ansi.reset)
+    body.push(theme.border + "  │" + ansi.reset + theme.gold + padToWidth(truncateToWidth(title, inner), inner) + ansi.reset + theme.border + "│" + ansi.reset)
+    for (const [index, row] of rows.entries()) {
+      const active = index === askingChoice
+      const marker = active ? theme.goblin + " ❯ " + ansi.reset : "   "
+      const label = (active ? theme.text : theme.muted) + padToWidth(row.label, labelWidth) + ansi.reset
+      const hint = truncateToWidth(row.hint, Math.max(0, inner - 3 - labelWidth))
+      body.push(theme.border + "  │" + ansi.reset + padToWidth(marker + label + dim + hint + ansi.reset, inner) + theme.border + "│" + ansi.reset)
+    }
+    body.push(theme.border + "  │" + ansi.reset + dim + padToWidth("  " + keys, inner) + ansi.reset + theme.border + "│" + ansi.reset)
+    body.push(theme.border + "  ╰" + "─".repeat(inner) + "╯" + ansi.reset)
+  }
+
   if (pending && !input) {
     // The box names what is being asked and what "for this session" would
     // cover. It used to say only "allow this?", with the command down in the
@@ -2045,6 +2108,15 @@ async function deleteInDialog() {
 }
 
 async function send() {
+  // The person's own answer to the model's question, not a new prompt.
+  if (asking?.typing) {
+    const typed = input.trim()
+    if (!typed) return
+    input = ""
+    cursor = 0
+    settleQuestion(asking, [typed])
+    return
+  }
   if (secret) {
     const provider = secret.provider
     const typed = input
@@ -2614,6 +2686,7 @@ async function send() {
       // Compaction archives what it replaces, so /export still has every word.
       archive: sessions.appendArchive.bind(null, session.id),
       extraTools: mcp,
+      askUser,
       // Offered only with /boost - or while subagents started under it are still out.
       subagents: !profile?.tools && (boost || boostOnce || subagents.running().length) ? subagents : undefined,
       tools: profile?.tools,
@@ -3052,6 +3125,41 @@ process.stdin.on("data", (chunk) => {
       if (pressed.type === "escape" || pressed.type === "enter") { render(); continue }
       // A keystroke meant for the composer still lands there, so dismissing
       // it does not cost the character someone was already typing.
+    }
+
+    // A question from the model owns the keys while its choices are up. While
+    // the person types their own answer, the composer is theirs and escape
+    // goes back to the choices.
+    if (asking && !pending) {
+      const entry = asking
+      if (entry.typing) {
+        if (pressed.type === "escape" && !palette) { entry.typing = false; input = ""; cursor = 0; status = ""; render(); continue }
+      } else {
+        const options = entry.question.options
+        const own = options.length
+        if (pressed.type === "up") { askingChoice = Math.max(0, askingChoice - 1); render(); continue }
+        if (pressed.type === "down") { askingChoice = Math.min(own, askingChoice + 1); render(); continue }
+        if (pressed.type === "escape") { settleQuestion(entry, undefined); continue }
+        if (pressed.type === "char" && pressed.value === " " && entry.question.multiple && askingChoice < own) {
+          if (entry.picked.has(askingChoice)) entry.picked.delete(askingChoice)
+          else entry.picked.add(askingChoice)
+          render(); continue
+        }
+        if (pressed.type === "enter") {
+          if (askingChoice === own) {
+            entry.typing = true
+            status = "type your answer and press enter - esc goes back to the choices"
+            render(); continue
+          }
+          const chosen = entry.question.multiple && entry.picked.size
+            ? [...entry.picked].sort((a, b) => a - b).map((index) => options[index]!.label)
+            : [options[askingChoice]!.label]
+          settleQuestion(entry, chosen)
+          continue
+        }
+        // A stray key must not answer for the person.
+        continue
+      }
     }
 
     if (pending && !input && !palette && !(pressed.type === "char" && pressed.value === "/")) {

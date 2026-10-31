@@ -49,7 +49,7 @@ export type AgentProfile = {
 }
 
 /** Tools that only look. */
-const READ_ONLY = ["read_file", "list_files", "grep", "glob", "skill", "webfetch"]
+const READ_ONLY = ["read_file", "list_files", "grep", "glob", "skill", "webfetch", "websearch"]
 
 export const BUILT_IN_AGENTS: AgentProfile[] = [
   {
@@ -82,11 +82,11 @@ const CLAUDE_TOOLS: Record<string, string> = {
   multiedit: "edit_file",
   write: "write_file",
   webfetch: "webfetch",
-  websearch: "webfetch",
+  websearch: "websearch",
   todowrite: "todo_write",
   skill: "skill",
 }
-const OWN_TOOLS = new Set(["read_file", "list_files", "grep", "glob", "shell", "edit_file", "write_file", "webfetch", "todo_write", "skill"])
+const OWN_TOOLS = new Set(["read_file", "list_files", "grep", "glob", "shell", "edit_file", "write_file", "webfetch", "websearch", "todo_write", "skill"])
 
 export function toolsFrom(value: unknown): string[] | undefined {
   if (typeof value !== "string" || !value.trim()) return undefined

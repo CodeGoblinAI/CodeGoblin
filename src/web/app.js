@@ -808,6 +808,74 @@ function permissionPrompt(event) {
   scrollDown()
 }
 
+/**
+ * The model's question tool, inline like a permission prompt: a button per
+ * option (checkboxes when several may be picked), and a box for the person's
+ * own words. Answered once; Stop or a new turn expires it.
+ */
+function questionPrompt(event) {
+  const q = event.question || {}
+  const box = document.createElement("div")
+  box.className = "permission question"
+  box.dataset.question = event.id
+  box.dataset.permissionState = "pending"
+  box.innerHTML = '<div class="ptext"><span class="qlabel">Question</span> <strong></strong></div><div class="qoptions"></div><form class="qown"><input type="text" placeholder="Or type your own answer" aria-label="Your own answer"><button type="submit" class="pallow">Send</button><button type="button" class="pdeny qdismiss">Dismiss</button></form>'
+  box.querySelector("strong").textContent = q.question || ""
+  const options = box.querySelector(".qoptions")
+  const send = async (answer) => {
+    if (box.dataset.permissionState !== "pending") return
+    box.dataset.permissionState = "answering"
+    for (const control of box.querySelectorAll("button, input")) control.disabled = true
+    const response = await fetch("/api/question", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: event.id, answer }) }).catch(() => null)
+    if (box.dataset.permissionState !== "answering") return
+    box.dataset.permissionState = "resolved"
+    const done = document.createElement("div")
+    done.className = "presolved"
+    done.textContent = response?.ok ? (answer ? "answered: " + answer.join(", ") : "dismissed") : "expired - no pending question"
+    box.querySelector(".qoptions").replaceChildren(done)
+    box.querySelector(".qown").remove()
+  }
+  const list = Array.isArray(q.options) ? q.options : []
+  if (q.multiple) {
+    for (const option of list) {
+      const label = document.createElement("label")
+      label.className = "qcheck"
+      const check = document.createElement("input")
+      check.type = "checkbox"
+      check.value = option.label
+      label.append(check, " " + option.label)
+      if (option.description) label.title = option.description
+      options.appendChild(label)
+    }
+    const confirm = document.createElement("button")
+    confirm.className = "pallow"
+    confirm.textContent = "Send choices"
+    confirm.onclick = () => {
+      const picked = [...options.querySelectorAll("input:checked")].map((each) => each.value)
+      if (picked.length) void send(picked)
+    }
+    options.appendChild(confirm)
+  } else {
+    for (const option of list) {
+      const button = document.createElement("button")
+      button.className = "pallow"
+      button.textContent = option.label
+      if (option.description) button.title = option.description
+      button.onclick = () => void send([option.label])
+      options.appendChild(button)
+    }
+  }
+  box.querySelector(".qown").onsubmit = (submitted) => {
+    submitted.preventDefault()
+    const typed = box.querySelector(".qown input").value.trim()
+    if (typed) void send([typed])
+  }
+  box.querySelector(".qdismiss").onclick = () => void send(null)
+  thread.appendChild(box)
+  scrollDown()
+  ;(box.querySelector(".qoptions button") || box.querySelector(".qown input")).focus()
+}
+
 function resolvePermission(box, label) {
   box.dataset.permissionState = "resolved"
   const done = document.createElement("span")
@@ -819,6 +887,16 @@ function resolvePermission(box, label) {
 function expirePermissions() {
   for (const box of thread.querySelectorAll(".permission[data-permission]")) {
     if (box.dataset.permissionState !== "resolved") resolvePermission(box, "cancelled — turn ended")
+  }
+  // A question the turn ended without: its controls go, so nobody answers into nothing.
+  for (const box of thread.querySelectorAll(".question[data-question]")) {
+    if (box.dataset.permissionState === "resolved") continue
+    box.dataset.permissionState = "resolved"
+    const done = document.createElement("div")
+    done.className = "presolved"
+    done.textContent = "cancelled — turn ended"
+    box.querySelector(".qoptions").replaceChildren(done)
+    box.querySelector(".qown")?.remove()
   }
 }
 
@@ -2219,6 +2297,7 @@ async function submit() {
         if (event.type === "usage") showUsage(event)
         if (event.type === "plan") { planItems = event.todos; renderActivity() }
         if (event.type === "permission") { body = null; permissionPrompt(event) }
+        if (event.type === "question") { body = null; questionPrompt(event) }
         if (event.type === "permission_resolved") {
           const box = [...thread.querySelectorAll(".permission")].find((box) => box.dataset.permission === event.id)
           if (box) resolvePermission(box, event.allowed ? "Allowed by the new approval mode" : "Blocked by current policy")

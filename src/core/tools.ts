@@ -345,6 +345,25 @@ export const EXTRA_TOOLS: Tool[] = [
       return clip(await fetchUrl(String(args.url ?? "")))
     },
   },
+  {
+    name: "websearch",
+    description:
+      "Search the web and return the most relevant pages' text, for what is newer than you know or " +
+      "not in the project. Asks the user first, since the query leaves the machine. Use the year " +
+      "from the environment when searching for anything recent.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "What to search for, in a few key words." },
+        numResults: { type: "number", description: "How many results, 1-10 (default 6)." },
+      },
+      required: ["query"],
+    },
+    run: async (args, _root, signal) => {
+      const { searchWeb } = await import("./websearch")
+      return clip(await searchWeb(String(args.query ?? ""), { numResults: typeof args.numResults === "number" ? args.numResults : undefined, signal }))
+    },
+  },
 ]
 
 const NEWLINE = String.fromCharCode(10)

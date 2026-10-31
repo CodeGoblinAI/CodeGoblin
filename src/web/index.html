@@ -166,6 +166,12 @@
   .row.muted:hover { background: none; color: var(--muted); }
   #session-list .group { padding: 12px 16px 4px; }
 
+  .question { flex-direction: column; align-items: stretch; gap: 10px; }
+  .question .qlabel { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--gold); margin-right: 6px; }
+  .question .qoptions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .question .qcheck { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+  .question .qown { display: flex; gap: 8px; }
+  .question .qown input { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font: inherit; }
   .permission { margin-left: 68px; background: var(--panel); border: 1px solid var(--gold); border-radius: 8px; padding: 11px 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 13px; }
   .permission .ptext { flex: 1 1 230px; min-width: 0; overflow-wrap: anywhere; }
   .permission strong { color: var(--gold); }

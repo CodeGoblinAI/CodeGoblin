@@ -88,7 +88,8 @@ export type Ask = (tool: string, detail: string, cover: string, from?: string) =
  */
 // Starting a subagent and collecting its result change nothing themselves; what
 // a subagent then does is asked about call by call, the same as anything else.
-const HARMLESS = new Set(["read_file", "list_files", "grep", "glob", "todo_write", "skill", "task", "task_result"])
+// A question to the user is the opposite of acting without asking.
+const HARMLESS = new Set(["read_file", "list_files", "grep", "glob", "todo_write", "skill", "task", "task_result", "question"])
 
 const NEWLINE = String.fromCharCode(10)
 const RETURN = String.fromCharCode(13)
@@ -137,6 +138,8 @@ export function askedFor(tool: string, detail: string): string {
     return `${file} (${lines} ${lines === 1 ? "line" : "lines"})`
   }
   if (tool === "webfetch" && typeof args.url === "string") return args.url
+  if (tool === "websearch" && typeof args.query === "string") return `"${flat(args.query, 120)}"`
+  if (tool === "question" && typeof args.question === "string") return flat(args.question, 120)
   if (tool === "read_file" && file) return file
   return detail
 }
@@ -636,7 +639,7 @@ export class Permissions {
     // Planning refuses before anything is asked: the point is that nothing
     // changes until the plan is agreed. Looking still works - a read-only
     // command, or a page - so the plan can rest on what is actually there.
-    const onlyLooks = !this.needsConsent(tool) || tool === "webfetch" || (tool === "shell" && isReadOnlyCommand(commandOf(detail)))
+    const onlyLooks = !this.needsConsent(tool) || tool === "webfetch" || tool === "websearch" || (tool === "shell" && isReadOnlyCommand(commandOf(detail)))
     if (this.planning && !onlyLooks) {
       return {
         allowed: false,
