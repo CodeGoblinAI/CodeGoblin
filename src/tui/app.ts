@@ -8,6 +8,7 @@
  */
 import { ansi, theme, dim, invert, noInvert, applyTheme as paintTheme } from "./ansi"
 import { APPEARANCES, effectiveTheme, terminalLooksLight } from "../core/theme"
+import { LEADER_DEFAULTS, loadKeymap, type LeaderAction } from "./keybinds"
 import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
 import { THEMES } from "../core/theme"
 import { EFFORTS } from "../core/settings"
@@ -3127,22 +3128,27 @@ function changePermissionMode(mode: PermissionMode) {
  * Each is a shortcut for something a slash command already does, so nothing
  * here behaves differently from typing the command.
  */
-const LEADER: Record<string, { label: string; run: () => void | Promise<void> }> = {
-  m: { label: "model", run: () => openModelPicker() },
-  l: { label: "sessions", run: () => runQuick("/resume") },
-  n: { label: "new", run: () => runQuick("/clear") },
-  s: { label: "status", run: () => runQuick("/status") },
-  t: { label: "theme", run: () => { applyComposer({ text: "/theme ", cursor: 7 }, true); refreshPalette() } },
-  a: { label: "agents", run: () => runQuick("/agents") },
-  c: { label: "compact", run: () => runQuick("/compact") },
-  u: { label: "undo", run: () => runQuick("/undo") },
-  r: { label: "redo", run: () => runQuick("/redo") },
-  y: { label: "copy answer", run: () => runQuick("/copy last") },
-  x: { label: "export", run: () => runQuick("/export") },
-  e: { label: "editor", run: () => openEditor() },
-  g: { label: "timeline", run: () => { openTimeline(); render() } },
-  q: { label: "quit", run: () => shutdown() },
+const LEADER_RUN: Record<LeaderAction, () => void | Promise<void>> = {
+  model: () => openModelPicker(),
+  sessions: () => runQuick("/resume"),
+  new: () => runQuick("/clear"),
+  status: () => runQuick("/status"),
+  theme: () => { applyComposer({ text: "/theme ", cursor: 7 }, true); refreshPalette() },
+  agents: () => runQuick("/agents"),
+  compact: () => runQuick("/compact"),
+  undo: () => runQuick("/undo"),
+  redo: () => runQuick("/redo"),
+  copy: () => runQuick("/copy last"),
+  export: () => runQuick("/export"),
+  editor: () => openEditor(),
+  timeline: () => { openTimeline(); render() },
+  quit: () => shutdown(),
 }
+/** The leader and its letters: the defaults, with tui.json's keybinds over them (the fork's file). */
+const keymap = loadKeymap()
+// A binding it could not use is said once, rather than silently doing nothing.
+if (keymap.problems.length) status = "tui.json: " + keymap.problems[0]
+const leaderLabel = (action: LeaderAction) => LEADER_DEFAULTS.find((entry) => entry.action === action)!.label
 let leaderUntil = 0
 
 /** Runs a slash command as if typed, keeping whatever was being written. */
@@ -3194,18 +3200,19 @@ process.stdin.on("data", (chunk) => {
 
   for (const pressed of readKeys(chunk.toString())) {
     // ctrl+x arms the leader; the next letter picks the shortcut.
-    if (pressed.type === "ctrl" && pressed.value === "x" && !secret) {
+    if (pressed.type === "ctrl" && pressed.value === keymap.leader && !secret) {
       leaderUntil = Date.now() + 1500
-      status = "ctrl+x  " + Object.entries(LEADER).map(([key, entry]) => key + " " + entry.label).join(" · ")
+      status = "ctrl+" + keymap.leader + "  " + Object.entries(keymap.letters).map(([key, action]) => key + " " + leaderLabel(action)).join(" · ")
       render(); continue
     }
     if (leaderUntil) {
       const armed = Date.now() < leaderUntil
       leaderUntil = 0
-      if (armed && pressed.type === "char" && LEADER[pressed.value.toLowerCase()]) {
+      const action = pressed.type === "char" ? keymap.letters[pressed.value.toLowerCase()] : undefined
+      if (armed && action) {
         status = ""
         dialog = undefined
-        void LEADER[pressed.value.toLowerCase()]!.run()
+        void LEADER_RUN[action]()
         render(); continue
       }
       if (armed) { status = ""; render(); continue }
