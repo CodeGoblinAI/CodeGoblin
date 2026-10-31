@@ -1,5 +1,7 @@
 import { spawnSync as nodeSpawnSync } from "node:child_process"
 import { realpathSync } from "node:fs"
+import fsSync from "node:fs"
+import { inRepoCache } from "./repos"
 import fs from "node:fs/promises"
 import path from "node:path"
 
@@ -38,6 +40,16 @@ export const SKIP_DIRS = new Set([
   "node_modules", ".git", "dist", ".next", "build", "coverage",
   "output", ".playwright-cli", "_RECOVERED_LOCAL_2026-08-29",
 ])
+
+/**
+ * Where a read-only tool may look: the working directory, or a repository
+ * repo_clone put in CG-Next's own clone folder (given as its absolute path).
+ * Writing tools never use this - they stay inside the project.
+ */
+export function resolveReadable(root: string, target: string): string {
+  if (path.isAbsolute(target) && inRepoCache(target)) return path.resolve(target)
+  return resolveInside(root, target)
+}
 
 export function resolveInside(root: string, target: string): string {
   const absolute = path.resolve(root, target)
@@ -102,13 +114,13 @@ export const TOOLS: Tool[] = [
   {
     name: "read_file",
     concurrent: true,
-    description: "Read a UTF-8 text file, relative to the working directory.",
+    description: "Read a UTF-8 text file, relative to the working directory (or an absolute path inside a repository repo_clone fetched).",
     parameters: {
       type: "object",
       properties: { path: { type: "string", description: "File path relative to the working directory." } },
       required: ["path"],
     },
-    run: async (args, root) => clip(await fs.readFile(resolveInside(root, args.path), "utf8")),
+    run: async (args, root) => clip(await fs.readFile(resolveReadable(root, args.path), "utf8")),
   },
   {
     name: "list_files",
@@ -119,7 +131,7 @@ export const TOOLS: Tool[] = [
       properties: { path: { type: "string", description: "Directory path. Defaults to the working directory." } },
     },
     run: async (args, root) => {
-      const dir = resolveInside(root, args.path ?? ".")
+      const dir = resolveReadable(root, args.path ?? ".")
       const entries = await fs.readdir(dir, { withFileTypes: true })
       return clip(
         entries
@@ -273,12 +285,14 @@ export const EXTRA_TOOLS: Tool[] = [
       properties: {
         query: { type: "string", description: "Regular expression, case-insensitive." },
         include: { type: "string", description: "Optional glob to limit files, e.g. src/**/*.ts" },
+        path: { type: "string", description: "Optional folder to search instead: a subfolder, or a repository repo_clone fetched." },
       },
       required: ["query"],
     },
     run: async (args, root, signal) => {
       const { grepFiles, walkNote } = await import("./search")
-      const { matches, truncated, skipped, secret, total, end } = await grepFiles(root, String(args.query ?? ""), args.include, signal)
+      const base = typeof args.path === "string" && args.path ? resolveReadable(root, args.path) : root
+      const { matches, truncated, skipped, secret, total, end } = await grepFiles(base, String(args.query ?? ""), args.include, signal)
       const notSearched =
         (skipped.length ? NEWLINE + "not searched, too large: " + skipped.slice(0, 10).join(", ") : "") +
         (secret.length ? NEWLINE + `not searched, ${secret.length === 1 ? "it holds" : "they hold"} secrets: ${secret.slice(0, 10).join(", ")}${secret.length > 10 ? ", ..." : ""} (read_file asks the user first)` : "")
@@ -296,14 +310,18 @@ export const EXTRA_TOOLS: Tool[] = [
       "and {a,b} alternation.",
     parameters: {
       type: "object",
-      properties: { pattern: { type: "string", description: "e.g. src/**/*.ts or src/{tui,web}/*.ts" } },
+      properties: {
+        pattern: { type: "string", description: "e.g. src/**/*.ts or src/{tui,web}/*.ts" },
+        path: { type: "string", description: "Optional folder to search instead: a subfolder, or a repository repo_clone fetched." },
+      },
       required: ["pattern"],
     },
     run: async (args, root, signal) => {
       const { globFiles, walkNote } = await import("./search")
       const pattern = String(args.pattern ?? "*")
       const end = { stopped: false, capped: false }
-      const files = await globFiles(root, pattern, 200, signal, end)
+      const base = typeof args.path === "string" && args.path ? resolveReadable(root, args.path) : root
+      const files = await globFiles(base, pattern, 200, signal, end)
       const partway = walkNote(end) ? NEWLINE + walkNote(end) : ""
       // Naming the pattern back is the difference between "these files are not
       // here" and "this pattern found nothing". A bare "no files matched" reads
@@ -343,6 +361,50 @@ export const EXTRA_TOOLS: Tool[] = [
     run: async (args) => {
       const { fetchUrl } = await import("./webfetch")
       return clip(await fetchUrl(String(args.url ?? "")))
+    },
+  },
+  {
+    name: "repo_clone",
+    description:
+      "Clone (shallow) a public repository into CG-Next's own clone folder, to read its source - never into the project. " +
+      "Takes owner/repo, host/owner/repo or an https URL; returns the folder, which read_file, list_files, grep and glob " +
+      "(with path) can then read. Asks the user first. For research, not for changing anything.",
+    parameters: {
+      type: "object",
+      properties: {
+        repository: { type: "string", description: "owner/repo (GitHub), host/owner/repo, or an https URL." },
+        refresh: { type: "boolean", description: "Fetch the latest when it is already cloned." },
+        branch: { type: "string", description: "A branch or tag to clone instead of the default." },
+      },
+      required: ["repository"],
+    },
+    run: async (args, _root, signal) => {
+      const { cloneRepo } = await import("./repos")
+      return cloneRepo(String(args.repository ?? ""), { refresh: args.refresh === true, branch: typeof args.branch === "string" ? args.branch : undefined, signal })
+    },
+  },
+  {
+    name: "repo_overview",
+    concurrent: true,
+    description:
+      "Summarise a repository or folder: languages, package manager, likely entry points, docs and a two-level layout. " +
+      "Takes a cloned repository (owner/repo, as given to repo_clone) or a folder in the project.",
+    parameters: {
+      type: "object",
+      properties: { target: { type: "string", description: "owner/repo of a cloned repository, or a folder path (default: the project)." } },
+    },
+    run: async (args, root) => {
+      const { parseRepo, repoOverview } = await import("./repos")
+      const target = typeof args.target === "string" && args.target.trim() ? args.target.trim() : "."
+      let folder: string
+      try {
+        folder = resolveReadable(root, target)
+        if (!fsSync.existsSync(folder)) throw new Error("missing")
+      } catch {
+        folder = parseRepo(target).folder
+        if (!fsSync.existsSync(folder)) return `error: ${target} is neither a folder here nor a cloned repository - repo_clone it first`
+      }
+      return clip(repoOverview(folder))
     },
   },
   {

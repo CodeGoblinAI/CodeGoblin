@@ -38,6 +38,7 @@ export function systemPrompt(where: Where, platform: string = process.platform):
     "",
     "Tools: read_file, list_files, grep and glob to look around; write_file and edit_file to change",
     "things; shell to run commands; webfetch to read a page and websearch to search the web;",
+    "repo_clone and repo_overview to read another repository's source rather than guess at it;",
     "todo_write to keep a plan the user can see; skill to load one of the skills listed below; and,",
     "where the user can answer, question to ask them something. Tools from MCP servers are named",
     "mcp__server__tool.",
