@@ -60,6 +60,7 @@ import { History, describe as describeCheckpoint, nothingToDo } from "../core/un
 import { changesIn, summarise } from "../core/changes"
 import { THEMES, paletteOf } from "../core/theme"
 import * as settingsStore from "../core/settings"
+import { canOpenTerminal, endTerminal, startTerminal, terminalMessage, type TerminalSocket } from "./terminal"
 import { isDirectory, recentProjects, rememberProject, sameFolder } from "../core/projects"
 import { createWorktree, currentBranch, listWorktrees, localBranches, removeWorktree, repoRoot, switchBranch } from "../core/worktrees"
 import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
@@ -226,8 +227,32 @@ async function projectFiles(force = false): Promise<string[]> {
   return fileWalk
 }
 
-async function handle(request: Request): Promise<Response> {
+/** The xterm.js files the terminal panel loads, served from node_modules and nothing else. */
+const VENDOR: Record<string, { file: string; type: string }> = {
+  "/vendor/xterm.js": { file: "../../node_modules/@xterm/xterm/lib/xterm.js", type: "text/javascript; charset=utf-8" },
+  "/vendor/xterm.css": { file: "../../node_modules/@xterm/xterm/css/xterm.css", type: "text/css; charset=utf-8" },
+  "/vendor/addon-fit.js": { file: "../../node_modules/@xterm/addon-fit/lib/addon-fit.js", type: "text/javascript; charset=utf-8" },
+}
+
+async function handle(request: Request, server?: Bun.Server<TerminalSocket["data"]>): Promise<Response | undefined> {
   const url = new URL(request.url)
+
+  // The terminal: a WebSocket that must come from this page itself. Same
+  // origin as every other API call, and an Origin header is required - a
+  // browser always sends one on a WebSocket, so its absence means it is not
+  // this page asking.
+  if (url.pathname === "/api/terminal") {
+    if (!sameOrigin(request, url) || !request.headers.get("origin")) return json({ error: "refused: local same-origin requests only" }, 403)
+    if (!canOpenTerminal()) return json({ error: "too many terminals open" }, 429)
+    const cols = Number(url.searchParams.get("cols")) || 100
+    const rows = Number(url.searchParams.get("rows")) || 30
+    if (server?.upgrade(request, { data: { cwd: root, cols, rows } as TerminalSocket["data"] & { cols: number; rows: number } })) return undefined
+    return json({ error: "a terminal needs a WebSocket" }, 400)
+  }
+  if (VENDOR[url.pathname]) {
+    const entry = VENDOR[url.pathname]!
+    return new Response(file(fileURLToPath(new URL(entry.file, import.meta.url))), { headers: { "content-type": entry.type, "cache-control": "max-age=3600" } })
+  }
 
   if (url.pathname.startsWith("/api/") && !sameOrigin(request, url)) {
     return json({ error: "refused: local same-origin requests only" }, 403)
@@ -1081,7 +1106,20 @@ async function handle(request: Request): Promise<Response> {
 let server
 for (const port of [4400, 4401, 4402, 4403, 0]) {
   try {
-    server = Bun.serve({ port, hostname: "127.0.0.1", idleTimeout: 255, fetch: handle })
+    server = Bun.serve<TerminalSocket["data"]>({
+      port,
+      hostname: "127.0.0.1",
+      idleTimeout: 255,
+      fetch: handle as (request: Request, server: Bun.Server<TerminalSocket["data"]>) => Promise<Response>,
+      websocket: {
+        open(socket) {
+          const size = socket.data as TerminalSocket["data"] & { cols?: number; rows?: number }
+          startTerminal(socket as unknown as TerminalSocket, size.cols, size.rows)
+        },
+        message(socket, message) { terminalMessage(socket as unknown as TerminalSocket, message as string) },
+        close(socket) { endTerminal(socket as unknown as TerminalSocket) },
+      },
+    })
     break
   } catch (error) {
     const inUse = error instanceof Error && /in use|EADDRINUSE/i.test(error.message)

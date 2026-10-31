@@ -1682,6 +1682,11 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/terminal") {
+    if (!terminalPanel.hidden && argument === "close") closeTerminal()
+    else void openTerminal()
+    return true
+  }
   if (name === "/project" || name === "/worktree" || name === "/branch") {
     const words = argument.split(/\s+/).filter(Boolean)
     if (name === "/project" && argument) { await projectAction("/api/project", { path: argument }); return true }
@@ -2626,6 +2631,85 @@ const paletteEl = document.createElement("div")
 paletteEl.className = "palette"
 paletteEl.hidden = true
 document.querySelector(".composer").prepend(paletteEl)
+
+/**
+ * /terminal: a real shell in the project folder, drawn with xterm.js. The
+ * scripts load the first time it opens, so the page does not pay for them
+ * otherwise. Closing the panel ends the shell.
+ */
+const terminalPanel = document.getElementById("terminal-panel")
+let terminal = null
+let terminalSocket = null
+let terminalFit = null
+
+function loadOnce(tag, attrs) {
+  return new Promise((resolve, reject) => {
+    const key = attrs.src || attrs.href
+    if (document.querySelector(`[data-vendor="${key}"]`)) return resolve()
+    const el = document.createElement(tag)
+    Object.assign(el, attrs)
+    el.dataset.vendor = key
+    el.onload = () => resolve()
+    el.onerror = () => reject(new Error("could not load " + key))
+    document.head.appendChild(el)
+  })
+}
+
+async function openTerminal() {
+  if (!terminalPanel.hidden && terminalSocket) { terminal?.focus(); return }
+  terminalPanel.hidden = false
+  try {
+    await loadOnce("link", { rel: "stylesheet", href: "/vendor/xterm.css" })
+    await loadOnce("script", { src: "/vendor/xterm.js" })
+    await loadOnce("script", { src: "/vendor/addon-fit.js" })
+  } catch (error) {
+    terminalPanel.hidden = true
+    note("The terminal could not load: " + error.message)
+    return
+  }
+  const view = document.getElementById("terminal-view")
+  if (!terminal) {
+    terminal = new window.Terminal({ fontSize: 13, cursorBlink: true, convertEol: false, scrollback: 5000, theme: { background: "#0b0e0c" } })
+    terminalFit = new window.FitAddon.FitAddon()
+    terminal.loadAddon(terminalFit)
+    terminal.open(view)
+    terminal.onData((data) => { if (terminalSocket?.readyState === 1) terminalSocket.send(JSON.stringify({ type: "input", data })) })
+    new ResizeObserver(() => {
+      if (terminalPanel.hidden) return
+      terminalFit.fit()
+      if (terminalSocket?.readyState === 1) terminalSocket.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }))
+    }).observe(view)
+  }
+  terminal.clear()
+  terminalFit.fit()
+  const project = projectData?.current?.path || ""
+  terminalPanel.querySelector(".term-cwd").textContent = project
+  const socket = new WebSocket(`ws://${location.host}/api/terminal?cols=${terminal.cols}&rows=${terminal.rows}`)
+  terminalSocket = socket
+  socket.onmessage = (event) => {
+    let message
+    try { message = JSON.parse(event.data) } catch { return }
+    if (message.type === "output") terminal.write(message.data)
+    if (message.type === "exit") terminal.write("\r\n[the shell exited - close and reopen the terminal for a new one]\r\n")
+  }
+  socket.onclose = () => { if (terminalSocket === socket) terminalSocket = null }
+  socket.onerror = () => note("The terminal could not connect.")
+  terminal.focus()
+}
+
+function closeTerminal() {
+  terminalPanel.hidden = true
+  if (terminalSocket) { try { terminalSocket.close() } catch {} terminalSocket = null }
+  input.focus()
+}
+document.getElementById("terminal-close").onclick = () => closeTerminal()
+document.addEventListener("keydown", (event) => {
+  if (event.ctrlKey && event.key === "`") {
+    event.preventDefault()
+    if (terminalPanel.hidden) void openTerminal()
+    else closeTerminal()
+  }
+})
 
 /** Only the model list behind /model and /favourite, after a star changes its order. */
 async function refreshModelPalette() {

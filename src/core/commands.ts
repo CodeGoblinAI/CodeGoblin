@@ -67,6 +67,7 @@ export const COMMANDS = [
   { name: "/project", description: "switch project (web): recent projects, or /project <folder>" },
   { name: "/worktree", description: "git worktrees: /worktree lists them, /worktree new <name> makes one on cg/<name>" },
   { name: "/branch", description: "git branches: /branch lists them, /branch <name> switches (nothing uncommitted)" },
+  { name: "/terminal", description: "a shell in the project folder, in the browser (ctrl+`)" },
   { name: "/resume", description: "reopen a saved conversation" },
   { name: "/compact", description: "summarise the conversation to free context" },
   { name: "/undo", description: "put back the files the last turn changed" },
@@ -232,6 +233,8 @@ export function runCommand(text: string): CommandResult {
     }
     case "/branch":
       return argument ? { kind: "branch", name: argument } : { kind: "branch" }
+    case "/terminal":
+      return { kind: "message", text: "/terminal is the browser's built-in shell; here, ! runs a command (!git status), or use another terminal tab" }
     case "/status":
       return { kind: "status" }
     case "/usage":
