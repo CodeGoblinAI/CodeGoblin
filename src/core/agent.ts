@@ -56,6 +56,8 @@ export type Message = {
   stopped?: boolean
   /** A command the person ran with `!`; shown as its output, not as something they said. Metadata only. */
   typed?: boolean
+  /** When it was written, for /timestamps. Metadata only - never sent. */
+  at?: number
 }
 
 function continuationContent(message: Message) {

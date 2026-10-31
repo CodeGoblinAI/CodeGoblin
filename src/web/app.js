@@ -644,12 +644,23 @@ function emptyState() {
   thread.innerHTML = '<div class="empty-hint"><h1>What should we work on?</h1><p>Ask about your code. Use <code>/</code> for commands or <code>+</code> to add context.</p></div>'
 }
 
-function turn(kind, text, images) {
+/** "14:05", or "Oct 30 14:05" for another day. Mirrors sessions.clockTime. */
+function clockTime(ms) {
+  const at = new Date(ms)
+  const time = String(at.getHours()).padStart(2, "0") + ":" + String(at.getMinutes()).padStart(2, "0")
+  return at.toDateString() === new Date().toDateString() ? time : at.toLocaleString("en-US", { month: "short", day: "numeric" }) + " " + time
+}
+
+function turn(kind, text, images, at = Date.now()) {
   if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
   const wrap = document.createElement("div")
   wrap.className = "turn " + (kind === "user" ? "user" : "agent")
-  wrap.innerHTML = '<div class="who">' + (kind === "user" ? "you" : "goblin") + '</div><div class="body"></div>'
+  wrap.innerHTML = '<div class="who">' + (kind === "user" ? "you" : "goblin") + '<span class="at"></span></div><div class="body"></div>'
+  // /timestamps shows it; it is always there, so turning it on needs no redraw.
+  if (at) { wrap.dataset.at = String(at); wrap.querySelector(".at").textContent = clockTime(at) }
   const body = wrap.querySelector(".body")
+  // A folded answer opens with a click, and closes with another.
+  if (kind !== "user") body.addEventListener("click", () => { if (document.body.classList.contains("fold-answers")) wrap.classList.toggle("unfolded") })
   if (kind === "user") body.textContent = text
   else body.innerHTML = markdown(text)
   // The transcript shows what was sent, so a question about a picture still
@@ -1076,8 +1087,8 @@ async function openSession(id) {
     if (data.hiddenMessages || data.archived) note(earlierNotice(data.hiddenMessages, data.archived))
     for (const m of data.session.messages) {
       if (m.role === "user" && m.typed) typedRow(m.display || m.content, true)
-      else if (m.role === "user") turn("user", m.display || m.content)
-      else if (m.role === "assistant" && m.content) turn("agent", m.content)
+      else if (m.role === "user") turn("user", m.display || m.content, undefined, m.at)
+      else if (m.role === "assistant" && m.content) turn("agent", m.content, undefined, m.at)
       if (m.stopped) turn("agent", "_stopped_")
     }
     if (!thread.children.length) emptyState()
@@ -1220,6 +1231,28 @@ async function chooseAgent(name = "") {
   if (!setModel(data.model)) throw new Error("Agent model unavailable; previous profile kept")
   currentAgent = data.agent
   note("Agent: " + (currentAgent || "default") + " · " + data.model)
+}
+
+/** /timeline: your messages, newest first; choosing one scrolls the conversation to it. */
+function openTimeline() {
+  const asked = [...thread.querySelectorAll(".turn.user")].reverse()
+  if (!asked.length) { note("Nothing to jump to yet."); return }
+  const modal = makeDialog("Jump to a message")
+  for (const wrap of asked) {
+    const button = document.createElement("button")
+    button.className = "dialog-action"
+    const text = (wrap.querySelector(".body")?.textContent || "").replace(/\s+/g, " ").slice(0, 90)
+    button.textContent = (wrap.dataset.at ? clockTime(Number(wrap.dataset.at)) + " · " : "") + text
+    button.onclick = () => {
+      modal.close()
+      thread.style.scrollBehavior = "auto"
+      wrap.scrollIntoView({ block: "start" })
+      thread.style.scrollBehavior = ""
+      wrap.classList.add("flash")
+      setTimeout(() => wrap.classList.remove("flash"), 1200)
+    }
+    modal.append(button)
+  }
 }
 
 async function openAgentsDialog() {
@@ -1706,6 +1739,18 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/timestamps") {
+    const on = document.body.classList.toggle("show-times")
+    note(on ? "Showing when each message was written." : "Timestamps hidden.")
+    return true
+  }
+  if (name === "/fold") {
+    const on = document.body.classList.toggle("fold-answers")
+    for (const open of thread.querySelectorAll(".turn.unfolded")) open.classList.remove("unfolded")
+    note(on ? "Answers folded to their first lines - click one to open it, /fold to unfold all." : "Answers shown in full.")
+    return true
+  }
+  if (name === "/timeline") { openTimeline(); return true }
   // The browser's composer is already a full editor.
   if (name === "/editor") { note("The message box here is already an editor - Shift+Enter adds a line. /editor opens your own editor in the terminal app."); return true }
   if (name === "/terminal") {

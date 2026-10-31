@@ -957,9 +957,11 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
 
     session.messages.push(
       mentioned.files.length || images.length || invoked || whole !== text
-        ? { role: "user", content: mentioned.content, display: text, images }
-        : { role: "user", content: text },
+        ? { role: "user", content: mentioned.content, display: text, images, at: Date.now() }
+        : { role: "user", content: text, at: Date.now() },
     )
+    // Everything after it is this turn's; stamped when the turn is saved, for /timestamps.
+    const turnFrom = session.messages.length
 
     // Server-sent events: the browser gets the same event stream the TUI sees.
     const stream = new ReadableStream({
@@ -1066,6 +1068,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
           }
           // Committed before saving, so the turn's undo checkpoint is saved with it.
           edits.commit(root)
+          sessions.stampNew(session.messages, turnFrom)
           await saveReviewSession(session)
           if (session.messages.at(-1)?.stopped) send({ type: "stopped" })
           send({ type: "saved", id: session.id, title: session.title })

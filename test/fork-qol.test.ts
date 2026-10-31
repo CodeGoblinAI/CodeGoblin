@@ -43,3 +43,26 @@ describe("/editor", () => {
     expect(COMMANDS.filter((c) => c.name === "/editor").length).toBe(1)
   })
 })
+
+describe("timestamps, fold and timeline", () => {
+  test("a message's time reads as a clock today and with the date otherwise", async () => {
+    const { clockTime } = await import("../src/core/sessions")
+    const now = new Date(2026, 9, 31, 15, 0).getTime()
+    expect(clockTime(new Date(2026, 9, 31, 9, 5).getTime(), now)).toBe("09:05")
+    expect(clockTime(new Date(2026, 9, 30, 22, 41).getTime(), now)).toBe("Oct 30 22:41")
+  })
+
+  test("a turn's new messages are stamped; earlier ones keep their own time", async () => {
+    const { stampNew } = await import("../src/core/sessions")
+    const messages: { at?: number }[] = [{ at: 1 }, {}, {}]
+    stampNew(messages, 1, 99)
+    expect(messages.map((m) => m.at)).toEqual([1, 99, 99])
+  })
+
+  test("the commands", () => {
+    expect(runCommand("/timeline")).toEqual({ kind: "timeline" })
+    expect(runCommand("/jump")).toEqual({ kind: "timeline" })
+    expect(runCommand("/fold")).toEqual({ kind: "fold" })
+    expect(runCommand("/timestamps")).toEqual({ kind: "timestamps" })
+  })
+})

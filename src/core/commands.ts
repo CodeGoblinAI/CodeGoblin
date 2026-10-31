@@ -51,6 +51,9 @@ export type CommandResult =
   | { kind: "worktree"; action: "list" | "new"; name?: string }
   | { kind: "branch"; name?: string }
   | { kind: "editor" }
+  | { kind: "timeline" }
+  | { kind: "fold" }
+  | { kind: "timestamps" }
   | { kind: "connect"; provider?: string }
   | { kind: "disconnect"; provider?: string }
   | { kind: "none" }
@@ -69,6 +72,9 @@ export const COMMANDS = [
   { name: "/worktree", description: "git worktrees: /worktree lists them, /worktree new <name> makes one on cg/<name>" },
   { name: "/branch", description: "git branches: /branch lists them, /branch <name> switches (nothing uncommitted)" },
   { name: "/terminal", description: "a shell in the project folder, in the browser (ctrl+`)" },
+  { name: "/timeline", description: "jump to an earlier message in this conversation - ctrl+x g" },
+  { name: "/fold", description: "fold every answer to its first lines, or unfold them" },
+  { name: "/timestamps", description: "show or hide when each message was written" },
   { name: "/editor", description: "write the prompt in your editor ($VISUAL / $EDITOR, else Notepad) - ctrl+x e" },
   { name: "/resume", description: "reopen a saved conversation" },
   { name: "/compact", description: "summarise the conversation to free context" },
@@ -110,6 +116,7 @@ export const COMMAND_ALIASES: Record<string, string> = {
   "/exit": "/quit", "/q": "/quit",
   "/favorite": "/favourite", "/fav": "/favourite", "/star": "/favourite",
   "/projects": "/project", "/worktrees": "/worktree", "/branches": "/branch",
+  "/jump": "/timeline", "/toggle-fold": "/fold", "/toggle-timestamps": "/timestamps",
   "/credits": "/balance",
   "/market": "/plugins", "/mcp-market": "/plugins", "/skills-market": "/plugins",
   "/upgrade": "/update", "/version": "/update", "/orgs": "/org", "/switch-org": "/org",
@@ -236,6 +243,12 @@ export function runCommand(text: string): CommandResult {
       return argument ? { kind: "branch", name: argument } : { kind: "branch" }
     case "/editor":
       return { kind: "editor" }
+    case "/timeline":
+      return { kind: "timeline" }
+    case "/fold":
+      return { kind: "fold" }
+    case "/timestamps":
+      return { kind: "timestamps" }
     case "/terminal":
       return { kind: "message", text: "/terminal is the browser's built-in shell; here, ! runs a command (!git status), or use another terminal tab" }
     case "/status":

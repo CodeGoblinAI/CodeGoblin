@@ -177,7 +177,16 @@ type Entry = {
   /** Thinking only: when the first and the latest reasoning arrived, for "thought for Ns". */
   started?: number
   last?: number
+  /** When it was written, for /timestamps. */
+  at?: number
 }
+/** /fold: every answer drawn as its first lines. A view, not a setting. */
+let foldAnswers = false
+/** /timestamps: when each message was written, beside who wrote it. */
+let showTimes = false
+/** /timeline: the entry to bring to the top of the screen on the next frame. */
+let jumpTo: Entry | undefined
+const FOLDED_LINES = 3
 /** Ctrl+O: finished thinking shown in full rather than folded to one line. A view, not a setting. */
 let expandThinking = false
 let transcript: Entry[] = []
@@ -343,8 +352,8 @@ function fromMessages(list: Message[]): Entry[] {
   const out: Entry[] = []
   for (const message of list) {
     if (message.role === "user" && message.typed) out.push({ kind: "tool", state: "done", text: (message.display ?? message.content).replace(/^! /, "$ ") })
-    else if (message.role === "user") out.push({ kind: "user", text: message.content })
-    else if (message.role === "assistant" && message.content) out.push({ kind: "agent", text: message.content })
+    else if (message.role === "user") out.push({ kind: "user", text: message.display ?? message.content, at: message.at })
+    else if (message.role === "assistant" && message.content) out.push({ kind: "agent", text: message.content, at: message.at })
     if (message.stopped) out.push({ kind: "tool", text: "stopped", state: "failed" })
   }
   return out
@@ -614,7 +623,8 @@ const drawnRows = new WeakMap<Entry, { key: string; rows: string[] }>()
 function entryLines(entry: Entry, width: number): string[] {
   const key = [width, settings.theme, settings.thinking, entry.kind, entry.state ?? "", entry.by ?? selection.provider.label, entry.text.length,
     // Thinking folds once it is finished, and Ctrl+O flips every fold.
-    entry.kind === "thinking" ? String(expandThinking) + (entry === transcript.at(-1) && streaming) : ""].join("|")
+    entry.kind === "thinking" ? String(expandThinking) + (entry === transcript.at(-1) && streaming) : "",
+    entry.kind === "agent" ? String(foldAnswers) : "", showTimes && entry.at ? sessions.clockTime(entry.at) : ""].join("|")
   const cached = drawnRows.get(entry)
   if (cached && cached.key === key) return cached.rows
   const rows = drawEntry(entry, width)
@@ -678,13 +688,18 @@ function drawEntry(entry: Entry, width: number): string[] {
     // than a call can take arguments.
     const block = wrapped.reduce((widest, line) => Math.max(widest, displayWidth(line)), 3)
     const indent = " ".repeat(Math.max(2, width - block - 4))
-    out.push(accent + indent + padStartToWidth("you", block + 2) + ansi.reset)
+    const who = showTimes && entry.at ? sessions.clockTime(entry.at) + " · you" : "you"
+    out.push(accent + indent + padStartToWidth(who, block + 2) + ansi.reset)
     for (const line of wrapped) out.push(indent + theme.text + padToWidth(line, block) + ansi.reset + accent + " |" + ansi.reset)
     out.push("")
     return out
   }
-  out.push(accent + "  " + (entry.by ?? selection.provider.label.toLowerCase()) + ansi.reset)
-  for (const line of renderMarkdown(entry.text, width)) out.push(accent + "  | " + ansi.reset + line)
+  out.push(accent + "  " + (entry.by ?? selection.provider.label.toLowerCase()) + (showTimes && entry.at ? dim + " · " + sessions.clockTime(entry.at) + ansi.reset : "") + ansi.reset)
+  const rendered = renderMarkdown(entry.text, width)
+  // /fold keeps the start of each answer; the rest is a line away.
+  const shown = foldAnswers && rendered.length > FOLDED_LINES + 1 ? rendered.slice(0, FOLDED_LINES) : rendered
+  for (const line of shown) out.push(accent + "  | " + ansi.reset + line)
+  if (shown !== rendered) out.push(accent + "  | " + ansi.reset + dim + "… " + (rendered.length - FOLDED_LINES) + " more lines - /fold unfolds" + ansi.reset)
   out.push("")
   return out
 }
@@ -702,6 +717,8 @@ function render() {
   const main = railShown ? cols - RAIL_WIDTH - 1 : cols
   const width = Math.max(20, main - 6)
   const lines: string[] = []
+  /** Where /timeline's chosen message starts, when one was chosen. */
+  let jumpLine: number | undefined
 
   if (transcript.length === 0) {
     const wide = main >= WORDMARK_WIDTH + 4
@@ -718,7 +735,10 @@ function render() {
       lines.push(dim + "  " + earlierNotice(leftOut, historyArchived).slice(0, width) + ansi.reset)
       lines.push("")
     }
-    for (const entry of drawn) for (const line of entryLines(entry, width)) lines.push(line)
+    for (const entry of drawn) {
+      if (entry === jumpTo) jumpLine = lines.length
+      for (const line of entryLines(entry, width)) lines.push(line)
+    }
   }
 
   const planLines: string[] = []
@@ -776,6 +796,8 @@ function render() {
   const room = Math.max(1, rows - composerHeight - 1)
 
   const maxScroll = Math.max(0, lines.length - room)
+  // /timeline: the chosen message at the top of the screen, once.
+  if (jumpLine !== undefined) { scroll = Math.max(0, lines.length - room - jumpLine); jumpTo = undefined }
   scroll = Math.min(scroll, maxScroll)
   const cut = lines.length - room - scroll
   const body = lines.length > room ? lines.slice(Math.max(0, cut), Math.max(0, cut) + room) : lines
@@ -1740,6 +1762,18 @@ function openModelPicker(selectedValue = selection.provider.id + "/" + selection
   })
 }
 
+/** /timeline: your messages, newest first; choosing one scrolls it to the top. */
+function openTimeline() {
+  const drawn = transcript.length > TRANSCRIPT_WINDOW ? transcript.slice(-TRANSCRIPT_WINDOW) : transcript
+  const asked = drawn.map((entry, index) => ({ entry, index })).filter(({ entry }) => entry.kind === "user").reverse()
+  if (!asked.length) { status = "nothing to jump to yet"; return }
+  dialog = Dialogs.open("timeline", "Jump to a message", asked.map(({ entry, index }) => ({
+    label: entry.text.replace(/\s+/g, " ").slice(0, 70),
+    hint: entry.at ? sessions.clockTime(entry.at) : undefined,
+    value: String(transcript.length - drawn.length + index),
+  })), { size: "large", footer: "enter jumps there . esc closes" })
+}
+
 /** Stars or unstars a model; the change is written straight to the shared settings file. */
 async function starModel(id: string) {
   try {
@@ -1915,6 +1949,10 @@ async function chooseInDialog() {
     refreshPalette()
     render()
     return
+  }
+  if (dialog.kind === "timeline") {
+    jumpTo = transcript[Number(row.value)]
+    closeDialog(); render(); return
   }
   if (dialog.kind === "model-picker") {
     const next = resolveSelection(row.value)
@@ -2409,6 +2447,20 @@ async function send() {
       openEditor()
       return
     }
+    if (result.kind === "fold") {
+      foldAnswers = !foldAnswers
+      status = foldAnswers ? "answers folded to their first lines - /fold unfolds" : "answers shown in full"
+      render(); return
+    }
+    if (result.kind === "timestamps") {
+      showTimes = !showTimes
+      status = showTimes ? "showing when each message was written" : "timestamps hidden"
+      render(); return
+    }
+    if (result.kind === "timeline") {
+      openTimeline()
+      render(); return
+    }
     if (result.kind === "project") {
       status = "the terminal works in the folder it started in - run cgn in another folder, or use /project in the web app"
       render(); return
@@ -2683,10 +2735,10 @@ async function send() {
   pendingImages = []
   messages.push(
     mentioned.files.length || whole !== text || images.length
-      ? { role: "user", content: mentioned.content, display: text, images }
-      : { role: "user", content: text },
+      ? { role: "user", content: mentioned.content, display: text, images, at: Date.now() }
+      : { role: "user", content: text, at: Date.now() },
   )
-  transcript.push({ kind: "user", text })
+  transcript.push({ kind: "user", text, at: Date.now() })
   if (mentioned.files.length) transcript.push({ kind: "tool", text: "attached " + mentioned.files.join(", ") })
   if (pasted.length) transcript.push({ kind: "tool", text: "attached " + pasted.join(", ") })
   // Attaching a picture to a model that cannot see one is a mistake worth
@@ -2707,6 +2759,8 @@ async function send() {
   let current: Entry | undefined
   turn = new AbortController()
   const turnStarted = Date.now()
+  // The user message is already pushed; everything from it on is this turn's.
+  const turnFrom = Math.max(0, messages.length - 1)
   // Every stop path must wake consent, not only the Ctrl+S interrupt path.
   turn.signal.addEventListener("abort", cancelPending, { once: true })
   // Everything this turn writes is captured under one checkpoint, so /undo
@@ -2757,7 +2811,7 @@ async function send() {
       }
       if (event.type === "text") {
         if (!current || current.kind !== "agent") {
-          current = { kind: "agent", text: "", by: selection.provider.label.toLowerCase() }
+          current = { kind: "agent", text: "", by: selection.provider.label.toLowerCase(), at: Date.now() }
           transcript.push(current)
         }
         current.text += event.delta
@@ -2859,6 +2913,7 @@ async function send() {
     stopSpinner()
     turn = undefined
     edits.commit(process.cwd())
+    sessions.stampNew(messages, turnFrom)
     session.messages = messages
     session.spend = spend
     session.review = edits.reviewState(process.cwd())
@@ -3037,6 +3092,7 @@ const LEADER: Record<string, { label: string; run: () => void | Promise<void> }>
   y: { label: "copy answer", run: () => runQuick("/copy last") },
   x: { label: "export", run: () => runQuick("/export") },
   e: { label: "editor", run: () => openEditor() },
+  g: { label: "timeline", run: () => { openTimeline(); render() } },
   q: { label: "quit", run: () => shutdown() },
 }
 let leaderUntil = 0

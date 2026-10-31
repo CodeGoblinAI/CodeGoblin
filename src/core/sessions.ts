@@ -170,6 +170,20 @@ export async function load(id: string): Promise<Session | undefined> {
   }
 }
 
+/** "14:05", or "Oct 30 14:05" for another day - when a message was written. */
+export function clockTime(ms: number, now = Date.now()): string {
+  const at = new Date(ms)
+  const time = String(at.getHours()).padStart(2, "0") + ":" + String(at.getMinutes()).padStart(2, "0")
+  const today = new Date(now)
+  if (at.toDateString() === today.toDateString()) return time
+  return at.toLocaleString("en-US", { month: "short", day: "numeric" }) + " " + time
+}
+
+/** Stamps the messages a turn added, so /timestamps has something to show after a resume. */
+export function stampNew(messages: { at?: number }[], from: number, now = Date.now()) {
+  for (const message of messages.slice(from)) message.at ??= now
+}
+
 /**
  * A long paste, folded to a token in the composer the way the fork shows it:
  * "[Pasted ~42 lines]", with " #2" when another paste of the same length is
