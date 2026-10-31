@@ -1275,6 +1275,8 @@ function connectForm(provider) {
   const field = box.querySelector(".pkey")
   const save = async () => {
     const key = field.value
+    // Enter in an empty field is a slip, not a request: no error, no round trip.
+    if (!key.trim()) { field.placeholder = "paste the key first, then Enter"; field.focus(); return }
     field.value = ""
     const result = await fetch("/api/connect", {
       method: "POST",
@@ -1771,17 +1773,11 @@ async function runCommand(text) {
   if (name === "/connect") {
     if (argument === "cursor") { note("Use /login cursor for SDK user-plan sign-in, or /connect cursor-api for an existing key"); return true }
     if (argument) { connectForm(argument); return true }
-    const data = await fetch("/api/connect").then((r) => r.json()).catch(() => null)
-    if (!data) { note("could not reach the server"); return true }
-    const NEWLINE = String.fromCharCode(10)
-    note(
-      (data.connections.length
-        ? data.connections
-            .map((c) => c.id.padEnd(18) + c.type.padEnd(7) + c.source + (c.hint ? "  " + c.hint : ""))
-            .join(NEWLINE)
-        : "nothing connected yet") +
-        NEWLINE + NEWLINE + "/connect <provider> to add one - stored in " + data.store,
-    )
+    // Bare /connect opens the list to pick from, as /model and /theme do;
+    // each row says whether that provider is already connected.
+    input.value = "/connect "
+    refreshPalette()
+    input.focus()
     return true
   }
 
@@ -2483,6 +2479,8 @@ document.querySelector(".composer").prepend(paletteEl)
 
 async function loadCommands() {
   paletteData = await fetch("/api/commands").then((r) => r.json()).catch(() => paletteData)
+  // Someone quick types "/connect " before this arrives; show what it completes to now.
+  if (input.value.trim().startsWith("/")) refreshPalette()
   if (paletteData.project) document.getElementById("project-name").textContent = paletteData.project
   if (paletteData.settings) {
     webSettings = paletteData.settings
@@ -2530,7 +2528,8 @@ function itemsFor(text, cursor) {
         hint: entry.label + "  " + (entry.connected ? "connected" : entry.about),
       }))
       .filter((item) => !q || item.value.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q))
-      .slice(0, 9)
+      // All of them: the list scrolls, and a provider past a cap could only be found by name.
+      .slice(0, 50)
   }
   if ((head === "/settings" || head === "/set") && hasArgument) {
     const options = modelSettings()
