@@ -39,6 +39,8 @@ import {
   pickerSection,
   refreshExperientialModels,
   refreshLiveModels,
+  refreshCatalog,
+  activateCatalog,
   CONNECTABLE,
 } from "../core/providers"
 import { apiKey } from "../core/auth"
@@ -136,6 +138,8 @@ const mcp = McpManager.fromConfig()
 // Experiential Labs' list changes often; read it live once, without holding up startup.
 void refreshExperientialModels()
 void refreshLiveModels(apiKey)
+// models.dev: every provider for /connect, and the ones with a key in the picker.
+void refreshCatalog(apiKey)
 void mcp.start()
 
 /**
@@ -681,6 +685,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     if (!provider) return json({ message: "which provider?" }, 400)
     try {
       await auth.connect(provider, String(body.key ?? ""))
+      // A models.dev provider joins the picker as soon as it has a key.
+      activateCatalog(auth.apiKey)
       return json({ message: "connected " + provider })
     } catch (error) {
       return json({ message: error instanceof Error ? error.message : "could not store the key" }, 400)

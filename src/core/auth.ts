@@ -2,6 +2,7 @@ import fs from "node:fs"
 import fsp from "node:fs/promises"
 import path from "node:path"
 import { Global } from "../platform/paths"
+import { catalogEnv } from "./catalog"
 
 /**
  * Where API keys live.
@@ -85,6 +86,8 @@ export function apiKey(providerId: string): string | undefined {
   if (providerId === "local" || providerId === "llama" || providerId === "claude-code" || providerId === "codex" || providerId === "cursor") return ""
   const fromEnv = process.env[envName(providerId)]
   if (fromEnv) return fromEnv
+  // A models.dev provider's key under the name the catalog gives (GOOGLE_GENERATIVE_AI_API_KEY and so on).
+  for (const name of catalogEnv(providerId)) if (process.env[name]) return process.env[name]
 
   const entry = readStore()[providerId]
   if (entry?.type === "api" && typeof entry.key === "string" && entry.key) return entry.key
@@ -152,5 +155,5 @@ export function storePath(): string {
 
 /** The variable that would supply this provider's key without storing it. */
 export function envVariable(providerId: string): string {
-  return envName(providerId)
+  return catalogEnv(providerId)[0] ?? envName(providerId)
 }

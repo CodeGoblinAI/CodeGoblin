@@ -18,12 +18,14 @@ import { resolveStartupModel } from "../core/model-selection"
 import { isLiveCommand } from "./live-commands"
 import { footerHeight } from "./layout"
 import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
-import { refreshExperientialModels, refreshLiveModels, selectionsByKind } from "../core/providers"
+import { activateCatalog, refreshCatalog, refreshExperientialModels, refreshLiveModels, selectionsByKind } from "../core/providers"
 import { apiKey as storedKey } from "../core/auth"
 
 // Model lists that change often are read live once, without holding up startup.
 void refreshExperientialModels()
 void refreshLiveModels(storedKey)
+// models.dev: every provider for /connect, and the ones with a key in the picker.
+void refreshCatalog(storedKey).then(() => { refreshConnected(); render() })
 import { isLocalChat } from "../core/local-provider"
 import { localCommand } from "../core/local-command"
 import { runTypedCommand, typedCommand } from "../core/user-shell"
@@ -2207,6 +2209,8 @@ async function send() {
     secret = undefined
     try {
       await connect(provider, typed)
+      // A models.dev provider joins the picker as soon as it has a key.
+      activateCatalog(apiKey)
       refreshConnected()
       // The key this terminal sends is read once at startup and on model
       // switches - storing one without re-reading it left every later prompt

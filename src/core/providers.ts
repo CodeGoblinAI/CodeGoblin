@@ -20,6 +20,7 @@ import { localProvider } from "./local-provider"
 import { contextFor, installedModels, readPrefs, toolsFor } from "./local-runtime"
 import { cachedExperientialModels, fetchExperientialModels } from "./experiential"
 import { EFFORT_NAMES } from "./settings"
+import { asProvider, loadCatalog, rememberCatalogEnv, type CatalogProvider } from "./catalog"
 
 export type Capabilities = {
   input?: { text?: boolean; image?: boolean; audio?: boolean }
@@ -438,6 +439,44 @@ export async function discoverModels(provider: Provider, key: string, fetcher: t
   } catch { return false }
 }
 
+/** models.dev providers, loaded once per run; the ones with a key join PROVIDERS. */
+let catalog: CatalogProvider[] = []
+let catalogLoad: Promise<void> | undefined
+
+/**
+ * Loads the models.dev catalog (cached for a day), offers every provider in it
+ * to /connect, and adds the ones that have a key to the picker. Never holds up
+ * startup; a catalog that cannot be had leaves the built-ins as they are.
+ */
+export function refreshCatalog(keyFor: (id: string) => string | undefined, load: () => Promise<CatalogProvider[]> = loadCatalog): Promise<void> {
+  catalogLoad ??= load().then((loaded) => {
+    catalog = loaded
+    rememberCatalogEnv(loaded)
+    for (const entry of loaded) {
+      if (PROVIDERS[entry.id] || CONNECTABLE.some((each) => each.id === entry.id)) continue
+      CONNECTABLE.push({ id: entry.id, label: entry.label, about: `${entry.models.length} model${entry.models.length === 1 ? "" : "s"}, from models.dev` })
+    }
+    activateCatalog(keyFor)
+  }).catch(() => {})
+  return catalogLoad
+}
+
+/** Adds every catalog provider that now has a key - after /connect stores one, say. Returns the ids added. */
+export function activateCatalog(keyFor: (id: string) => string | undefined): string[] {
+  const added: string[] = []
+  for (const entry of catalog) {
+    if (PROVIDERS[entry.id] || !keyFor(entry.id)) continue
+    PROVIDERS[entry.id] = asProvider(entry)
+    added.push(entry.id)
+  }
+  return added
+}
+
+/** Whether a provider came from models.dev rather than the hand-written catalogue. */
+export function fromCatalog(id: string): boolean {
+  return catalog.some((entry) => entry.id === id) && !BUILT_IN_IDS.has(id)
+}
+
 let liveRefresh: Promise<void> | undefined
 /** Discovery for every provider that has a key here, once per run, without holding up startup. */
 export function refreshLiveModels(keyFor: (id: string) => string | undefined): Promise<void> {
@@ -461,6 +500,9 @@ for (const id of ["cursor", "cursor-api"] as const) PROVIDERS[id] = {
   id, label: id === "cursor" ? "Cursor user plan (CG tools)" : "Cursor API key (CG tools)", cli: id,
   models: [{ id: "default", label: "Auto (official selection)", contextWindow: 0, effort: false }],
 }
+
+/** The hand-written providers, before any catalog entry joins. */
+const BUILT_IN_IDS = new Set(Object.keys(PROVIDERS))
 
 export const DEFAULT_PROVIDER = "deepseek"
 
