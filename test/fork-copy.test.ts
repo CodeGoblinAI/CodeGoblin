@@ -28,6 +28,11 @@ test("/fork saves a separate copy to carry on in; the original is untouched", as
   expect((await sessions.fork(copy)).title).toBe("Fork: Fix the parser")
 })
 
+test("a conversation is titled by its first real prompt, not a ! command typed before it", () => {
+  expect(sessions.titleFrom([{ role: "user", content: "ran it", display: "! git status\n\nM app.js", typed: true }])).toBe("New session")
+  expect(sessions.titleFrom([{ role: "user", content: "ran it", display: "! git status", typed: true }, { role: "user", content: "fix the failing test" }])).toBe("fix the failing test")
+})
+
 test("/copy takes the last answer with words in it", () => {
   expect(sessions.lastAnswer([{ role: "assistant", content: "first" }, { role: "user", content: "q" }, { role: "assistant", content: "second" }, { role: "assistant", content: "  " }])).toBe("second")
   expect(sessions.lastAnswer([{ role: "user", content: "only a question" }])).toBeUndefined()

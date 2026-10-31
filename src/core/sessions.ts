@@ -143,7 +143,8 @@ export function newSessionId(): string {
 
 /** First user line, trimmed - enough to recognise a session in a list. */
 export function titleFrom(messages: Message[]): string {
-  const found = messages.find((message) => message.role === "user")
+  // A `!command` is not what the conversation is about: wait for the first real prompt.
+  const found = messages.find((message) => message.role === "user" && !message.typed)
   const first = found?.display ?? found?.content ?? ""
   const line = first.split(String.fromCharCode(10))[0] ?? ""
   return line.length > 48 ? line.slice(0, 48) + "…" : line || "New session"
