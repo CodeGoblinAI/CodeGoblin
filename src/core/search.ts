@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { resolveInside, SKIP_DIRS } from "./tools"
+import { isSecretPath } from "./secret-files"
 
 /**
  * Finding code.
@@ -183,7 +184,7 @@ export async function grepFiles(
   query: string,
   include?: string,
   signal?: AbortSignal,
-): Promise<{ matches: string[]; truncated: boolean; skipped: string[]; total: number; end: WalkEnd }> {
+): Promise<{ matches: string[]; truncated: boolean; skipped: string[]; secret: string[]; total: number; end: WalkEnd }> {
   const end: WalkEnd = { stopped: false, capped: false }
   let pattern: RegExp
   try {
@@ -196,10 +197,14 @@ export async function grepFiles(
   const filter = include ? globToRegExp(relativePattern(root, include)) : undefined
   const matches: string[] = []
   const skipped: string[] = []
+  // Files that hold secrets are never searched: a match prints the line, and
+  // the line is the key. read_file asks about one when the task needs it.
+  const secret: string[] = []
   let total = 0
 
   for await (const relative of bounded(root, end, signal)) {
     if (filter && !filter.test(relative)) continue
+    if (isSecretPath(relative)) { secret.push(relative); continue }
 
     let absolute: string
     try { absolute = resolveInside(root, relative) } catch { continue }
@@ -230,7 +235,7 @@ export async function grepFiles(
     }
   }
 
-  return { matches, truncated: total > matches.length, skipped, total, end }
+  return { matches, truncated: total > matches.length, skipped, secret, total, end }
 }
 
 /** Kept here so the search tools share the sandbox check with the file tools. */

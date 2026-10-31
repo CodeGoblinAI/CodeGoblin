@@ -278,8 +278,10 @@ export const EXTRA_TOOLS: Tool[] = [
     },
     run: async (args, root, signal) => {
       const { grepFiles, walkNote } = await import("./search")
-      const { matches, truncated, skipped, total, end } = await grepFiles(root, String(args.query ?? ""), args.include, signal)
-      const notSearched = skipped.length ? NEWLINE + "not searched, too large: " + skipped.slice(0, 10).join(", ") : ""
+      const { matches, truncated, skipped, secret, total, end } = await grepFiles(root, String(args.query ?? ""), args.include, signal)
+      const notSearched =
+        (skipped.length ? NEWLINE + "not searched, too large: " + skipped.slice(0, 10).join(", ") : "") +
+        (secret.length ? NEWLINE + `not searched, ${secret.length === 1 ? "it holds" : "they hold"} secrets: ${secret.slice(0, 10).join(", ")}${secret.length > 10 ? ", ..." : ""} (read_file asks the user first)` : "")
       const partway = walkNote(end) ? NEWLINE + walkNote(end) : ""
       if (!matches.length) return "no matches" + notSearched + partway
       const more = truncated ? NEWLINE + `... ${total} matching lines in all; the first ${matches.length} are shown` : ""

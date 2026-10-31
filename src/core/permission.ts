@@ -2,6 +2,7 @@ import { homedir } from "node:os"
 import path from "node:path"
 import { loadConfig, type RuleAction } from "./config"
 import { mostSpecific } from "./wildcard"
+import { isSecretPath, pathArgument, secretPathsIn } from "./secret-files"
 
 /**
  * Consent for tools that change things.
@@ -119,6 +120,7 @@ export function askedFor(tool: string, detail: string): string {
     return `${file} (${lines} ${lines === 1 ? "line" : "lines"})`
   }
   if (tool === "webfetch" && typeof args.url === "string") return args.url
+  if (tool === "read_file" && file) return file
   return detail
 }
 
@@ -305,6 +307,23 @@ type Scope = { key: string; words: string }
  * `ls` approved every shell command for the rest of the session.
  */
 function scopesFor(tool: string, detail: string): Scope[] {
+  const secrets = secretScopes(tool, detail)
+  if (HARMLESS.has(tool) && secrets.length) return secrets
+  return [...ownScopes(tool, detail), ...secrets]
+}
+
+/**
+ * Reading a file that holds secrets, as its own scope: approved per file, and
+ * asked about in every mode. Full access is for working without interruptions,
+ * not for handing the model the user's keys - and a prompt can be talked
+ * around, this cannot.
+ */
+function secretScopes(tool: string, detail: string): Scope[] {
+  const files = tool === "shell" ? secretPathsIn(commandOf(detail)) : tool === "read_file" ? [pathArgument(detail) ?? ""].filter(isSecretPath) : []
+  return files.map((file) => ({ key: "secret:" + file.split(BACKSLASH).join("/").toLowerCase(), words: "reading " + file }))
+}
+
+function ownScopes(tool: string, detail: string): Scope[] {
   if (tool === "webfetch") {
     const key = webfetchScope(detail)
     return [{ key, words: key.startsWith("webfetch:?") ? "this exact address" : key.slice("webfetch:".length) }]
@@ -499,7 +518,7 @@ export type PermissionMode = "ask" | "approve" | "full"
 export const MODES: { id: PermissionMode; label: string; hint: string }[] = [
   { id: "ask", label: "Ask for approval", hint: "ask before changing files, running commands or using the internet" },
   { id: "approve", label: "Approve for me", hint: "only ask for actions that could be unsafe" },
-  { id: "full", label: "Full access", hint: "never ask - only the rules in codegoblin.jsonc stop anything" },
+  { id: "full", label: "Full access", hint: "don't ask, except for secret files, checkpoints and codegoblin.jsonc rules" },
 ]
 
 export function nextMode(mode: PermissionMode): PermissionMode {
@@ -572,7 +591,8 @@ export class Permissions {
 
   /** Re-evaluate a waiting request after a mode change, without prompting again. */
   automaticVerdict(tool: string, detail: string): Verdict | undefined {
-    if (!this.needsConsent(tool)) return { allowed: true }
+    const secrets = secretScopes(tool, detail)
+    if (!this.needsConsent(tool) && !secrets.length) return { allowed: true }
 
     // The rules come first - before the mode, before anything approved earlier
     // in the session, before anyone is asked. The fork learned that a command
@@ -590,7 +610,7 @@ export class Permissions {
     // Planning refuses before anything is asked: the point is that nothing
     // changes until the plan is agreed. Looking still works - a read-only
     // command, or a page - so the plan can rest on what is actually there.
-    const onlyLooks = tool === "webfetch" || (tool === "shell" && isReadOnlyCommand(commandOf(detail)))
+    const onlyLooks = !this.needsConsent(tool) || tool === "webfetch" || (tool === "shell" && isReadOnlyCommand(commandOf(detail)))
     if (this.planning && !onlyLooks) {
       return {
         allowed: false,
@@ -598,6 +618,11 @@ export class Permissions {
         reason: "not run: planning is on, so nothing that changes files or runs commands is executed until the plan is agreed",
       }
     }
+
+    // A secret file is asked about in every mode, full access included, until
+    // that file is approved for the session.
+    if (secrets.some((scope) => !this.granted.has(scope.key))) return undefined
+    if (!this.needsConsent(tool)) return { allowed: true }
 
     // An ask rule means ask - in every mode, and even after an approval.
     const forced = rule?.action === "ask"

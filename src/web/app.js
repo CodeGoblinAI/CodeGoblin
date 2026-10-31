@@ -139,7 +139,7 @@ const boostTag = document.getElementById("boost-tag")
 const MODE_CHOICES = [
   { id: "ask", label: "Ask for approval", hint: "ask before changing files, running commands or using the internet" },
   { id: "approve", label: "Approve for me", hint: "only ask for actions that could be unsafe" },
-  { id: "full", label: "Full access", hint: "never ask - only the rules in codegoblin.jsonc stop anything" },
+  { id: "full", label: "Full access", hint: "don't ask, except for secret files, checkpoints and codegoblin.jsonc rules" },
 ]
 let currentMode = "ask"
 let modeIndex = 0

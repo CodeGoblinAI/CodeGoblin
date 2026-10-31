@@ -3,14 +3,13 @@ import path from "node:path"
 import { effortLevels, type Provider } from "./providers"
 
 /**
- * What the model is told about itself and this session, every turn.
+ * The environment the model is working in, stated every turn: which app,
+ * model, effort level, permission mode and folder, the platform and the date.
  *
- * Asked "what effort are you running at?", a real DeepSeek run had no way to
- * know: nothing it was given said which app it was in, which model it was or
- * what was set. So it went looking - the fork's `codegoblin` command on PATH,
- * its config, its SQLite databases, its logs, the process tree, open ports,
- * auth.json - for 84 steps and a dollar before it was stopped. Every one of
- * those facts was sitting in the app that sent the question.
+ * Codex and Gemini CLI both give the model its environment up front rather than
+ * leaving it to find out. Without it, a real "what effort are you on?" became
+ * an 84-step search of the machine. The block only states facts; how to use
+ * them is in the system prompt, in general terms.
  */
 export type SessionFactsInput = {
   provider: Provider
@@ -20,6 +19,14 @@ export type SessionFactsInput = {
   mode?: string
   root: string
   home?: string
+  platform?: string
+  now?: Date
+}
+
+const MODE_WORDS: Record<string, string> = {
+  ask: "ask - the user approves changes, commands and internet use",
+  approve: "approve for me - edits and read-only commands run; anything riskier asks",
+  full: "full access - nothing asks except the rules, checkpoints and secret files",
 }
 
 export function sessionFacts(input: SessionFactsInput): string {
@@ -33,14 +40,17 @@ export function sessionFacts(input: SessionFactsInput): string {
       : `auto - no level is sent, so the model's own default applies${model?.defaultEffort ? ` (${model.defaultEffort})` : ""}; levels: ${levels.join(", ")}`
   const home = input.home ?? os.homedir()
   const atHome = Boolean(input.root) && path.resolve(input.root).toLowerCase() === path.resolve(home).toLowerCase()
+  const platform = input.platform ?? process.platform
+  const now = input.now ?? new Date()
+  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
   return [
-    "About this session - answer questions about yourself and these settings from this list, without searching:",
-    "- App: CG-Next, CodeGoblin rebuilt from scratch. A `codegoblin`, `cg` or `opencode` command on this machine is a different, older app; its config, logs and databases say nothing about this session.",
+    "Environment (current, and kept up to date by the app):",
+    "- App: CG-Next, CodeGoblin rebuilt from scratch",
     `- Model: ${label} (${input.provider.id}/${input.modelId})`,
     `- Reasoning effort: ${effort}. The user changes it with /effort.`,
-    ...(input.mode ? [`- Permission mode: ${input.mode}`] : []),
-    `- Working directory: ${input.root}` +
-      (atHome ? " - the user's home folder, not a project. Searching it walks everything they own, which is slow and costly; search a named folder instead." : ""),
-    "Anything about the session not listed here, say you do not know and name the command that shows it (/status) rather than going to look.",
-  ].join("\n")
+    ...(input.mode ? [`- Permission mode: ${MODE_WORDS[input.mode] ?? input.mode}`] : []),
+    `- Working directory: ${input.root}${atHome ? " (the user's home folder, not a project)" : ""}`,
+    `- Platform: ${platform === "win32" ? "Windows" : platform === "darwin" ? "macOS" : platform}`,
+    `- Today: ${day}`,
+  ].join(String.fromCharCode(10))
 }

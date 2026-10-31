@@ -60,11 +60,12 @@ describe("the model is told about its own session", () => {
     serve(answers("auto, which is high on this model"))
     await drive({ messages: [{ role: "system", content: "base" }, { role: "user", content: "what effort are you running at?" }], spendLimit: 0 })
     const system = String(bodies[0]!.messages[0]!.content)
-    expect(system).toContain("About this session")
+    expect(system).toContain("Environment (current")
     expect(system).toContain("Model: Test Labs Pricey (test/pricey)")
     expect(system).toContain("Reasoning effort: auto")
     expect(system).toContain("(high)")
-    expect(system).toContain("is a different, older app")
+    // Facts only: nothing in it is about a particular question or another app.
+    expect(system).not.toMatch(/codegoblin`|different, older app|without searching/)
   })
 
   test("a set level, a model with none, and the home folder are each said plainly", () => {
@@ -72,7 +73,7 @@ describe("the model is told about its own session", () => {
     expect(sessionFacts({ provider: priced, modelId: "pricey", effort: "max", root: "C:/proj", home })).toContain("Reasoning effort: max (this model's levels: none, low, high, max)")
     const flat: Provider = { ...priced, models: [{ id: "flat", label: "Flat", contextWindow: 1 }] }
     expect(sessionFacts({ provider: flat, modelId: "flat", root: "C:/proj", home })).toContain("this model has no effort setting")
-    expect(sessionFacts({ provider: priced, modelId: "pricey", root: home, home })).toContain("the user's home folder, not a project")
+    expect(sessionFacts({ provider: priced, modelId: "pricey", root: home, home })).toContain("(the user's home folder, not a project)")
     expect(sessionFacts({ provider: priced, modelId: "pricey", root: path.join(home, "proj"), home })).not.toContain("home folder")
   })
 })
