@@ -346,6 +346,22 @@ export const EXTRA_TOOLS: Tool[] = [
     },
   },
   {
+    // Offered only to models trained on it (agent.ts usesPatch); run by runTool,
+    // which records every file it touches for /undo before writing any.
+    name: "apply_patch",
+    description:
+      "Edit files with a patch: *** Begin Patch, then for each file *** Add File: <path> (every line +), " +
+      "*** Delete File: <path>, or *** Update File: <path> (optionally *** Move to: <path>) followed by " +
+      "@@ hunks of context lines (space), removed lines (-) and added lines (+), then *** End Patch. " +
+      "Paths are relative to the working directory. The whole patch applies or none of it does.",
+    parameters: {
+      type: "object",
+      properties: { patch: { type: "string", description: "The whole patch, from *** Begin Patch to *** End Patch." } },
+      required: ["patch"],
+    },
+    run: async () => "error: apply_patch runs through runTool",
+  },
+  {
     name: "websearch",
     description:
       "Search the web and return the most relevant pages' text, for what is newer than you know or " +
@@ -480,6 +496,22 @@ export async function runTool(
 ): Promise<string> {
   const tool = ALL_TOOLS.find((candidate) => candidate.name === name)
   if (!tool) return `unknown tool: ${name}`
+  if (name === "apply_patch") {
+    try {
+      const { parsePatch, planPatch, writePatch } = await import("./patch")
+      const plan = planPatch(root, parsePatch(String((args as { patch?: unknown })?.patch ?? "")))
+      let result = await writePatch(root, plan, onWrite)
+      const { formatAfterWrite } = await import("./formatter")
+      for (const write of plan.writes) {
+        if (write.content === null) continue
+        const note = await formatAfterWrite(root, resolveInside(root, write.path), { signal }).catch(() => "")
+        if (note) result += NEWLINE + write.path + " " + note
+      }
+      return result
+    } catch (error) {
+      return `error: ${error instanceof Error ? error.message : String(error)} (nothing was changed)`
+    }
+  }
   try {
     const target = tool.writes ? (args as { path?: unknown }).path : undefined
     if (tool.writes && onWrite && typeof target === "string") await onWrite(target)

@@ -3,6 +3,18 @@ import path from "node:path"
 import { loadConfig, type RuleAction } from "./config"
 import { mostSpecific } from "./wildcard"
 import { isSecretPath, pathArgument, secretPathsIn } from "./secret-files"
+import { patchPaths } from "./patch"
+
+function patchOnlyEdits(detail: string): boolean {
+  try {
+    const patch = (JSON.parse(detail) as { patch?: unknown }).patch
+    if (typeof patch !== "string") return false
+    const { paths, deletes } = patchPaths(patch)
+    return paths.length > 0 && !deletes
+  } catch {
+    return false
+  }
+}
 
 /**
  * Consent for tools that change things.
@@ -141,6 +153,10 @@ export function askedFor(tool: string, detail: string): string {
   if (tool === "websearch" && typeof args.query === "string") return `"${flat(args.query, 120)}"`
   if (tool === "question" && typeof args.question === "string") return flat(args.question, 120)
   if (tool === "read_file" && file) return file
+  if (tool === "apply_patch" && typeof args.patch === "string") {
+    const { paths, deletes } = patchPaths(args.patch)
+    return (deletes ? "deletes or moves files: " : "") + (paths.length ? paths.join(", ") : "a patch it could not read")
+  }
   return detail
 }
 
@@ -344,6 +360,12 @@ function secretScopes(tool: string, detail: string): Scope[] {
 }
 
 function ownScopes(tool: string, detail: string): Scope[] {
+  // Approving patches that edit never covers one that deletes or moves files.
+  if (tool === "apply_patch") {
+    return patchOnlyEdits(detail)
+      ? [{ key: "apply_patch", words: "patches that only add and edit files" }]
+      : [{ key: "apply_patch:deletes", words: "patches that delete or move files" }]
+  }
   if (tool === "webfetch") {
     const key = webfetchScope(detail)
     return [{ key, words: key.startsWith("webfetch:?") ? "this exact address" : key.slice("webfetch:".length) }]
@@ -656,7 +678,8 @@ export class Permissions {
     // An ask rule means ask - in every mode, and even after an approval.
     const forced = rule?.action === "ask"
     if (!forced && this.mode === "full") return { allowed: true }
-    const harmless = tool === "write_file" || tool === "edit_file" || (tool === "shell" && isReadOnlyCommand(commandOf(detail)))
+    // A patch that only adds and updates is an edit; one that deletes or moves files asks.
+    const harmless = tool === "write_file" || tool === "edit_file" || (tool === "apply_patch" && patchOnlyEdits(detail)) || (tool === "shell" && isReadOnlyCommand(commandOf(detail)))
     if (!forced && this.mode === "approve" && harmless) return { allowed: true }
 
     const scopes = scopesFor(tool, detail)

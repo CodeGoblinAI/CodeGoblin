@@ -237,11 +237,20 @@ const SUBAGENTS_OFF =
   "Do the work with your own tools. Results you had from subagents earlier in this conversation were real."
 
 /** Tools that change files. Planning does not offer them, so the model never tries one and gets refused. */
-const CHANGES_FILES = new Set(["write_file", "edit_file"])
+const CHANGES_FILES = new Set(["write_file", "edit_file", "apply_patch"])
 
-function offeredTools(input: { permissions?: Permissions; extraTools?: ExtraTools; subagents?: Subagents; tools?: string[]; askUser?: AskUser }) {
+/**
+ * Models trained on apply_patch get it, as in the fork: GPT-5-era and Codex
+ * models, not the open-weight gpt-oss or GPT-4. The others never see it.
+ */
+export function usesPatch(modelId: string): boolean {
+  const id = modelId.toLowerCase()
+  return (id.includes("gpt-") || id.includes("codex")) && !id.includes("oss") && !id.includes("gpt-4")
+}
+
+function offeredTools(input: { modelId?: string; permissions?: Permissions; extraTools?: ExtraTools; subagents?: Subagents; tools?: string[]; askUser?: AskUser }) {
   const planning = input.permissions?.planning === true
-  const listed = (name: string) => !input.tools || input.tools.includes(name)
+  const listed = (name: string) => (name === "apply_patch" ? Boolean(input.modelId && usesPatch(input.modelId)) && (!input.tools || input.tools.includes("edit_file") || input.tools.includes("apply_patch")) : !input.tools || input.tools.includes(name))
   const own = TOOL_SCHEMA.filter((tool) => listed(tool.function.name) && !(planning && CHANGES_FILES.has(tool.function.name)))
   // MCP tools can do anything, and nothing says which of them only read.
   const mcp = planning || !listed("mcp") ? [] : (input.extraTools?.schema() ?? [])
@@ -371,6 +380,7 @@ async function* runTurns(input: {
   const usable = (name: string) =>
     !localChat && (!input.tools ||
     input.tools.includes(name) ||
+    (name === "apply_patch" && input.tools.includes("edit_file")) ||
     (name.startsWith("mcp__") && input.tools.includes("mcp")) ||
     Boolean(input.subagents?.has(name)))
 
