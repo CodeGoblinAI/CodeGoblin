@@ -1021,7 +1021,7 @@ function openSettingsDialog() {
   }
   select("Theme", paletteData.themes.map((t) => [t.value.slice(7), t.hint]), webSettings.theme, (theme) => saveSettings({ theme }))
   select("Thinking", [["on", "Shown"], ["off", "Hidden"]], webSettings.thinking ? "on" : "off", (value) => saveSettings({ thinking: value === "on" }))
-  select("Reasoning effort (this model)", ["auto", "low", "medium", "high"].map((x) => [x, x]), currentEffort(), (effort) => saveSettings({ effort }))
+  select("Reasoning effort (this model)", effortChoices().choices, currentEffort(), (effort) => saveSettings({ effort }))
   for (const option of modelSettings()) {
     if (!option.choices?.length) continue
     select(option.label, option.choices.map((c) => [c.id, c.label]), mediaValue(option.id), (value) => runCommand("/settings " + option.id + " " + value))
@@ -1200,7 +1200,7 @@ async function saveSettings(change) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(change.effort !== undefined ? { ...change, model: currentModel } : change),
   }).then((r) => r.json()).catch(() => null)
-  if (!result?.settings) { note("Could not save settings. Please try again."); return null }
+  if (!result?.settings) { note(result?.message || "Could not save settings. Please try again."); return null }
   webSettings = result.settings
   applyPalette(result.palette)
   document.body.classList.toggle("hide-thinking", !webSettings.thinking)
@@ -1210,6 +1210,18 @@ async function saveSettings(change) {
 function currentEffort() {
   const saved = webSettings.effortByModel || {}
   return Object.hasOwn(saved, currentModel) ? saved[currentModel] : Object.keys(saved).length ? "auto" : webSettings.effort || "auto"
+}
+
+/**
+ * The current model's own effort levels, "auto" first, each with what it
+ * means here. Models do not share a ladder, so this is never a fixed list.
+ */
+function effortChoices() {
+  const option = modelOptions.find((o) => o.value === currentModel)
+  const levels = option?.efforts || []
+  const describe = (level) => level === "auto" ? "auto - this model's default" + (option?.defaultEffort ? " (" + option.defaultEffort + ")" : "")
+    : level === "none" ? "none - thinking off" : level === levels.at(-1) ? level + " - the most this model offers" : level
+  return { option, levels, choices: ["auto", ...levels].map((level) => [level, describe(level)]) }
 }
 
 /**
@@ -1574,29 +1586,17 @@ async function runCommand(text) {
   }
 
   if (name === "/effort") {
-    const EFFORTS = ["auto", "low", "medium", "high"]
-    if (!argument) {
-      note("usage: /effort auto|low|medium|high" + String.fromCharCode(10) +
-        "auto lets the provider decide. The rest only reach reasoning models." + String.fromCharCode(10) +
-        "now: " + currentEffort() + " (" + currentModel + ")")
+    // Bare /effort opens this model's own levels to pick from.
+    if (!argument) { input.value = "/effort "; refreshPalette(); input.focus(); return true }
+    const { option, levels, choices } = effortChoices()
+    if (argument !== "auto" && !levels.includes(argument)) {
+      note(levels.length
+        ? (option?.label || currentModel) + " has no \"" + argument + "\" - its levels are " + levels.join(", ") + ". Nothing was changed."
+        : (option?.label || currentModel) + " takes no effort level.")
       return true
     }
-    if (!EFFORTS.includes(argument)) {
-      note("unknown effort: " + argument + "  (auto, low, medium, high)")
-      return true
-    }
-    const result = await saveSettings({ effort: argument })
-    if (!result) return true
-    const level = currentEffort()
-    const model = modelOptions.find((option) => option.value === currentModel)
-    const reasons = model && model.effort
-    note(
-      level === "auto"
-        ? "effort: auto - the provider decides"
-        : reasons
-          ? "effort: " + level
-          : "effort: " + level + " (saved; this model does not reason, so it is not sent)",
-    )
+    if (!(await saveSettings({ effort: argument }))) return true
+    note("effort: " + choices.find(([level]) => level === argument)[1] + " · " + (option?.label || currentModel))
     return true
   }
 
@@ -2314,6 +2314,8 @@ async function loadProviders() {
     value: p.id,
     label: p.label + (p.reasoning ? " (reasoning)" : ""),
     effort: p.effort,
+    efforts: p.efforts || [],
+    defaultEffort: p.defaultEffort,
     kind: p.kind,
     section: p.section,
     ready: p.ready,
@@ -2519,6 +2521,13 @@ function itemsFor(text, cursor) {
   if (head === "/theme" && hasArgument) {
     const q = text.slice(7).trim().toLowerCase()
     return (paletteData.themes || []).filter((t) => !q || t.value.toLowerCase().includes(q)).slice(0, 8)
+  }
+  if (head === "/effort" && hasArgument) {
+    const q = text.slice(8).trim().toLowerCase()
+    const saved = currentEffort()
+    return effortChoices().choices
+      .map(([level, meaning]) => ({ value: "/effort " + level, hint: (level === saved ? "current · " : "") + meaning }))
+      .filter((item) => !q || item.value.toLowerCase().includes(q))
   }
   if (head === "/connect" && hasArgument) {
     const q = text.slice(9).trim().toLowerCase()

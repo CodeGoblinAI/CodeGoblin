@@ -39,13 +39,21 @@ export type Settings = {
   effortByModel: Record<string, Effort>
 }
 
-/** Sent as reasoning_effort, except for "auto", which is sent as nothing. */
-export type Effort = "auto" | "low" | "medium" | "high"
+/**
+ * Sent as the model's own effort level, except for "auto", which is sent as
+ * nothing so the model's default applies. Which levels exist depends on the
+ * model (providers.ts `effortLevels`); this is every name any of them uses.
+ */
+export type Effort = string
 
+/** Every effort name any provider uses, weakest to strongest. */
+export const EFFORT_NAMES = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+
+/** The legacy fixed list, kept for older callers; models now offer their own. */
 export const EFFORTS: Effort[] = ["auto", "low", "medium", "high"]
 
 export const isEffort = (value: unknown): value is Effort =>
-  typeof value === "string" && (EFFORTS as string[]).includes(value)
+  typeof value === "string" && (value === "auto" || EFFORT_NAMES.includes(value))
 
 const file = path.join(Global.Path.state, "settings.json")
 

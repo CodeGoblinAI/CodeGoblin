@@ -18,11 +18,14 @@ test("legacy global preference survives until first scoped choice", () => {
   const next = withModelEffort(legacy,"a/b","high")
   expect(effortForModel(next,"a/c")).toBe("auto")
 })
-test("untrusted maps drop malformed keys and levels", () => {
-  expect(normalise({effortByModel:{"x/y":"high","bad":"low","x/z":"max"}}).effortByModel).toEqual({"x/y":"high"})
+// Levels are per model now, so any real level name may be saved ("max" on
+// GLM and Claude, "ultra" on some Codex models); invented names are not.
+test("untrusted maps drop malformed keys and unknown level names", () => {
+  expect(normalise({effortByModel:{"x/y":"high","bad":"low","x/z":"max","x/w":"turbo"}}).effortByModel).toEqual({"x/y":"high","x/z":"max"})
   expect(normalise({effortByModel:["high"]}).effortByModel).toEqual({})
   expect(()=>withModelEffort(defaults(), "", "high")).toThrow()
-  expect(()=>withModelEffort(defaults(), "a/b", "max")).toThrow()
+  expect(()=>withModelEffort(defaults(), "a/b", "turbo")).toThrow()
+  expect(withModelEffort(defaults(), "a/b", "ultra").effortByModel["a/b"]).toBe("ultra")
 })
 test("scoped effort survives settings save/load", async () => {
   const original = await load()

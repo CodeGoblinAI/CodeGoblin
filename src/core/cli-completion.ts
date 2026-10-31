@@ -57,7 +57,7 @@ export async function* cliCompletion(input: {
   cli?: "claude-code" | "codex" | "cursor" | "cursor-api"
   apiKey?: string
   modelId: string; messages: unknown[]; tools: CliTools; signal?: AbortSignal
-  effort?: "low" | "medium" | "high"
+  effort?: string
   /** Deterministic process peer for tests, never a user-configurable executable. */
   command?: string[]
 }): AsyncGenerator<CliCompletionEvent> {

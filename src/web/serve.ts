@@ -32,6 +32,8 @@ import {
   selectionsByKind,
   kindOf,
   effortFor,
+  effortLevels,
+  effortProblem,
   takesEffort,
   exactSelection,
   pickerSection,
@@ -289,6 +291,9 @@ async function handle(request: Request): Promise<Response> {
         label: s.provider.label + " " + s.model.label,
         reasoning: Boolean(s.model.reasoning),
         effort: takesEffort(s.model),
+        /** This model's own levels and what "auto" means on it - not a shared list. */
+        efforts: effortLevels(s.model),
+        ...(s.model.defaultEffort ? { defaultEffort: s.model.defaultEffort } : {}),
         ready: s.provider.cli ? cli[s.provider.id]?.ready === true : s.provider.runtime ? Boolean(engine) : apiKey(s.provider.id) !== undefined,
         connectionHint: s.provider.cli ? cli[s.provider.id]?.detail
           : s.provider.runtime ? (engine ? "Runs on this machine; CG-Next starts llama.cpp for it" : "No llama-server found; /local says where to put one") : undefined,
@@ -445,6 +450,12 @@ async function handle(request: Request): Promise<Response> {
     const body = (await request.json()) as { theme?: unknown; thinking?: unknown; effort?: unknown; model?: string }
     const current = await settingsStore.load()
     if (body.effort !== undefined && (!settingsStore.isEffort(body.effort) || !exactSelection(body.model || ""))) return json({ message: "Select a valid model and effort level" }, 400)
+    if (body.effort !== undefined) {
+      // A level the model does not have is refused, never saved to be quietly ignored.
+      const chosen = exactSelection(body.model || "")!
+      const problem = effortProblem(chosen.model, chosen.provider.label + " " + chosen.model.label, String(body.effort))
+      if (problem) return json({ message: problem }, 400)
+    }
     const next = body.effort !== undefined
       ? settingsStore.withModelEffort(settingsStore.normalise({ ...current, theme: body.theme ?? current.theme, thinking: body.thinking ?? current.thinking }), body.model!, body.effort)
       : settingsStore.normalise({ ...current, theme: body.theme ?? current.theme, thinking: body.thinking ?? current.thinking })

@@ -183,7 +183,7 @@ export type SubagentContext = {
   mcp?: ExtraTools
   instructions?: string
   memory?: string
-  effort?: "low" | "medium" | "high"
+  effort?: string
 }
 
 export type TaskStatus = "running" | "done" | "failed" | "stopped"

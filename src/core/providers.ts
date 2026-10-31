@@ -19,6 +19,7 @@
 import { localProvider } from "./local-provider"
 import { contextFor, installedModels, readPrefs, toolsFor } from "./local-runtime"
 import { cachedExperientialModels, fetchExperientialModels } from "./experiential"
+import { EFFORT_NAMES } from "./settings"
 
 export type Capabilities = {
   input?: { text?: boolean; image?: boolean; audio?: boolean }
@@ -41,6 +42,17 @@ export type Model = {
    * turns up, say `effort: false` on it rather than lying about `reasoning`.
    */
   effort?: boolean
+  /**
+   * The effort levels this model's API accepts, weakest first, under the
+   * names it uses. Models do not share one ladder: Z.ai's GLM takes none to
+   * max and defaults to max, DeepSeek takes none/low/high/max and defaults to
+   * high, Codex models report up to ultra. So "high" is a different amount on
+   * each, and nothing is translated between them. Absent with `effort` (or
+   * `reasoning`) means the standard three.
+   */
+  efforts?: string[]
+  /** What the API does when no effort is sent - what "auto" means for this model, when it is documented. */
+  defaultEffort?: string
   /**
    * US dollars per million tokens, in and out.
    *
@@ -115,13 +127,51 @@ export function authHeaders(provider: Provider, key: string): Record<string, str
  * whole request over a field they do not know, so a preference must never be
  * able to break a model it was not about.
  */
-export function effortFor(model: Model, setting: string): "low" | "medium" | "high" | undefined {
-  if (setting !== "low" && setting !== "medium" && setting !== "high") return undefined
-  return takesEffort(model) ? setting : undefined
+export function effortFor(model: Model, setting: string): string | undefined {
+  return setting !== "auto" && effortLevels(model).includes(setting) ? setting : undefined
+}
+
+export { EFFORT_NAMES }
+
+/**
+ * The levels this model offers, under its own names. Declared ones as given;
+ * otherwise the standard three for a model that takes an effort at all.
+ */
+export function effortLevels(model: Model): string[] {
+  if (model.efforts) return model.efforts
+  return (model.effort ?? model.reasoning === true) ? ["low", "medium", "high"] : []
 }
 
 /** Declared if it says so, otherwise assumed from whether it reasons at all. */
-export const takesEffort = (model: Model): boolean => model.effort ?? model.reasoning === true
+export const takesEffort = (model: Model): boolean => effortLevels(model).length > 0
+
+/** What a level means on this model, in a few words, for pickers and status lines. */
+export function effortHint(model: Model, level: string): string {
+  if (level === "auto") return "this model's default" + (model.defaultEffort ? " (" + model.defaultEffort + ")" : "")
+  if (level === "none") return "thinking off"
+  const levels = effortLevels(model)
+  if (level === levels.at(-1)) return "the most this model offers"
+  return ""
+}
+
+/**
+ * Why this level cannot be used on this model, or nothing when it can.
+ * A level is never translated to a neighbour: "max" on a model without it is
+ * refused with the levels it does have, not quietly sent as "high".
+ */
+export function effortProblem(model: Model, label: string, level: string): string | undefined {
+  if (level === "auto") return undefined
+  const levels = effortLevels(model)
+  if (!levels.length) return `${label} does not take an effort level`
+  if (!levels.includes(level)) return `${label} has no "${level}" - its levels are ${levels.join(", ")}`
+  return undefined
+}
+
+/** Documented in each provider's API reference (2026-10-30). */
+const DEEPSEEK_EFFORT = { efforts: ["none", "low", "high", "max"], defaultEffort: "high" }
+const ZAI_EFFORT = { efforts: ["none", "minimal", "low", "medium", "high", "xhigh", "max"], defaultEffort: "max" }
+/** `claude --effort`, from the installed CLI's help; its default is not documented there. */
+const CLAUDE_EFFORT = ["low", "medium", "high", "xhigh", "max"]
 
 export const PROVIDERS: Record<string, Provider> = {
   deepseek: {
@@ -129,8 +179,9 @@ export const PROVIDERS: Record<string, Provider> = {
     label: "DeepSeek",
     baseUrl: "https://api.deepseek.com/chat/completions",
     models: [
-      { id: "deepseek-v4-flash", label: "V4 Flash", contextWindow: 128000, price: { input: 0.28, output: 0.42 } },
-      { id: "deepseek-v4-pro", label: "V4 Pro", reasoning: true, contextWindow: 128000, price: { input: 0.55, output: 2.19 } },
+      // Both think unless told not to (DeepSeek's docs); "none" turns it off.
+      { id: "deepseek-v4-flash", label: "V4 Flash", reasoning: true, ...DEEPSEEK_EFFORT, contextWindow: 128000, price: { input: 0.28, output: 0.42 } },
+      { id: "deepseek-v4-pro", label: "V4 Pro", reasoning: true, ...DEEPSEEK_EFFORT, contextWindow: 128000, price: { input: 0.55, output: 2.19 } },
       {
         id: "deepseek-v4-flash-vision-exp",
         label: "V4 Flash Vision",
@@ -147,14 +198,14 @@ export const PROVIDERS: Record<string, Provider> = {
     label: "GLM",
     baseUrl: "https://api.z.ai/api/paas/v4/chat/completions",
     models: [
-      { id: "glm-5.3-flash", label: "5.3 Flash", contextWindow: 128000 },
-      { id: "glm-5.3", label: "5.3", reasoning: true, contextWindow: 200000 },
-      { id: "glm-5.2", label: "5.2", reasoning: true, contextWindow: 128000 },
-      { id: "glm-5.1", label: "5.1", contextWindow: 128000 },
-      { id: "glm-5", label: "5", contextWindow: 128000 },
-      { id: "glm-5-turbo", label: "5 Turbo", contextWindow: 128000 },
-      { id: "glm-4.7", label: "4.7", contextWindow: 128000 },
-      { id: "glm-4.6", label: "4.6", contextWindow: 128000 },
+      { id: "glm-5.3-flash", label: "5.3 Flash", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
+      { id: "glm-5.3", label: "5.3", reasoning: true, ...ZAI_EFFORT, contextWindow: 200000 },
+      { id: "glm-5.2", label: "5.2", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
+      { id: "glm-5.1", label: "5.1", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
+      { id: "glm-5", label: "5", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
+      { id: "glm-5-turbo", label: "5 Turbo", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
+      { id: "glm-4.7", label: "4.7", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
+      { id: "glm-4.6", label: "4.6", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
     ],
   },
   moonshotai: {
@@ -400,7 +451,7 @@ export function refreshLiveModels(keyFor: (id: string) => string | undefined): P
 PROVIDERS["claude-code"] = {
   id: "claude-code", label: "Claude CLI (CG tools)", cli: "claude-code",
   // Aliases resolve inside the CLI; its effective context window is not reported here.
-  models: ["default", "haiku", "sonnet", "opus"].map((id) => ({ id, label: id, contextWindow: 0, effort: id !== "haiku", reasoning: id !== "haiku" })),
+  models: ["default", "haiku", "sonnet", "opus"].map((id) => ({ id, label: id, contextWindow: 0, reasoning: id !== "haiku", efforts: id === "haiku" ? [] : CLAUDE_EFFORT })),
 }
 PROVIDERS.codex = {
   id: "codex", label: "Codex CLI (CG tools)", cli: "codex",

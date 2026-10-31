@@ -81,7 +81,7 @@ import { exportSession } from "../core/export"
 import { runMedia, describeMedia, type MediaKind } from "../core/media"
 import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
-import { defaultSelection, resolveSelection, acceptsImages, effortFor, takesEffort, type Selection, kindOf } from "../core/providers"
+import { defaultSelection, resolveSelection, acceptsImages, effortFor, effortHint, effortLevels, effortProblem, takesEffort, type Selection, kindOf } from "../core/providers"
 import { apiKey, connect, disconnect, connections, storePath, envVariable } from "../core/auth"
 import { localChatMessages, runAgent, type Attachment, type Message } from "../core/agent"
 import { COMMANDS, isCommand, runCommand } from "../core/commands"
@@ -1507,22 +1507,21 @@ function openThemePicker() {
  * "high" on a model that does not reason is a preference with no effect, and
  * finding that out from the status line afterwards is finding it out late.
  */
+/** This model's own levels - not a fixed list: "high" on one model is not "high" on another. */
 function openEffortPicker() {
-  const takes = takesEffort(selection.model)
+  const levels = effortLevels(selection.model)
+  const name = selection.provider.label + " " + selection.model.label
+  const saved = currentEffort()
   dialog = Dialogs.open(
     "effort",
-    takes ? "Effort  ·  " + selection.model.label : "Effort  ·  " + selection.model.label + " does not reason",
-    EFFORTS.map((level) => ({
-      label: (level === currentEffort() ? "• " : "  ") + level,
-      hint:
-        level === "auto"
-          ? "let the provider decide"
-          : takes
-            ? "sent as reasoning_effort"
-            : "saved, but not sent to this model",
+    levels.length ? "Effort  ·  " + name : "Effort  ·  " + name + " takes no effort level",
+    (levels.length ? ["auto", ...levels] : ["auto"]).map((level) => ({
+      label: (level === saved ? "• " : "  ") + level,
+      hint: effortHint(selection.model, level) || (selection.provider.cli === "claude-code" ? "sent as --effort" : selection.provider.cli ? "sent to the CLI" : "sent as reasoning_effort"),
       value: level,
     })),
-    { footer: "enter applies . esc closes", size: "medium" },
+    // A level saved for this model that it does not have (left from before) is said, not hidden.
+    { footer: (saved !== "auto" && !levels.includes(saved) ? `saved "${saved}" is not one of this model's levels, so nothing is sent . ` : "") + "enter applies . esc closes", size: "medium", selectedValue: saved },
   )
 }
 
@@ -1573,7 +1572,7 @@ function settingsRows(): Dialogs.DialogRow[] {
     { label: "Theme", hint: settings.theme, value: "ui:theme" },
     { label: "Show thinking", hint: settings.thinking ? "on" : "off", value: "ui:thinking" },
     { label: "Mouse controls", hint: settings.mouse ? "on (Shift+drag selects)" : "off (terminal selection)", value: "ui:mouse" },
-    { label: "Reasoning effort", hint: currentEffort(), value: "ui:effort" },
+    { label: "Reasoning effort", hint: currentEffort() + (currentEffort() === "auto" && selection.model.defaultEffort ? " (" + selection.model.defaultEffort + ")" : ""), value: "ui:effort" },
     { label: "Approvals", hint: permissions.mode, value: "ui:approvals" },
     { label: "Agent profile", hint: agentName || "default", value: "ui:agents" },
   ]
@@ -1890,12 +1889,7 @@ async function chooseInDialog() {
   if (dialog.kind === "effort") {
     settings = settingsStore.withModelEffort(settings, selection.provider.id + "/" + selection.model.id, row.value)
     void settingsStore.save(settings)
-    status =
-      row.value === "auto"
-        ? "effort: auto - the provider decides"
-        : selection.model.reasoning
-          ? "effort: " + row.value
-          : "effort: " + row.value + " (saved; " + selection.model.label + " does not reason)"
+    status = "effort: " + row.value + (effortHint(selection.model, row.value) ? " - " + effortHint(selection.model, row.value) : "") + " · " + selection.model.label
     closeDialog()
     render()
     return
@@ -2116,14 +2110,12 @@ async function send() {
     }
     if (result.kind === "effort") {
       if (!result.level) { openEffortPicker(); render(); return }
+      // A level this model does not have is refused, never sent as its nearest neighbour.
+      const problem = effortProblem(selection.model, selection.provider.label + " " + selection.model.label, result.level)
+      if (problem) { status = problem; render(); return }
       settings = settingsStore.withModelEffort(settings, selection.provider.id + "/" + selection.model.id, result.level)
       void settingsStore.save(settings)
-      status =
-        result.level === "auto"
-          ? "effort: auto - the provider decides"
-          : takesEffort(selection.model)
-            ? "effort: " + result.level
-            : "effort: " + result.level + " (saved; " + selection.model.label + " does not reason)"
+      status = "effort: " + result.level + (effortHint(selection.model, result.level) ? " - " + effortHint(selection.model, result.level) : "") + " · " + selection.model.label
     }
     if (result.kind === "settings") {
       if (!result.argument) { openSettings(); render(); return }
@@ -2298,8 +2290,8 @@ async function send() {
         [
           "effort",
           currentEffort() === "auto"
-            ? "auto"
-            : currentEffort() + (takesEffort(selection.model) ? "" : "  (not sent - this model does not take it)"),
+            ? "auto" + (selection.model.defaultEffort ? " (= " + selection.model.defaultEffort + " on this model)" : "")
+            : currentEffort() + (effortFor(selection.model, currentEffort()) ? "" : "  (not sent - not one of this model's levels)"),
         ],
         ["approved", approved.length ? approved.join(", ") : "nothing yet"],
         ["checkpoints", checkpointStatus()],

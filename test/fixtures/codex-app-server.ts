@@ -17,6 +17,12 @@ for await (const line of createInterface({ input: process.stdin })) {
       process.stdout.write(JSON.stringify({ id: input.id, result: { config: { mcp_servers: { fixture: { enabled: true } } } } }) + "\n")
       continue
     }
+    // "levels": the shape a real account reported on 2026-10-30, up to ultra with a low default.
+    if (input.method === "model/list" && process.argv[2] === "levels") {
+      const ladder = ["low", "medium", "high", "xhigh", "max", "ultra"].map((reasoningEffort) => ({ reasoningEffort }))
+      process.stdout.write(JSON.stringify({ id: input.id, result: { data: [{ model: "fixture-wide", isDefault: true, defaultReasoningEffort: "low", supportedReasoningEfforts: ladder }] } }) + "\n")
+      continue
+    }
     if (input.method === "model/list") {
       process.stdout.write(JSON.stringify({ id: input.id, result: { data: [{ model: "fixture-default", isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "medium" }, { reasoningEffort: "high" }] }, { model: "fixture-no-effort", supportedReasoningEfforts: [] }] } }) + "\n")
       continue

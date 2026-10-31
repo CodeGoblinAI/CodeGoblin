@@ -1,6 +1,6 @@
 import type { AgentEvent } from "./agent"
 import { CodexRpc, object } from "./codex-rpc"
-import { PROVIDERS } from "./providers"
+import { EFFORT_NAMES, PROVIDERS } from "./providers"
 
 /** No native execution: CG-Next's agent loop is the only tool owner. */
 export const CODEX_INFERENCE_CONFIG: Record<string, unknown> = {
@@ -24,16 +24,20 @@ export async function codexAuthStatus(start = () => CodexRpc.start()) {
     const ready = account.type === "chatgpt" || account.type === "apiKey"
     if (ready) {
       const listed = object(await rpc.call("model/list", { limit: 100 }))
+      // Each model's own levels and default, as Codex reports them - up to
+      // xhigh, max and ultra on some. They used to be cut to low/medium/high.
       const models = Array.isArray(listed.data) ? listed.data.flatMap((entry) => {
         const model = object(entry)
         if (typeof model.model !== "string" || !/^[A-Za-z0-9._-]{1,100}$/.test(model.model)) return []
-        const effort = Array.isArray(model.supportedReasoningEfforts) && model.supportedReasoningEfforts.some((entry) => ["low", "medium", "high"].includes(String(object(entry).reasoningEffort)))
-        return [{ id: model.model, label: model.model, contextWindow: 0, effort, reasoning: effort }]
+        const efforts = (Array.isArray(model.supportedReasoningEfforts) ? model.supportedReasoningEfforts : [])
+          .map((entry) => String(object(entry).reasoningEffort)).filter((level) => EFFORT_NAMES.includes(level))
+        const fallback = typeof model.defaultReasoningEffort === "string" && efforts.includes(model.defaultReasoningEffort) ? model.defaultReasoningEffort : undefined
+        return [{ id: model.model, label: model.model, contextWindow: 0, efforts, reasoning: efforts.length > 0, ...(fallback ? { defaultEffort: fallback } : {}) }]
       }) : []
       if (models.length && PROVIDERS.codex) {
         const selected = Array.isArray(listed.data) ? object(listed.data.find((entry) => object(entry).isDefault === true)).model : undefined
-        const effort = models.find((entry) => entry.id === selected)?.effort ?? false
-        PROVIDERS.codex.models = [{ id: "default", label: "official default", contextWindow: 0, effort, reasoning: effort }, ...models]
+        const chosen = models.find((entry) => entry.id === selected)
+        PROVIDERS.codex.models = [{ id: "default", label: "official default", contextWindow: 0, efforts: chosen?.efforts ?? [], reasoning: Boolean(chosen?.efforts.length), ...(chosen?.defaultEffort ? { defaultEffort: chosen.defaultEffort } : {}) }, ...models]
       }
     }
     return { ready, detail: ready ? "Official Codex CLI authentication; CG-Next owns tool approvals" : "Run /login codex or codex login" }
@@ -44,7 +48,7 @@ export async function codexAuthStatus(start = () => CodexRpc.start()) {
 /** One ephemeral, tool-free inference turn. No official conversation is resumed. */
 export async function* codexChat(input: {
   modelId: string; prompt: string; system: string; signal?: AbortSignal
-  effort?: "low" | "medium" | "high"
+  effort?: string
   schema?: Record<string, unknown>
   start?: () => Promise<CodexRpc>
 }): AsyncGenerator<Extract<AgentEvent, { type: "text" | "thinking" | "spend" }>> {

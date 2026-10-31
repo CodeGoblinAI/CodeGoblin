@@ -105,7 +105,7 @@ export class ClaudeStream {
 export async function* claudeChat(input: {
   modelId: string; messages: Message[]; signal?: AbortSignal
   system?: string; prompt?: string; command?: string[]; schema?: Record<string, unknown>
-  effort?: "low" | "medium" | "high"
+  effort?: string
 }): AsyncGenerator<AgentEvent> {
   input.signal?.throwIfAborted()
   const executable = claudeExecutable()
@@ -162,6 +162,6 @@ export async function* claudeChat(input: {
 }
 
 /** Keep the actual CLI argument boundary testable without subscription calls. */
-export function claudeCommand(executable: string, flags: readonly string[], input: { modelId: string; schema?: Record<string, unknown>; effort?: "low" | "medium" | "high" }) {
+export function claudeCommand(executable: string, flags: readonly string[], input: { modelId: string; schema?: Record<string, unknown>; effort?: string }) {
   return [executable, ...flags, ...(input.schema ? ["--json-schema", JSON.stringify(input.schema)] : []), ...(input.modelId === "default" ? [] : ["--model", input.modelId]), ...(input.effort ? ["--effort", input.effort] : [])]
 }

@@ -80,7 +80,7 @@ export const COMMANDS = [
   { name: "/copy", description: "copy the last answer to the clipboard" },
   { name: "/theme", description: "change colours: /theme midnight" },
   { name: "/thinking", description: "show or hide the model's reasoning" },
-  { name: "/effort", description: "how hard a reasoning model thinks: /effort high" },
+  { name: "/effort", description: "how hard this model thinks, in its own levels - /effort lists them" },
   { name: "/agents", description: "choose a named agent profile; /agents default resets" },
   { name: "/settings", description: "open settings, or /settings <model setting> <value>; omit value to reset" },
   { name: "/diff", description: "what this session changed, file by file" },
@@ -238,7 +238,7 @@ export function runCommand(text: string): CommandResult {
     case "/effort": {
       if (!argument) return { kind: "effort" }
       if (!isEffort(argument)) {
-        return { kind: "message", text: `unknown effort: ${argument}  (auto, low, medium, high)` }
+        return { kind: "message", text: `unknown effort: ${argument}  (auto, or one of the model's own levels - /effort lists them)` }
       }
       return { kind: "effort", level: argument }
     }

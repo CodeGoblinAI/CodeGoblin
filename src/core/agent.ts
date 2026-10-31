@@ -318,7 +318,7 @@ async function* runTurns(input: {
    * handed a reasoning_effort it does not know can reject the whole request,
    * so the loop only forwards what it is given.
    */
-  effort?: "low" | "medium" | "high"
+  effort?: string
   /**
    * Pause and ask to continue after this many tool calls in the turn.
    *
