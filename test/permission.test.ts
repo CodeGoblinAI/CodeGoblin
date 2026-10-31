@@ -74,8 +74,8 @@ describe("permissions", () => {
 })
 
 describe("the answers on offer", () => {
-  test("there are three, and reject is one of them", () => {
-    expect(DECISIONS.map((d) => d.id)).toEqual(["once", "always", "reject"])
+  test("there are four: once, for the session, reject, and never", () => {
+    expect(DECISIONS.map((d) => d.id)).toEqual(["once", "always", "reject", "never"])
   })
 
   test("the least committal one comes first", () => {
@@ -215,7 +215,7 @@ describe("how much to ask", () => {
     expect(atCheckpoint.reject).toBe("stop the turn here")
     expect(Object.values(atCheckpoint).join(" ")).not.toContain("one call")
     const shell = decisionHints("shell", "git status")
-    expect(shell).toEqual({ once: "just this one call", always: "stop asking about git status", reject: "refuse, and tell the model so" })
+    expect(shell).toEqual({ once: "just this one call", always: "stop asking about git status", reject: "refuse, and tell the model so", never: "refuse git status without asking" })
     expect(decisionHints("write_file").always).toBe("stop asking about calls like this")
   })
 
