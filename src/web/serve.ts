@@ -977,6 +977,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     const done = new Promise<void>((resolve) => { finishTurn = resolve })
     if (requestedId) activeTurns.set(requestedId, { controller: turn, done })
     let streamStarted = false
+    /** The id the turn is held under once the session is known - a new conversation's own id. */
+    let lockedId = requestedId
     try {
     const whole = sessions.unfoldPastes(text, body.pastes)
 
@@ -1003,6 +1005,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
       return json({ error: "An answer is still running in this conversation; wait for it to finish or stop it first." }, 409)
     }
     activeTurns.set(session.id, { controller: turn, done })
+    lockedId = session.id
     // Switched off before the conversation had been saved: carried into it now.
     if (!loaded && pendingMcpOff.has("")) { session.mcpOff = pendingMcpOff.get(""); pendingMcpOff.delete("") }
     session.provider = provider.id
@@ -1190,7 +1193,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     })
     } finally {
       if (!streamStarted) {
-        if (requestedId && activeTurns.get(requestedId)?.controller === turn) activeTurns.delete(requestedId)
+        // Anything that ended this request before the stream - a refusal or a throw - lets the conversation go.
+        for (const id of new Set([requestedId, lockedId])) if (id && activeTurns.get(id)?.controller === turn) activeTurns.delete(id)
         finishTurn()
       }
     }
