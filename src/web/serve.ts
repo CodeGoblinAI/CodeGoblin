@@ -62,7 +62,7 @@ import { History, describe as describeCheckpoint, nothingToDo } from "../core/un
 import { changesIn, summarise } from "../core/changes"
 import { THEMES, paletteOf } from "../core/theme"
 import * as settingsStore from "../core/settings"
-import { canOpenTerminal, endTerminal, startTerminal, terminalMessage, type TerminalSocket } from "./terminal"
+import { endTerminal, releaseTerminal, reserveTerminal, startTerminal, terminalMessage, type TerminalSocket } from "./terminal"
 import { isDirectory, recentProjects, rememberProject, sameFolder } from "../core/projects"
 import { createWorktree, currentBranch, listWorktrees, localBranches, removeWorktree, repoRoot, switchBranch } from "../core/worktrees"
 import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
@@ -157,7 +157,8 @@ const subagentContexts = new Map<string, SubagentContext>()
  * Aborting the browser fetch only closes the reader; without this the agent
  * kept running server-side, spending tokens on a turn nobody would see.
  */
-const activeTurns = new Map<string, AbortController>()
+type ActiveTurn = { controller: AbortController; done: Promise<void> }
+const activeTurns = new Map<string, ActiveTurn>()
 const codexLogins = new Map<string, Awaited<ReturnType<typeof startCodexLogin>>>()
 let codexLoginsStarting = 0
 const cursorLogins = new Map<string, Awaited<ReturnType<typeof startCursorLogin>>>()
@@ -249,10 +250,11 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
   // this page asking.
   if (url.pathname === "/api/terminal") {
     if (!sameOrigin(request, url) || !request.headers.get("origin")) return json({ error: "refused: local same-origin requests only" }, 403)
-    if (!canOpenTerminal()) return json({ error: "too many terminals open" }, 429)
+    if (!reserveTerminal()) return json({ error: "too many terminals open" }, 429)
     const cols = Number(url.searchParams.get("cols")) || 100
     const rows = Number(url.searchParams.get("rows")) || 30
-    if (server?.upgrade(request, { data: { cwd: root, cols, rows } as TerminalSocket["data"] & { cols: number; rows: number } })) return undefined
+    if (server?.upgrade(request, { data: { cwd: root, cols, rows, reserved: true } as TerminalSocket["data"] & { cols: number; rows: number } })) return undefined
+    releaseTerminal()
     return json({ error: "a terminal needs a WebSocket" }, 400)
   }
   if (VENDOR[url.pathname]) {
@@ -836,6 +838,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
   if (url.pathname === "/api/undo" && request.method === "POST") {
     const body = (await request.json()) as { sessionId?: string; direction?: string }
     const id = body.sessionId ?? ""
+    if (id && activeTurns.has(id)) return json({ message: "an answer is still running; undo once it finishes" }, 409)
     // After a restart the conversation's undo history comes back from its saved file.
     const saved = /^[a-zA-Z0-9_-]+$/.test(id) ? await sessions.load(id).catch(() => undefined) : undefined
     const edits = editsBySession.get(id) || (saved ? editsFor(id, saved.review) : undefined)
@@ -863,13 +866,16 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
 
   if (url.pathname === "/api/stop" && request.method === "POST") {
     const body = (await request.json()) as { sessionId?: string }
-    const controller = activeTurns.get(body.sessionId ?? "")
-    if (controller) {
-      controller.abort()
-      subagentsBySession.get(body.sessionId ?? "")?.stopAll()
-      activeTurns.delete(body.sessionId ?? "")
+    const id = body.sessionId ?? ""
+    const active = activeTurns.get(id)
+    if (active) {
+      active.controller.abort()
+      subagentsBySession.get(id)?.stopAll()
       // Unblock a turn waiting on consent, or it will hang forever.
-      consent.abandon(body.sessionId ?? "")
+      consent.abandon(id)
+      // Wait for the aborted turn to commit its undo checkpoint and save the
+      // session before releasing the lock or answering Stop.
+      await Promise.race([active.done, Bun.sleep(2000)])
       return json({ ok: true })
     }
     return json({ ok: false, error: "no turn running" }, 404)
@@ -961,9 +967,20 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     }
     const text = (body.text ?? "").trim()
     if (!text) return json({ error: "empty prompt" }, 400)
+    const requestedId = typeof body.sessionId === "string" ? body.sessionId.trim() : ""
+    if (requestedId && activeTurns.has(requestedId)) {
+      return json({ error: "An answer is still running in this conversation; wait for it to finish or stop it first." }, 409)
+    }
+
+    const turn = new AbortController()
+    let finishTurn!: () => void
+    const done = new Promise<void>((resolve) => { finishTurn = resolve })
+    if (requestedId) activeTurns.set(requestedId, { controller: turn, done })
+    let streamStarted = false
+    try {
     const whole = sessions.unfoldPastes(text, body.pastes)
 
-    const loaded = body.sessionId ? await sessions.load(body.sessionId) : undefined
+    const loaded = requestedId ? await sessions.load(requestedId) : undefined
     if (body.agent !== undefined && (typeof body.agent !== "string" || body.agent.length > 128)) return json({error:"Invalid agent profile"},400)
     let profile: ReturnType<typeof selectedAgent>
     let selection
@@ -979,6 +996,13 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
 
     const session =
       loaded ?? sessions.create(provider.id, model.id, root)
+    if (requestedId && requestedId !== session.id && activeTurns.get(requestedId)?.controller === turn) {
+      activeTurns.delete(requestedId)
+    }
+    if (activeTurns.has(session.id) && activeTurns.get(session.id)?.controller !== turn) {
+      return json({ error: "An answer is still running in this conversation; wait for it to finish or stop it first." }, 409)
+    }
+    activeTurns.set(session.id, { controller: turn, done })
     // Switched off before the conversation had been saved: carried into it now.
     if (!loaded && pendingMcpOff.has("")) { session.mcpOff = pendingMcpOff.get(""); pendingMcpOff.delete("") }
     session.provider = provider.id
@@ -1033,10 +1057,13 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder()
-        const send = (event: unknown) =>
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}
+        const send = (event: unknown) => {
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}
 
 `))
+          } catch {}
+        }
 
         const encoderPing = new TextEncoder()
         const heartbeat = setInterval(() => {
@@ -1046,9 +1073,6 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
             clearInterval(heartbeat)
           }
         }, 5000)
-
-        const turn = new AbortController()
-        activeTurns.set(session.id, turn)
 
         send({ type: "session", id: session.id, model:provider.id + "/" + model.id, agent:profile?.name || "" })
         // One checkpoint per turn, so undo takes back the whole answer.
@@ -1153,15 +1177,23 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
         } finally {
           edits.commit(root)
           clearInterval(heartbeat)
-          activeTurns.delete(session.id)
-          controller.close()
+          if (activeTurns.get(session.id)?.controller === turn) activeTurns.delete(session.id)
+          finishTurn()
+          try { controller.close() } catch {}
         }
       },
     })
 
+    streamStarted = true
     return new Response(stream, {
       headers: { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" },
     })
+    } finally {
+      if (!streamStarted) {
+        if (requestedId && activeTurns.get(requestedId)?.controller === turn) activeTurns.delete(requestedId)
+        finishTurn()
+      }
+    }
   }
 
   if (url.pathname === "/app.js") {

@@ -1,12 +1,27 @@
 import { describe, expect, test } from "bun:test"
 import os from "node:os"
-import { endTerminal, startTerminal, terminalMessage, terminalShell, type TerminalSocket } from "../src/web/terminal"
+import { canOpenTerminal, endTerminal, releaseTerminal, reserveTerminal, startTerminal, terminalMessage, terminalShell, type TerminalSocket } from "../src/web/terminal"
 
 describe("the browser terminal", () => {
   test("starts PowerShell on Windows and $SHELL elsewhere", () => {
     expect(terminalShell("linux", { SHELL: "/bin/zsh" })).toEqual(["/bin/zsh"])
     expect(terminalShell("linux", {})).toEqual(["/bin/sh"])
     expect(terminalShell("win32", { PATH: "" })).toEqual(["powershell.exe", "-NoLogo"])
+  })
+
+  test("reserves slots up front so concurrent upgrades cannot exceed the cap", () => {
+    const sockets: TerminalSocket[] = []
+    for (let i = 0; i < 4; i++) {
+      expect(reserveTerminal()).toBe(true)
+      sockets.push({ data: { cwd: os.tmpdir(), reserved: true }, send() {}, close() {} })
+    }
+    expect(canOpenTerminal()).toBe(false)
+    expect(reserveTerminal()).toBe(false)
+    for (const socket of sockets) endTerminal(socket)
+    expect(canOpenTerminal()).toBe(true)
+    expect(reserveTerminal()).toBe(true)
+    releaseTerminal()
+    expect(canOpenTerminal()).toBe(true)
   })
 
   test("runs what is typed in the project folder, without secret variables, and ends with the page", async () => {

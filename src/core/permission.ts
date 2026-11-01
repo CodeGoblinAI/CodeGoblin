@@ -349,15 +349,32 @@ function scopesFor(tool: string, detail: string): Scope[] {
   return [...ownScopes(tool, detail), ...secrets]
 }
 
+function patchSecretPaths(detail: string): string[] {
+  try {
+    const patch = (JSON.parse(detail) as { patch?: unknown })?.patch
+    return typeof patch === "string" ? patchPaths(patch).paths.filter(isSecretPath) : []
+  } catch {
+    return []
+  }
+}
+
 /**
- * Reading a file that holds secrets, as its own scope: approved per file, and
- * asked about in every mode. Full access is for working without interruptions,
- * not for handing the model the user's keys - and a prompt can be talked
- * around, this cannot.
+ * Reading or changing a file that holds secrets, as its own scope: approved
+ * per file, and asked about in every mode. Full access and Approve for me are
+ * for working without interruptions, not for handing the model the user's
+ * keys - and a prompt can be talked around, this cannot.
  */
 function secretScopes(tool: string, detail: string): Scope[] {
-  const files = tool === "shell" ? secretPathsIn(commandOf(detail)) : tool === "read_file" ? [pathArgument(detail) ?? ""].filter(isSecretPath) : []
-  return files.map((file) => ({ key: "secret:" + file.split(BACKSLASH).join("/").toLowerCase(), words: "reading " + file }))
+  const files =
+    tool === "shell"
+      ? secretPathsIn(commandOf(detail))
+      : tool === "read_file" || tool === "write_file" || tool === "edit_file"
+        ? [pathArgument(detail) ?? ""].filter(isSecretPath)
+        : tool === "apply_patch"
+          ? patchSecretPaths(detail)
+          : []
+  const verb = tool === "read_file" || tool === "shell" ? "reading " : "changing "
+  return files.map((file) => ({ key: "secret:" + file.split(BACKSLASH).join("/").toLowerCase(), words: verb + file }))
 }
 
 function ownScopes(tool: string, detail: string): Scope[] {

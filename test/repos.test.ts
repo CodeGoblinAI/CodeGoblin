@@ -38,6 +38,21 @@ describe("reading a cloned repository", () => {
     expect(await runTool("glob", { pattern: "**/*.ts", path: folder }, project)).toContain("src/index.ts")
     expect(await runTool("read_file", { path: path.join(os.tmpdir(), "elsewhere.txt") }, project)).toContain("escapes the working directory")
     expect(inRepoCache(path.join(repoHome(), "..", "auth.json"))).toBe(false)
+    expect(inRepoCache(path.join(folder, "missing-file.ts"))).toBe(true)
+    const brokenLink = path.join(folder, "broken-link")
+    try {
+      fs.symlinkSync(path.join(os.tmpdir(), "cg-nonexistent-outside-target-12345"), brokenLink)
+      expect(inRepoCache(brokenLink)).toBe(false)
+      expect(inRepoCache(path.join(brokenLink, "secret.txt"))).toBe(false)
+    } catch {
+      // Unprivileged Windows without Developer Mode cannot create file symlinks; test with a directory junction.
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "cg-outside-junction-"))
+      fs.symlinkSync(outside, brokenLink, "junction")
+      expect(inRepoCache(brokenLink)).toBe(false)
+      expect(inRepoCache(path.join(brokenLink, "missing.txt"))).toBe(false)
+    } finally {
+      try { fs.unlinkSync(brokenLink) } catch { try { fs.rmdirSync(brokenLink) } catch {} }
+    }
   })
 
   test("writing tools still stay inside the project", async () => {

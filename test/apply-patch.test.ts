@@ -49,6 +49,15 @@ describe("apply_patch", () => {
     expect(await runTool("apply_patch", { patch: patch("*** Add File: ../escape.txt", "+x") }, root)).toContain("escapes the working directory")
   })
 
+  test("refuses protected directories and lockfiles, including as move destinations", async () => {
+    const root = project()
+    expect(await runTool("apply_patch", { patch: patch("*** Add File: .git/hooks/pre-commit", "+#!/bin/sh") }, root)).toContain("protected directory")
+    expect(await runTool("apply_patch", { patch: patch("*** Add File: node_modules/pkg/index.js", "+x") }, root)).toContain("protected directory")
+    expect(await runTool("apply_patch", { patch: patch("*** Add File: bun.lock", "+x") }, root)).toContain("lockfile")
+    expect(await runTool("apply_patch", { patch: patch("*** Update File: app.py", "*** Move to: package-lock.json") }, root)).toContain("lockfile")
+    expect(fs.existsSync(path.join(root, "app.py"))).toBe(true)
+  })
+
   test("bad patches are refused with a reason", () => {
     expect(() => parsePatch("no envelope")).toThrow("Begin Patch")
     expect(() => parsePatch("*** Begin Patch\n*** Add File: a\nnot plus\n*** End Patch")).toThrow("starts with +")

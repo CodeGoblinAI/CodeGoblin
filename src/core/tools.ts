@@ -93,7 +93,7 @@ function realLocation(absolute: string): string | undefined {
 const PROTECTED_SEGMENTS = new Set([".git", "node_modules"])
 const PROTECTED_FILES = new Set(["bun.lock", "bun.lockb", "package-lock.json"])
 
-function assertWritable(relative: string) {
+export function assertWritable(relative: string) {
   // Normalise separators without a regex: on Windows path.relative returns
   // backslashes, and an escaped character class is easy to get wrong.
   const BACKSLASH = String.fromCharCode(92)

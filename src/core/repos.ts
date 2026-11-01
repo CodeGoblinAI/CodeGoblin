@@ -36,16 +36,34 @@ export function parseRepo(reference: string): RepoRef {
 /** Whether an absolute path is inside the clone cache - the one place outside the project read tools may look. */
 export function inRepoCache(target: string): boolean {
   if (!path.isAbsolute(target)) return false
-  const relative = path.relative(repoHome(), path.resolve(target))
+  const resolved = path.resolve(target)
+  const home = path.resolve(repoHome())
+  const relative = path.relative(home, resolved)
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return false
-  // Through a link it could be anywhere.
+  // Through a link it could be anywhere. Walk from the target up to the cache
+  // root; any broken link along the way is refused rather than trusted.
   try {
-    const real = fs.realpathSync(target)
-    const realHome = fs.realpathSync(repoHome())
-    const again = path.relative(realHome, real)
+    const realHome = fs.realpathSync(home)
+    let at = resolved
+    let realTarget: string | undefined
+    for (;;) {
+      try {
+        realTarget = path.join(fs.realpathSync(at), path.relative(at, resolved))
+        break
+      } catch {
+        try {
+          fs.lstatSync(at)
+          return false
+        } catch {}
+        const up = path.dirname(at)
+        if (up === at) return false
+        at = up
+      }
+    }
+    const again = path.relative(realHome, realTarget)
     return Boolean(again) && !again.startsWith("..") && !path.isAbsolute(again)
   } catch {
-    return true
+    return false
   }
 }
 

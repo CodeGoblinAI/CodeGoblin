@@ -18,7 +18,7 @@ import { shellEnvironment } from "../core/tools"
 export type TerminalSocket = {
   send(data: string): void
   close(code?: number, reason?: string): void
-  data: { shell?: Bun.Subprocess; cwd: string }
+  data: { shell?: Bun.Subprocess; cwd: string; reserved?: boolean }
 }
 
 const MAX_TERMINALS = 4
@@ -34,8 +34,26 @@ export function canOpenTerminal(): boolean {
   return open < MAX_TERMINALS
 }
 
-export function startTerminal(socket: TerminalSocket, cols = 100, rows = 30) {
+/** Reserves a slot at upgrade time, so concurrent upgrades cannot pass the cap before open() fires. */
+export function reserveTerminal(): boolean {
+  if (open >= MAX_TERMINALS) return false
   open++
+  return true
+}
+
+export function releaseTerminal(): void {
+  open = Math.max(0, open - 1)
+}
+
+export function startTerminal(socket: TerminalSocket, cols = 100, rows = 30) {
+  if (!socket.data.reserved) {
+    if (!reserveTerminal()) {
+      socket.send(JSON.stringify({ type: "output", data: "too many terminals open\r\n" }))
+      socket.close(1013, "too many terminals")
+      return
+    }
+    socket.data.reserved = true
+  }
   const decoder = new TextDecoder()
   try {
     socket.data.shell = Bun.spawn(terminalShell(), {
@@ -54,7 +72,8 @@ export function startTerminal(socket: TerminalSocket, cols = 100, rows = 30) {
       try { socket.close(1000, "shell exited") } catch {}
     })
   } catch (error) {
-    open--
+    socket.data.reserved = false
+    releaseTerminal()
     socket.send(JSON.stringify({ type: "output", data: "could not start a shell: " + (error instanceof Error ? error.message : String(error)) + "\r\n" }))
     socket.close(1011, "no shell")
   }
@@ -77,8 +96,9 @@ export function terminalMessage(socket: TerminalSocket, raw: string | Buffer) {
 
 /** The page went away: the shell goes with it. */
 export function endTerminal(socket: TerminalSocket) {
-  if (!socket.data.shell) return
-  open = Math.max(0, open - 1)
-  try { socket.data.shell.kill() } catch {}
+  if (!socket.data.shell && !socket.data.reserved) return
+  socket.data.reserved = false
+  releaseTerminal()
+  try { socket.data.shell?.kill() } catch {}
   socket.data.shell = undefined
 }

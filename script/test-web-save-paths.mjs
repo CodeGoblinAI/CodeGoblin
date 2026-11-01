@@ -89,11 +89,14 @@ try {
   const aS = await session(aId)
   results.normal = { events: types(a.events), stoppedMarkers: aS.session.messages.filter((m) => m.stopped).length, last: aS.session.messages.at(-1)?.content }
 
-  // 2. Stop mid-stream.
+  // 2. Stop mid-stream (and verify concurrent /api/chat on the same session is rejected with 409).
   let bId
+  let concurrentStatus
   const b = await chat("slow please", undefined, async (e) => {
     if (e.type === "session") bId = e.id
     if (e.type === "text" || e.type === "delta" || e.type === "content") {
+      const overlap = await fetch(base + "/api/chat", { method: "POST", headers: origin, body: JSON.stringify({ text: "overlap", sessionId: bId, provider: "local/fixture", mode: "full" }) })
+      concurrentStatus = overlap.status
       await fetch(base + "/api/stop", { method: "POST", headers: origin, body: JSON.stringify({ sessionId: bId }) })
     }
   })
@@ -126,6 +129,7 @@ try {
   results.resumeAfterStop = { events: types(d.events), stoppedMarkers: dS.session.messages.filter((m) => m.stopped).length, count: dS.session.messages.length }
   assert.equal(results.normal.stoppedMarkers, 0)
   assert.equal(results.normal.last, "normal answer")
+  assert.equal(concurrentStatus, 409)
   assert.equal(results.stop.stoppedEvents, 1)
   assert.equal(results.stop.stoppedMarkers, 1)
   assert.ok(results.stop.partialKept, "partial answer kept after Stop")

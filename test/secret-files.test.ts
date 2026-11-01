@@ -67,6 +67,26 @@ describe("reading a secret file asks, in every mode", () => {
   test("the prompt says which file", () => {
     expect(coverOf("read_file", JSON.stringify({ path: "deploy/.env" }))).toBe("reading deploy/.env")
   })
+
+  test("approve and full modes also ask before write_file, edit_file or apply_patch touches a secret file", async () => {
+    for (const mode of ["approve", "full"] as const) {
+      asked.length = 0
+      const p = permissions()
+      p.mode = mode
+      await p.decide("write_file", JSON.stringify({ path: ".env", content: "X=1\n" }))
+      await p.decide("edit_file", JSON.stringify({ path: ".env.local", old_string: "A=1", new_string: "A=2" }))
+      await p.decide("apply_patch", JSON.stringify({ patch: "*** Begin Patch\n*** Update File: .ssh/config\n@@\n-Host a\n+Host b\n*** End Patch" }))
+      expect(asked).toEqual([
+        "write_file|every write_file call and changing .env",
+        "edit_file|every edit_file call and changing .env.local",
+        "apply_patch|patches that only add and edit files and changing .ssh/config",
+      ])
+      // Ordinary edits in approve/full mode still run without asking.
+      await p.decide("write_file", JSON.stringify({ path: "src/app.ts", content: "export {}\n" }))
+      await p.decide("edit_file", JSON.stringify({ path: "src/app.ts", old_string: "export {}", new_string: "export const x = 1" }))
+      expect(asked.length).toBe(3)
+    }
+  })
 })
 
 describe("grep never prints a secret file", () => {

@@ -1,6 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
-import { resolveInside } from "./tools"
+import { assertWritable, resolveInside } from "./tools"
 
 /**
  * apply_patch: the multi-file patch format GPT and Codex models are trained
@@ -108,7 +108,8 @@ export function planPatch(root: string, ops: PatchOp[]): PatchPlan {
   }
   const summary: string[] = []
   for (const op of ops) {
-    resolveInside(root, op.path)
+    const target = resolveInside(root, op.path)
+    assertWritable(path.relative(root, target))
     if (op.kind === "add") {
       if (read(op.path) !== null) throw new Error(`${op.path} already exists - update it instead of adding it`)
       state.set(op.path, op.content)
@@ -122,7 +123,8 @@ export function planPatch(root: string, ops: PatchOp[]): PatchPlan {
       if (original === null) throw new Error(`${op.path} does not exist - add it instead`)
       const updated = applyHunks(op.path, original, op.hunks)
       if (op.moveTo) {
-        resolveInside(root, op.moveTo)
+        const moved = resolveInside(root, op.moveTo)
+        assertWritable(path.relative(root, moved))
         if (read(op.moveTo) !== null) throw new Error(`${op.moveTo} already exists`)
         state.set(op.path, null)
         state.set(op.moveTo, updated)
@@ -138,6 +140,10 @@ export function planPatch(root: string, ops: PatchOp[]): PatchPlan {
 
 /** Writes a worked-out patch. `before` is told each path first, so /undo can put it back. */
 export async function writePatch(root: string, plan: PatchPlan, before?: (relative: string) => Promise<void>): Promise<string> {
+  for (const write of plan.writes) {
+    const target = resolveInside(root, write.path)
+    assertWritable(path.relative(root, target))
+  }
   for (const write of plan.writes) await before?.(write.path)
   for (const write of plan.writes) {
     const target = resolveInside(root, write.path)
