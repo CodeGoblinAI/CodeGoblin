@@ -60,7 +60,7 @@ export type CommandResult =
 
 export const COMMANDS = [
   { name: "/usage", description: "session tokens/context and provider balance; Codex quotas via /account" },
-  { name: "/balance", description: "refresh balance/quota: deepseek, moonshotai, tripo or elevenlabs" },
+  { name: "/balance", description: "refresh balance/quota: deepseek, explabs, moonshotai, tripo or elevenlabs" },
   { name: "/account", description: "subscription snapshots: codex, claude or cursor (dashboard)" },
   { name: "/login", description: "official sign-in: /login codex, /login claude or /login cursor" },
   { name: "/import", description: "copy a conversation for this project as text: /import codex, claude, antigravity or cursor" },

@@ -3103,13 +3103,15 @@ function itemsFor(text, cursor) {
   }
   if (head === "/connect" && hasArgument) {
     const q = text.slice(9).trim().toLowerCase()
-    return (paletteData.connectable || [])
+    // A short list until something is typed; typing searches every provider. Mirrors connectChoices.
+    const rows = q
+      ? (paletteData.connectable || []).filter((entry) => entry.id.toLowerCase().includes(q) || entry.label.toLowerCase().includes(q) || entry.about.toLowerCase().includes(q))
+      : paletteData.connectShort || paletteData.connectable || []
+    return rows
       .map((entry) => ({
         value: "/connect " + entry.id,
         hint: entry.label + "  " + (entry.connected ? "connected" : entry.about),
       }))
-      .filter((item) => !q || item.value.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q))
-      // All of them: the list scrolls, and a provider past a cap could only be found by name.
       .slice(0, 50)
   }
   if ((head === "/settings" || head === "/set") && hasArgument) {

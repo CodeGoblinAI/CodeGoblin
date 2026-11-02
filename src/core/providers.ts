@@ -454,7 +454,10 @@ export function refreshCatalog(keyFor: (id: string) => string | undefined, load:
     rememberCatalogEnv(loaded)
     for (const entry of loaded) {
       if (PROVIDERS[entry.id] || CONNECTABLE.some((each) => each.id === entry.id)) continue
-      CONNECTABLE.push({ id: entry.id, label: entry.label, about: `${entry.models.length} model${entry.models.length === 1 ? "" : "s"}, from models.dev` })
+      CONNECTABLE.push({
+        id: entry.id, label: entry.label, about: `${entry.models.length} model${entry.models.length === 1 ? "" : "s"}, from models.dev`,
+        ...(FEATURED_CATALOG.includes(entry.id) ? {} : { more: true }),
+      })
     }
     activateCatalog(keyFor)
   }).catch(() => {})
@@ -470,6 +473,20 @@ export function activateCatalog(keyFor: (id: string) => string | undefined): str
     added.push(entry.id)
   }
   return added
+}
+
+/**
+ * What /connect lists for a query: everything that matches when something is
+ * typed; otherwise the built-ins, the featured catalog providers and anything
+ * already connected, then one row saying how many more a search would find.
+ */
+export function connectChoices(query: string, connected: (id: string) => boolean): { id: string; label: string; about: string; connected: boolean }[] {
+  const q = query.trim().toLowerCase()
+  const rows = CONNECTABLE.map((entry) => ({ ...entry, connected: connected(entry.id) }))
+  if (q) return rows.filter((entry) => entry.id.toLowerCase().includes(q) || entry.label.toLowerCase().includes(q) || entry.about.toLowerCase().includes(q))
+  const shown = rows.filter((entry) => !entry.more || entry.connected)
+  const hidden = rows.length - shown.length
+  return hidden ? [...shown, { id: "", label: `… ${hidden} more provider${hidden === 1 ? "" : "s"}`, about: "type part of a name to find one", connected: false }] : shown
 }
 
 /** Whether a provider came from models.dev rather than the hand-written catalogue. */
@@ -628,7 +645,16 @@ const KIND_ALIASES: Record<string, ModelKind> = {
  * you have to know the name of, and each line says what the key is for -
  * because "elevenlabs" alone does not tell you it is the one that speaks.
  */
-export const CONNECTABLE: { id: string; label: string; about: string }[] = [
+/**
+ * The models.dev providers worth showing in /connect before anything is typed:
+ * the big general ones and the fast hosts. The other couple of hundred are a
+ * search away - typing part of a name finds any of them - so the list a person
+ * sees first is short enough to read.
+ */
+export const FEATURED_CATALOG = ["openrouter", "openai", "google", "groq", "mistral", "xai", "togetherai", "fireworks-ai", "cerebras", "deepinfra", "perplexity"]
+
+/** `more`: a models.dev provider that /connect lists only when searched for. */
+export const CONNECTABLE: { id: string; label: string; about: string; more?: boolean }[] = [
   { id: "cursor-api", label: "Cursor API key", about: "SDK access; billed to the key's user or team. Browser user-plan login: /login cursor" },
   { id: "deepseek", label: "DeepSeek", about: "chat and reasoning" },
   { id: "zai", label: "GLM", about: "chat and reasoning" },

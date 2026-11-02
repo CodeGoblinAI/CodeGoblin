@@ -42,6 +42,7 @@ import {
   refreshCatalog,
   activateCatalog,
   CONNECTABLE,
+  connectChoices,
 } from "../core/providers"
 import { apiKey } from "../core/auth"
 import * as auth from "../core/auth"
@@ -435,6 +436,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
         env: auth.envVariable(entry.id),
         connected: auth.isConnected(entry.id),
       })),
+      // What /connect shows before anything is typed: built-ins, featured and connected providers.
+      connectShort: connectChoices("", (id) => auth.isConnected(id)),
     })
   }
 

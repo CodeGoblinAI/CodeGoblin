@@ -6,6 +6,7 @@ import {
   kindFromWord,
   pickerSection,
   CONNECTABLE,
+  connectChoices,
 } from "../core/providers"
 import { pickerRows } from "../core/favourites"
 import { findMention } from "../core/mention"
@@ -157,12 +158,11 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
   // the id already - which is the thing that made it unusable.
   if (/^\/connect\s+/.test(input)) {
     const query = input.slice(input.indexOf(" ") + 1).trim().toLowerCase()
-    return CONNECTABLE.map((entry) => ({
+    // A short list until something is typed; the "more" row just reopens it.
+    return connectChoices(query, (id) => connectedIds.has(id)).map((entry) => ({
       value: `/connect ${entry.id}`,
-      hint: `${entry.label}  ${connectedIds.has(entry.id) ? "connected" : entry.about}`,
-    }))
-      .filter((item) => !query || item.value.toLowerCase().includes(query) || item.hint.toLowerCase().includes(query))
-      .slice(0, LIST_LIMIT)
+      hint: `${entry.label}  ${entry.connected ? "connected" : entry.about}`,
+    })).slice(0, LIST_LIMIT)
   }
 
   // "/resume " no longer completes to an id. The picker is where a

@@ -14,6 +14,21 @@ const ENDPOINTS: Record<string, string> = {
   elevenlabs: "https://api.elevenlabs.io/v1/user/subscription",
   // https://platform.kimi.ai/docs/api/balance - USD; keys from the .com platform are a different account.
   moonshotai: "https://api.moonshot.ai/v1/users/me/balance",
+  // https://platform.experientiallabs.ai/llms.txt - total_credits minus total_usage, in USD, with an ordinary key.
+  explabs: "https://api.experientiallabs.ai/api/v1/credits",
+}
+
+/** Experiential Labs' per-key figures: spend today, this week and month, and a daily cap when one is set. */
+const EXPLABS_KEY = "https://api.experientiallabs.ai/api/v1/key"
+
+/**
+ * Providers that have no balance API at all, with where to look instead. Said
+ * plainly, rather than "not supported yet", which reads as coming soon.
+ */
+const NO_API: Record<string, string> = {
+  zai: "Z.ai has no balance API for pay-as-you-go keys; check the billing page at https://z.ai",
+  xiaomi: "Xiaomi MiMo has no balance API; check the Balance page at https://platform.xiaomimimo.com",
+  meta: "Meta has no balance API; check your account in Meta's developer dashboard",
 }
 
 export async function fetchBalance(
@@ -24,6 +39,7 @@ export async function fetchBalance(
   const snapshot: Balance = { provider, state: "unavailable", checkedAt: Date.now(), detail: "Balance unavailable; not zero", entries: [] }
   // Never take an endpoint from the browser, model, config or an error response.
   const endpoint = Object.hasOwn(ENDPOINTS, provider) ? ENDPOINTS[provider] : undefined
+  if (!endpoint && Object.hasOwn(NO_API, provider)) return { ...snapshot, state: "unsupported", detail: NO_API[provider]! }
   if (!endpoint) return { ...snapshot, state: "unsupported", detail: "Live balance not supported for this provider yet" }
   if (!key?.trim()) return { ...snapshot, state: "disconnected", detail: "Connect this provider to check its balance" }
   try {
@@ -38,27 +54,58 @@ export async function fetchBalance(
         : "Balance request failed (HTTP " + response.status + "); try again" }
     }
     if (!response.body) throw new Error("Missing response body")
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let text = ""
-    let bytes = 0
-    try {
-      for (;;) {
-        const part = await reader.read()
-        if (part.done) break
-        bytes += part.value.byteLength
-        if (bytes > 65_536) throw new Error("Oversized balance response")
-        text += decoder.decode(part.value, { stream: true })
-      }
-      text += decoder.decode()
-    } finally {
-      await reader.cancel().catch(() => {})
-    }
-    const parsed = parseBalance(provider, JSON.parse(text))
+    const parsed = parseBalance(provider, JSON.parse(await readCapped(response)))
+    // Experiential Labs: the key's own spend and daily cap too, best effort - the balance stands without it.
+    if (provider === "explabs") parsed.entries.push(...await explabsKeyEntries(key, request))
     return { ...snapshot, ...parsed, state: "ready", checkedAt: Date.now() }
   } catch {
     // Provider bodies and exception text may echo a key; expose neither.
     return { ...snapshot, checkedAt: Date.now(), detail: "Balance unavailable: timeout, network error or invalid provider response; try again" }
+  }
+}
+
+/** A JSON body read whole, but never more than 64 KB of it. */
+async function readCapped(response: Response): Promise<string> {
+  if (!response.body) throw new Error("Missing response body")
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let text = ""
+  let bytes = 0
+  try {
+    for (;;) {
+      const part = await reader.read()
+      if (part.done) break
+      bytes += part.value.byteLength
+      if (bytes > 65_536) throw new Error("Oversized balance response")
+      text += decoder.decode(part.value, { stream: true })
+    }
+    return text + decoder.decode()
+  } finally {
+    await reader.cancel().catch(() => {})
+  }
+}
+
+const usd = (value: number) => (Math.round(value * 100) / 100).toFixed(2)
+
+async function explabsKeyEntries(key: string, request: (url: string, init: RequestInit) => Promise<Response>): Promise<{ label: string; amount: string; unit: string }[]> {
+  try {
+    const response = await request(EXPLABS_KEY, { method: "GET", headers: { authorization: "Bearer " + key, accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(5000) })
+    if (!response.ok) { await response.body?.cancel(); return [] }
+    const data = record(record(JSON.parse(await readCapped(response))).data)
+    const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined)
+    const entries: { label: string; amount: string; unit: string }[] = []
+    for (const [label, field] of [["This key today", "usage_daily"], ["This key this month", "usage_monthly"]] as const) {
+      const value = number(data[field])
+      if (value !== undefined) entries.push({ label, amount: usd(value), unit: "USD" })
+    }
+    const limit = number(data.limit)
+    const left = number(data.limit_remaining)
+    entries.push(limit === undefined
+      ? { label: "Daily limit", amount: "none", unit: "set on this key" }
+      : { label: "Daily limit left", amount: usd(left ?? 0), unit: "of " + usd(limit) + " USD" })
+    return entries
+  } catch {
+    return []
   }
 }
 
@@ -100,6 +147,17 @@ function parseBalance(provider: string, input: unknown) {
       { label: "Available", amount: available, unit: "USD" },
       { label: "Vouchers", amount: amount(data.voucher_balance), unit: "USD" },
       { label: "Cash", amount: cash, unit: "USD" },
+    ] }
+  }
+  if (provider === "explabs") {
+    const data = record(raw.data)
+    const credits = Number(amount(data.total_credits))
+    const used = Number(amount(data.total_usage))
+    const left = credits - used
+    return { detail: left > 0 ? "Credits left for API calls (provider)" : "no credits left for API calls (provider) - top up at https://platform.experientiallabs.ai/credits", entries: [
+      { label: "Credits left", amount: usd(left), unit: "USD" },
+      { label: "Total credits", amount: usd(credits), unit: "USD" },
+      { label: "Used", amount: usd(used), unit: "USD" },
     ] }
   }
   if (provider === "tripo") {
