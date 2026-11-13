@@ -51,6 +51,24 @@ describe("the web page", () => {
   })
 
   test("puts your messages on the right", () => {
-    expect(page).toContain(".turn.user { flex-direction: row-reverse; }")
+    expect(page).toContain(".turn.user { align-items: flex-end; }")
+  })
+
+  test("the empty page puts the composer under the question, and the model inside the box", () => {
+    expect(page).toContain("body.home .thread { flex: 0 0 auto;")
+    expect(app).toContain('document.body.classList.toggle("home"')
+    // The pickers live in the box's own row, after the message.
+    const box = page.slice(page.indexOf('<div class="box">'), page.indexOf('<div class="meta">'))
+    expect(box.indexOf('id="input"')).toBeLessThan(box.indexOf('id="mode-btn"'))
+    expect(box.indexOf('id="mode-btn"')).toBeLessThan(box.indexOf('id="provider-btn"'))
+    expect(box.indexOf('id="provider-btn"')).toBeLessThan(box.indexOf('id="send"'))
+  })
+
+  test("icon-only buttons keep a name, and activity starts closed", () => {
+    for (const id of ["new-session", "settings-open", "help-open", "sessions-toggle", "activity-toggle"]) {
+      const tag = page.slice(page.indexOf('id="' + id + '"') - 40, page.indexOf(">", page.indexOf('id="' + id + '"')))
+      expect([id, /aria-label="[A-Z][^"]+"/.test(tag)]).toEqual([id, true])
+    }
+    expect(app).toContain('localStorage.getItem("cg-hide-activity") !== "false"')
   })
 })

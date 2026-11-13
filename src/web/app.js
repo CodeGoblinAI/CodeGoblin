@@ -662,8 +662,13 @@ const atBottom = () => thread.scrollHeight - thread.scrollTop - thread.clientHei
 const scrollDown = () => { thread.scrollTop = thread.scrollHeight }
 
 function emptyState() {
-  thread.innerHTML = '<div class="empty-hint"><h1>What should we work on?</h1><p>Ask about your code. Use <code>/</code> for commands or <code>+</code> to add context.</p></div>'
+  thread.innerHTML = '<div class="empty-hint"><h1>What should we work on?</h1></div>'
 }
+// The empty page lays out differently: the composer sits under the question
+// rather than at the bottom. Watching the thread keeps that true however it
+// was emptied or filled - there are a dozen places that do either.
+new MutationObserver(() => document.body.classList.toggle("home", !!thread.querySelector(".empty-hint") && thread.children.length === 1))
+  .observe(thread, { childList: true })
 
 /** "14:05", or "Oct 30 14:05" for another day. Mirrors sessions.clockTime. */
 function clockTime(ms) {
@@ -676,7 +681,7 @@ function turn(kind, text, images, at = Date.now()) {
   if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
   const wrap = document.createElement("div")
   wrap.className = "turn " + (kind === "user" ? "user" : "agent")
-  wrap.innerHTML = '<div class="who">' + (kind === "user" ? "you" : "goblin") + '<span class="at"></span></div><div class="body"></div>'
+  wrap.innerHTML = '<span class="sr">' + (kind === "user" ? "you" : "goblin") + '</span><div class="who"><span class="at"></span></div><div class="body"></div>'
   // /timestamps shows it; it is always there, so turning it on needs no redraw.
   if (at) { wrap.dataset.at = String(at); wrap.querySelector(".at").textContent = clockTime(at) }
   const body = wrap.querySelector(".body")
@@ -1003,6 +1008,8 @@ function groupOf(ms) {
 async function refreshSessions() {
   const data = await fetch("/api/sessions").then((r) => r.json()).catch(() => ({ sessions: [] }))
   sessionList.innerHTML = ""
+  // The open conversation's name heads the page.
+  document.getElementById("session-title").textContent = data.sessions.find((s) => s.id === sessionId)?.title ?? ""
 
   let lastGroup = null
   for (const s of data.sessions) {
@@ -1176,6 +1183,9 @@ function applyPalette(palette, looked = false) {
   // A palette from anywhere but applyLook is a preview of a theme; Appearance still decides light or dark.
   if (!looked && webSettings.appearance && webSettings.appearance !== "dark") { applyLook(); return }
   const root = document.documentElement.style
+  // A light page wants a sidebar barely darker than itself; a dark one, clearly darker.
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(String(palette.step1).slice(i, i + 2), 16))
+  document.body.classList.toggle("light", (r * 299 + g * 587 + b * 114) / 1000 > 140)
   root.setProperty("--step1", palette.step1)
   root.setProperty("--step2", palette.step2)
   root.setProperty("--step3", palette.step3)
@@ -1458,7 +1468,8 @@ function closeMobilePanels(restoreFocus = true) {
   if (restoreFocus) document.getElementById(openPanel + "-toggle").focus()
 }
 function restorePanelLayout() {
-  for (const panel of ["sessions", "activity"]) paintPanel(panel, narrowLayout.matches || localStorage.getItem("cg-hide-" + panel) === "true")
+  // Activity stays out of the way until it is asked for; the conversation list is there until it is hidden.
+  for (const panel of ["sessions", "activity"]) paintPanel(panel, narrowLayout.matches || (panel === "activity" ? localStorage.getItem("cg-hide-activity") !== "false" : localStorage.getItem("cg-hide-sessions") === "true"))
   syncPanelLayout()
 }
 for (const panel of ["sessions", "activity"]) {

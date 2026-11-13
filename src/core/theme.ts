@@ -27,8 +27,8 @@ export const THEMES: Record<string, { label: string; palette: Palette }> = {
   goblin: {
     label: "charcoal and green, the default",
     palette: {
-      step1: "#16181c", step2: "#1a1d22", step3: "#22262c", step5: "#333842", step7: "#4b515d",
-      step11: "#9aa1ab", step12: "#e8eaed",
+      step1: "#141414", step2: "#1a1a1a", step3: "#232323", step5: "#323232", step7: "#4c4c4c",
+      step11: "#a0a0a0", step12: "#ececec",
       green: "#62f56e", greenBright: "#92ff9b", gold: "#d4b06a", red: "#ff6f7d", orange: "#ffb84d",
     },
   },

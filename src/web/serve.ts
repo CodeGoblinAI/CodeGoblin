@@ -1203,6 +1203,12 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     }
   }
 
+  if (url.pathname === "/logo.png") {
+    return new Response(file(fileURLToPath(new URL("./logo.png", import.meta.url))), {
+      headers: { "content-type": "image/png", "cache-control": "max-age=86400" },
+    })
+  }
+
   if (url.pathname === "/app.js") {
     return new Response(file(fileURLToPath(new URL("./app.js", import.meta.url))), {
       headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" },
