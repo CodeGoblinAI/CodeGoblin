@@ -22,7 +22,7 @@ import { codexAccount, cachedCodexAccount, accountRows, startCodexLogin } from "
 import { startCursorLogin } from "../core/cursor-sdk"
 import { subscriptionAccount, cachedSubscriptionAccount, subscriptionRows } from "../core/subscription-account"
 import { IMPORTERS, importSource } from "../core/conversation-import"
-import { addSpend, priceOf, usage } from "../core/context"
+import { addSpend, costOf, usage } from "../core/context"
 import {
   PROVIDERS,
   resolveSelection,
@@ -1148,7 +1148,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
             // A refused call carries who refused it; the label is composed here
             // so the browser and the terminal say the same words about it.
             if (event.type === "spend") {
-              session.spend = addSpend(session.spend ?? { input: 0, output: 0 }, { ...event, dollars: priceOf(event, model.price) })
+              session.spend = addSpend(session.spend ?? { input: 0, output: 0 }, { ...event, dollars: costOf(event, model.price) })
             }
             send(
               event.type === "tool_denied" ? { ...event, label: refusalLabel(event) }

@@ -517,7 +517,7 @@ function showUsage(value) {
     ? "Usage unavailable until a response"
     : !used
     ? "Tokens/cost unavailable (not zero)" + contextLabel
-    : `${used.input.toLocaleString()} in / ${used.output.toLocaleString()} out · ${used.dollars === undefined ? "cost unknown / subscription" : "$" + used.dollars.toFixed(4) + (used.unpriced ? " + unpriced usage" : " estimated")}${contextLabel}`
+    : `${used.input.toLocaleString()}${used.cached ? " (" + used.cached.toLocaleString() + " cached)" : ""} in / ${used.output.toLocaleString()} out · ${used.dollars === undefined ? "cost unknown / subscription" : "$" + used.dollars.toFixed(4) + (used.unpriced ? " + unpriced usage" : " estimated")}${contextLabel}`
 }
 let busy = false
 let deferredAction

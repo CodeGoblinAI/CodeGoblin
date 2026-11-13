@@ -34,11 +34,13 @@ export async function fakeModel(reply) {
       const answer = await reply(sent, seen.length)
       response.writeHead(200, { "content-type": "text/event-stream" })
       const tools = answer.tools ?? (answer.tool ? [{ name: answer.tool, args: answer.args }] : [])
+      // { usage } is sent as the provider's usage block, on its own last chunk.
+      const usage = answer.usage ? `data: ${JSON.stringify({ choices: [], usage: answer.usage })}\n\n` : ""
       if (tools.length) {
         const chunks = tools.map((t, index) => `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index, id: "c" + seen.length + "_" + index, function: { name: t.name, arguments: JSON.stringify(t.args ?? {}) } }] } }] })}\n\n`).join("")
-        response.end(chunks + "data: [DONE]\n\n")
+        response.end(chunks + usage + "data: [DONE]\n\n")
       } else {
-        response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: answer.text ?? "ok" } }] })}\n\ndata: [DONE]\n\n`)
+        response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: answer.text ?? "ok" } }] })}\n\n${usage}data: [DONE]\n\n`)
       }
     })
   })

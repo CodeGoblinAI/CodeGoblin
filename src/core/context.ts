@@ -45,8 +45,56 @@ export function formatContext(context: Usage): string {
   return context.limit > 0 ? "~" + context.used.toLocaleString() + " / " + context.limit.toLocaleString() + " (" + context.percent + "%)" : "~" + context.used.toLocaleString() + " tokens; window unavailable"
 }
 
-/** What a turn used, as the provider reported it. */
-export type Spend = { input: number; output: number; dollars?: number; unpriced?: boolean }
+/**
+ * US dollars per million tokens.
+ *
+ * `cacheRead` is what input costs when the provider served it from its prompt
+ * cache - a tenth to a fiftieth of the full price, and in a long conversation
+ * most of the input. Without it every cached token is counted at full price.
+ * `peak` is for a provider that charges more at set hours (DeepSeek doubles
+ * its prices for part of each weekday): the price is multiplied by `times`
+ * inside any of the UTC hour ranges, Monday to Friday.
+ */
+export type Price = { input: number; output: number; cacheRead?: number; peak?: { times: number; hoursUtc: [number, number][] } }
+
+/** What a turn used, as the provider reported it. `cached` is the part of `input` read from the provider's cache. */
+export type Spend = { input: number; output: number; cached?: number; dollars?: number; unpriced?: boolean }
+
+/**
+ * The usage block of an OpenAI-style response, with the cached part of the
+ * prompt wherever this provider puts it: OpenAI, Z.ai and most others under
+ * prompt_tokens_details.cached_tokens, DeepSeek as prompt_cache_hit_tokens,
+ * Moonshot as a bare cached_tokens. All of them count it inside prompt_tokens.
+ */
+export function readUsage(raw: unknown, reportsCost = false): { input: number; output: number; cached?: number; dollars?: number } | undefined {
+  if (!raw || typeof raw !== "object") return undefined
+  const used = raw as Record<string, unknown>
+  const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0)
+  const input = count(used.prompt_tokens), output = count(used.completion_tokens)
+  if (!input && !output) return undefined
+  const details = used.prompt_tokens_details as Record<string, unknown> | undefined
+  const cached = Math.min(input, count(details?.cached_tokens) || count(used.prompt_cache_hit_tokens) || count(used.cached_tokens))
+  // A provider that bills through its own router says what the request cost.
+  // That is the bill; a price table is a guess at it. Only read from providers
+  // known to report dollars here (Provider.reportsCost) - the field's unit is
+  // not a standard.
+  const cost = reportsCost && typeof used.cost === "number" && Number.isFinite(used.cost) && used.cost >= 0 ? used.cost : undefined
+  return { input, output, ...(cached ? { cached } : {}), ...(cost !== undefined ? { dollars: cost } : {}) }
+}
+
+/** What a reported turn cost: the provider's own figure when it gave one, else the price table's. */
+export function costOf(event: { input: number; output: number; cached?: number; dollars?: number }, price?: Price, now: Date = new Date()): number | undefined {
+  return event.dollars ?? priceOf(event, price, now)
+}
+
+/** Whether a price with peak hours is in one of them now. */
+export function atPeak(price: Price | undefined, now: Date = new Date()): boolean {
+  if (!price?.peak) return false
+  const day = now.getUTCDay()
+  if (day === 0 || day === 6) return false
+  const hour = now.getUTCHours() + now.getUTCMinutes() / 60
+  return price.peak.hoursUtc.some(([from, to]) => hour >= from && hour < to)
+}
 
 /**
  * Add up a turn.
@@ -60,6 +108,7 @@ export function addSpend(total: Spend, next: Spend): Spend {
   return {
     input: total.input + next.input,
     output: total.output + next.output,
+    ...((total.cached ?? 0) + (next.cached ?? 0) > 0 ? { cached: (total.cached ?? 0) + (next.cached ?? 0) } : {}),
     ...((total.unpriced || next.unpriced || (next.dollars === undefined && next.input + next.output > 0) || (total.dollars === undefined && total.input + total.output > 0)) ? { unpriced: true } : {}),
     dollars:
       total.dollars === undefined && next.dollars === undefined
@@ -69,11 +118,20 @@ export function addSpend(total: Spend, next: Spend): Spend {
 }
 
 export function priceOf(
-  usage: { input: number; output: number },
-  price?: { input: number; output: number },
+  usage: { input: number; output: number; cached?: number },
+  price?: Price,
+  now: Date = new Date(),
 ): number | undefined {
   if (!price) return undefined
-  return (usage.input * price.input + usage.output * price.output) / 1_000_000
+  const cached = Math.min(usage.input, Math.max(0, usage.cached ?? 0))
+  // A cache price nobody has published is the full price: over, never under.
+  const dollars = ((usage.input - cached) * price.input + cached * (price.cacheRead ?? price.input) + usage.output * price.output) / 1_000_000
+  return atPeak(price, now) ? dollars * price.peak!.times : dollars
+}
+
+/** "12,345 in (9,000 cached)" - how much of the prompt the provider already had. */
+export function formatInput(spend: { input: number; cached?: number }): string {
+  return spend.input.toLocaleString() + (spend.cached ? " (" + spend.cached.toLocaleString() + " cached)" : "")
 }
 
 /** Cents to four places while it is pennies, then two. Never bare zero. */

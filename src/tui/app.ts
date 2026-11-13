@@ -94,7 +94,7 @@ import * as sessions from "../core/sessions"
 import { normaliseActivity, recordActivity } from "../core/session-activity"
 import {
   usage,
-  shouldCompact,
+  shouldCompact, formatInput, costOf,
   planCompaction, boundSummaryInput,
   applyCompaction,
   addSpend,
@@ -1311,7 +1311,7 @@ function onSubagent(event: SubagentEvent) {
       const row = rowFor(id)
       if (row) row.text += "  ->  " + (inner.result.split(String.fromCharCode(10))[0] ?? "").slice(0, 50)
     } else if (inner.type === "spend") {
-      spend = addSpend(spend, { input: inner.input, output: inner.output, dollars: priceOf(inner, selection.model.price) })
+      spend = addSpend(spend, { input: inner.input, output: inner.output, ...(inner.cached ? { cached: inner.cached } : {}), dollars: costOf(inner, selection.model.price) })
     }
   }
   render()
@@ -1345,7 +1345,7 @@ function usageRows(): [string, string][] {
   const context = contextUsage()
   return [
     ["context", formatContext(context)],
-    ["tokens", spend.input.toLocaleString() + " input / " + spend.output.toLocaleString() + " output"],
+    ["tokens", formatInput(spend) + " input / " + spend.output.toLocaleString() + " output"],
     ["cost", spend.dollars === undefined ? "unknown / subscription; not zero" : formatSpend(spend)],
     ["subscription quota", "/account codex, claude or cursor (dashboard)"],
   ]
@@ -1560,7 +1560,7 @@ function railLines(height: number): string[] {
     ["session", session.title],
     ["model", selection.provider.label + " " + selection.model.label],
     ["context", context.limit > 0 ? bar + " " + context.percent + "%" : formatContext(context)],
-    ["tokens", spend.input.toLocaleString() + " in / " + spend.output.toLocaleString() + " out"],
+    ["tokens", formatInput(spend) + " in / " + spend.output.toLocaleString() + " out"],
     ["cost", spend.dollars === undefined ? "unknown" : formatSpend(spend)],
     ["mode", permissions.mode + (permissions.planning ? " +planning" : "") + (boost || boostOnce ? " +boost" : "")],
     ["checkpoints", permissions.checkpointsOff ? "off this session" : [every > 0 ? "every " + every : "", spendLimit > 0 ? formatSpend({ input: 0, output: 0, dollars: spendLimit }) : ""].filter(Boolean).join(" · ") || "off"],
@@ -2558,7 +2558,7 @@ async function send() {
         [
           "spent",
           spend.input + spend.output > 0
-            ? formatSpend(spend) + "  (" + spend.input.toLocaleString() + " in, " + spend.output.toLocaleString() + " out)"
+            ? formatSpend(spend) + "  (" + formatInput(spend) + " in, " + spend.output.toLocaleString() + " out)"
             : "nothing yet",
         ],
         ["theme", settings.theme],
@@ -2881,7 +2881,8 @@ async function send() {
         spend = addSpend(spend, {
           input: event.input,
           output: event.output,
-          dollars: priceOf(event, selection.model.price),
+          ...(event.cached ? { cached: event.cached } : {}),
+          dollars: costOf(event, selection.model.price),
         })
       }
       if (event.type === "plan") {

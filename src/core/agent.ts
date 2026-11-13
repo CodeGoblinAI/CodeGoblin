@@ -7,7 +7,7 @@ import { storedSecrets } from "./auth"
 import { checkpointEvery, spendLimitPerPrompt } from "./config"
 import { configuredInstructions } from "./instructions"
 import type { Permissions } from "./permission"
-import { shouldCompact, planCompaction, applyCompaction, boundSummaryInput, SUMMARY_PROMPT, estimateTokens, priceOf, formatSpend } from "./context"
+import { shouldCompact, planCompaction, applyCompaction, boundSummaryInput, SUMMARY_PROMPT, estimateTokens, priceOf, costOf, formatSpend, readUsage } from "./context"
 import { sessionFacts } from "./session-facts"
 import { parseTodos, type Todo } from "./todo"
 import type { History } from "./undo"
@@ -95,7 +95,8 @@ export type AgentEvent =
   | { type: "tool_denied"; id: string; name: string; by: "rule" | "plan" | "user"; rule?: string }
   | { type: "compacted"; before: number; after: number }
   | { type: "plan"; todos: Todo[] }
-  | { type: "spend"; input: number; output: number }
+  /** `cached` is the part of `input` the provider read from its prompt cache, when it says. */
+  | { type: "spend"; input: number; output: number; cached?: number; /** What the provider says the request cost, when it says. */ dollars?: number }
   /**
    * The loop ran out of turns with the model still calling tools.
    *
@@ -425,7 +426,7 @@ async function* runTurns(input: {
         if (event.type === "calls") { event.calls.forEach((call, index) => calls.set(index, call)); continue }
         if (event.type === "text") { text += event.delta; partial = text }
         if (event.type === "output_limit") { outputLimited = true; continue }
-        if (event.type === "spend" && priced) spentThisPrompt += priceOf(event, price) ?? 0
+        if (event.type === "spend" && priced) spentThisPrompt += costOf(event, price) ?? 0
         yield event
       }
     } else {
@@ -489,10 +490,9 @@ async function* runTurns(input: {
         // stop. Throwing it away is why nothing could say what a session had
         // cost - the one number people want from a tool that spends their
         // money.
-        const used = chunk?.usage
-        if (used && (used.prompt_tokens || used.completion_tokens)) {
-          const spend = { input: Number(used.prompt_tokens ?? 0), output: Number(used.completion_tokens ?? 0) }
-          if (priced) spentThisPrompt += priceOf(spend, price) ?? 0
+        const spend = readUsage(chunk?.usage, input.provider.reportsCost)
+        if (spend) {
+          if (priced) spentThisPrompt += costOf(spend, price) ?? 0
           yield { type: "spend", ...spend }
         }
 
@@ -776,10 +776,8 @@ async function* summarise(
     })
     if (!response.ok) throw new Error(String(response.status))
     const body = (await response.json()) as any
-    const used = body?.usage
-    if (used && (used.prompt_tokens || used.completion_tokens)) {
-      yield { type: "spend", input: Number(used.prompt_tokens ?? 0), output: Number(used.completion_tokens ?? 0) }
-    }
+    const used = readUsage(body?.usage, input.provider.reportsCost)
+    if (used) yield { type: "spend", ...used }
     const text = body?.choices?.[0]?.message?.content
     if (typeof text === "string" && text.trim()) return text.trim()
     throw new Error("empty summary")

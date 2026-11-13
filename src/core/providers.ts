@@ -20,7 +20,8 @@ import { localProvider } from "./local-provider"
 import { contextFor, installedModels, readPrefs, toolsFor } from "./local-runtime"
 import { cachedExperientialModels, fetchExperientialModels } from "./experiential"
 import { EFFORT_NAMES } from "./settings"
-import { asProvider, loadCatalog, rememberCatalogEnv, type CatalogProvider } from "./catalog"
+import { asProvider, catalogPrices, loadCatalog, rememberCatalogEnv, type CatalogProvider } from "./catalog"
+import type { Price } from "./context"
 
 export type Capabilities = {
   input?: { text?: boolean; image?: boolean; audio?: boolean }
@@ -60,7 +61,7 @@ export type Model = {
    * Absent means unpriced rather than free - a spend of nothing and a spend
    * nobody has told us are different things, and the status line says which.
    */
-  price?: { input: number; output: number }
+  price?: Price
   capabilities?: Capabilities
 }
 
@@ -75,6 +76,8 @@ export type Provider = {
   runtime?: boolean
   /** Sends stream_options.include_usage: OpenAI-style APIs omit usage on streams unless asked, and spend stays unknown. */
   usageOnStream?: boolean
+  /** The usage block carries `cost`, in US dollars, for the request (Experiential Labs does). It is used instead of the price table. */
+  reportsCost?: boolean
   /**
    * Ask the API which models this key may call (GET /models) and list those:
    * catalog entries keep their limits and prices, newly listed chat models are
@@ -174,6 +177,18 @@ const ZAI_EFFORT = { efforts: ["none", "minimal", "low", "medium", "high", "xhig
 /** `claude --effort`, from the installed CLI's help; its default is not documented there. */
 const CLAUDE_EFFORT = ["low", "medium", "high", "xhigh", "max"]
 
+/**
+ * DeepSeek charges double from 01:00 to 04:00 and 06:00 to 10:00 UTC, Monday
+ * to Friday (api-docs.deepseek.com/quick_start/pricing, 2026-11). Its Chinese
+ * public holidays are off-peak; those are counted as peak here, which only
+ * ever overstates.
+ */
+const DEEPSEEK_PEAK = { times: 2, hoursUtc: [[1, 4], [6, 10]] as [number, number][] }
+
+/*
+ * Prices below are the fallback for a run that cannot reach models.dev; the
+ * daily catalog replaces them (applyCatalogPrices). Checked 2026-11-13.
+ */
 export const PROVIDERS: Record<string, Provider> = {
   deepseek: {
     id: "deepseek",
@@ -181,13 +196,13 @@ export const PROVIDERS: Record<string, Provider> = {
     baseUrl: "https://api.deepseek.com/chat/completions",
     models: [
       // Both think unless told not to (DeepSeek's docs); "none" turns it off.
-      { id: "deepseek-v4-flash", label: "V4 Flash", reasoning: true, ...DEEPSEEK_EFFORT, contextWindow: 128000, price: { input: 0.28, output: 0.42 } },
-      { id: "deepseek-v4-pro", label: "V4 Pro", reasoning: true, ...DEEPSEEK_EFFORT, contextWindow: 128000, price: { input: 0.55, output: 2.19 } },
+      { id: "deepseek-v4-flash", label: "V4 Flash", reasoning: true, ...DEEPSEEK_EFFORT, contextWindow: 128000, price: { input: 0.15, output: 0.6, cacheRead: 0.003, peak: DEEPSEEK_PEAK } },
+      { id: "deepseek-v4-pro", label: "V4 Pro", reasoning: true, ...DEEPSEEK_EFFORT, contextWindow: 128000, price: { input: 0.66, output: 1.98, cacheRead: 0.022, peak: DEEPSEEK_PEAK } },
       {
         id: "deepseek-v4-flash-vision-exp",
         label: "V4 Flash Vision",
         contextWindow: 128000,
-        price: { input: 0.28, output: 0.42 },
+        price: { input: 0.15, output: 0.6, cacheRead: 0.003, peak: DEEPSEEK_PEAK },
         // Declared, and now meant: a model called Vision that could not be
         // shown a picture was the only kind of vision this had.
         capabilities: { input: { text: true, image: true } },
@@ -199,14 +214,15 @@ export const PROVIDERS: Record<string, Provider> = {
     label: "GLM",
     baseUrl: "https://api.z.ai/api/paas/v4/chat/completions",
     models: [
-      { id: "glm-5.3-flash", label: "5.3 Flash", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
-      { id: "glm-5.3", label: "5.3", reasoning: true, ...ZAI_EFFORT, contextWindow: 200000 },
-      { id: "glm-5.2", label: "5.2", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
-      { id: "glm-5.1", label: "5.1", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
-      { id: "glm-5", label: "5", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
-      { id: "glm-5-turbo", label: "5 Turbo", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
-      { id: "glm-4.7", label: "4.7", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
-      { id: "glm-4.6", label: "4.6", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000 },
+      // Unpriced, these were never stopped by the spend brake - it only counts what has a price.
+      { id: "glm-5.3-flash", label: "5.3 Flash", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000, price: { input: 0.15, output: 0.5, cacheRead: 0.03 } },
+      { id: "glm-5.3", label: "5.3", reasoning: true, ...ZAI_EFFORT, contextWindow: 200000, price: { input: 1.4, output: 4.4, cacheRead: 0.26 } },
+      { id: "glm-5.2", label: "5.2", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000, price: { input: 1.4, output: 4.4, cacheRead: 0.26 } },
+      { id: "glm-5.1", label: "5.1", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000, price: { input: 1.4, output: 4.4, cacheRead: 0.26 } },
+      { id: "glm-5", label: "5", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000, price: { input: 1, output: 3.2, cacheRead: 0.2 } },
+      { id: "glm-5-turbo", label: "5 Turbo", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000, price: { input: 1.2, output: 4, cacheRead: 0.24 } },
+      { id: "glm-4.7", label: "4.7", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000, price: { input: 0.6, output: 2.2, cacheRead: 0.11 } },
+      { id: "glm-4.6", label: "4.6", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000, price: { input: 0.6, output: 2.2, cacheRead: 0.11 } },
     ],
   },
   moonshotai: {
@@ -214,10 +230,10 @@ export const PROVIDERS: Record<string, Provider> = {
     label: "Kimi",
     baseUrl: "https://api.moonshot.ai/v1/chat/completions",
     models: [
-      { id: "kimi-k3", label: "K3", contextWindow: 256000 },
-      { id: "kimi-k2.7-code", label: "K2.7 Code", contextWindow: 256000 },
-      { id: "kimi-k2.7-code-highspeed", label: "K2.7 Code Highspeed", contextWindow: 256000 },
-      { id: "kimi-k2.6", label: "K2.6", contextWindow: 128000 },
+      { id: "kimi-k3", label: "K3", contextWindow: 256000, price: { input: 3, output: 15, cacheRead: 0.3 } },
+      { id: "kimi-k2.7-code", label: "K2.7 Code", contextWindow: 256000, price: { input: 0.95, output: 4, cacheRead: 0.19 } },
+      { id: "kimi-k2.7-code-highspeed", label: "K2.7 Code Highspeed", contextWindow: 256000, price: { input: 1.9, output: 8, cacheRead: 0.38 } },
+      { id: "kimi-k2.6", label: "K2.6", contextWindow: 128000, price: { input: 0.95, output: 4, cacheRead: 0.16 } },
       { id: "kimi-k2.5", label: "K2.5", contextWindow: 128000 },
     ],
   },
@@ -314,6 +330,8 @@ export const PROVIDERS: Record<string, Provider> = {
     label: "Experiential Labs",
     baseUrl: "https://api.experientiallabs.ai/v1/chat/completions",
     usageOnStream: true,
+    // Its catalog price is one route's; requests are billed by the route taken, which has been over double.
+    reportsCost: true,
     models: [],
   },
   qwen: {
@@ -451,6 +469,7 @@ let catalogLoad: Promise<void> | undefined
 export function refreshCatalog(keyFor: (id: string) => string | undefined, load: () => Promise<CatalogProvider[]> = loadCatalog): Promise<void> {
   catalogLoad ??= load().then((loaded) => {
     catalog = loaded
+    applyCatalogPrices(catalogPrices())
     rememberCatalogEnv(loaded)
     for (const entry of loaded) {
       if (PROVIDERS[entry.id] || CONNECTABLE.some((each) => each.id === entry.id)) continue
@@ -462,6 +481,27 @@ export function refreshCatalog(keyFor: (id: string) => string | undefined, load:
     activateCatalog(keyFor)
   }).catch(() => {})
   return catalogLoad
+}
+
+/**
+ * Today's prices for the built-in models, from the catalog.
+ *
+ * The hand-written table goes stale - DeepSeek's had drifted by half, and two
+ * providers had no prices at all, which left the spend brake off for them. A
+ * model the catalog does not list keeps what it has; so does a peak schedule,
+ * which the catalog cannot express. Returns how many models were repriced.
+ */
+export function applyCatalogPrices(prices: Record<string, Record<string, Price>>): number {
+  let changed = 0
+  for (const [providerId, models] of Object.entries(prices)) {
+    for (const model of PROVIDERS[providerId]?.models ?? []) {
+      const fresh = models[model.id]
+      if (!fresh) continue
+      model.price = { ...fresh, ...(model.price?.peak ? { peak: model.price.peak } : {}) }
+      changed++
+    }
+  }
+  return changed
 }
 
 /** Adds every catalog provider that now has a key - after /connect stores one, say. Returns the ids added. */

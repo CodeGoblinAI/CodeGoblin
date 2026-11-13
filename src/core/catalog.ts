@@ -2,6 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { Global } from "../platform/paths"
 import type { Model, Provider } from "./providers"
+import type { Price } from "./context"
 
 /**
  * Provider breadth from models.dev, the open catalog the fork reads.
@@ -41,12 +42,38 @@ export type CatalogProvider = { id: string; label: string; env: string[]; baseUr
 
 type RawModel = {
   id?: unknown; name?: unknown; reasoning?: unknown; tool_call?: unknown; status?: unknown
-  limit?: { context?: unknown }; cost?: { input?: unknown; output?: unknown }
+  limit?: { context?: unknown }; cost?: { input?: unknown; output?: unknown; cache_read?: unknown }
   modalities?: { input?: unknown; output?: unknown }
 }
 type RawProvider = { id?: unknown; name?: unknown; env?: unknown; npm?: unknown; api?: unknown; doc?: unknown; models?: Record<string, RawModel> }
 
 const str = (value: unknown, max = 200) => (typeof value === "string" && value.length <= max ? value : undefined)
+
+function priceFrom(cost: RawModel["cost"]): Price | undefined {
+  if (!cost || typeof cost.input !== "number" || typeof cost.output !== "number" || cost.input < 0 || cost.output < 0) return undefined
+  const read = cost.cache_read
+  return { input: cost.input, output: cost.output, ...(typeof read === "number" && read >= 0 && read <= cost.input ? { cacheRead: read } : {}) }
+}
+
+/** The hand-written providers whose prices the catalog keeps current. */
+const PRICED_BUILT_INS = ["deepseek", "zai", "moonshotai", "openai", "xiaomi", "meta"]
+
+/** Prices for the built-in providers' models, by provider and model id. A free or unpriced entry is left out. */
+export function builtInPrices(raw: unknown): Record<string, Record<string, Price>> {
+  const out: Record<string, Record<string, Price>> = {}
+  if (!raw || typeof raw !== "object") return out
+  for (const id of PRICED_BUILT_INS) {
+    const models = (raw as Record<string, RawProvider>)[id]?.models
+    if (!models || typeof models !== "object") continue
+    for (const model of Object.values(models)) {
+      const modelId = str(model?.id)
+      const price = priceFrom(model?.cost)
+      if (!modelId || !price || (price.input === 0 && price.output === 0)) continue
+      ;(out[id] ??= {})[modelId] = price
+    }
+  }
+  return out
+}
 
 /** The catalog, kept to providers CG-Next can call and models an agent can use: text out, tool calls, not deprecated. */
 export function usableCatalog(raw: unknown): CatalogProvider[] {
@@ -66,7 +93,7 @@ export function usableCatalog(raw: unknown): CatalogProvider[] {
       if (model.tool_call !== true || !output.includes("text") || model.status === "deprecated") continue
       const input = Array.isArray(model.modalities?.input) ? model.modalities!.input as unknown[] : ["text"]
       const context = typeof model.limit?.context === "number" && model.limit.context > 0 ? model.limit.context : 128_000
-      const cost = model.cost && typeof model.cost.input === "number" && typeof model.cost.output === "number" ? { input: model.cost.input, output: model.cost.output } : undefined
+      const cost = priceFrom(model.cost)
       models.push({
         id: modelId,
         label: str(model.name, 120) ?? modelId,
@@ -83,27 +110,40 @@ export function usableCatalog(raw: unknown): CatalogProvider[] {
   return out.sort((a, b) => a.label.localeCompare(b.label))
 }
 
-function readCache(): { at: number; providers: CatalogProvider[] } | undefined {
+type Cached = { at: number; providers: CatalogProvider[]; prices?: Record<string, Record<string, Price>> }
+function readCache(): Cached | undefined {
   try {
-    const cached = JSON.parse(fs.readFileSync(cacheFile(), "utf8")) as { at?: unknown; providers?: unknown }
-    return typeof cached.at === "number" && Array.isArray(cached.providers) ? { at: cached.at, providers: cached.providers as CatalogProvider[] } : undefined
+    const cached = JSON.parse(fs.readFileSync(cacheFile(), "utf8")) as { at?: unknown; providers?: unknown; prices?: unknown }
+    if (typeof cached.at !== "number" || !Array.isArray(cached.providers)) return undefined
+    const prices = cached.prices && typeof cached.prices === "object" ? (cached.prices as Cached["prices"]) : undefined
+    return { at: cached.at, providers: cached.providers as CatalogProvider[], ...(prices ? { prices } : {}) }
   } catch {
     return undefined
   }
+}
+
+/** Built-in providers' prices from the last catalog that loaded; empty until one has. */
+let prices: Record<string, Record<string, Price>> = {}
+export function catalogPrices() {
+  return prices
 }
 
 /** The usable catalog: from the cache when it is fresh, else fetched (and cached), else whatever cache there is. */
 export async function loadCatalog(options: { fetch?: typeof fetch; now?: number; force?: boolean } = {}): Promise<CatalogProvider[]> {
   const now = options.now ?? Date.now()
   const cached = readCache()
-  if (cached && !options.force && now - cached.at < MAX_AGE_MS) return cached.providers
+  prices = cached?.prices ?? {}
+  // A cache written before prices were kept is refetched once, to get them.
+  if (cached?.prices && !options.force && now - cached.at < MAX_AGE_MS) return cached.providers
   try {
     const response = await (options.fetch ?? fetch)(URL_, { signal: AbortSignal.timeout(15_000), redirect: "error" })
     if (!response.ok) throw new Error(String(response.status))
-    const providers = usableCatalog(await response.json())
+    const raw = await response.json()
+    const providers = usableCatalog(raw)
     if (providers.length) {
+      prices = builtInPrices(raw)
       fs.mkdirSync(path.dirname(cacheFile()), { recursive: true })
-      fs.writeFileSync(cacheFile(), JSON.stringify({ at: now, providers }))
+      fs.writeFileSync(cacheFile(), JSON.stringify({ at: now, providers, prices }))
     }
     return providers.length ? providers : cached?.providers ?? []
   } catch {

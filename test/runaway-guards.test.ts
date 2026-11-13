@@ -101,6 +101,41 @@ describe("the spend brake", () => {
     expect(asked).toEqual(["$0.40 spent on this prompt - keep going", "$0.60 spent on this prompt - keep going"])
   })
 
+  test("cached input counts at the cache price, so a long cached conversation is not stopped early", async () => {
+    const asked: string[] = []
+    const permissions = new Permissions(async (_tool, detail) => { asked.push(detail); return "reject" })
+    permissions.mode = "full"
+    // 200k in, 190k of it from the cache at a tenth of the price: $0.029 a step, not $0.20.
+    const cachedStep = (id: string) => () => stream(
+      { choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name: "list_files", arguments: '{"path":"."}' } }] } }] },
+      { choices: [], usage: { prompt_tokens: 200_000, completion_tokens: 0, prompt_tokens_details: { cached_tokens: 190_000 } } },
+    )
+    serve(cachedStep("a"), cachedStep("b"), answers("done"))
+    const cheap: Provider = { ...priced, models: [{ ...priced.models[0]!, price: { input: 1, output: 1, cacheRead: 0.1 } }] }
+    const events = await drive({ provider: cheap, messages: [{ role: "user", content: "go" }], permissions, spendLimit: 0.3 })
+    expect(asked).toEqual([])
+    expect(events.find((event) => event.type === "spend")).toMatchObject({ input: 200_000, cached: 190_000 })
+  })
+
+  test("a provider's own cost figure is what the brake counts, when it is higher than the table says", async () => {
+    const asked: string[] = []
+    const permissions = new Permissions(async (_tool, detail) => { asked.push(detail); return "reject" })
+    permissions.mode = "full"
+    // The table makes this step a tenth of a cent; the provider says 25 cents.
+    const billedStep = (id: string) => () => stream(
+      { choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name: "list_files", arguments: '{"path":"."}' } }] } }] },
+      { choices: [], usage: { prompt_tokens: 1000, completion_tokens: 0, cost: 0.25 } },
+    )
+    serve(billedStep("a"), billedStep("b"), answers("done"))
+    await drive({ provider: { ...priced, reportsCost: true }, messages: [{ role: "user", content: "go" }], permissions, spendLimit: 0.3 })
+    expect(asked).toEqual(["$0.50 spent on this prompt - keep going"])
+    // Without the flag the same field is ignored: its unit is not a standard.
+    asked.length = 0
+    serve(billedStep("a"), billedStep("b"), answers("done"))
+    await drive({ messages: [{ role: "user", content: "go" }], permissions, spendLimit: 0.3 })
+    expect(asked).toEqual([])
+  })
+
   test("an unpriced model is never stopped for money", async () => {
     let asked = 0
     const permissions = new Permissions(async () => { asked++; return "reject" })
