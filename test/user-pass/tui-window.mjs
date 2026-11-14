@@ -10,10 +10,12 @@ import { fakeModel, tempDir, delay } from "./harness.mjs"
 
 const [cols = "120", rows = "36"] = process.argv.slice(2)
 const reply = "Here is what I found.\n\n## Plan\n\n1. Read `src/core/agent.ts`\n2. Add the guard\n\n```ts\nexport function guard(n: number) {\n  return n > 0\n}\n```\n\n| File | Change |\n| --- | --- |\n| agent.ts | guard added |\n\nDone: **1 file** changed."
-const model = await fakeModel((sent) => {
+const model = await fakeModel(async (sent) => {
   const last = sent.messages.at(-1)
   const text = String(last?.content ?? "")
   if (last?.role === "tool") return { text: reply, usage: { prompt_tokens: 4300, completion_tokens: 120, prompt_tokens_details: { cached_tokens: 4096 } } }
+  // "slow" in a prompt holds the answer back, to look at the working state and to stop or queue.
+  if (/slow/i.test(text)) await delay(9000)
   if (/question/i.test(text)) return { tool: "question", args: { question: "Which runtime should the script target?", options: [{ label: "Bun (Recommended)", description: "what the repo uses" }, { label: "Node" }, { label: "Deno" }] } }
   if (/write|edit|change/i.test(text)) return { tool: "write_file", args: { path: "notes.md", content: "# Notes\n\n- a guard was added\n" } }
   if (/run|shell/i.test(text)) return { tool: "shell", args: { command: "git status" } }

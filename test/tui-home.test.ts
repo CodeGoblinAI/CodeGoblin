@@ -41,3 +41,44 @@ describe("the terminal's empty conversation", () => {
     expect(homeScreen(30, 20, "", plain).join("\n")).not.toContain(TAGLINE)
   })
 })
+
+describe("the empty conversation's layout around the composer", () => {
+  const { homeLayout } = require("../src/tui/wordmark") as typeof import("../src/tui/wordmark")
+  const composerRow = (layout: { above: string[] }, taken: number) => layout.above.length + taken
+
+  test("always exactly the rows it is given, whatever is open", () => {
+    for (const room of [3, 8, 12, 20, 30, 45]) {
+      for (const taken of [0, 4, 11]) {
+        for (const notice of [0, 1, 2]) {
+          // The app always leaves at least one row here.
+          if (taken + notice >= room) continue
+          const layout = homeLayout(120, room, taken + notice, "~/proj:main", plain, notice)
+          expect([room, taken, notice, layout.above.length + layout.below.length]).toEqual([room, taken, notice, room - taken - notice])
+        }
+      }
+    }
+  })
+
+  test("the composer sits under the wordmark, with the folder on the last row", () => {
+    const layout = homeLayout(120, 30, 0, "~/proj:main", plain)
+    const text = layout.above.join("\n")
+    expect(text).toContain(WORDMARK[0]!)
+    expect(text).toContain(HOME_TIP)
+    expect(layout.above.at(-1)).toBe("")
+    expect(layout.below.length).toBeGreaterThan(5)
+    expect(layout.below.at(-1)).toContain("~/proj:main")
+  })
+
+  test("a notice takes the blank row, so the composer does not move", () => {
+    const quiet = homeLayout(120, 30, 0, "~/proj:main", plain)
+    const noted = homeLayout(120, 30, 1, "~/proj:main", plain, 1)
+    expect(composerRow(noted, 1)).toBe(composerRow(quiet, 0))
+    expect(noted.above.join("\n")).toContain(WORDMARK[0]!)
+  })
+
+  test("the command list takes its rows from below; the wordmark stays where it was", () => {
+    const quiet = homeLayout(120, 30, 0, "", plain)
+    const listed = homeLayout(120, 30, 11, "", plain)
+    expect(listed.above.findIndex((line) => line.includes(WORDMARK[0]!))).toBe(quiet.above.findIndex((line) => line.includes(WORDMARK[0]!)))
+  })
+})

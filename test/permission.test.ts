@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Permissions, DECISIONS, MODES, nextMode, scopeOf, decisionHints, askedFor, CHECKPOINT_TOOL } from "../src/core/permission"
+import { Permissions, DECISIONS, MODES, nextMode, scopeOf, decisionHints, askedFor, toolLabel, CHECKPOINT_TOOL } from "../src/core/permission"
 
 describe("permissions", () => {
   test("tools that change nothing never prompt", async () => {
@@ -229,6 +229,16 @@ describe("how much to ask", () => {
     expect(askedFor("shell", JSON.stringify({ command: "git status" }))).toBe("git status")
     expect(askedFor("webfetch", JSON.stringify({ url: "https://example.com" }))).toBe("https://example.com")
     expect(askedFor("autonomous run", "3 tool calls this turn - keep going")).toBe("3 tool calls this turn - keep going")
-    expect(askedFor("mcp__x__y", '{"q":1}')).toBe('{"q":1}')
+    // Any other tool's arguments are put in words, not shown as the JSON they travelled in.
+    expect(askedFor("mcp__x__y", '{"q":1}')).toBe("q: 1")
+    expect(askedFor("mcp__browser__new_page", JSON.stringify({ url: "https://example.com" }))).toBe("https://example.com")
+    expect(askedFor("mcp__browser__fill", JSON.stringify({ uid: "1_4", value: "hello" }))).toBe("uid: 1_4, value: hello")
+    expect(askedFor("mcp__browser__take_snapshot", "{}")).toBe("")
+    expect(askedFor("glob", JSON.stringify({ pattern: "*.md" }))).toBe("*.md")
+    expect(askedFor("glob", JSON.stringify({ pattern: "**/*.ts", path: "src" }))).toBe("**/*.ts in src")
+    expect(askedFor("grep", JSON.stringify({ pattern: "TODO", include: "*.ts" }))).toBe('"TODO" *.ts')
+    expect(askedFor("list_files", JSON.stringify({ path: "." }))).toBe(".")
+    expect(toolLabel("mcp__browser__new_page")).toBe("browser: new_page")
+    expect(toolLabel("glob")).toBe("glob")
   })
 })

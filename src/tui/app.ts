@@ -10,7 +10,7 @@ import { ansi, theme, dim, invert, noInvert, applyTheme as paintTheme } from "./
 import { APPEARANCES, effectiveTheme, terminalLooksLight } from "../core/theme"
 import { LEADER_DEFAULTS, loadKeymap, type LeaderAction } from "./keybinds"
 import os from "node:os"
-import { homeScreen } from "./wordmark"
+import { homeLayout } from "./wordmark"
 import { THEMES } from "../core/theme"
 import { EFFORTS } from "../core/settings"
 import { createKeyReader } from "./keys"
@@ -106,7 +106,7 @@ import {
   type Spend,
 } from "../core/context"
 import { marker, counts, type Todo } from "../core/todo"
-import { Permissions, decisionsFor, MODES, nextMode, askedFor, refusalLabel, decisionHints, type Decision, type PermissionMode } from "../core/permission"
+import { Permissions, decisionsFor, MODES, nextMode, askedFor, toolLabel, refusalLabel, decisionHints, type Decision, type PermissionMode } from "../core/permission"
 import { McpManager, withoutServers } from "../core/mcp"
 import { browserStatus, switchBrowser } from "../core/browser"
 import { SubagentManager, listAgents, selectedAgent, agentSelection, type SubagentEvent } from "../core/subagents"
@@ -752,7 +752,8 @@ function render() {
   // With the side panel showing, the transcript gets the columns left of it -
   // wrapping to the full width and cutting at the panel lost the right side,
   // which is where your own messages sit.
-  const railShown = cols >= RAIL_MIN_COLS
+  // Not on the empty conversation: there is nothing in the panel to show yet, and the home screen is centred on the full width.
+  const railShown = cols >= RAIL_MIN_COLS && transcript.length > 0
   const main = railShown ? cols - RAIL_WIDTH - 1 : cols
   const width = Math.max(20, main - 6)
   const lines: string[] = []
@@ -809,6 +810,7 @@ function render() {
     queued: Boolean(queued && !secret),
     images: Boolean(pendingImages.length && !secret),
     scrolled: scroll > 3,
+    notice: Number(streaming && !pending && !asking) + Number(Boolean(status)),
   }
   // Editing a wrapped draft during inference still draws all its lines.
   // Reserve those, plus queued/image/latest notices, before the transcript.
@@ -832,10 +834,12 @@ function render() {
   if (jumpLine !== undefined) { scroll = Math.max(0, lines.length - room - jumpLine); jumpTo = undefined }
   scroll = Math.min(scroll, maxScroll)
   const cut = lines.length - room - scroll
-  const body = transcript.length === 0
-    ? homeScreen(main, room, homeWhere(), { goblin: theme.goblin, gold: theme.gold, dim, reset: ansi.reset })
-    : lines.length > room ? lines.slice(Math.max(0, cut), Math.max(0, cut) + room) : lines
-  while (body.length < room) body.push("")
+  // The empty conversation puts the composer under the wordmark; what is left of the window goes below it.
+  const home = transcript.length === 0
+    ? homeLayout(main, room + paletteLines.length + footer.notice, paletteLines.length + footer.notice, homeWhere(), { goblin: theme.goblin, gold: theme.gold, dim, reset: ansi.reset }, footer.notice)
+    : undefined
+  const body = home ? home.above : lines.length > room ? lines.slice(Math.max(0, cut), Math.max(0, cut) + room) : lines
+  if (!home) while (body.length < room) body.push("")
 
   // A side panel on wide terminals: session, spend and servers at a glance,
   // the way the original shows them beside the conversation. Narrow screens
@@ -964,9 +968,7 @@ function render() {
     shown = dim + (asking.typing ? "type your answer..." : "pick an answer above") + ansi.reset
   } else if (streaming && !input) {
     caretOffset = 0
-    shown =
-      dim + spinnerFrame() + " goblin is working... " + ansi.reset +
-      dim + "type to steer" + ansi.reset
+    shown = dim + "type to queue a message for when this finishes" + ansi.reset
   } else if (secret) {
     // Dots, and one per character rather than a fixed run, so backspace is
     // visible without the key ever being.
@@ -1004,6 +1006,18 @@ function render() {
     }
   }
 
+  // Working: said where the eye is, in colour, with how long it has been and
+  // how to stop it. It used to be a dim spinner inside the prompt box, which
+  // on a blank screen read as nothing happening.
+  if (streaming && !pending && !asking) {
+    body.push(
+      theme.goblin + "  " + spinnerFrame() + " working" + ansi.reset +
+        dim + " \u00b7 " + sessions.workedFor(Date.now() - workingSince) + " \u00b7 esc to stop" + ansi.reset,
+    )
+  }
+  // What just happened - "switched to ...", "no key for ..." - on a line of
+  // its own. Sharing the status line, it pushed the model's name off the end.
+  if (status) body.push(theme.muted + "  " + truncateToWidth(status, Math.max(10, cols - 4)) + ansi.reset)
   body.push(theme.border + "  " + "\u2500".repeat(inner) + ansi.reset)
   // Scrolled up a way: a floating way back down, Claude-style, only while
   // scrolled - a button that is always there teaches nobody anything.
@@ -1059,17 +1073,21 @@ function render() {
   body.push(theme.border + "  " + "\u2500".repeat(inner) + ansi.reset)
 
   const context = contextUsage()
+  // How much it will ask before acting is always on show, coloured by how
+  // much it is trusted with: it changes what the next prompt can do.
+  const modeLabel = permissions.mode === "ask" ? "ask" : permissions.mode === "approve" ? "approve for me" : "full access"
+  const modeColour = permissions.mode === "ask" ? theme.muted : permissions.mode === "approve" ? theme.gold : theme.error
   const modeTag =
-    (permissions.mode === "ask" ? "" : "  [" + MODES.find((entry) => entry.id === permissions.mode)!.label.toLowerCase() + "]") +
     (permissions.planning ? "  [planning]" : "") +
     (boost || boostOnce ? "  [boost]" : "") +
     (subagents.running().length ? "  [" + subagents.running().length + " subagent" + (subagents.running().length === 1 ? "" : "s") + " running]" : "")
-  const spendTag = spend.input + spend.output > 0 ? "  " + formatSpend(spend) : ""
+  // Nothing spent on a model that costs nothing is not worth a column.
+  const spendTag = spend.input + spend.output > 0 && !(spend.dollars === 0 && !spend.unpriced) ? "  " + formatSpend(spend) : ""
   // Usage stays on the bar even while a status is showing: a transient
   // message used to replace the model, context and spend readout entirely,
   // so "no key" also hid what you were connected to.
-  const usage = selection.provider.label + " · " + selection.model.id + (context.limit > 0 ? "  ~" + context.percent + "% ctx" : "  ctx window unknown") + spendTag
-  const left = status ? status + "   " + usage : modeTag.trim() + (modeTag ? "  " : "") + usage
+  const usage = selection.provider.label + " " + selection.model.label + (context.limit > 0 ? "  ~" + context.percent + "% ctx" : "  ctx window unknown") + spendTag
+  const left = usage + modeTag
   const compactHints = cols < 75
   const right = dialog
     ? compactHints ? "enter · esc close" : "up/down · enter choose · esc close"
@@ -1090,10 +1108,11 @@ function render() {
         : compactHints ? "ctrl+c copy/quit" : "shift+tab mode · ctrl+c copy/quit"
   // A long status gives way to the key hints rather than pushing them off the
   // edge: "mode: Full access - never ask - only the rules..." ran into them.
-  const statusRoom = Math.max(10, cols - displayWidth(right) - 4)
-  const plain = "  " + (displayWidth(left) > statusRoom - 2 ? truncateToWidth(left, statusRoom - 3) + "…" : left)
-  const padded = padToWidth(plain, Math.max(displayWidth(plain) + 1, cols - displayWidth(right) - 2))
-  body.push(dim + padded + ansi.reset + theme.muted + right + ansi.reset)
+  const statusRoom = Math.max(10, cols - displayWidth(right) - 4 - displayWidth(modeLabel) - 3)
+  const plain = (displayWidth(left) > statusRoom - 2 ? truncateToWidth(left, statusRoom - 3) + "\u2026" : left)
+  const lead = "  " + modeLabel + " \u00b7 "
+  const gap = Math.max(1, cols - displayWidth(right) - 2 - displayWidth(lead) - displayWidth(plain))
+  body.push("  " + modeColour + modeLabel + ansi.reset + dim + " \u00b7 " + plain + ansi.reset + " ".repeat(gap) + theme.muted + right + ansi.reset)
   toolbarRow = body.length + 1
   toolbarTargets = []
   let toolbar = "  "
@@ -1124,7 +1143,9 @@ function render() {
   // A dialog goes over the top, with the conversation dimmed behind it.
   // The caret is hidden while one is open: the composer is not where the
   // keys are going, and a blinking caret there would say it was.
-  const painted = dialog ? Dialogs.compose(clamped, Dialogs.box(dialog, cols, rows), cols, rows) : clamped
+  // Added after the caret and the toolbar were placed, so neither has to know about it.
+  const framed = home ? [...clamped, ...home.below] : clamped
+  const painted = dialog ? Dialogs.compose(framed, Dialogs.box(dialog, cols, rows), cols, rows) : framed
   const showCaret = caretAt && !dialog
 
   out.write(
@@ -2228,6 +2249,8 @@ async function deleteInDialog() {
  * person does first cancels it; so does a draft in the box, since someone
  * typing is not away.
  */
+/** When the turn now running began, for the working line. */
+let workingSince = 0
 let idleTimer: ReturnType<typeof setTimeout> | undefined
 let idleCompacting = false
 /** The conversation the timer was set for; a different one when it fires means the person moved on. */
@@ -2923,6 +2946,7 @@ async function send() {
   let current: Entry | undefined
   turn = new AbortController()
   const turnStarted = Date.now()
+  workingSince = turnStarted
   // The user message is already pushed; everything from it on is this turn's.
   const turnFrom = Math.max(0, messages.length - 1)
   // Every stop path must wake consent, not only the Ctrl+S interrupt path.
@@ -2983,7 +3007,7 @@ async function send() {
       if (event.type === "tool_start") {
         current = undefined
         // Summarised as approvals are, so an edit's row names its file before the cut.
-        transcript.push({ kind: "tool", call: event.id, text: event.name + " " + askedFor(event.name, event.args).replace(/\s+/g, " ").slice(0, 60), state: "running" })
+        transcript.push({ kind: "tool", call: event.id, text: toolLabel(event.name) + " " + askedFor(event.name, event.args).replace(/\s+/g, " ").slice(0, 60), state: "running" })
       }
       if (event.type === "spend") {
         spend = addSpend(spend, {

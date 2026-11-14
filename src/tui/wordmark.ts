@@ -51,3 +51,45 @@ export function homeScreen(
   const top = Math.max(0, Math.floor((height - shown.length) * 0.4))
   return [...Array.from({ length: top }, () => ""), ...shown]
 }
+
+/**
+ * The empty conversation as the whole window is laid out: the wordmark block,
+ * then - straight under it, not at the bottom of the terminal - the composer,
+ * with the folder and its branch on the last row. The prompt is where the eye
+ * already is, and the window does not look like a logo over a void.
+ *
+ * `room` is the rows there would be above the composer were it at the bottom;
+ * `taken` is rows something else needs between the block and the composer
+ * (the command list). `above` is drawn before the composer and `below` after
+ * it, and together with `taken` they always come to exactly `room` rows, so
+ * the frame is the same height as any other. The block stays where it is when
+ * the command list opens: the list takes its rows from below, and only lifts
+ * the block when there is nowhere else to find them.
+ */
+export function homeLayout(
+  width: number,
+  room: number,
+  taken: number,
+  where: string,
+  paint: { goblin: string; gold: string; dim: string; reset: string },
+  /** Rows of notices drawn just above the composer (counted in `taken`): they use the blank row, so the composer never moves. */
+  notice = 0,
+): { above: string[]; below: string[] } {
+  const space = Math.max(1, room - taken)
+  // Laid out as if the notices were not there, so the block and the composer stay put when one appears.
+  const full = space + notice
+  // The block without the place line and without padding; one blank row keeps it off the composer.
+  const block = homeScreen(width, Math.max(1, full - 1), "", paint).filter((line, index, all) => line !== "" || all.slice(0, index).some((each) => each !== ""))
+  const gap = full > block.length ? 1 : 0
+  const settled = Math.max(0, Math.floor((room - block.length - gap) * 0.38))
+  const top = Math.max(0, Math.min(settled, full - block.length - gap))
+  const above = [...Array.from({ length: top }, () => ""), ...block.slice(0, full), ...(gap ? [""] : [])]
+  // The notices sit just above the composer: their rows come from the blank under the block, then the padding on top.
+  for (let index = 0; index < notice && above.length; index++) {
+    const blank = above.at(-1) === "" ? above.length - 1 : above.indexOf("")
+    above.splice(blank >= 0 ? blank : above.length - 1, 1)
+  }
+  const rest = Math.max(0, full - top - Math.min(block.length, full) - gap)
+  const place = where && [...where].length <= width - 4 && rest >= 2 ? [paint.dim + "  " + where + paint.reset] : []
+  return { above, below: [...Array.from({ length: rest - place.length }, () => ""), ...place] }
+}

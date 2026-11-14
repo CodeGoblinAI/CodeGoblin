@@ -127,6 +127,12 @@ export function commandOf(detail: string): string {
  * one thing you need to know before allowing it: which file. Arguments that
  * are not recognised are shown as they came.
  */
+/** A tool's name as a row shows it: an MCP tool is `mcp__server__tool` on the wire and "server: tool" to a person. */
+export function toolLabel(name: string): string {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
+  return mcp ? mcp[1] + ": " + mcp[2] : name
+}
+
 export function askedFor(tool: string, detail: string): string {
   let args: Record<string, unknown> | undefined
   try {
@@ -158,7 +164,18 @@ export function askedFor(tool: string, detail: string): string {
     const { paths, deletes } = patchPaths(args.patch)
     return (deletes ? "deletes or moves files: " : "") + (paths.length ? paths.join(", ") : "a patch it could not read")
   }
-  return detail
+  if ((tool === "glob" || tool === "grep") && typeof args.pattern === "string") {
+    const where = [typeof args.include === "string" ? args.include : "", file ? "in " + file : ""].filter(Boolean).join(" ")
+    return (tool === "grep" ? `"${flat(args.pattern, 80)}"` : flat(args.pattern, 80)) + (where ? " " + where : "")
+  }
+  if (tool === "list_files" && file) return file
+  // Anything else - an MCP server's tool, say - as its arguments in words
+  // rather than the JSON they travelled in: `url: https://example.com`.
+  const entries = Object.entries(args).filter(([, value]) => value !== undefined && value !== null && value !== "")
+  if (!entries.length) return ""
+  const words = (value: unknown) => (typeof value === "string" ? flat(value, 80) : flat(JSON.stringify(value) ?? "", 60))
+  if (entries.length === 1 && typeof entries[0]![1] === "string") return words(entries[0]![1])
+  return flat(entries.map(([key, value]) => key + ": " + words(value)).join(", "), 200)
 }
 
 /**
