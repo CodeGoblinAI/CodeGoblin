@@ -92,6 +92,8 @@ import { liveReasoningLabel } from "@tui/context/thinking"
 export type PromptProps = {
   sessionID?: string
   visible?: boolean
+  /** Told when the / or @ list opens and closes, so rows above the prompt can step aside for it. */
+  onAutocomplete?: (open: boolean) => void
   disabled?: boolean
   onSubmit?: () => void
   ref?: (ref: PromptRef | undefined) => void
@@ -237,6 +239,7 @@ export function Prompt(props: PromptProps) {
   })
   const editorContextLabelState = createMemo(() => editor.labelState())
   const [auto, setAuto] = createSignal<AutocompleteRef>()
+  createEffect(() => props.onAutocomplete?.(Boolean(auto()?.visible)))
   const [workspaceSelection, setWorkspaceSelection] = createSignal<WorkspaceSelection>()
   const [workspaceCreating, setWorkspaceCreating] = createSignal(false)
   const [workspaceCreatingDots, setWorkspaceCreatingDots] = createSignal(3)

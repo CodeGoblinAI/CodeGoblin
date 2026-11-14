@@ -11,6 +11,8 @@ export function HistoryControls(props: {
   onSearch: () => void
   /** The keys that jump to the bottom (session.last), shown on the button. */
   shortcut?: string
+  /** True while a / or @ list is open over this row. */
+  hidden?: boolean
 }) {
   const renderer = useRenderer()
   const { theme } = useTheme()
@@ -113,7 +115,7 @@ export function HistoryControls(props: {
   )
 
   return (
-    <Show when={away() || props.page?.loading || props.page?.error}>
+    <Show when={!props.hidden && (away() || props.page?.loading || props.page?.error)}>
       <box
         id="history-controls"
         flexDirection="row"
