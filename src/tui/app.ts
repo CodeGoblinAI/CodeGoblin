@@ -1801,7 +1801,8 @@ function openEffortPicker() {
     levels.length ? "Effort  ·  " + selection.model.label : "Effort  ·  " + name + " takes no effort level",
     (levels.length ? ["auto", ...levels] : ["auto"]).map((level) => ({
       label: (level === saved ? "• " : "  ") + level,
-      hint: effortHint(selection.model, level) || (selection.provider.cli === "claude-code" ? "sent as --effort" : selection.provider.cli ? "sent to the CLI" : "sent as reasoning_effort"),
+      // Said in words where there is something to say; "sent as reasoning_effort" told nobody anything.
+      hint: effortHint(selection.model, level) || undefined,
       value: level,
     })),
     // A level saved for this model that it does not have (left from before) is said, not hidden.
@@ -1998,6 +1999,8 @@ function modelPickerRows(): Dialogs.DialogRow[] {
       value: id,
       hint: [id === current ? "current" : "", s.provider.runtime ? "runs here" : "", modelFacts(s)].filter(Boolean).join(" \u00b7 ") || undefined,
       search: id + " " + s.provider.label + " " + s.model.label,
+      // Searching drops the provider headings, and "DeepSeek V4.1 Flash" is sold by three providers.
+      ...(row.grouped ? { searchLabel: (row.favourite ? "★ " : "  ") + s.provider.label + " · " + s.model.label } : {}),
     })
   }
   return rows
@@ -2009,7 +2012,7 @@ function modelFacts(s: Selection): string {
   const size = s.model.contextWindow
   const holds = size >= 1_000_000 ? Math.round(size / 100_000) / 10 + "M" : size >= 1000 ? Math.round(size / 1000) + "K" : ""
   const money = (n: number) => "$" + (n >= 10 ? Math.round(n) : Number(n.toFixed(n < 0.1 ? 3 : 2)))
-  const price = s.model.price ? money(s.model.price.input) + "/" + money(s.model.price.output) : ""
+  const price = s.model.price && s.model.price.input + s.model.price.output > 0 ? money(s.model.price.input) + "/" + money(s.model.price.output) : ""
   return [price, holds, s.model.capabilities?.input?.image ? "sees images" : ""].filter(Boolean).join(" \u00b7 ")
 }
 

@@ -23,6 +23,8 @@ export type DialogRow = {
   label: string
   /** Filterable dialogs: the text matched, when it is more than the label - a whole message. */
   search?: string
+  /** The label while the list is being searched: headings are gone then, so a row may need to say more. */
+  searchLabel?: string
   /** With search: when filtered, the label becomes the part of the text around the match. */
   snippet?: boolean
   /** Dimmer text at the right-hand end of the row. */
@@ -121,7 +123,7 @@ export function filter(dialog: Dialog, query: string): Dialog {
       if (row.search === undefined) return { row, at, score: commandScore(row.label, row.hint ?? "", q) }
       const found = row.search.toLowerCase().indexOf(q)
       if (found < 0) return { row, at, score: -1 }
-      if (!row.snippet) return { row, at, score: 500 }
+      if (!row.snippet) return { row: row.searchLabel ? { ...row, label: row.searchLabel } : row, at, score: 500 }
       const flat = row.search.replace(/\s+/g, " ")
       const where = flat.toLowerCase().indexOf(q)
       const from = Math.max(0, where - 24)
