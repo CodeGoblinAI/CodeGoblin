@@ -1268,7 +1268,9 @@ function openSettingsDialog(startSection = "General") {
 
   /** Every setting, in order: { section, title, about, control }. */
   const entries = []
-  const row = (section, title, about, control) => entries.push({ section, title, about, control })
+  // `plain` rows are not a <label>: a label passes a click on its text to the control, which for a
+  // Forget button would delete the memory someone only meant to read.
+  const row = (section, title, about, control, plain = false) => entries.push({ section, title, about, control, plain })
   const busy = (field, change) => async (value) => { field.disabled = true; try { await change(value) } finally { field.disabled = false } }
   const choice = (section, title, about, options, current, change) => {
     const field = el("select")
@@ -1377,14 +1379,16 @@ function openSettingsDialog(startSection = "General") {
       const forget = el("button", "", "Forget")
       forget.type = "button"
       forget.onclick = () => { forget.disabled = true; void remember("forget " + entry.id) }
-      row("Memory", entry.content, (entry.pinned ? "pinned · " : "") + (entry.scope === "user" ? "every project" : "this project"), forget)
+      row("Memory", entry.content, (entry.pinned ? "pinned · " : "") + (entry.scope === "user" ? "every project" : "this project"), forget, true)
     }
     if (memories && memories.length > 1) {
       const all = el("button", "", "Forget all")
       all.type = "button"
       // Two clicks: the first only asks.
-      all.onclick = () => { if (all.dataset.sure) void remember("clear"); else { all.dataset.sure = "1"; all.textContent = "Really forget all " + memories.length + "?" } }
-      row("Memory", "Forget everything", "Removes every memory above. This cannot be undone.", all)
+      // Only what is listed: "/memory clear" empties the whole store, other projects included.
+      const forgetListed = async () => { all.disabled = true; for (const entry of memories.slice(0, -1)) await fetch("/api/memory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ argument: "forget " + entry.id }) }).catch(() => null); await remember("forget " + memories.at(-1).id) }
+      all.onclick = () => { if (all.dataset.sure) void forgetListed(); else { all.dataset.sure = "1"; all.textContent = "Really forget all " + memories.length + "?" } }
+      row("Memory", "Forget everything", "Removes every memory above. This cannot be undone.", all, true)
     }
   }
   }
@@ -1407,7 +1411,7 @@ function openSettingsDialog(startSection = "General") {
     tabs.forEach((tab, index) => { const on = !query && sections[index] === current; tab.classList.toggle("active", on); if (on) tab.setAttribute("aria-current", "true"); else tab.removeAttribute("aria-current") })
     rows.replaceChildren()
     for (const entry of shown) {
-      const line = el("label", "set-row")
+      const line = el(entry.plain ? "div" : "label", "set-row")
       const text = el("span", "set-text")
       text.append(el("span", "set-title", entry.title), el("span", "set-about", entry.about))
       line.append(text, entry.control)

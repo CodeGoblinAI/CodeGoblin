@@ -50,8 +50,17 @@ try {
   await w.send("hello", 1500)
   check("Memory: the model is told it on the next turn", JSON.stringify(model.seen.at(-1).messages).includes("Grobnar"))
   await w.send("/settings", 600); await tab("Memory").click(); await page.waitForTimeout(400)
+  // Clicking a memory's words must not forget it: only the button does.
+  await rowOf("the mascot is called Grobnar").locator(".set-title").click(); await page.waitForTimeout(500)
+  check("Memory: clicking the text of a memory leaves it alone", (await rowOf("the mascot is called Grobnar").count()) === 1)
   await rowOf("the mascot is called Grobnar").locator("button").click(); await page.waitForTimeout(700)
   check("Memory: Forget removes it", /Nothing remembered yet/.test(await page.locator(".set-rows").innerText()))
+  for (const fact of ["first fact", "second fact"]) { const box = page.getByRole("textbox", { name: "Something to remember" }); await box.fill(fact); await box.press("Enter"); await page.waitForTimeout(700) }
+  const all = rowOf("Forget everything").locator("button")
+  await all.click(); await page.waitForTimeout(300)
+  check("Memory: Forget all asks first", /Really forget all 2/.test(await all.innerText()) && (await rowOf("first fact").count()) === 1)
+  await all.click(); await page.waitForTimeout(1200)
+  check("Memory: a second click forgets them", /Nothing remembered yet/.test(await page.locator(".set-rows").innerText()))
   await page.locator(".set-pane input[type=search]").fill("voice"); await page.waitForTimeout(300)
   check("Settings search finds a generation setting", (await page.locator(".set-row").count()) > 0, (await page.locator(".set-title").allInnerTexts()).join(" | "))
   await page.screenshot({ path: "output/shots/settings-images.png" }).catch(() => {})

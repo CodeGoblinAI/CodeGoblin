@@ -22,7 +22,10 @@ for (const [cols, rows] of [[80, 24], [60, 18], [44, 14]]) {
   const fits = (label, needsPrompt = true) => {
     const lines = screen()
     const wide = lines.filter((line) => width(line.trimEnd()) > cols)
-    const promptThere = lines.some((line) => /^\s*[|│>❯]?\s*\S/.test(line)) && lines.some((line) => /─{10,}/.test(line))
+    // The prompt box is looked for in the last two repaints: the pseudo-console sends some repaints as
+    // differences, so the newest one can hold only the rows that changed.
+    const recent = plain(t.out.split("\x1b[2J").slice(-2).join("\n"))
+    const promptThere = /─{10,}/.test(recent)
     if (process.env.SHOW) console.log(`\n===== ${tag} ${label} =====\n` + lines.map((line) => line.trimEnd()).join("\n"))
     check(`${tag} ${label}: fits the window`, wide.length === 0 && lines.length <= rows && (!needsPrompt || promptThere), wide.length ? "too wide: " + wide[0] : lines.length > rows ? lines.length + " rows" : "")
   }

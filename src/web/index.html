@@ -391,8 +391,9 @@
   dialog .set-close { position: absolute; top: 12px; right: 14px; border: 0; background: none; font-size: 20px; padding: 2px 8px; color: var(--muted); }
   dialog.settings input[type="search"] { margin: 0 0 12px; }
   .set-rows { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 0 14px; }
-  dialog label.set-row { margin: 0; padding: 13px 0; border-bottom: 1px solid var(--line); cursor: default; }
-  dialog label.set-row:last-child { border-bottom: 0; }
+  dialog .set-row { margin: 0; padding: 13px 0; border-bottom: 1px solid var(--line); cursor: default; }
+  dialog .set-row:last-child { border-bottom: 0; }
+  dialog div.set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .set-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .set-title { font-weight: 600; }
   .set-about { color: var(--muted); font-size: 12.5px; line-height: 1.4; }

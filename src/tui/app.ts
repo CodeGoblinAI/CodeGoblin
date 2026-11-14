@@ -617,7 +617,8 @@ function completeWith(value: string) {
 function refreshPalette() {
   // A key is not a command and not a mention. Matching it against either
   // would put part of it on screen in a palette row.
-  if (secret) { palette = undefined; return }
+  // A key, or a conversation name being edited, is not a command or a mention.
+  if (secret || renaming) { palette = undefined; return }
   if (findMention(input, cursor)) {
     void refreshFileCache().then((changed) => {
       if (!changed || secret || !findMention(input, cursor)) return
@@ -1169,6 +1170,8 @@ function render() {
     ? asking.typing ? "enter answers \u00b7 esc back to the choices" : compactHints ? "number or enter \u00b7 esc" : "up/down \u00b7 number or enter picks \u00b7 esc dismiss"
     : streaming
     ? (queued ? (compactHints ? "esc esc stop" : "queued · esc twice stops") : compactHints ? "enter queue · esc esc stop" : "enter queue · ctrl+s now · esc twice stops")
+    : renaming
+    ? "enter saves the name · esc cancels"
     : secret
     ? "enter saves · esc cancels · nothing is echoed"
     : overlay
@@ -2420,7 +2423,7 @@ async function deleteInDialog() {
     resumeModelMissing = false
     messages = []
     transcript = []
-    edits.reset()
+    edits.reset(); railChanges = []
   }
   await refreshSessionCache()
   const saved = await sessions.list(60)
@@ -2627,7 +2630,7 @@ async function send() {
       resumeModelMissing = false
       permissions.reset()
       subagents.reset()
-      edits.reset()
+      edits.reset(); railChanges = []
       pastes = []
       pendingImages = []
       spend = { input: 0, output: 0 }
@@ -2982,7 +2985,7 @@ async function send() {
         session = copy
         messages = copy.messages
         spend = { input: 0, output: 0 }
-        edits.reset()
+        edits.reset(); railChanges = []
         await refreshSessionCache()
         transcript.push({ kind: "tool", text: "forked: you are now in a copy of this conversation; the original is unchanged (/resume to go back)" })
         status = "now in " + copy.title
@@ -3006,6 +3009,7 @@ async function send() {
       const forward = result.kind === "redo"
       try {
         const checkpoint = forward ? await edits.redo(process.cwd()) : await edits.undo(process.cwd())
+        void refreshRailChanges().then(() => render())
         status = checkpoint
           ? (forward ? "redid " : "undid ") + describeCheckpoint(checkpoint)
           : nothingToDo(edits, forward)
@@ -3408,8 +3412,9 @@ async function restoreSession(loaded: sessions.Session) {
   hiddenEarlier = shown.hidden
   historyArchived = await sessions.hasArchive(loaded.id)
   scroll = 0
-  edits.reset()
+  edits.reset(); railChanges = []
   edits.restoreReview(process.cwd(), loaded.review)
+  void refreshRailChanges().then(() => render())
   session.activity = normaliseActivity(loaded.activity, true)
   plan = session.activity.plan
   if (session.activity.items.length) {
