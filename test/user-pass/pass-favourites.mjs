@@ -30,9 +30,9 @@ try {
   const models = t.screen().split("\n").filter((l) => /\/model /.test(l)).slice(0, 3).join("\n")
   check("TUI: /model lists the favourite first, starred, under Favourites", /\/model zai\/glm-5\.3-flash.*\u2605 Favourites/.test(models), models)
   t.write("\x15"); await delay(200)
-  t.clear(); t.write("/model deepseek/deepseek-chat\r"); await delay(900)
+  t.clear(); t.write("/model deepseek/deepseek-v4-flash\r"); await delay(900)
   const recents = findSettings().recents ?? []
-  check("TUI: switching models records it as recent", recents[0] === "deepseek/deepseek-chat" || recents.length > 0, JSON.stringify(recents))
+  check("TUI: switching models records it as recent", recents[0] === "deepseek/deepseek-v4-flash" || recents.length > 0, JSON.stringify(recents))
 } catch (error) { check("TUI pass", false, error.message) } finally { t.kill() }
 
 // --- Web: same profile, so the TUI's favourite shows; star another with the star button ---

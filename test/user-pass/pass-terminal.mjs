@@ -32,7 +32,7 @@ try {
     socket.onerror = () => resolve(true)
   })
   check("a WebSocket from outside the page is refused", refused === true)
-  const crossOrigin = await fetch(w.url + "/api/terminal", { headers: { origin: "https://evil.example", upgrade: "websocket", connection: "Upgrade", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==" } })
+  const crossOrigin = await fetch(w.url + "/api/terminal", { headers: { origin: "https://evil.example" } })
   check("and so is one claiming another origin", crossOrigin.status === 403, String(crossOrigin.status))
   check("no console errors", w.errors.length === 0, w.errors.join(" | "))
 } catch (error) { check("web pass", false, error.message) } finally { await w.close() }

@@ -21,9 +21,9 @@ try {
   await t.until((s) => /Not pushing:/.test(s), 10000, "answer")
   await delay(500)
   const second = model.seen.at(-1).messages.filter((m) => m.role === "tool").map((m) => m.content)
-  check("TUI: the second push is refused without a second prompt", (t.screen().match(/allow shell: git push/g) ?? []).length === 1 && /said never to "git push"/.test(second[1] ?? ""), second.join(" | "))
+  check("TUI: the second push is refused without a second prompt", /refused by the user, who said never/.test(second[0] ?? "") && /^refused: the user said never to "git push"/.test(second[1] ?? ""), second.join(" | "))
   t.clear(); t.write("/status\r"); await delay(900)
-  check("TUI: /status lists what was answered never", /never shell:git push/.test(t.screen()), t.screen().split("\n").filter((l) => /approved|never/.test(l)).join("\n"))
+  check("TUI: /status lists what was answered never", /never\s+"git push"/.test(t.screen()), t.screen().split("\n").filter((l) => /approved|never/.test(l)).join("\n"))
 } catch (error) { check("TUI pass", false, error.message) } finally { t.kill() }
 
 // --- Web ---

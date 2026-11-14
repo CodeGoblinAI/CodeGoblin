@@ -1,7 +1,8 @@
 // User pass: the question tool (pick an option, type your own) and websearch (real Exa call, asked first), TUI and web.
 import { check, failed, fakeModel, tempDir, tui, web, delay } from "./harness.mjs"
 
-const toolResults = (sent) => sent.messages.filter((m) => m.role === "tool").map((m) => String(m.content))
+// The tool results of the current prompt only: each prompt starts the plan again.
+const toolResults = (sent) => sent.messages.slice(sent.messages.map((m) => m.role).lastIndexOf("user") + 1).filter((m) => m.role === "tool").map((m) => String(m.content))
 // Turn plan: 1) ask a question  2) search the web  3) answer, quoting what it got.
 const model = await fakeModel((sent) => {
   const results = toolResults(sent)
@@ -35,7 +36,8 @@ try {
   t.clear(); model.seen.length = 0
   t.write("another script\r")
   await t.until((s) => /Which runtime should the script target\?/.test(s), 10000, "second question")
-  t.write("\x1b[B\x1b[B\x1b[B\r") // Type your own answer
+  await t.until((s) => /Type your own answer/.test(s), 5000, "second picker"); await delay(400)
+  for (const key of ["\x1b[B", "\x1b[B", "\x1b[B", "\r"]) { t.write(key); await delay(150) } // Type your own answer
   await t.until((s) => /type your answer and press enter/.test(s), 5000, "typing mode")
   t.write("Python, actually\r")
   await t.until((s) => /allow websearch/.test(s), 10000, "second approval")

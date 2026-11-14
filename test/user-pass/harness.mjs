@@ -11,7 +11,11 @@ const pty = require("C:/Users/shawn/code/CodeGoblin/node_modules/.bun/@lydell+no
 const { chromium } = require("C:/Users/shawn/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules/playwright")
 
 export const delay = (ms) => new Promise((r) => setTimeout(r, ms))
-export const plain = (text) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "")
+// The Windows pseudo-console sends a run of blanks as "move the cursor right n", not as spaces.
+// Those become spaces again here; dropped, columns ran together and boxes looked ragged.
+export const plain = (text) => text
+  .replace(/\x1b\[(\d*)C/g, (_, n) => " ".repeat(Number(n || 1)))
+  .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "")
 let failures = 0
 export const check = (name, ok, detail = "") => {
   if (!ok) failures++
@@ -22,10 +26,10 @@ export const failed = () => failures
 export function tempDir(prefix) { return fs.mkdtempSync(path.join(os.tmpdir(), prefix)) }
 
 /** A model that answers by `reply(sentBody, n)`: returns { text } or { tool: name, args } or { tools: [{name,args}] }. */
-export async function fakeModel(reply) {
+export async function fakeModel(reply, id = "fixture") {
   const seen = []
   const server = http.createServer((request, response) => {
-    if (request.method === "GET") { response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ data: [{ id: "fixture" }] })); return }
+    if (request.method === "GET") { response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ data: [{ id }] })); return }
     let body = ""
     request.on("data", (d) => body += d)
     request.on("end", async () => {
@@ -60,7 +64,7 @@ export function env(model, profile, extra = {}) {
 
 export async function tui({ model, cwd, profile = tempDir("cg-pass-profile-"), cols = 140, rows = 42, extraEnv = {}, args = ["--model", "local"] }) {
   let out = ""
-  const term = pty.spawn("bun.exe", ["C:/Users/shawn/code/CG-Next/src/tui/app.ts", ...args], { cwd, cols, rows, name: "xterm-256color", env: env(model, profile, extraEnv) })
+  const term = pty.spawn("bun.exe", [(process.env.CG_ROOT ?? "C:/Users/shawn/code/CG-Next") + "/src/tui/app.ts", ...args], { cwd, cols, rows, name: "xterm-256color", env: env(model, profile, extraEnv) })
   term.onData((d) => out += d)
   const api = {
     term, profile,
@@ -80,7 +84,7 @@ export async function tui({ model, cwd, profile = tempDir("cg-pass-profile-"), c
 }
 
 export async function web({ model, cwd, profile = tempDir("cg-pass-web-"), extraEnv = {}, viewport = { width: 1280, height: 860 } }) {
-  const server = spawn("bun", ["C:/Users/shawn/code/CG-Next/src/web/serve.ts"], { cwd, env: env(model, profile, extraEnv), windowsHide: true })
+  const server = spawn("bun", [(process.env.CG_ROOT ?? "C:/Users/shawn/code/CG-Next") + "/src/web/serve.ts"], { cwd, env: env(model, profile, extraEnv), windowsHide: true })
   let log = ""
   server.stderr.on("data", (d) => log += d)
   const url = await new Promise((resolve, reject) => { let t = ""; server.stdout.on("data", (d) => { t += d; const m = /http:\/\/localhost:(\d+)/.exec(t); if (m) resolve(m[0]) }); setTimeout(() => reject(new Error("web did not start: " + t + log)), 25000) })
@@ -106,7 +110,7 @@ export async function web({ model, cwd, profile = tempDir("cg-pass-web-"), extra
   const fixture = async () => {
     let onFixture = false
     for (let attempt = 0; attempt < 40 && !onFixture; attempt++) {
-      await press("/model local/fixture", 300)
+      await press("/model local/" + (extraEnv.CODEGOBLIN_LOCAL_MODEL ?? "fixture"), 300)
       onFixture = /fixture/i.test(await current())
       if (!onFixture) await page.waitForTimeout(500)
     }

@@ -1994,7 +1994,11 @@ async function chooseInDialog() {
     try {
       const result = await IMPORTERS[importFrom].copy(id, process.cwd(), selection.provider.id)
       await refreshSessionCache()
-      status = "Copied " + result.messages + " messages; use /resume to open the new copy"
+      // With nothing open there is nothing to keep in front of it, so the copy
+      // opens - as it does in the browser. A conversation in progress stays put.
+      const copy = transcript.length === 0 && !streaming ? await sessions.load(result.id) : undefined
+      if (copy) { await restoreSession(copy); status = "Copied " + result.messages + " messages; this is the new copy" }
+      else status = "Copied " + result.messages + " messages; use /resume to open the new copy"
     } catch { status = "Import failed; source and current conversation unchanged" }
     render(); return
   }

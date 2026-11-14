@@ -1765,8 +1765,16 @@ async function openImportDialog(source, selectedId) {
       if (!modal.isConnected) return
       status.textContent = result?.message || "Import failed; source and current conversation unchanged"
       if (!result?.id) { confirm.disabled = false; return }
-      label.textContent = result.title + " · " + result.messages + " messages. Use /resume to open the copy."
       confirm.remove()
+      // With nothing open there is nothing to keep in front of it, so the copy
+      // opens, as in the terminal. A conversation in progress stays put.
+      if (!thread.querySelector(".turn") && !busy) {
+        modal.close()
+        await openSession(result.id)
+        note(result.message || "Imported a new text conversation.")
+        return
+      }
+      label.textContent = result.title + " · " + result.messages + " messages. It is in the list on the left."
       void refreshSessions()
     }
     list.append(label, confirm)
