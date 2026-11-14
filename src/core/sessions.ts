@@ -32,6 +32,8 @@ export type Session = {
   forkedFrom?: { id: string; at: number }
   /** The folder it was working in; older conversations do not say. */
   root?: string
+  /** Kept at the top of the conversation list. */
+  pinned?: boolean
   /** MCP servers switched off for this conversation (/mcp). */
   mcpOff?: string[]
   /** Set when the conversation was compacted while idle: when, and the estimated dollars saved. Shown once it is next opened. */
@@ -258,7 +260,8 @@ export async function list(limit = 30, root?: string): Promise<Session[]> {
     return sessions
       .filter((session): session is Session => Boolean(session))
       .filter((session) => !root || !session.root || same(session.root, root))
-      .sort((a, b) => b.updated - a.updated)
+      // Pinned conversations first, each group newest first.
+      .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updated - a.updated)
       .slice(0, limit)
   } catch {
     return []
@@ -279,6 +282,16 @@ export async function rename(id: string, title: string): Promise<boolean> {
   const session = await load(id)
   if (!session) return false
   session.title = title.slice(0, 80)
+  await fs.writeFile(file(id), JSON.stringify(session, null, 2), "utf8")
+  return true
+}
+
+/** Pin or unpin a conversation. Its place in time is left alone: pinning is not using it. */
+export async function pin(id: string, pinned: boolean): Promise<boolean> {
+  const session = await load(id)
+  if (!session) return false
+  if (pinned) session.pinned = true
+  else delete session.pinned
   await fs.writeFile(file(id), JSON.stringify(session, null, 2), "utf8")
   return true
 }

@@ -488,6 +488,13 @@ const diffOpen = new Set<string>()
 let lastChanges: Changes | undefined
 /** Which setting is having its value chosen. */
 let settingBeing: string | undefined
+/** A conversation being renamed from the list: the prompt holds its name until Enter. */
+let renaming: { id: string } | undefined
+/** Files this conversation has changed, for the side panel; refreshed after each tool call. */
+let railChanges: { path: string; added: number; removed: number }[] = []
+async function refreshRailChanges() {
+  try { railChanges = (await changesIn(process.cwd(), edits)).files.map((file) => ({ path: file.path, added: file.added, removed: file.removed })) } catch {}
+}
 /** The generator whose settings are open from Settings > Images/Audio/3D, when it is not the selected model. */
 let settingsFor: { provider: string; model: string; label: string } | undefined
 let generatorKind: "image" | "audio" | "model3d" = "image"
@@ -1349,7 +1356,7 @@ function diffRows(changes: Changes): Dialogs.DialogRow[] {
 }
 
 /** Saved conversations, with the one you are in marked. */
-async function openSessions() {
+async function openSessions(selectedValue?: string) {
   const saved = await sessions.list(60)
   if (!saved.length) {
     status = "no saved conversations yet"
@@ -1359,12 +1366,12 @@ async function openSessions() {
     "sessions",
     "Conversations",
     saved.map((entry) => ({
-      label: (entry.id === session.id ? "\u2022 " : "  ") + entry.title,
+      label: (entry.id === session.id ? "\u2022 " : "  ") + (entry.pinned ? "\u2605 " : "") + entry.title,
       // The age tells apart conversations that share a title, as the web sidebar does.
       hint: (entry.id === session.id ? "open · " : "") + sessions.ago(entry.updated),
       value: entry.id,
     })),
-    { footer: "type to search · enter opens · ctrl+d twice deletes · esc closes", size: "large", filterable: true },
+    { footer: "type to search · enter opens · ctrl+p pins · ctrl+r renames · ctrl+d twice deletes", size: "large", filterable: true, ...(selectedValue ? { selectedValue } : {}) },
   )
 }
 
@@ -1693,6 +1700,17 @@ function railLines(height: number): string[] {
       return dim + truncateToWidth(cell, RAIL_WIDTH) + ansi.reset
     }),
   ]
+  // What this conversation has changed, as the original shows beside the chat. /diff opens them.
+  if (railChanges.length) {
+    out.push("", theme.gold + padToWidth(" changed files  (/diff)", RAIL_WIDTH) + ansi.reset)
+    const room = Math.max(1, height - out.length - 1)
+    for (const file of railChanges.slice(0, room)) {
+      const counts = (file.added ? "+" + file.added : "") + (file.removed ? " -" + file.removed : "")
+      const name = file.path.length > RAIL_WIDTH - counts.length - 3 ? "\u2026" + file.path.slice(-(RAIL_WIDTH - counts.length - 4)) : file.path
+      out.push(dim + " " + padToWidth(name, RAIL_WIDTH - counts.length - 2) + ansi.reset + theme.goblin + counts + ansi.reset)
+    }
+    if (railChanges.length > room) out.push(dim + " \u2026 " + (railChanges.length - room) + " more" + ansi.reset)
+  }
   while (out.length < height) out.push("")
   return out.slice(0, height)
 }
@@ -2344,6 +2362,33 @@ async function chooseInDialog() {
   render()
 }
 
+/** ctrl+p in the conversation list: keep this one at the top, or let it go. */
+async function pinInDialog() {
+  if (!dialog || dialog.kind !== "sessions") return
+  const row = Dialogs.selected(dialog)
+  if (!row?.value) return
+  const pinned = !row.label.includes("\u2605")
+  await sessions.pin(row.value, pinned)
+  if (row.value === session.id) { if (pinned) session.pinned = true; else delete session.pinned }
+  await openSessions(row.value)
+  status = pinned ? "pinned - it stays at the top of the list" : "unpinned"
+  render()
+}
+
+/** ctrl+r in the conversation list: the name goes into the prompt to edit; Enter saves it. */
+function renameInDialog() {
+  if (!dialog || dialog.kind !== "sessions") return
+  const row = Dialogs.selected(dialog)
+  if (!row?.value) return
+  const title = row.label.replace(/^[\u2022 ]+/, "").replace(/^\u2605 /, "")
+  closeDialog()
+  renaming = { id: row.value }
+  input = title
+  cursor = input.length
+  status = "edit the name · enter saves · esc cancels"
+  render()
+}
+
 /**
  * ctrl+d, which only means anything in the session list.
  *
@@ -2388,7 +2433,7 @@ async function deleteInDialog() {
   dialog = Dialogs.withRows(
     dialog,
     saved.map((entry) => ({
-      label: (entry.id === session.id ? "\u2022 " : "  ") + entry.title,
+      label: (entry.id === session.id ? "\u2022 " : "  ") + (entry.pinned ? "\u2605 " : "") + entry.title,
       // The age tells apart conversations that share a title, as the web sidebar does.
       hint: (entry.id === session.id ? "open · " : "") + sessions.ago(entry.updated),
       value: entry.id,
@@ -2469,6 +2514,20 @@ async function send() {
     input = ""
     cursor = 0
     settleQuestion(asking, [typed])
+    return
+  }
+  if (renaming) {
+    const { id } = renaming
+    const title = input.trim().slice(0, 80)
+    renaming = undefined
+    input = ""
+    cursor = 0
+    if (!title) { status = "not renamed"; await openSessions(id); render(); return }
+    if (id === session.id) { session.title = title; await sessions.save(session).catch(() => {}) }
+    else await sessions.rename(id, title)
+    await openSessions(id)
+    status = "renamed to " + title
+    render()
     return
   }
   if (secret) {
@@ -3253,6 +3312,8 @@ async function send() {
         }
       }
       if (event.type === "tool_end") {
+        // The side panel's changed-files list follows what the tools do.
+        void refreshRailChanges().then(() => render())
         const row = rowFor(event.id)
         if (row) {
           if (row.state !== "failed") row.state = /^(error|stopped)/.test(event.result) ? "failed" : "done"
@@ -3715,6 +3776,8 @@ process.stdin.on("data", (chunk) => {
       if (pressed.type === "end") { dialog = Dialogs.move(dialog, dialog.rows.length); render(); continue }
       if (pressed.type === "enter") { void chooseInDialog(); continue }
       if (pressed.type === "ctrl" && pressed.value === "d") { void deleteInDialog(); continue }
+      if (dialog.kind === "sessions" && pressed.type === "ctrl" && pressed.value === "p") { void pinInDialog(); continue }
+      if (dialog.kind === "sessions" && pressed.type === "ctrl" && pressed.value === "r") { renameInDialog(); continue }
       // In a list you can search, typing narrows it and backspace widens it again.
       if (dialog.filterable && pressed.type === "char") { dialog = Dialogs.filter(dialog, (dialog.query ?? "") + pressed.value); render(); continue }
       if (dialog.filterable && pressed.type === "backspace") { dialog = Dialogs.filter(dialog, (dialog.query ?? "").slice(0, -1)); render(); continue }
@@ -3901,6 +3964,7 @@ process.stdin.on("data", (chunk) => {
       }
       case "escape":
         if (secret) { secret = undefined; input = ""; cursor = 0; anchor = undefined; status = "cancelled"; dirty = true; break }
+        if (renaming) { renaming = undefined; input = ""; cursor = 0; anchor = undefined; status = "not renamed"; dirty = true; break }
         // Escape drops a selection before it clears the line, so losing a
         // highlight does not also lose everything you had written.
         if (anchor !== undefined) { anchor = undefined; dragged = false; dirty = true; break }
