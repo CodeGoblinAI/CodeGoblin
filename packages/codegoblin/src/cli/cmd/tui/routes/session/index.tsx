@@ -191,6 +191,7 @@ function displayAgentMode(mode: string | undefined) {
 
 export function Session() {
   const route = useRouteData("session")
+  const latestShortcut = useCommandShortcut("session.last")
   const { navigate } = useRoute()
   const sync = useSync()
   const event = useEvent()
@@ -857,7 +858,7 @@ export function Session() {
       },
     },
     {
-      title: "Jump to latest",
+      title: "Jump to bottom",
       value: "session.last",
       category: "Session",
       slash: { name: "latest", aliases: ["bottom"] },
@@ -1307,6 +1308,7 @@ export function Session() {
                 </For>
               </scrollbox>
               <HistoryControls
+                shortcut={latestShortcut()}
                 scroll={() => scroll}
                 sessionID={route.sessionID}
                 page={sync.data.message_page[route.sessionID]}

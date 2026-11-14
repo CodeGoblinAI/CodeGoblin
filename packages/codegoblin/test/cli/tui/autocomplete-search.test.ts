@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test"
 import {
   builtinFirst,
   searchAutocomplete,
+  slashCloseness,
+  noteSlashUse,
+  recentFirst,
   type AutocompleteSearchOption,
 } from "../../../src/cli/cmd/tui/component/prompt/autocomplete-search"
 
@@ -49,5 +52,53 @@ describe("slash autocomplete priority", () => {
     const matches = searchAutocomplete("models#10-20", options, "@", (path) => (path === "new" ? 100 : 0))
     expect(matches[0]).toBe(options[1])
     expect(matches).toHaveLength(3)
+  })
+})
+
+describe("slash autocomplete closeness and recency", () => {
+  const settings = { display: "/settings", builtin: true }
+  const browserSkill = { display: "/chrome-browser:skill", description: "drive Chrome" }
+  const builtInBrowser = { display: "/built-in-browser:skill", description: "the app's browser pane" }
+  const weakBuiltin = { display: "/branch-overview", builtin: true }
+
+  test("a skill whose name holds the typed word beats a built-in that only loosely matches", () => {
+    const matches = searchAutocomplete("browser", [weakBuiltin, settings, browserSkill, builtInBrowser], "/", () => 0)
+    expect(
+      matches
+        .slice(0, 2)
+        .map((m) => m.display)
+        .sort(),
+    ).toEqual(["/built-in-browser:skill", "/chrome-browser:skill"])
+  })
+
+  test("closeness tiers: exact, start, a word inside, anywhere, looser", () => {
+    expect(slashCloseness({ display: "/models" }, "models")).toBe(5)
+    expect(slashCloseness({ display: "/models-skill-1:skill" }, "models")).toBe(4)
+    expect(slashCloseness({ display: "/chrome-browser:skill" }, "browser")).toBe(3)
+    expect(slashCloseness({ display: "/abrowserz" }, "browser")).toBe(2)
+    expect(slashCloseness({ display: "/bxrxowxsxer" }, "browser")).toBe(1)
+    expect(slashCloseness({ display: "/x", aliases: ["models"] }, "models")).toBe(5)
+  })
+
+  test("among equally close matches the one used last comes first, ahead of a built-in", () => {
+    const recent = noteSlashUse([], builtInBrowser)
+    expect(recent).toEqual(["built-in-browser"])
+    const matches = searchAutocomplete("browser", [browserSkill, builtInBrowser], "/", () => 0, recent)
+    expect(matches[0]).toBe(builtInBrowser)
+    // Recency never lifts a looser match above a closer one.
+    const exact = { display: "/browser", builtin: true }
+    expect(searchAutocomplete("browser", [browserSkill, builtInBrowser, exact], "/", () => 0, recent)[0]).toBe(exact)
+  })
+
+  test("the unfiltered list puts recently used first and leaves the rest in order", () => {
+    const list = [settings, weakBuiltin, browserSkill, builtInBrowser]
+    expect(recentFirst(list, [])).toBe(list)
+    expect(recentFirst(list, ["chrome-browser"]).map((m) => m.display)).toEqual([
+      "/chrome-browser:skill",
+      "/settings",
+      "/branch-overview",
+      "/built-in-browser:skill",
+    ])
+    expect(noteSlashUse(["a", "b"], { display: "/b" })).toEqual(["b", "a"])
   })
 })

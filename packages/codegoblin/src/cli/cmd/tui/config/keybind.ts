@@ -129,7 +129,8 @@ export const Definitions = {
   messages_half_page_up: keybind("ctrl+alt+u", "Scroll messages up by half page"),
   messages_half_page_down: keybind("ctrl+alt+d", "Scroll messages down by half page"),
   messages_first: keybind("ctrl+home", "Navigate to first message"),
-  messages_last: keybind("ctrl+alt+g,end", "Navigate to last message"),
+  // ctrl+end first: it is the key the jump-to-bottom button shows, as in Claude Code.
+  messages_last: keybind("ctrl+end,end,ctrl+alt+g", "Navigate to last message"),
   messages_next: keybind("ctrl+down", "Navigate to next message"),
   messages_previous: keybind("ctrl+up", "Navigate to previous message"),
   messages_last_user: keybind("ctrl+shift+down", "Navigate to last user message"),
