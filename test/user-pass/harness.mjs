@@ -43,6 +43,13 @@ export async function fakeModel(reply, id = "fixture") {
         return
       }
       response.writeHead(200, { "content-type": "text/event-stream" })
+      // { stream: [{ reasoning }, { text }, ...] } sends those deltas in that order, the way some providers
+      // interleave a sliver of reasoning inside an answer.
+      if (answer.stream) {
+        const parts = answer.stream.map((part) => `data: ${JSON.stringify({ choices: [{ delta: part.reasoning !== undefined ? { reasoning_content: part.reasoning } : { content: part.text } }] })}\n\n`).join("")
+        response.end(parts + "data: [DONE]\n\n")
+        return
+      }
       const tools = answer.tools ?? (answer.tool ? [{ name: answer.tool, args: answer.args }] : [])
       // { usage } is sent as the provider's usage block, on its own last chunk.
       const usage = answer.usage ? `data: ${JSON.stringify({ choices: [], usage: answer.usage })}\n\n` : ""

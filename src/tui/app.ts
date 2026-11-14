@@ -3037,6 +3037,15 @@ async function send() {
   render()
 
   let current: Entry | undefined
+  /**
+   * This step's reasoning and answer - one model response, up to a tool call.
+   * Some providers send a sliver of reasoning in the middle of the answer;
+   * it joins the step's reasoning, and the answer carries on where it was.
+   * Opening a new block for each switch split one answer into two that read
+   * as the reply being sent twice.
+   */
+  let stepThinking: Entry | undefined
+  let stepAnswer: Entry | undefined
   turn = new AbortController()
   const turnStarted = Date.now()
   workingSince = turnStarted
@@ -3083,22 +3092,29 @@ async function send() {
       session.activity ??= normaliseActivity(undefined)
       recordActivity(session.activity, event)
       if (event.type === "thinking") {
-        if (!current || current.kind !== "thinking") {
-          current = { kind: "thinking", text: "", started: Date.now() }
-          transcript.push(current)
+        if (!stepThinking) {
+          stepThinking = { kind: "thinking", text: "", started: Date.now() }
+          // Reasoning that only starts once the answer has: it still goes above the answer.
+          const at = stepAnswer ? transcript.indexOf(stepAnswer) : -1
+          if (at >= 0) transcript.splice(at, 0, stepThinking)
+          else transcript.push(stepThinking)
         }
-        current.text += event.delta
-        current.last = Date.now()
+        stepThinking.text += event.delta
+        stepThinking.last = Date.now()
+        current = stepAnswer ?? stepThinking
       }
       if (event.type === "text") {
-        if (!current || current.kind !== "agent") {
-          current = { kind: "agent", text: "", by: selection.provider.label.toLowerCase(), at: Date.now() }
-          transcript.push(current)
+        if (!stepAnswer) {
+          stepAnswer = { kind: "agent", text: "", by: selection.provider.label.toLowerCase(), at: Date.now() }
+          transcript.push(stepAnswer)
         }
-        current.text += event.delta
+        stepAnswer.text += event.delta
+        current = stepAnswer
       }
       if (event.type === "tool_start") {
         current = undefined
+        stepThinking = undefined
+        stepAnswer = undefined
         callArgs.set(event.id, event.args)
         // Summarised as approvals are, so an edit's row names its file before the cut.
         transcript.push({ kind: "tool", call: event.id, text: toolLabel(event.name) + " " + askedFor(event.name, event.args).replace(/\s+/g, " ").slice(0, 60), state: "running" })

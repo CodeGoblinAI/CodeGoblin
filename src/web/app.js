@@ -2532,6 +2532,10 @@ async function submit() {
   let raw = ""
   let thinking = null
   let thinkingRaw = ""
+  // This step's reasoning box, kept once the answer starts: a sliver of
+  // reasoning in the middle of an answer joins it instead of opening a new
+  // box under the answer.
+  let stepThinking = null
   const request = new AbortController()
   controller = request
   const turnStarted = Date.now()
@@ -2592,7 +2596,15 @@ async function submit() {
         if (event.type === "stopped") stopRequested = true
         if (event.type === "thinking") {
           const stick = atBottom()
-          if (!thinking) { thinkingRaw = ""; thinking = thinkingBlock() }
+          if (!thinking && body && stepThinking) thinking = stepThinking
+          if (!thinking) {
+            thinkingRaw = ""
+            thinking = thinkingBlock()
+            // Reasoning that only starts once the answer has still goes above it.
+            const answer = body && body.closest(".turn")
+            if (answer) thread.insertBefore(thinking.parentElement, answer)
+          }
+          stepThinking = thinking
           thinkingRaw += event.delta
           thinking.textContent = thinkingRaw
           if (stick) scrollDown()
@@ -2651,10 +2663,11 @@ async function submit() {
           renderActivity()
         }
         // The model carries on with what its subagents found, as a new answer.
-        if (event.type === "subagents_collected") { body = null; thinking = null }
+        if (event.type === "subagents_collected") { body = null; thinking = null; stepThinking = null }
         if (event.type === "tool_start") {
           body = null
           thinking = null
+          stepThinking = null
           toolChip(event.name, event.asked || event.args, event.id)
           toolArgsByCall.set(event.id, event.args)
           runningTools.push(event.name)

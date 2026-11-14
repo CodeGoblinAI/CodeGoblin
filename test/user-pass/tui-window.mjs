@@ -16,6 +16,8 @@ const model = await fakeModel(async (sent) => {
   if (last?.role === "tool") return { text: reply, usage: { prompt_tokens: 4300, completion_tokens: 120, prompt_tokens_details: { cached_tokens: 4096 } } }
   // "slow" in a prompt holds the answer back, to look at the working state and to stop or queue.
   if (/slow/i.test(text)) await delay(9000)
+  // "testing" replies the way DeepSeek V4.1 Flash on Experiential Labs did: reasoning, answer, a sliver of reasoning, more answer.
+  if (/testing/i.test(text)) return { stream: [{ reasoning: "The user is just testing." }, { text: "All" }, { reasoning: " " }, { text: " good on my end - tools, shell, and files are ready when you need them." }] }
   if (/question/i.test(text)) return { tool: "question", args: { question: "Which runtime should the script target?", options: [{ label: "Bun (Recommended)", description: "what the repo uses" }, { label: "Node" }, { label: "Deno" }] } }
   if (/write|edit|change/i.test(text)) return { tool: "write_file", args: { path: "notes.md", content: "# Notes\n\n- a guard was added\n" } }
   if (/run|shell/i.test(text)) return { tool: "shell", args: { command: "git status" } }
