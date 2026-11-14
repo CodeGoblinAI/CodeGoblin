@@ -64,6 +64,21 @@ describe("the web page", () => {
     expect(box.indexOf('id="provider-btn"')).toBeLessThan(box.indexOf('id="send"'))
   })
 
+  test("Settings is sectioned, each row says what it does, and on/off settings are switches", () => {
+    const settings = app.slice(app.indexOf("function openSettingsDialog"), app.indexOf("function openHelpDialog"))
+    for (const section of ["General", "Appearance", "Model", "Providers"]) expect(settings).toContain('"' + section + '"')
+    expect(settings).toContain('setAttribute("role", "switch")')
+    expect(settings).toContain('"Search settings"')
+    // Each setting is declared with a section, a name and a sentence about it.
+    expect(settings.split('toggle("').length + settings.split('choice("').length).toBeGreaterThan(8)
+    expect(settings).toContain("The model still gets every line.")
+    expect(page).toContain("dialog.settings[open] { display: grid;")
+  })
+
+  test("a command's note on the empty page does not send the composer to the bottom", () => {
+    expect(app).toContain('child.matches(".empty-hint, .tool.note")')
+  })
+
   test("icon-only buttons keep a name, and activity starts closed", () => {
     for (const id of ["new-session", "settings-open", "help-open", "sessions-toggle", "activity-toggle"]) {
       const tag = page.slice(page.indexOf('id="' + id + '"') - 40, page.indexOf(">", page.indexOf('id="' + id + '"')))

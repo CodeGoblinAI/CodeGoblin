@@ -373,6 +373,38 @@
   dialog .command-row { display: grid; grid-template-columns: minmax(110px, auto) 1fr; gap: 12px; align-items: baseline; }
   dialog .command-row span { color: var(--muted); font-size: 12px; }
   dialog[aria-label="Conversation changes"] { width: min(1000px, 92vw); }
+  /* Settings: sections on the left, the chosen section's rows on the right. */
+  dialog.settings { width: min(860px, 94vw); height: min(600px, 84vh); padding: 0; overflow: hidden; }
+  dialog.settings[open] { display: grid; grid-template-columns: 190px 1fr; }
+  .set-nav { background: var(--side); border-right: 1px solid var(--line); padding: 16px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+  .set-nav h2 { margin: 0 8px 12px; font-size: 15px; }
+  dialog .set-tab { background: none; border: 1px solid transparent; border-radius: 7px; padding: 8px 10px; text-align: left; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
+  dialog .set-tab:hover { color: var(--text); background: var(--panel2); }
+  dialog .set-tab.active { color: var(--text); background: var(--panel2); border-color: var(--goblin); }
+  .set-pane { position: relative; padding: 18px 22px 20px; overflow-y: auto; min-width: 0; }
+  .set-pane h3 { margin: 0 0 12px; font-size: 16px; }
+  dialog .set-close { position: absolute; top: 12px; right: 14px; border: 0; background: none; font-size: 20px; padding: 2px 8px; color: var(--muted); }
+  dialog.settings input[type="search"] { margin: 0 0 12px; }
+  .set-rows { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 0 14px; }
+  dialog label.set-row { margin: 0; padding: 13px 0; border-bottom: 1px solid var(--line); cursor: default; }
+  dialog label.set-row:last-child { border-bottom: 0; }
+  .set-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .set-title { font-weight: 600; }
+  .set-about { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+  .set-rows > p.set-about { padding: 14px 0; margin: 0; }
+  dialog .set-row select, dialog .set-row button { flex-shrink: 0; max-width: 46%; padding: 6px 9px; }
+  /* An on/off setting is a switch. */
+  input.switch { appearance: none; -webkit-appearance: none; flex-shrink: 0; width: 34px; height: 20px; margin: 0; border-radius: 999px; background: var(--line-strong); position: relative; cursor: pointer; transition: background .15s; }
+  input.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--text); transition: transform .15s; }
+  input.switch:checked { background: var(--goblin); }
+  input.switch:checked::after { transform: translateX(14px); background: #06210a; }
+  input.switch:disabled { opacity: .5; }
+  @media(max-width: 650px) {
+    dialog.settings[open] { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .set-nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); padding: 10px; }
+    .set-nav h2 { flex-basis: 100%; margin-bottom: 6px; }
+    dialog .set-row select, dialog .set-row button { max-width: 55%; }
+  }
   dialog .diff-line, dialog .diff-hunk { margin: 0; white-space: pre; overflow-wrap: normal; font: 12px var(--mono); }
   body.diff-wrap dialog .diff-line { white-space: pre-wrap; overflow-wrap: anywhere; }
   dialog details { overflow-x: auto; margin: 16px 0; }

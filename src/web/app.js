@@ -667,7 +667,9 @@ function emptyState() {
 // The empty page lays out differently: the composer sits under the question
 // rather than at the bottom. Watching the thread keeps that true however it
 // was emptied or filled - there are a dozen places that do either.
-new MutationObserver(() => document.body.classList.toggle("home", !!thread.querySelector(".empty-hint") && thread.children.length === 1))
+// A note or two from a command - a model switch, say - does not end it: the
+// composer jumping to the bottom of the page for that read as a page change.
+new MutationObserver(() => document.body.classList.toggle("home", thread.children.length <= 3 && [...thread.children].every((child) => child.matches(".empty-hint, .tool.note"))))
   .observe(thread, { childList: true })
 
 /** "14:05", or "Oct 30 14:05" for another day. Mirrors sessions.clockTime. */
@@ -1214,31 +1216,110 @@ function makeDialog(title) {
   return modal
 }
 
-function openSettingsDialog() {
+/**
+ * Settings: sections down the left, and on the right each setting as a name,
+ * a line saying what it does, and its control. A bare list of dropdowns made
+ * you guess what "Paste summary" was; an on/off choice is a switch.
+ */
+function openSettingsDialog(startSection = "General") {
   const modal = makeDialog("Settings")
-  const agent = document.createElement("button")
-  agent.textContent = "Agent profile: " + (currentAgent || "default")
-  agent.onclick = () => { modal.close(); void openAgentsDialog() }
-  modal.append(agent)
-  const select = (label, options, current, change) => {
-    const row = document.createElement("label"); row.textContent = label
-    const field = document.createElement("select")
-    for (const [value, text] of options) { const option = document.createElement("option"); option.value = value; option.textContent = text; field.appendChild(option) }
+  modal.classList.add("settings")
+  modal.replaceChildren()
+  const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node }
+
+  const nav = el("nav", "set-nav")
+  nav.setAttribute("aria-label", "Settings sections")
+  nav.appendChild(el("h2", "", "Settings"))
+  const pane = el("div", "set-pane")
+  const heading = el("h3", "", startSection)
+  const close = el("button", "icon set-close", "×")
+  close.type = "button"; close.title = "Close"; close.setAttribute("aria-label", "Close")
+  close.onclick = () => modal.close()
+  const search = el("input", "")
+  search.type = "search"; search.placeholder = "Search settings"; search.setAttribute("aria-label", "Search settings")
+  const rows = el("div", "set-rows")
+  pane.append(close, heading, search, rows)
+  modal.append(nav, pane)
+
+  /** Every setting, in order: { section, title, about, control }. */
+  const entries = []
+  const row = (section, title, about, control) => entries.push({ section, title, about, control })
+  const busy = (field, change) => async (value) => { field.disabled = true; try { await change(value) } finally { field.disabled = false } }
+  const choice = (section, title, about, options, current, change) => {
+    const field = el("select")
+    for (const [value, text] of options) { const option = el("option", "", text); option.value = value; field.appendChild(option) }
     field.value = current
-    field.onchange = async () => { field.disabled = true; try { await change(field.value) } finally { field.disabled = false } }
-    row.appendChild(field); modal.appendChild(row)
+    const run = busy(field, change)
+    field.onchange = () => run(field.value)
+    row(section, title, about, field)
   }
-  select("Theme", paletteData.themes.map((t) => [t.value.slice(7), t.hint]), webSettings.theme, (theme) => saveSettings({ theme }))
-  select("Thinking", [["on", "Shown"], ["off", "Hidden"]], webSettings.thinking ? "on" : "off", (value) => saveSettings({ thinking: value === "on" }))
-  select("Appearance", [["dark", "Dark"], ["light", "Light"], ["system", "Follow the system"]], webSettings.appearance || "dark", (appearance) => saveSettings({ appearance }))
-  select("Paste summary", [["on", "Fold long pastes to [Pasted ~N lines]"], ["off", "Paste in whole"]], webSettings.pasteSummary === false ? "off" : "on", (value) => saveSettings({ pasteSummary: value === "on" }))
-  select("Animations", [["on", "On"], ["off", "Off"]], webSettings.animations === false ? "off" : "on", (value) => saveSettings({ animations: value === "on" }))
-  select("Diff wrapping", [["off", "Long lines scroll"], ["on", "Long lines wrap"]], webSettings.diffWrap ? "on" : "off", (value) => saveSettings({ diffWrap: value === "on" }))
-  select("Reasoning effort (this model)", effortChoices().choices, currentEffort(), (effort) => saveSettings({ effort }))
+  const toggle = (section, title, about, on, change) => {
+    const field = el("input", "switch")
+    field.type = "checkbox"; field.setAttribute("role", "switch"); field.checked = on
+    const run = busy(field, change)
+    field.onchange = () => run(field.checked)
+    row(section, title, about, field)
+  }
+  const action = (section, title, about, label, run) => {
+    const button = el("button", "", label)
+    button.type = "button"
+    button.onclick = run
+    row(section, title, about, button)
+  }
+
+  action("General", "Agent profile", "The instructions and tools the goblin works with in this conversation.", currentAgent || "default", () => { modal.close(); void openAgentsDialog() })
+  toggle("General", "Show thinking", "Show the model's reasoning above its answer, when it shares any.", !!webSettings.thinking, (thinking) => saveSettings({ thinking }))
+  toggle("General", "Paste summary", "Fold a long paste into [Pasted ~N lines] in the box. The model still gets every line.", webSettings.pasteSummary !== false, (pasteSummary) => saveSettings({ pasteSummary }))
+  toggle("General", "Wrap long diff lines", "In Review diff, wrap long lines instead of scrolling sideways.", !!webSettings.diffWrap, (diffWrap) => saveSettings({ diffWrap }))
+
+  choice("Appearance", "Appearance", "Dark, light, or whatever your system is set to.", [["dark", "Dark"], ["light", "Light"], ["system", "Follow the system"]], webSettings.appearance || "dark", (appearance) => saveSettings({ appearance }))
+  choice("Appearance", "Theme", "The colours used in the dark appearance.", paletteData.themes.map((t) => [t.value.slice(7), t.hint]), webSettings.theme, (theme) => saveSettings({ theme }))
+  toggle("Appearance", "Animations", "Spinners and smooth scrolling. Turn off for a still page.", webSettings.animations !== false, (animations) => saveSettings({ animations }))
+
+  const modelName = modelOptions.find((option) => option.value === currentModel)?.label || "this model"
+  choice("Model", "Reasoning effort", "How hard " + modelName + " thinks before answering. Kept per model.", effortChoices().choices, currentEffort(), (effort) => saveSettings({ effort }))
   for (const option of modelSettings()) {
     if (!option.choices?.length) continue
-    select(option.label, option.choices.map((c) => [c.id, c.label]), mediaValue(option.id), (value) => runCommand("/settings " + option.id + " " + value))
+    choice("Model", option.label, "For " + modelName + ".", option.choices.map((c) => [c.id, c.label]), mediaValue(option.id), (value) => runCommand("/settings " + option.id + " " + value))
   }
+
+  for (const provider of paletteData.connectShort || []) {
+    if (!provider.id) { row("Providers", provider.label.replace(/^\u2026\s*/, ""), "Type /connect and part of a name to find any of them.", el("span")); continue }
+    action("Providers", provider.label, provider.connected ? "Connected. Its models are in the model list." : provider.about, provider.connected ? "Manage" : "Connect", () => {
+      modal.close()
+      input.value = "/connect " + provider.id
+      input.focus()
+      refreshPalette()
+    })
+  }
+
+  const sections = [...new Set(entries.map((entry) => entry.section))]
+  let current = sections.includes(startSection) ? startSection : sections[0]
+  const tabs = sections.map((name) => {
+    const tab = el("button", "set-tab", name)
+    tab.type = "button"
+    tab.onclick = () => { current = name; search.value = ""; paint() }
+    nav.appendChild(tab)
+    return tab
+  })
+  const paint = () => {
+    const query = search.value.trim().toLowerCase()
+    // A search looks through every section; otherwise the chosen one shows.
+    const shown = entries.filter((entry) => (query ? (entry.title + " " + entry.about + " " + entry.section).toLowerCase().includes(query) : entry.section === current))
+    heading.textContent = query ? "Search" : current
+    tabs.forEach((tab, index) => { const on = !query && sections[index] === current; tab.classList.toggle("active", on); if (on) tab.setAttribute("aria-current", "true"); else tab.removeAttribute("aria-current") })
+    rows.replaceChildren()
+    for (const entry of shown) {
+      const line = el("label", "set-row")
+      const text = el("span", "set-text")
+      text.append(el("span", "set-title", entry.title), el("span", "set-about", entry.about))
+      line.append(text, entry.control)
+      rows.appendChild(line)
+    }
+    if (!shown.length) rows.appendChild(el("p", "set-about", "No setting matches."))
+  }
+  search.oninput = paint
+  paint()
 }
 
 function openHelpDialog(initial = "") {
@@ -1282,7 +1363,7 @@ function openHelpDialog(initial = "") {
   search.focus()
 }
 
-document.getElementById("settings-open").onclick = openSettingsDialog
+document.getElementById("settings-open").onclick = () => openSettingsDialog()
 
 async function chooseAgent(name = "") {
   const response = await fetch("/api/agent/selection", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, model: currentModel }) })
