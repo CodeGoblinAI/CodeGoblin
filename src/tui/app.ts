@@ -20,11 +20,12 @@ import { resolveStartupModel } from "../core/model-selection"
 import { isLiveCommand } from "./live-commands"
 import { footerHeight } from "./layout"
 import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
-import { activateCatalog, refreshCatalog, refreshExperientialModels, refreshLiveModels, selectionsByKind, selectionsOfKind } from "../core/providers"
+import { activateCatalog, refreshCatalog, refreshExperientialModels, refreshLiveModels, refreshRefuselessModels, selectionsByKind, selectionsOfKind } from "../core/providers"
 import { apiKey as storedKey } from "../core/auth"
 
 // Model lists that change often are read live once, without holding up startup.
 void refreshExperientialModels()
+void refreshRefuselessModels()
 void refreshLiveModels(storedKey)
 // models.dev: every provider for /connect, and the ones with a key in the picker.
 void refreshCatalog(storedKey).then(() => { refreshConnected(); render() })

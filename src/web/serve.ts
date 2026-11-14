@@ -39,6 +39,7 @@ import {
   exactSelection,
   pickerSection,
   refreshExperientialModels,
+  refreshRefuselessModels,
   refreshLiveModels,
   refreshCatalog,
   activateCatalog,
@@ -142,6 +143,7 @@ function withMode(permissions: Permissions, body: { mode?: string; planning?: bo
 const mcp = McpManager.fromConfig()
 // Experiential Labs' list changes often; read it live once, without holding up startup.
 void refreshExperientialModels()
+void refreshRefuselessModels()
 void refreshLiveModels(apiKey)
 // models.dev: every provider for /connect, and the ones with a key in the picker.
 void refreshCatalog(apiKey)

@@ -19,6 +19,7 @@
 import { localProvider } from "./local-provider"
 import { contextFor, installedModels, readPrefs, toolsFor } from "./local-runtime"
 import { cachedExperientialModels, fetchExperientialModels } from "./experiential"
+import { cachedRefuselessModels, fetchRefuselessModels } from "./refuseless"
 import { EFFORT_NAMES } from "./settings"
 import { asProvider, catalogPrices, loadCatalog, rememberCatalogEnv, type CatalogProvider } from "./catalog"
 import type { Price } from "./context"
@@ -82,6 +83,12 @@ export type Provider = {
    * compacting before then (core/idle-compact.ts); absent means unknown.
    */
   cacheMinutes?: number
+  /**
+   * Send a step's reasoning back as `reasoning_content` on the assistant message that made tool calls.
+   * DeepSeek-style thinking models expect it when a turn continues after a tool; the fork does this for
+   * Refuseless (#139). Off elsewhere: other providers have not asked for it.
+   */
+  replayReasoning?: boolean
   /** The usage block carries `cost`, in US dollars, for the request (Experiential Labs does). It is used instead of the price table. */
   reportsCost?: boolean
   /**
@@ -344,6 +351,15 @@ export const PROVIDERS: Record<string, Provider> = {
     reportsCost: true,
     models: [],
   },
+  // Filled from the public Refuseless catalog, with a built-in copy behind it (core/refuseless.ts).
+  refuseless: {
+    id: "refuseless",
+    label: "Refuseless",
+    baseUrl: "https://api.refuseless.com/v1/chat/completions",
+    usageOnStream: true,
+    replayReasoning: true,
+    models: [],
+  },
   qwen: {
     id: "qwen",
     label: "Qwen",
@@ -441,6 +457,16 @@ export function refreshExperientialModels(fetcher?: typeof fetch): Promise<numbe
     .then((models) => { PROVIDERS.explabs!.models = models; return models.length })
     .catch(() => PROVIDERS.explabs!.models.length)
   return experientialRefresh
+}
+
+PROVIDERS.refuseless!.models = cachedRefuselessModels()
+let refuselessRefresh: Promise<number> | undefined
+/** The current Refuseless models from its public catalog, once per run. A failure keeps the list already shown. */
+export function refreshRefuselessModels(fetcher?: typeof fetch): Promise<number> {
+  refuselessRefresh ??= fetchRefuselessModels(fetcher)
+    .then((models) => { PROVIDERS.refuseless!.models = models; return models.length })
+    .catch(() => PROVIDERS.refuseless!.models.length)
+  return refuselessRefresh
 }
 
 /** Listed by /models but not chat: speech, images, transcription, embeddings. */
@@ -710,6 +736,7 @@ export const CONNECTABLE: { id: string; label: string; about: string; more?: boo
   { id: "zai", label: "GLM", about: "chat and reasoning" },
   { id: "moonshotai", label: "Kimi", about: "chat, long context" },
   { id: "explabs", label: "Experiential Labs", about: "one key, hundreds of chat models (Claude, DeepSeek, GLM and more)" },
+  { id: "refuseless", label: "Refuseless", about: "abliterated GLM and DeepSeek, MiniMax and Kimi; 1M context" },
   { id: "meta", label: "Meta Muse Spark", about: "chat and reasoning, 1M context" },
   { id: "xiaomi", label: "Xiaomi MiMo", about: "chat and reasoning, long context" },
   { id: "google", label: "Google", about: "Gemini image generation" },

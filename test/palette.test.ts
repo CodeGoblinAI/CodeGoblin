@@ -70,7 +70,9 @@ describe("the model list says which models can actually run", () => {
 
   test("a provider with a key is not", () => {
     setConnectedProviders(["deepseek"])
-    const deepseek = paletteFor("/model deepseek")!
+    // Only DeepSeek's own entries: other providers (Refuseless, Experiential Labs) serve DeepSeek models too.
+    const deepseek = paletteFor("/model deepseek")!.filter((item) => item.value.startsWith("/model deepseek/"))
+    expect(deepseek.length).toBeGreaterThan(0)
     expect(deepseek.some((item) => item.hint.includes("no key"))).toBe(false)
   })
 
@@ -78,7 +80,8 @@ describe("the model list says which models can actually run", () => {
     setConnectedProviders([])
     expect(paletteFor("/model glm")!.every((item) => item.hint.includes("no key"))).toBe(true)
     setConnectedProviders(["zai"])
-    expect(paletteFor("/model glm")!.some((item) => item.hint.includes("no key"))).toBe(false)
+    // Z.ai's own GLM entries; Refuseless serves GLM models too and still has no key.
+    expect(paletteFor("/model glm")!.filter((item) => item.value.startsWith("/model zai/")).some((item) => item.hint.includes("no key"))).toBe(false)
   })
 
   test("the marking never eats the model's own name", () => {

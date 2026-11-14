@@ -52,6 +52,8 @@ export type Message = {
   images?: Attachment[]
   tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[]
   tool_call_id?: string
+  /** The reasoning behind a message that made tool calls; sent back only to providers with `replayReasoning`. */
+  reasoning?: string
   /** UI/session metadata; never forwarded as an API field. */
   stopped?: boolean
   /** A command the person ran with `!`; shown as its output, not as something they said. Metadata only. */
@@ -148,8 +150,16 @@ function chatEndpoint(provider: Provider, modelId?: string): string {
  * Messages carry a display copy for the UI, and providers that validate their
  * input reject unknown keys outright - so the wire gets the wire fields.
  */
-const wire = (messages: Message[], memory?: string, images = false, instructions?: string) => {
-  const sent = messages.map((message) => {
+const wire = (messages: Message[], memory?: string, images = false, instructions?: string, replayReasoning = false) => {
+  const sent = messages.map((raw) => {
+    // The reasoning goes back as its own field, only to providers that want it, and only beside tool calls.
+    const extra = replayReasoning && raw.reasoning && raw.tool_calls?.length ? { reasoning_content: raw.reasoning } : {}
+    return { ...shape(raw, images), ...extra }
+  })
+  return finish(sent, memory, instructions)
+}
+
+const shape = (message: Message, images: boolean) => {
     const { role, images: attached, tool_calls, tool_call_id } = message
     const content = continuationContent(message)
     // A message with pictures becomes the multimodal shape, which is the only
@@ -187,7 +197,9 @@ const wire = (messages: Message[], memory?: string, images = false, instructions
     }
 
     return { role, content, tool_calls, tool_call_id }
-  })
+}
+
+const finish = (sent: { role: Role; content: unknown; tool_calls?: unknown; tool_call_id?: string }[], memory?: string, instructions?: string) => {
 
   // Memory rides along with the system prompt rather than being stored in
   // the conversation: it is read fresh every turn, so forgetting something
@@ -418,6 +430,7 @@ async function* runTurns(input: {
   }
 
     let text = ""
+    let reasoning = ""
     let outputLimited = false
     const calls = new Map<number, ToolCall>()
     if (input.provider.cli) {
@@ -445,6 +458,7 @@ async function* runTurns(input: {
           input.images,
           [input.instructions, input.permissions?.planning ? PLANNING : undefined].filter(Boolean).join(String.fromCharCode(10, 10)) ||
             undefined,
+          input.provider.replayReasoning,
         ),
         tools: localChat ? undefined : offeredTools(input),
         stream: true,
@@ -506,6 +520,7 @@ async function* runTurns(input: {
         // name is not standardised, so accept the variants seen in the wild.
         const thought = delta?.reasoning_content ?? delta?.reasoning ?? delta?.thinking
         if (typeof thought === "string" && thought) {
+          reasoning += thought
           yield { type: "thinking", delta: thought }
         }
 
@@ -557,6 +572,7 @@ async function* runTurns(input: {
     input.messages.push({
       role: "assistant",
       content: text,
+      ...(reasoning ? { reasoning } : {}),
       tool_calls: pending.map((call) => ({
         id: call.id,
         type: "function" as const,

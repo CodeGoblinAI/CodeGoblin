@@ -842,3 +842,42 @@ describe("compacting a long conversation", () => {
     expect(events.some((event) => event.type === "compacted")).toBe(true)
   })
 })
+
+describe("sending reasoning back after a tool call", () => {
+  /** The second request's messages, after a step that reasoned and then asked for a tool. */
+  async function continuation(replayReasoning: boolean): Promise<any[]> {
+    const bodies: any[] = []
+    let step = 0
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)))
+      return step++ === 0
+        ? stream(
+            { choices: [{ delta: { reasoning_content: "I should list the files first." } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 0, id: "call-1", function: { name: "list_files", arguments: '{"path":"."}' } }] } }] },
+          )
+        : answers("done")
+    }) as unknown as typeof fetch
+    for await (const _ of runAgent({
+      provider: { ...provider, replayReasoning },
+      modelId: "test-model",
+      apiKey: "k",
+      messages: [{ role: "user", content: "what is here" }],
+      root: process.cwd(),
+      maxTurns: 3,
+    })) {
+      // drained
+    }
+    return bodies[1]?.messages ?? []
+  }
+
+  test("a provider that asks for it gets the step's reasoning beside its tool calls", async () => {
+    const sent = await continuation(true)
+    const step = sent.find((message: any) => message.role === "assistant" && message.tool_calls?.length)
+    expect(step.reasoning_content).toBe("I should list the files first.")
+  })
+
+  test("any other provider gets no reasoning field at all", async () => {
+    const sent = await continuation(false)
+    expect(JSON.stringify(sent)).not.toContain("reasoning")
+  })
+})
