@@ -27,6 +27,8 @@ export type McpServer =
       environment: Record<string, string>
       enabled: boolean
       timeout?: number
+      /** Offer only these of the server's tools ("only": ["a", "b"]). Every tool's schema rides on every request. */
+      only?: string[]
     }
   | {
       type: "remote"
@@ -35,6 +37,7 @@ export type McpServer =
       oauth?: McpOAuthConfig
       enabled: boolean
       timeout?: number
+      only?: string[]
     }
 
 /**
@@ -94,7 +97,8 @@ function servers(value: unknown): Record<string, McpServer> {
     if (!isRecord(entry)) continue
     const enabled = entry.enabled !== false
     const limit = entry.timeout
-    const timeout = typeof limit === "number" && limit > 0 ? { timeout: limit } : {}
+    const names = Array.isArray(entry.only) ? entry.only.filter((each): each is string => typeof each === "string" && Boolean(each)) : []
+    const timeout = { ...(typeof limit === "number" && limit > 0 ? { timeout: limit } : {}), ...(names.length ? { only: names } : {}) }
     const command = entry.command
     if (
       entry.type === "local" &&

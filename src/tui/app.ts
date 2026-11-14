@@ -107,6 +107,7 @@ import {
 import { marker, counts, type Todo } from "../core/todo"
 import { Permissions, decisionsFor, MODES, nextMode, askedFor, refusalLabel, decisionHints, type Decision, type PermissionMode } from "../core/permission"
 import { McpManager, withoutServers } from "../core/mcp"
+import { browserStatus, switchBrowser } from "../core/browser"
 import { SubagentManager, listAgents, selectedAgent, agentSelection, type SubagentEvent } from "../core/subagents"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
@@ -2510,6 +2511,15 @@ async function send() {
     }
     if (result.kind === "mcp") {
       openMcp()
+    }
+    if (result.kind === "browser") {
+      if (!result.mode) { transcript.push({ kind: "tool", text: browserStatus(mcp) }); render(); return }
+      status = result.mode === "off" ? "closing the browser..." : "starting the browser - the first time downloads it..."
+      render()
+      const line = await switchBrowser(mcp, result.mode)
+      status = ""
+      transcript.push({ kind: "tool", text: line })
+      render(); return
     }
     // The terminal works in the folder it was started in, so worktrees and
     // branches are listed and made here, and opened by starting cgn there.

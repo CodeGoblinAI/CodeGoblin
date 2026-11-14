@@ -29,6 +29,7 @@ export type CommandResult =
   | { kind: "redo" }
   | { kind: "status" }
   | { kind: "mcp"; toggle?: { server: string; on: boolean } }
+  | { kind: "browser"; mode?: "own" | "mine" | "off" }
   | { kind: "skills" }
   | { kind: "plan"; text?: string }
   | { kind: "approvals" }
@@ -87,6 +88,7 @@ export const COMMANDS = [
   { name: "/memory", description: "what is remembered: /memory, /memory add ..., /memory forget <id>" },
   { name: "/status", description: "what this session is using right now" },
   { name: "/mcp", description: "MCP servers and their tools; /mcp off <server> switches one off for this conversation" },
+  { name: "/browser", description: "a Chrome the goblin can drive: /browser on (its own), /browser mine (yours), /browser off" },
   { name: "/skills", description: "skills and custom commands, and where each comes from" },
   { name: "/plan", description: "plan before changing anything: /plan add dark mode, or /plan to switch it" },
   { name: "/approvals", description: "how much to ask before acting - opens a picker" },
@@ -263,6 +265,14 @@ export function runCommand(text: string): CommandResult {
       if ((verb === "off" || verb === "on") && name) return { kind: "mcp", toggle: { server: name, on: verb === "on" } }
       if (verb) return { kind: "message", text: "usage: /mcp (servers and their tools), /mcp off <server> or /mcp on <server> for this conversation" }
       return { kind: "mcp" }
+    }
+    case "/browser": {
+      const verb = argument.trim().toLowerCase()
+      if (!verb || verb === "status") return { kind: "browser" }
+      if (verb === "on" || verb === "own") return { kind: "browser", mode: "own" }
+      if (verb === "mine") return { kind: "browser", mode: "mine" }
+      if (verb === "off") return { kind: "browser", mode: "off" }
+      return { kind: "message", text: "usage: /browser, /browser on, /browser mine or /browser off" }
     }
     case "/skills":
       return { kind: "skills" }

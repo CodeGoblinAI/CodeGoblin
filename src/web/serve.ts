@@ -52,6 +52,7 @@ import { DECISIONS, MODES, Permissions, askedFor, refusalLabel, type Decision, t
 import { runTypedCommand, typedCommand } from "../core/user-shell"
 import { BrowserConsent } from "./consent"
 import { McpManager, withoutServers } from "../core/mcp"
+import { browserMode, browserStatus, switchBrowser } from "../core/browser"
 import { SubagentManager, agentMention, listAgents, selectedAgent, agentSelection, type SubagentContext } from "../core/subagents"
 import { configPath, checkpointEvery } from "../core/config"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
@@ -471,6 +472,15 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     const id = url.searchParams.get("sessionId") ?? ""
     const saved = /^[a-zA-Z0-9_-]+$/.test(id) ? await sessions.load(id).catch(() => undefined) : undefined
     return json({ servers: mcp.statuses(), config: configPath(), off: saved?.mcpOff ?? pendingMcpOff.get(id) ?? [] })
+  }
+  // /browser: status, or on (own profile) / mine (the person's Chrome) / off, for this run of the server.
+  if (url.pathname === "/api/browser") {
+    if (request.method === "GET") return json({ message: browserStatus(mcp), mode: browserMode(mcp) ?? "off" })
+    if (request.method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as { mode?: unknown }
+      if (body.mode !== "own" && body.mode !== "mine" && body.mode !== "off") return json({ message: "usage: /browser, /browser on, /browser mine or /browser off" }, 400)
+      return json({ message: await switchBrowser(mcp, body.mode), mode: browserMode(mcp) ?? "off" })
+    }
   }
   // /mcp off|on <server>: for this conversation only, saved with it.
   if (url.pathname === "/api/mcp/session" && request.method === "POST") {

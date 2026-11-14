@@ -592,6 +592,12 @@ export class McpClient {
   }
 }
 
+/** A server's tools, less any its config leaves out (`only`). Every tool's schema is sent with every request, so unused ones are not free. */
+function offered(client: McpClient): McpToolInfo[] {
+  const only = client.config.only
+  return only ? client.tools.filter((tool) => only.includes(tool.name)) : client.tools
+}
+
 export type McpToolEntry = { name: string; server: string; tool: McpToolInfo; client: McpClient }
 
 /** How many times a server that dropped out is started again in one session. */
@@ -646,7 +652,7 @@ export class McpManager {
   private loginStarting = new Set<string>()
   private closing = false
 
-  constructor(servers: Record<string, McpServer>, makeTransport: (config: McpServer) => Transport = transportFor) {
+  constructor(servers: Record<string, McpServer>, private makeTransport: (config: McpServer) => Transport = transportFor) {
     this.clients = Object.entries(servers).map(([name, config]) => {
       const client = new McpClient(name, config, makeTransport)
       client.onToolsChanged = () => this.onChange?.()
@@ -710,7 +716,7 @@ export class McpManager {
     const entries: McpToolEntry[] = []
     for (const client of this.clients) {
       if (client.status !== "connected") continue
-      for (const tool of client.tools) {
+      for (const tool of offered(client)) {
         const name = toolNameFor(client.name, tool.name)
         if (seen.has(name)) continue
         seen.add(name)
@@ -730,6 +736,30 @@ export class McpManager {
         parameters: entry.tool.inputSchema ?? { type: "object", properties: {} },
       },
     }))
+  }
+
+  /**
+   * Adds a server while running and connects it - /browser on, say. Resolves
+   * once it has connected or failed; like start(), it never throws.
+   */
+  async add(name: string, config: McpServer): Promise<void> {
+    if (this.clients.some((client) => client.name === name)) await this.remove(name)
+    const client = new McpClient(name, config, this.makeTransport)
+    client.onToolsChanged = () => this.onChange?.()
+    this.clients.push(client)
+    this.onChange?.()
+    await client.connect()
+    this.onChange?.()
+  }
+
+  /** Closes a server and forgets it. Returns whether there was one. */
+  async remove(name: string): Promise<boolean> {
+    const index = this.clients.findIndex((client) => client.name === name)
+    if (index < 0) return false
+    const [client] = this.clients.splice(index, 1)
+    await client!.close().catch(() => {})
+    this.onChange?.()
+    return true
   }
 
   /** Servers still connecting, by name. */
@@ -752,7 +782,7 @@ export class McpManager {
       name: client.name,
       type: client.config.type,
       status: client.status,
-      tools: client.status === "connected" ? client.tools.map((tool) => tool.name) : [],
+      tools: client.status === "connected" ? offered(client).map((tool) => tool.name) : [],
       ...(client.error ? { error: client.error } : {}),
       target: client.config.type === "local" ? client.config.command.join(" ") : client.config.url,
       oauth: client.config.type === "remote" && client.config.enabled && client.config.oauth !== false && !Object.keys(client.config.headers).some(key => key.toLowerCase() === "authorization"),

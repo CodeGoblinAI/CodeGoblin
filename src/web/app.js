@@ -2105,6 +2105,16 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/browser") {
+    const verb = argument.toLowerCase()
+    const mode = verb === "on" || verb === "own" ? "own" : verb === "mine" || verb === "off" ? verb : ""
+    if (verb && verb !== "status" && !mode) { note("Use /browser, /browser on, /browser mine or /browser off."); return true }
+    if (mode && mode !== "off") note("Starting the browser - the first time downloads it…")
+    const data = await fetch("/api/browser", mode ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode }) } : { cache: "no-store" }).then((r) => r.json()).catch(() => null)
+    note(data?.message || "The browser could not be reached.")
+    return true
+  }
+
   if (name === "/mcp") {
     const [verb, server] = argument.split(/\s+/).filter(Boolean)
     if ((verb === "off" || verb === "on") && server) { await setMcpForSession(server, verb === "on"); return true }

@@ -334,3 +334,19 @@ describe("a remote server over Streamable HTTP", () => {
     }
   })
 })
+
+describe("a server limited to some of its tools", () => {
+  test("only the named tools are offered, listed and callable", async () => {
+    const manager = new McpManager({ fixture: { ...local(), only: ["echo"] } })
+    open.push(manager)
+    await manager.start()
+    expect(manager.schema().map((entry) => entry.function.name)).toEqual(["mcp__fixture__echo"])
+    expect(manager.statuses()[0]!.tools).toEqual(["echo"])
+    expect(await manager.call("mcp__fixture__echo", { text: "kept" })).toBe("echo: kept")
+    const other = new McpManager({ fixture: local() })
+    open.push(other)
+    await other.start()
+    const left = other.schema().map((entry) => entry.function.name).find((name) => name !== "mcp__fixture__echo")!
+    expect(await manager.call(left, {})).toBe("unknown tool: " + left)
+  })
+})
