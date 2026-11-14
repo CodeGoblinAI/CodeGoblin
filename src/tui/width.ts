@@ -121,3 +121,17 @@ export function wrapToWidth(text: string, max: number): string[] {
   if (line) lines.push(line)
   return lines
 }
+
+/**
+ * Shorten plain text to a display width by cutting out of the middle, so both ends stay readable.
+ * Model names differ at the end ("... Abliterated Fast", "... (free route)"), which a cut from the right loses.
+ */
+export function truncateMiddle(text: string, max: number): string {
+  if (displayWidth(text) <= max) return text
+  if (max <= 1) return max === 1 ? "…" : ""
+  const chars = [...text]
+  const tailRoom = Math.floor((max - 1) / 2)
+  let tail = ""
+  for (let index = chars.length - 1; index >= 0 && displayWidth(chars[index]! + tail) <= tailRoom; index--) tail = chars[index]! + tail
+  return truncateToWidth(text, max - 1 - displayWidth(tail)) + "…" + tail
+}

@@ -6,7 +6,10 @@ const t = await tui({ model, cwd: project, rows: 46 })
 try {
   // Click [Model] where the toolbar is actually drawn - under the composer on the home screen,
   // at the bottom in a conversation - found in the last repaint.
-  const frame = plain(t.out.split("\x1b[2J").at(-1)).replace(/\r/g, "").split("\n")
+  // The first repaint can land a moment after the harness returns; wait for the toolbar rather than assume it.
+  const drawn = () => plain(t.out.split("\x1b[2J").at(-1)).replace(/\r/g, "").split("\n")
+  for (let tries = 0; tries < 20 && !drawn().some((line) => line.includes("[Model]")); tries++) await delay(250)
+  const frame = drawn()
   const row = frame.findIndex((line) => line.includes("[Model]"))
   const col = frame[row].indexOf("[Model]") + 3
   t.write(`\x1b[<0;${col};${row + 1}M`); t.write(`\x1b[<0;${col};${row + 1}m`); await delay(600)

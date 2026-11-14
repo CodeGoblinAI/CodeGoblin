@@ -58,7 +58,7 @@ import {
   wordStart,
   type Composer,
 } from "./composer"
-import { displayWidth, truncateToWidth, padToWidth, padStartToWidth, wrapToWidth as wrapWords } from "./width"
+import { displayWidth, truncateMiddle, truncateToWidth, padToWidth, padStartToWidth, wrapToWidth as wrapWords } from "./width"
 import { renderMarkdown } from "./markdown"
 import {
   paletteFor,
@@ -88,7 +88,7 @@ import { exportSession, sessionMarkdown } from "../core/export"
 import { runMedia, describeMedia, type MediaKind } from "../core/media"
 import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
-import { defaultSelection, resolveSelection, acceptsImages, effortFor, effortHint, effortLevels, effortProblem, takesEffort, type Selection, kindOf } from "../core/providers"
+import { CONNECTABLE, KIND_LABEL, defaultSelection, resolveSelection, acceptsImages, effortFor, effortHint, effortLevels, effortProblem, takesEffort, type Selection, kindOf } from "../core/providers"
 import { apiKey, connect, disconnect, connections, storePath, envVariable } from "../core/auth"
 import { compactConversation, localChatMessages, runAgent, type Attachment, type Message } from "../core/agent"
 import { idleCompaction, idleNote } from "../core/idle-compact"
@@ -117,7 +117,7 @@ import { listSkills, skillIndex } from "../core/skills"
 import { setAgents, setInvocations, setModelLists, setRecentCommands, isListedCommand } from "./palette"
 import { loadRecentCommands, noteCommandUse } from "../core/command-rank"
 import { agentMention } from "../core/subagents"
-import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
+import { FAVOURITES, RECENT, markRecent, pickerRows, toggleFavourite } from "../core/favourites"
 import { formatterStatus } from "../core/formatter"
 import { systemPrompt } from "../core/system-prompt"
 import { configPath, checkpointEvery, spendLimitPerPrompt, idleCompactMin } from "../core/config"
@@ -1161,8 +1161,9 @@ function render() {
   // Usage stays on the bar even while a status is showing: a transient
   // message used to replace the model, context and spend readout entirely,
   // so "no key" also hid what you were connected to.
-  const usage = selection.provider.label + " " + selection.model.label + (context.limit > 0 ? "  ~" + context.percent + "% ctx" : "  ctx window unknown") + spendTag
-  const left = usage + modeTag
+  const usageTail = (context.limit > 0 ? "  ~" + context.percent + "% ctx" : "  ctx window unknown") + spendTag
+  const fullName = selection.provider.label + " " + selection.model.label
+  let left = fullName + usageTail + modeTag
   const rightFor = (compactHints: boolean) => dialog
     ? compactHints ? "enter · esc close" : "up/down · enter choose · esc close"
     : pending && !input
@@ -1190,6 +1191,13 @@ function render() {
   // A long status gives way to the key hints rather than pushing them off the
   // edge: "mode: Full access - never ask - only the rules..." ran into them.
   const statusRoom = Math.max(10, cols - displayWidth(right) - 4 - displayWidth(modeLabel) - 3)
+  // A name too long for the bar loses its provider first, then its middle - never its end, which is where
+  // "Fast" and "(free route)" are. The context and cost readout stays whole while there is room for it.
+  if (displayWidth(left) > statusRoom - 2) {
+    const nameRoom = statusRoom - 2 - displayWidth(usageTail + modeTag)
+    const name = displayWidth(selection.model.label) <= nameRoom ? selection.model.label : truncateMiddle(selection.model.label, Math.max(12, nameRoom))
+    left = name + usageTail + modeTag
+  }
   const plain = (displayWidth(left) > statusRoom - 2 ? truncateToWidth(left, statusRoom - 3) + "\u2026" : left)
   const lead = "  " + modeLabel + " \u00b7 "
   const gap = Math.max(1, cols - displayWidth(right) - 2 - displayWidth(lead) - displayWidth(plain))
@@ -1386,6 +1394,21 @@ async function openSessions(selectedValue?: string) {
  * not the label - "zai" is GLM, "google" is Gemini. The list already existed
  * for /connect; this makes it something you can choose from.
  */
+function openConnect() {
+  const rows: Dialogs.DialogRow[] = []
+  const have = new Set(connections().map((item) => item.id))
+  const entries = CONNECTABLE.map((entry) => ({ ...entry, connected: have.has(entry.id) }))
+  const section = (title: string, list: typeof entries) => {
+    if (!list.length) return
+    rows.push({ label: title, tone: "heading", inert: true })
+    for (const entry of list) rows.push({ label: "  " + entry.label, hint: entry.connected ? "connected \u00b7 enter replaces the key" : entry.about, value: entry.id, search: entry.id + " " + entry.label + " " + entry.about })
+  }
+  section("Connected", entries.filter((entry) => entry.connected))
+  section("Providers", entries.filter((entry) => !entry.connected && !entry.more))
+  section("More, from models.dev", entries.filter((entry) => !entry.connected && entry.more))
+  dialog = Dialogs.open("connect", "Connect a provider", rows, { size: "large", filterable: true, footer: "type to search \u00b7 enter adds a key \u00b7 esc closes" })
+}
+
 function openDisconnect() {
   const stored = connections().filter((item) => item.source === "file")
   if (!stored.length) {
@@ -1775,7 +1798,7 @@ function openEffortPicker() {
   const saved = currentEffort()
   dialog = Dialogs.open(
     "effort",
-    levels.length ? "Effort  ·  " + name : "Effort  ·  " + name + " takes no effort level",
+    levels.length ? "Effort  ·  " + selection.model.label : "Effort  ·  " + name + " takes no effort level",
     (levels.length ? ["auto", ...levels] : ["auto"]).map((level) => ({
       label: (level === saved ? "• " : "  ") + level,
       hint: effortHint(selection.model, level) || (selection.provider.cli === "claude-code" ? "sent as --effort" : selection.provider.cli ? "sent to the CLI" : "sent as reasoning_effort"),
@@ -1948,21 +1971,46 @@ function toFile(dialog: Dialogs.Dialog, direction: number): Dialogs.Dialog {
 function modelPickerRows(): Dialogs.DialogRow[] {
   const current = selection.provider.id + "/" + selection.model.id
   const rows: Dialogs.DialogRow[] = []
+  const have = new Set(connections().map((item) => item.id))
+  const usable = (s: Selection) => Boolean(s.provider.local || s.provider.runtime || s.provider.cli || have.has(s.provider.id))
+  // Chat models sit under their provider, as in the fork, so a row is the model's own name and not
+  // "Refuseless DeepSeek V4.1 Flash 1017 Abliterated (free route)" cut short. Providers with a key come first.
+  const all = pickerRows(selectionsByKind(), settings).map((row) => {
+    const grouped = row.section === KIND_LABEL.text
+    return { ...row, grouped, heading: grouped ? row.selection.provider.label + (usable(row.selection) ? "" : "  \u00b7 no key, /connect " + row.selection.provider.id) : row.section }
+  })
+  const ordered = [
+    ...all.filter((row) => row.section === FAVOURITES || row.section === RECENT),
+    ...all.filter((row) => row.grouped && usable(row.selection)),
+    ...all.filter((row) => !row.grouped && row.section !== FAVOURITES && row.section !== RECENT),
+    ...all.filter((row) => row.grouped && !usable(row.selection)),
+  ]
   let section = ""
-  for (const row of pickerRows(selectionsByKind(), settings)) {
-    if (row.section !== section) {
-      section = row.section
+  for (const row of ordered) {
+    if (row.heading !== section) {
+      section = row.heading
       rows.push({ label: section, tone: "heading", inert: true })
     }
     const s = row.selection
     const id = s.provider.id + "/" + s.model.id
     rows.push({
-      label: (row.favourite ? "\u2605 " : "  ") + s.provider.label + " " + s.model.label,
+      label: (row.favourite ? "\u2605 " : "  ") + (row.grouped ? "" : s.provider.label + " ") + s.model.label,
       value: id,
-      hint: id === current ? "current" : s.provider.runtime ? "runs here" : undefined,
+      hint: [id === current ? "current" : "", s.provider.runtime ? "runs here" : "", modelFacts(s)].filter(Boolean).join(" \u00b7 ") || undefined,
+      search: id + " " + s.provider.label + " " + s.model.label,
     })
   }
   return rows
+}
+
+/** A model in a few words for the picker: how much it holds, whether it sees, what a million tokens cost. */
+function modelFacts(s: Selection): string {
+  if (kindOf(s.model) !== "text") return ""
+  const size = s.model.contextWindow
+  const holds = size >= 1_000_000 ? Math.round(size / 100_000) / 10 + "M" : size >= 1000 ? Math.round(size / 1000) + "K" : ""
+  const money = (n: number) => "$" + (n >= 10 ? Math.round(n) : Number(n.toFixed(n < 0.1 ? 3 : 2)))
+  const price = s.model.price ? money(s.model.price.input) + "/" + money(s.model.price.output) : ""
+  return [price, holds, s.model.capabilities?.input?.image ? "sees images" : ""].filter(Boolean).join(" \u00b7 ")
 }
 
 function openModelPicker(selectedValue = selection.provider.id + "/" + selection.model.id) {
@@ -1970,7 +2018,7 @@ function openModelPicker(selectedValue = selection.provider.id + "/" + selection
     size: "large",
     selectedValue,
     filterable: true,
-    footer: "type to search · enter choose · ctrl+f favourite · esc close",
+    footer: "type to search · enter choose · ctrl+f favourite · $/M tokens in/out",
   })
 }
 
@@ -2206,7 +2254,12 @@ async function chooseInDialog() {
     const next = resolveSelection(row.value)
     if (next) {
       if (streaming) { queued = "/model " + row.value; status = "model switch queued until this turn ends" }
-      else { selection = next; resumeModelMissing = false; key = apiKey(next.provider.id); status = next.provider.label + " " + next.model.label; rememberRecent() }
+      else {
+        selection = next; resumeModelMissing = false; key = apiKey(next.provider.id); status = next.provider.label + " " + next.model.label; rememberRecent()
+        // As the fork does: a model with effort levels asks for one the first time it is chosen.
+        // Any answer, "auto" included, is remembered for that model, so it asks once.
+        if (effortLevels(next.model).length && !(row.value in settings.effortByModel)) { closeDialog(); openEffortPicker(); render(); return }
+      }
     }
     closeDialog(); render(); return
   }
@@ -2227,6 +2280,12 @@ async function chooseInDialog() {
     await restoreSession(loaded)
     closeDialog()
     render()
+    return
+  }
+
+  if (dialog.kind === "connect") {
+    closeDialog()
+    await runQuick("/connect " + row.value)
     return
   }
 
@@ -3927,6 +3986,14 @@ process.stdin.on("data", (chunk) => {
         // help. An item containing a space is already a complete choice, so it
         // must not expand again - that was why picking a model did nothing.
         const isBareCommand = !chosen.includes(" ")
+        // /model and /connect are pop-ups, like /theme and /effort: favourites and recent models are there,
+        // and a name is never cut short. Typing "/model " still lists matches under the prompt.
+        if (chosen === "/model" || chosen === "/connect") {
+          input = ""; cursor = 0; palette = undefined
+          if (chosen === "/model") openModelPicker(); else openConnect()
+          render()
+          continue
+        }
         const expanded = isBareCommand ? paletteFor(chosen + " ") : undefined
         if (expanded) {
           input = chosen + " "

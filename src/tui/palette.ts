@@ -12,7 +12,7 @@ import { pickerRows } from "../core/favourites"
 import { findMention } from "../core/mention"
 import { rankCommands } from "../core/command-rank"
 import { theme, dim, ansi } from "./ansi"
-import { displayWidth, truncateToWidth, padToWidth } from "./width"
+import { displayWidth, truncateToWidth, truncateMiddle, padToWidth } from "./width"
 
 /**
  * The popup shown while typing a slash command.
@@ -257,7 +257,8 @@ export function renderPalette(items: PaletteItem[], selected: number, width: num
     const index = start + offset
     const active = index === selected
     const marker = active ? theme.goblin + "❯ " + ansi.reset : "  "
-    const value = padToWidth(cut(item.value, valueColumn), valueColumn)
+    // A value keeps both ends: model ids differ in their last word.
+    const value = padToWidth(truncateMiddle(item.value, valueColumn), valueColumn)
     const hint = padToWidth(cut(item.hint, hintColumn), hintColumn)
     const body = marker + (active ? theme.text : theme.muted) + value + ansi.reset + "  " + dim + hint + ansi.reset
     // Close the row so the box reads as a box rather than an open bracket.

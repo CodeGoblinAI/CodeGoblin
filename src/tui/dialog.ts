@@ -1,5 +1,5 @@
 import { theme, dim, ansi } from "./ansi"
-import { displayWidth, truncateToWidth, padToWidth } from "./width"
+import { displayWidth, truncateToWidth, truncateMiddle, padToWidth } from "./width"
 import { commandScore } from "../core/command-rank"
 
 /**
@@ -216,7 +216,7 @@ export function box(dialog: Dialog, cols: number, rows: number): string[] {
   // The title carries its own "esc" so a dialog never has to be guessed out of.
   lines.push(
     theme.borderStrong + "│" + ansi.reset +
-      theme.gold + padToWidth(" " + truncateToWidth(dialog.title, inner - 7), inner - 5) + ansi.reset +
+      theme.gold + padToWidth(" " + truncateMiddle(dialog.title, inner - 7), inner - 5) + ansi.reset +
       dim + " esc " + ansi.reset +
       theme.borderStrong + "│" + ansi.reset,
   )
@@ -249,7 +249,7 @@ export function box(dialog: Dialog, cols: number, rows: number): string[] {
     const hintRoom = Math.max(0, inner - 3 - displayWidth(row.label) - 2)
     const hintWidth = hint ? Math.min(displayWidth(hint), hintRoom) : 0
     const labelWidth = Math.max(0, inner - 3 - hintWidth - (hintWidth ? 2 : 0))
-    const label = padToWidth(truncateToWidth(row.label, labelWidth), labelWidth)
+    const label = padToWidth(row.label.includes("\u001b") ? truncateToWidth(row.label, labelWidth) : truncateMiddle(row.label, labelWidth), labelWidth)
     const tone = armed ? theme.error : dim
     const tail = hintWidth ? "  " + tone + padToWidth(truncateToWidth(hint, hintWidth), hintWidth) + ansi.reset : ""
 
