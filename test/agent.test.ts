@@ -491,7 +491,7 @@ describe("which models can be shown one", () => {
     const { acceptsImages, resolveSelection } = await import("../src/core/providers")
 
     expect(acceptsImages(resolveSelection("deepseek/deepseek-v4-flash-vision-exp")!)).toBe(true)
-    expect(acceptsImages(resolveSelection("deepseek/deepseek-v4-flash")!)).toBe(false)
+    expect(acceptsImages(resolveSelection("deepseek/deepseek-v4-pro")!)).toBe(false)
   })
 
   test("a generator's reference image is not the same claim", async () => {
@@ -879,5 +879,48 @@ describe("sending reasoning back after a tool call", () => {
   test("any other provider gets no reasoning field at all", async () => {
     const sent = await continuation(false)
     expect(JSON.stringify(sent)).not.toContain("reasoning")
+  })
+})
+
+describe("read_file on a picture", () => {
+  // A 1x1 PNG.
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64")
+
+  async function second(images: boolean): Promise<any[]> {
+    const fs = await import("node:fs")
+    const os = await import("node:os")
+    const path = await import("node:path")
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cg-picture-"))
+    fs.writeFileSync(path.join(root, "shot.png"), PNG)
+    const bodies: any[] = []
+    let step = 0
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)))
+      return step++ === 0
+        ? stream({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call-1", function: { name: "read_file", arguments: '{"path":"shot.png"}' } }] } }] })
+        : answers("done")
+    }) as unknown as typeof fetch
+    for await (const _ of runAgent({ provider, modelId: "test-model", apiKey: "k", messages: [{ role: "user", content: "what is in shot.png" }], root, images, maxTurns: 3 })) {
+      // drained
+    }
+    return bodies[1]?.messages ?? []
+  }
+
+  test("a model that can see is shown the picture, after the tool result", async () => {
+    const sent = await second(true)
+    const at = sent.findIndex((message: any) => message.role === "tool")
+    expect(sent[at].content).toContain("PNG image, 1x1")
+    expect(typeof sent[at].content).toBe("string")
+    const shown = sent[at + 1]
+    expect(shown.role).toBe("user")
+    expect(shown.content.some((part: any) => part.type === "image_url" && part.image_url.url.startsWith("data:image/png;base64,"))).toBe(true)
+  })
+
+  test("a model that cannot see is told so, and is sent no picture or bytes", async () => {
+    const sent = await second(false)
+    const result = sent.find((message: any) => message.role === "tool")
+    expect(result.content).toContain("You cannot see images")
+    expect(JSON.stringify(sent)).not.toContain("image_url")
+    expect(JSON.stringify(sent)).not.toContain("base64")
   })
 })

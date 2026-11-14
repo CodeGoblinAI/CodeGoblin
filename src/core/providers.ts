@@ -21,7 +21,7 @@ import { contextFor, installedModels, readPrefs, toolsFor } from "./local-runtim
 import { cachedExperientialModels, fetchExperientialModels } from "./experiential"
 import { cachedRefuselessModels, fetchRefuselessModels } from "./refuseless"
 import { EFFORT_NAMES } from "./settings"
-import { asProvider, catalogPrices, loadCatalog, rememberCatalogEnv, type CatalogProvider } from "./catalog"
+import { asProvider, catalogPrices, catalogVision, loadCatalog, rememberCatalogEnv, type CatalogProvider } from "./catalog"
 import type { Price } from "./context"
 
 export type Capabilities = {
@@ -211,7 +211,7 @@ export const PROVIDERS: Record<string, Provider> = {
     cacheMinutes: 120,
     models: [
       // Both think unless told not to (DeepSeek's docs); "none" turns it off.
-      { id: "deepseek-v4-flash", label: "V4 Flash", reasoning: true, ...DEEPSEEK_EFFORT, contextWindow: 128000, price: { input: 0.15, output: 0.6, cacheRead: 0.003, peak: DEEPSEEK_PEAK } },
+      { id: "deepseek-v4-flash", label: "V4 Flash", reasoning: true, ...DEEPSEEK_EFFORT, contextWindow: 128000, price: { input: 0.15, output: 0.6, cacheRead: 0.003, peak: DEEPSEEK_PEAK }, capabilities: { input: { text: true, image: true } } },
       { id: "deepseek-v4-pro", label: "V4 Pro", reasoning: true, ...DEEPSEEK_EFFORT, contextWindow: 128000, price: { input: 0.66, output: 1.98, cacheRead: 0.022, peak: DEEPSEEK_PEAK } },
       {
         id: "deepseek-v4-flash-vision-exp",
@@ -230,7 +230,7 @@ export const PROVIDERS: Record<string, Provider> = {
     baseUrl: "https://api.z.ai/api/paas/v4/chat/completions",
     models: [
       // Unpriced, these were never stopped by the spend brake - it only counts what has a price.
-      { id: "glm-5.3-flash", label: "5.3 Flash", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000, price: { input: 0.15, output: 0.5, cacheRead: 0.03 } },
+      { id: "glm-5.3-flash", label: "5.3 Flash", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000, price: { input: 0.15, output: 0.5, cacheRead: 0.03 }, capabilities: { input: { text: true, image: true } } },
       { id: "glm-5.3", label: "5.3", reasoning: true, ...ZAI_EFFORT, contextWindow: 200000, price: { input: 1.4, output: 4.4, cacheRead: 0.26 } },
       { id: "glm-5.2", label: "5.2", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000, price: { input: 1.4, output: 4.4, cacheRead: 0.26 } },
       { id: "glm-5.1", label: "5.1", reasoning: true, ...ZAI_EFFORT, contextWindow: 128000, price: { input: 1.4, output: 4.4, cacheRead: 0.26 } },
@@ -245,10 +245,10 @@ export const PROVIDERS: Record<string, Provider> = {
     label: "Kimi",
     baseUrl: "https://api.moonshot.ai/v1/chat/completions",
     models: [
-      { id: "kimi-k3", label: "K3", contextWindow: 256000, price: { input: 3, output: 15, cacheRead: 0.3 } },
-      { id: "kimi-k2.7-code", label: "K2.7 Code", contextWindow: 256000, price: { input: 0.95, output: 4, cacheRead: 0.19 } },
-      { id: "kimi-k2.7-code-highspeed", label: "K2.7 Code Highspeed", contextWindow: 256000, price: { input: 1.9, output: 8, cacheRead: 0.38 } },
-      { id: "kimi-k2.6", label: "K2.6", contextWindow: 128000, price: { input: 0.95, output: 4, cacheRead: 0.16 } },
+      { id: "kimi-k3", label: "K3", contextWindow: 256000, price: { input: 3, output: 15, cacheRead: 0.3 }, capabilities: { input: { text: true, image: true } } },
+      { id: "kimi-k2.7-code", label: "K2.7 Code", contextWindow: 256000, price: { input: 0.95, output: 4, cacheRead: 0.19 }, capabilities: { input: { text: true, image: true } } },
+      { id: "kimi-k2.7-code-highspeed", label: "K2.7 Code Highspeed", contextWindow: 256000, price: { input: 1.9, output: 8, cacheRead: 0.38 }, capabilities: { input: { text: true, image: true } } },
+      { id: "kimi-k2.6", label: "K2.6", contextWindow: 128000, price: { input: 0.95, output: 4, cacheRead: 0.16 }, capabilities: { input: { text: true, image: true } } },
       { id: "kimi-k2.5", label: "K2.5", contextWindow: 128000 },
     ],
   },
@@ -506,6 +506,7 @@ export function refreshCatalog(keyFor: (id: string) => string | undefined, load:
   catalogLoad ??= load().then((loaded) => {
     catalog = loaded
     applyCatalogPrices(catalogPrices())
+    applyCatalogVision(catalogVision())
     rememberCatalogEnv(loaded)
     for (const entry of loaded) {
       if (PROVIDERS[entry.id] || CONNECTABLE.some((each) => each.id === entry.id)) continue
@@ -534,6 +535,23 @@ export function applyCatalogPrices(prices: Record<string, Record<string, Price>>
       const fresh = models[model.id]
       if (!fresh) continue
       model.price = { ...fresh, ...(model.price?.peak ? { peak: model.price.peak } : {}) }
+      changed++
+    }
+  }
+  return changed
+}
+
+/**
+ * Marks the built-in models the catalog says take pictures. It only ever turns vision on: DeepSeek V4 Flash,
+ * GLM 5.3 Flash and the Kimi models all take images, and while they were listed as blind a picture attached
+ * to them was held back and the model told it could not see. Returns how many models changed.
+ */
+export function applyCatalogVision(vision: Record<string, string[]>): number {
+  let changed = 0
+  for (const [providerId, ids] of Object.entries(vision)) {
+    for (const model of PROVIDERS[providerId]?.models ?? []) {
+      if (!ids.includes(model.id) || model.capabilities?.input?.image || model.capabilities?.output) continue
+      model.capabilities = { ...model.capabilities, input: { text: true, ...model.capabilities?.input, image: true } }
       changed++
     }
   }

@@ -75,6 +75,22 @@ export function builtInPrices(raw: unknown): Record<string, Record<string, Price
   return out
 }
 
+/** The built-in providers' models the catalog says take a picture as input, by provider. */
+export function builtInVision(raw: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  if (!raw || typeof raw !== "object") return out
+  for (const id of PRICED_BUILT_INS) {
+    const models = (raw as Record<string, RawProvider>)[id]?.models
+    if (!models || typeof models !== "object") continue
+    const seeing = Object.values(models).flatMap((model) => {
+      const modelId = str(model?.id)
+      return modelId && Array.isArray(model.modalities?.input) && (model.modalities!.input as unknown[]).includes("image") ? [modelId] : []
+    })
+    if (seeing.length) out[id] = seeing
+  }
+  return out
+}
+
 /** The catalog, kept to providers CG-Next can call and models an agent can use: text out, tool calls, not deprecated. */
 export function usableCatalog(raw: unknown): CatalogProvider[] {
   if (!raw || typeof raw !== "object") return []
@@ -110,13 +126,14 @@ export function usableCatalog(raw: unknown): CatalogProvider[] {
   return out.sort((a, b) => a.label.localeCompare(b.label))
 }
 
-type Cached = { at: number; providers: CatalogProvider[]; prices?: Record<string, Record<string, Price>> }
+type Cached = { at: number; providers: CatalogProvider[]; prices?: Record<string, Record<string, Price>>; vision?: Record<string, string[]> }
 function readCache(): Cached | undefined {
   try {
     const cached = JSON.parse(fs.readFileSync(cacheFile(), "utf8")) as { at?: unknown; providers?: unknown; prices?: unknown }
     if (typeof cached.at !== "number" || !Array.isArray(cached.providers)) return undefined
     const prices = cached.prices && typeof cached.prices === "object" ? (cached.prices as Cached["prices"]) : undefined
-    return { at: cached.at, providers: cached.providers as CatalogProvider[], ...(prices ? { prices } : {}) }
+    const vision = (cached as { vision?: unknown }).vision
+    return { at: cached.at, providers: cached.providers as CatalogProvider[], ...(prices ? { prices } : {}), ...(vision && typeof vision === "object" ? { vision: vision as Record<string, string[]> } : {}) }
   } catch {
     return undefined
   }
@@ -127,14 +144,20 @@ let prices: Record<string, Record<string, Price>> = {}
 export function catalogPrices() {
   return prices
 }
+/** Built-in models that take pictures, from the last catalog that loaded. */
+let vision: Record<string, string[]> = {}
+export function catalogVision() {
+  return vision
+}
 
 /** The usable catalog: from the cache when it is fresh, else fetched (and cached), else whatever cache there is. */
 export async function loadCatalog(options: { fetch?: typeof fetch; now?: number; force?: boolean } = {}): Promise<CatalogProvider[]> {
   const now = options.now ?? Date.now()
   const cached = readCache()
   prices = cached?.prices ?? {}
-  // A cache written before prices were kept is refetched once, to get them.
-  if (cached?.prices && !options.force && now - cached.at < MAX_AGE_MS) return cached.providers
+  vision = cached?.vision ?? {}
+  // A cache written before prices or vision were kept is refetched once, to get them.
+  if (cached?.prices && cached.vision && !options.force && now - cached.at < MAX_AGE_MS) return cached.providers
   try {
     const response = await (options.fetch ?? fetch)(URL_, { signal: AbortSignal.timeout(15_000), redirect: "error" })
     if (!response.ok) throw new Error(String(response.status))
@@ -142,8 +165,9 @@ export async function loadCatalog(options: { fetch?: typeof fetch; now?: number;
     const providers = usableCatalog(raw)
     if (providers.length) {
       prices = builtInPrices(raw)
+      vision = builtInVision(raw)
       fs.mkdirSync(path.dirname(cacheFile()), { recursive: true })
-      fs.writeFileSync(cacheFile(), JSON.stringify({ at: now, providers, prices }))
+      fs.writeFileSync(cacheFile(), JSON.stringify({ at: now, providers, prices, vision }))
     }
     return providers.length ? providers : cached?.providers ?? []
   } catch {

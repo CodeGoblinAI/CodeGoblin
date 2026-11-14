@@ -114,7 +114,7 @@ export const TOOLS: Tool[] = [
   {
     name: "read_file",
     concurrent: true,
-    description: "Read a UTF-8 text file, relative to the working directory (or an absolute path inside a repository repo_clone fetched).",
+    description: "Read a UTF-8 text file, relative to the working directory (or an absolute path inside a repository repo_clone fetched). An image (png, jpg, gif, webp) is shown to you as a picture if you can see images.",
     parameters: {
       type: "object",
       properties: { path: { type: "string", description: "File path relative to the working directory." } },

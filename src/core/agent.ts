@@ -2,7 +2,8 @@ import { authHeaders, kindOf, type Provider } from "./providers"
 import { isLocalChat, verifyLocalModel } from "./local-provider"
 import { localRuntime, type Lease } from "./local-runtime"
 import { cliCompletion } from "./cli-completion"
-import { TOOL_SCHEMA, runTool, isConcurrent, redactSecrets } from "./tools"
+import { TOOL_SCHEMA, runTool, isConcurrent, redactSecrets, resolveReadable } from "./tools"
+import { imageTypeOf, readImageFile } from "./mention"
 import { storedSecrets } from "./auth"
 import { checkpointEvery, spendLimitPerPrompt } from "./config"
 import { configuredInstructions } from "./instructions"
@@ -151,11 +152,36 @@ function chatEndpoint(provider: Provider, modelId?: string): string {
  * input reject unknown keys outright - so the wire gets the wire fields.
  */
 const wire = (messages: Message[], memory?: string, images = false, instructions?: string, replayReasoning = false) => {
-  const sent = messages.map((raw) => {
+  const sent: ReturnType<typeof shape>[] = []
+  // Pictures a tool opened. A tool result is text on this wire, so they follow the step's results as one
+  // message the model can look at.
+  let opened: Attachment[] = []
+  const flush = () => {
+    if (!opened.length) return
+    const names = opened.map((image) => image.name).join(", ")
+    sent.push({
+      role: "user",
+      content: [
+        { type: "text", text: `(${names}: ${opened.length === 1 ? "the image" : "the images"} read_file opened, shown here so you can see ${opened.length === 1 ? "it" : "them"} directly)` },
+        ...opened.map((image) => ({ type: "image_url", image_url: { url: image.dataUrl } })),
+      ],
+      tool_calls: undefined,
+      tool_call_id: undefined,
+    })
+    opened = []
+  }
+  for (const raw of messages) {
+    if (raw.role === "tool") {
+      if (images && raw.images?.length) opened.push(...raw.images)
+      sent.push(shape({ ...raw, images: undefined }, images))
+      continue
+    }
+    flush()
     // The reasoning goes back as its own field, only to providers that want it, and only beside tool calls.
     const extra = replayReasoning && raw.reasoning && raw.tool_calls?.length ? { reasoning_content: raw.reasoning } : {}
-    return { ...shape(raw, images), ...extra }
-  })
+    sent.push({ ...shape(raw, images), ...extra })
+  }
+  flush()
   return finish(sent, memory, instructions)
 }
 
@@ -636,6 +662,8 @@ async function* runTurns(input: {
           ? input.subagents.call(entry.call.name, entry.args)
           : input.extraTools?.has(entry.call.name)
             ? input.extraTools.call(entry.call.name, entry.args)
+            : entry.call.name === "read_file" && imageTypeOf(String((entry.args as { path?: unknown })?.path ?? ""))
+            ? openImage(entry.call.id, String((entry.args as { path: unknown }).path))
             : runTool(
                 entry.call.name,
                 entry.args,
@@ -645,6 +673,23 @@ async function* runTurns(input: {
                 },
                 input.signal,
               )
+
+    // read_file on a picture: the model is shown it if it can see, and told plainly if it cannot. Read as
+    // text it was unreadable bytes, and a model that got those went looking through the file's metadata.
+    const pictures = new Map<string, Attachment>()
+    const openImage = async (id: string, target: string) => {
+      try {
+        const file = await readImageFile(resolveReadable(input.root, target), target)
+        if (!file) return "error: not a file: " + target
+        const what = `${target} is ${file.type.replace("image/", "").toUpperCase()} image${file.size ? `, ${file.size.width}x${file.size.height}` : ""}, ${Math.max(1, Math.round(file.bytes / 1024))} KB.`
+        if (!file.image) return what + " It is too large to show you (the limit is 5 MB)."
+        if (!input.images) return what + " You cannot see images, so you cannot know what it shows: say so, and that a model with vision (chosen with /model) can look at it. Do not guess from its metadata."
+        pictures.set(id, file.image)
+        return what + " It is shown to you in the next message: look at it there."
+      } catch (error) {
+        return "error: " + (error instanceof Error ? error.message : String(error))
+      }
+    }
 
     // Reads overlap; everything else keeps its order. Four file reads used to
     // cost four round trips end to end for no reason - they do not touch each
@@ -690,7 +735,8 @@ async function* runTurns(input: {
       if (call.name === "todo_write") {
         yield { type: "plan", todos: parseTodos((args as Record<string, unknown>)?.todos) }
       }
-      input.messages.push({ role: "tool", tool_call_id: call.id, content: result })
+      const picture = pictures.get(call.id)
+      input.messages.push({ role: "tool", tool_call_id: call.id, content: result, ...(picture ? { images: [picture] } : {}) })
       yield { type: "tool_end", id: call.id, name: call.name, result }
     }
 

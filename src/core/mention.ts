@@ -44,9 +44,79 @@ const MAX_IMAGE_BYTES = 5_000_000
 
 export type AttachedImage = { name: string; dataUrl: string }
 
-const imageTypeOf = (name: string) => {
+export const imageTypeOf = (name: string) => {
   const dot = name.lastIndexOf(".")
   return dot < 0 ? undefined : IMAGE_TYPES[name.slice(dot).toLowerCase()]
+}
+
+/** Width and height from the file's own header (PNG, GIF, JPEG); undefined when it cannot be told. */
+export function imageSize(bytes: Uint8Array): { width: number; height: number } | undefined {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  if (bytes.length > 24 && bytes[0] === 0x89 && bytes[1] === 0x50) return { width: view.getUint32(16), height: view.getUint32(20) }
+  if (bytes.length > 10 && bytes[0] === 0x47 && bytes[1] === 0x49) return { width: view.getUint16(6, true), height: view.getUint16(8, true) }
+  if (bytes.length > 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    for (let at = 2; at + 9 < bytes.length;) {
+      if (bytes[at] !== 0xff) return undefined
+      const marker = bytes[at + 1]!
+      // Start-of-frame markers carry the size; C4, C8 and CC are tables, not frames.
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) return { width: view.getUint16(at + 7), height: view.getUint16(at + 5) }
+      at += 2 + view.getUint16(at + 2)
+    }
+  }
+  return undefined
+}
+
+export type ImageFile = { name: string; type: string; bytes: number; size?: { width: number; height: number }; image?: AttachedImage }
+
+/** Reads a picture from disk. Over the size limit it is described but not loaded (`image` is absent). */
+export async function readImageFile(absolute: string, name = path.basename(absolute)): Promise<ImageFile | undefined> {
+  const type = imageTypeOf(absolute)
+  if (!type) return undefined
+  const stat = await fs.stat(absolute)
+  if (!stat.isFile()) return undefined
+  if (stat.size > MAX_IMAGE_BYTES) return { name, type, bytes: stat.size }
+  const bytes = await fs.readFile(absolute)
+  return { name, type, bytes: stat.size, size: imageSize(bytes), image: { name, dataUrl: `data:${type};base64,` + bytes.toString("base64") } }
+}
+
+
+/**
+ * Picture paths written out in a message without an @: a full path (a drive letter, / or ~/), or any path in quotes.
+ * These are what a dropped or copied screenshot looks like, and they are usually outside the project, where an
+ * @mention cannot reach. A bare relative path stays text: "rename assets/logo.png" is not a request to look at it.
+ */
+export function typedImagePaths(text: string): string[] {
+  const found: string[] = []
+  const quoted = /"([^"\n]+\.(?:png|jpe?g|gif|webp))"|'([^'\n]+\.(?:png|jpe?g|gif|webp))'/gi
+  const full = /(?:^|[\s(\[])((?:[A-Za-z]:[\\/]|~[\\/]|\/)[^"'<>|?*\n]*?\.(?:png|jpe?g|gif|webp))(?=$|[\s"',;:)\]!?]|\.(?:\s|$))/gi
+  let match: RegExpExecArray | null
+  while ((match = quoted.exec(text)) !== null) found.push(match[1] ?? match[2]!)
+  while ((match = full.exec(text)) !== null) found.push(match[1]!)
+  return [...new Set(found)]
+}
+
+const absoluteOf = (token: string, root: string) =>
+  path.resolve(root, /^~[\\/]/.test(token) ? path.join(process.env.USERPROFILE || process.env.HOME || "", token.slice(2)) : token)
+
+/**
+ * Files dropped on the terminal that are all pictures: they are attached as pictures, wherever on disk they are.
+ * Returns undefined when the paste is anything else, so it goes on to be a mention or plain text.
+ */
+export async function droppedImages(text: string, root: string): Promise<AttachedImage[] | undefined> {
+  const tokens: string[] = []
+  const words = /"([^"]+)"|(\S+)/g
+  let match: RegExpExecArray | null
+  while ((match = words.exec(text.trim())) !== null) tokens.push(match[1] ?? match[2]!)
+  // An unquoted path with spaces in it arrives as several words; try the whole paste as one path too.
+  const candidates = tokens.length > 1 && !text.includes('"') && imageTypeOf(text.trim()) ? [[text.trim()], tokens] : [tokens]
+  for (const list of candidates) {
+    if (!list.length || list.length > MAX_FILES || !list.every((token) => imageTypeOf(token) && /[\\/]/.test(token))) continue
+    try {
+      const files = await Promise.all(list.map((token) => readImageFile(absoluteOf(token, root))))
+      if (files.every((file) => file?.image)) return files.map((file) => file!.image!)
+    } catch {}
+  }
+  return undefined
 }
 
 /** Characters that end a sentence rather than a filename. */
@@ -152,6 +222,21 @@ export async function expandMentions(
     if (body.includes(String.fromCharCode(0))) continue
     files.push(candidate)
     blocks.push(`--- ${candidate} ---` + NEWLINE + clip(body))
+  }
+
+  // Pictures named by a full or quoted path, without an @ - a dropped screenshot, most often.
+  for (const candidate of typedImagePaths(text)) {
+    if (images.length >= MAX_FILES) break
+    try {
+      const file = await readImageFile(absoluteOf(candidate, root))
+      if (!file) continue
+      if (!file.image) { blocks.push(`--- ${file.name} ---` + NEWLINE + `(not attached: ${Math.round(file.bytes / 1024)} KB is over the limit)`); continue }
+      if (images.some((image) => image.dataUrl === file.image!.dataUrl)) continue
+      images.push(file.image)
+      files.push(file.name)
+    } catch {
+      // Not a file that exists: it stays the text it was.
+    }
   }
 
   if (!blocks.length) return { content: text, files, images }

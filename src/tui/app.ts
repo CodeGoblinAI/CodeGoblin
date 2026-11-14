@@ -68,7 +68,7 @@ import {
   slashRange,
   type PaletteItem,
 } from "./palette"
-import { findMention, expandMentions, droppedMentions } from "../core/mention"
+import { findMention, expandMentions, droppedMentions, droppedImages, imageTypeOf } from "../core/mention"
 import { History, describe as describeCheckpoint, nothingToDo } from "../core/undo"
 import * as settingsStore from "../core/settings"
 import {
@@ -3962,9 +3962,21 @@ process.stdin.on("data", (chunk) => {
         // Newlines inside a paste are content. A paste that is only one
         // short line is just typing, and goes in as it is - unless it is a
         // file dropped from Explorer, which becomes a mention instead.
-        const dropped = droppedMentions(pressed.value.replace(/\r\n?/g, String.fromCharCode(10)), process.cwd())
-        const value = dropped ?? foldPaste(pressed.value.replace(/\r\n?/g, String.fromCharCode(10)))
-        applyComposer(insertText(composerState(), value), true)
+        const pastedText = pressed.value.replace(/\r\n?/g, String.fromCharCode(10))
+        const insertPaste = () => applyComposer(insertText(composerState(), droppedMentions(pastedText, process.cwd()) ?? foldPaste(pastedText)), true)
+        // Pictures dropped from Explorer are attached as pictures, wherever they are on disk: a screenshot
+        // is rarely inside the project, and as a bare path the model went off to open the file itself.
+        if (!pastedText.trim().includes(String.fromCharCode(10)) && imageTypeOf(pastedText.trim().replace(/"$/, ""))) {
+          void droppedImages(pastedText, process.cwd()).then((pictures) => {
+            if (pictures) {
+              pendingImages.push(...pictures)
+              status = "attached " + pictures.map((picture) => picture.name).join(", ") + " - sends with the next message" + (acceptsImages(selection) ? "" : " (this model cannot see images; pick a vision model)")
+            } else insertPaste()
+            render()
+          })
+          break
+        }
+        insertPaste()
         dirty = true
         break
       }
