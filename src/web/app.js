@@ -61,7 +61,7 @@ function renderModelMenu() {
       row.appendChild(tag)
       row.title = option.connectionHint || "No API key for this provider yet - add one with /connect"
     }
-    row.onclick = () => { if (setModel(option.value)) rememberRecent(option.value); closeModelMenu(true) }
+    row.onclick = () => { if (setModel(option.value)) rememberRecent(option.value); closeModelMenu(true); offerEffort() }
     providerMenu.appendChild(row)
   }
   if (!providerMenu.hidden) highlightModel(modelIndex)
@@ -95,6 +95,19 @@ function setModel(value) {
   providerLabel.textContent = option.label
   renderModelMenu()
   return true
+}
+
+/**
+ * A model with effort levels asks for one the first time it is chosen, as the terminal and the fork do: the
+ * composer opens this model's levels to pick from. Any answer is kept for the model, so it asks once, and a
+ * draft already in the composer is never replaced.
+ */
+function offerEffort() {
+  const option = modelOptions.find((o) => o.value === currentModel)
+  if (!option?.efforts?.length || Object.hasOwn(webSettings.effortByModel || {}, currentModel) || input.value.trim()) return
+  input.value = "/effort "
+  refreshPalette()
+  input.focus()
 }
 
 function closeModelMenu(restoreFocus = false) {
@@ -145,6 +158,7 @@ providerMenu.addEventListener("keydown", (event) => {
     const option = modelOptions[modelIndex]
     if (option && setModel(option.value)) rememberRecent(option.value)
     closeModelMenu(true)
+    offerEffort()
     return
   }
   // ctrl+f stars the highlighted model, as in the terminal.
