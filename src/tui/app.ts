@@ -9,7 +9,8 @@
 import { ansi, theme, dim, invert, noInvert, applyTheme as paintTheme } from "./ansi"
 import { APPEARANCES, effectiveTheme, terminalLooksLight } from "../core/theme"
 import { LEADER_DEFAULTS, loadKeymap, type LeaderAction } from "./keybinds"
-import { WORDMARK, WORDMARK_WIDTH, COMPACT } from "./wordmark"
+import os from "node:os"
+import { homeScreen } from "./wordmark"
 import { THEMES } from "../core/theme"
 import { EFFORTS } from "../core/settings"
 import { createKeyReader } from "./keys"
@@ -525,7 +526,27 @@ function composerOffset(col: number, row: number): number | undefined {
 
 const size = () => ({ cols: out.columns ?? 80, rows: out.rows ?? 24 })
 const charWidthOf = (char: string) => displayWidth(char)
-const centre = (text: string, width: number) => " ".repeat(Math.max(0, Math.floor(width))) + text
+/**
+ * "~\\proj:main" for the home screen: the folder, with the home folder as ~,
+ * and its git branch once that has been read. Reading it runs git, so it is
+ * done once in the background and again after /branch.
+ */
+let homeBranch: string | undefined
+function homeWhere(): string {
+  const cwd = process.cwd()
+  const home = os.homedir()
+  const folder = cwd.toLowerCase().startsWith(home.toLowerCase()) ? "~" + cwd.slice(home.length) : cwd
+  return folder + (homeBranch ? ":" + homeBranch : "")
+}
+function readHomeBranch() {
+  void import("../core/worktrees").then(({ currentBranch }) => {
+    const found = currentBranch(process.cwd())
+    if (found === homeBranch) return
+    homeBranch = found
+    if (transcript.length === 0 && homeDrawn) render()
+  }).catch(() => {})
+}
+let homeDrawn = false
 
 let paletteSignature = ""
 
@@ -724,6 +745,7 @@ let toolbarTargets: { from: number; to: number; command: string }[] = []
 /** The floating back-to-latest pill, when one is drawn: its screen row and span. */
 let latestPill: { row: number; from: number; to: number } | undefined
 function render() {
+  if (!homeDrawn) { homeDrawn = true; readHomeBranch() }
   const { cols, rows } = size()
   // With the side panel showing, the transcript gets the columns left of it -
   // wrapping to the full width and cutting at the panel lost the right side,
@@ -735,15 +757,8 @@ function render() {
   /** Where /timeline's chosen message starts, when one was chosen. */
   let jumpLine: number | undefined
 
-  if (transcript.length === 0) {
-    const wide = main >= WORDMARK_WIDTH + 4
-    const art = wide ? WORDMARK : [COMPACT]
-    const gutter = (main - (wide ? WORDMARK_WIDTH : COMPACT.length)) / 2
-    lines.push("")
-    for (const row of art) lines.push(theme.goblin + centre(row, gutter) + ansi.reset)
-    lines.push("")
-    lines.push(theme.gold + centre("your local AI goblin for code, images and agents", (main - 47) / 2) + ansi.reset)
-  } else {
+  // The empty conversation is drawn once the room above the composer is known.
+  if (transcript.length > 0) {
     const drawn = transcript.length > TRANSCRIPT_WINDOW ? transcript.slice(-TRANSCRIPT_WINDOW) : transcript
     const leftOut = hiddenEarlier + transcript.length - drawn.length
     if (leftOut || historyArchived) {
@@ -815,7 +830,9 @@ function render() {
   if (jumpLine !== undefined) { scroll = Math.max(0, lines.length - room - jumpLine); jumpTo = undefined }
   scroll = Math.min(scroll, maxScroll)
   const cut = lines.length - room - scroll
-  const body = lines.length > room ? lines.slice(Math.max(0, cut), Math.max(0, cut) + room) : lines
+  const body = transcript.length === 0
+    ? homeScreen(main, room, homeWhere(), { goblin: theme.goblin, gold: theme.gold, dim, reset: ansi.reset })
+    : lines.length > room ? lines.slice(Math.max(0, cut), Math.max(0, cut) + room) : lines
   while (body.length < room) body.push("")
 
   // A side panel on wide terminals: session, spend and servers at a glance,
@@ -982,7 +999,7 @@ function render() {
     }
   }
 
-  body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
+  body.push(theme.border + "  " + "\u2500".repeat(inner) + ansi.reset)
   // Scrolled up a way: a floating way back down, Claude-style, only while
   // scrolled - a button that is always there teaches nobody anything.
   latestPill = undefined
@@ -1034,7 +1051,7 @@ function render() {
     input && composerRows.length
       ? { first: body.length - composerRows.length + 1, rows: [...composerRows], before: rowsBefore }
       : undefined
-  body.push(theme.border + "  " + "-".repeat(inner) + ansi.reset)
+  body.push(theme.border + "  " + "\u2500".repeat(inner) + ansi.reset)
 
   const context = contextUsage()
   const modeTag =
@@ -2539,7 +2556,7 @@ async function send() {
       if (!repoRoot(process.cwd())) { status = "this folder is not in a git repository"; render(); return }
       if (result.name) {
         if (streaming) { status = "wait for the answer to finish first"; render(); return }
-        try { switchBranch(process.cwd(), result.name); status = "switched to " + result.name; void refreshFileCache(true) }
+        try { switchBranch(process.cwd(), result.name); status = "switched to " + result.name; void refreshFileCache(true); readHomeBranch() }
         catch (error) { status = "could not switch: " + (error instanceof Error ? error.message : "unknown") }
         render(); return
       }
