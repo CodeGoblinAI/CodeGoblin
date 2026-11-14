@@ -1262,23 +1262,29 @@ export function MessageTimeline(props: {
     <div class="relative w-full h-full min-w-0">
       <div
         class="absolute left-1/2 -translate-x-1/2 bottom-6 z-[60] pointer-events-none transition-all duration-200 ease-out"
+        aria-hidden={!props.scroll.overflow || !props.scroll.jump}
         classList={{
           "opacity-100 translate-y-0 scale-100": props.scroll.overflow && props.scroll.jump,
           "opacity-0 translate-y-2 scale-95 pointer-events-none": !props.scroll.overflow || !props.scroll.jump,
         }}
       >
         <button
-          class="pointer-events-auto flex items-center justify-center w-10 h-8 bg-transparent border-none cursor-pointer p-0 group"
+          type="button"
+          aria-label={language.t("session.messages.jumpToLatest")}
+          tabIndex={props.scroll.overflow && props.scroll.jump ? 0 : -1}
+          disabled={!props.scroll.overflow || !props.scroll.jump}
+          class="pointer-events-auto flex items-center justify-center h-8 bg-transparent border-none cursor-pointer p-0 group"
           onClick={props.onResumeScroll}
         >
           <div
-            class="flex items-center justify-center w-8 h-6 rounded-[6px] border border-border-weaker-base bg-[color-mix(in_srgb,var(--surface-raised-stronger-non-alpha)_80%,transparent)] backdrop-blur-[0.75px] transition-colors group-hover:border-[var(--border-weak-base)] group-hover:[--icon-base:var(--icon-hover)]"
+            class="flex items-center justify-center gap-2 px-3 h-8 rounded-full border border-border-weaker-base text-text-strong bg-surface-raised-stronger-non-alpha transition-colors group-hover:border-[var(--border-weak-base)] group-hover:[--icon-base:var(--icon-hover)]"
             style={{
               "box-shadow":
                 "0 51px 60px 0 rgba(0,0,0,0.10), 0 15px 18px 0 rgba(0,0,0,0.12), 0 6.386px 7.513px 0 rgba(0,0,0,0.12), 0 2.31px 2.717px 0 rgba(0,0,0,0.20)",
             }}
           >
             <Icon name="arrow-down-to-line" size="small" />
+            <span class="text-12-medium whitespace-nowrap">{language.t("session.messages.jumpToLatest")}</span>
           </div>
         </button>
       </div>
