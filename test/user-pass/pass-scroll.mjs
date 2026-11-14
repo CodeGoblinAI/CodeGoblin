@@ -43,7 +43,8 @@ const frame = (t) => plain(t.out.split("\x1b[2J").at(-1)).replace(/\r/g, "").spl
     check("TUI: new output arriving below leaves the view where it was, and the pill says there is more", before === after, before + "  ->  " + after)
     t.write("\x1b[1;5F"); await delay(400)
     // Two presses stop a turn; one only asks for the second.
-    t.write("another slow one\r"); await delay(800)
+    t.write("another slow one\r")
+    await t.until(() => /working/.test(frame(t).join("\n")), 5000, "the slow turn to start"); await delay(200)
     t.write("\x1b"); await delay(500)
     const once = frame(t).join("\n")
     check("TUI: one Esc asks for another and does not stop", /press esc again to stop/.test(once) && !/✗ stopped/.test(once))
