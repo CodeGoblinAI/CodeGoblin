@@ -20,7 +20,7 @@ import { resolveStartupModel } from "../core/model-selection"
 import { isLiveCommand } from "./live-commands"
 import { footerHeight } from "./layout"
 import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
-import { activateCatalog, refreshCatalog, refreshExperientialModels, refreshLiveModels, selectionsByKind } from "../core/providers"
+import { activateCatalog, refreshCatalog, refreshExperientialModels, refreshLiveModels, selectionsByKind, selectionsOfKind } from "../core/providers"
 import { apiKey as storedKey } from "../core/auth"
 
 // Model lists that change often are read live once, without holding up startup.
@@ -488,6 +488,13 @@ const diffOpen = new Set<string>()
 let lastChanges: Changes | undefined
 /** Which setting is having its value chosen. */
 let settingBeing: string | undefined
+/** The generator whose settings are open from Settings > Images/Audio/3D, when it is not the selected model. */
+let settingsFor: { provider: string; model: string; label: string } | undefined
+let generatorKind: "image" | "audio" | "model3d" = "image"
+const settingsTarget = () => settingsFor ?? { provider: selection.provider.id, model: selection.model.id, label: selection.provider.label + " " + selection.model.label }
+const MEDIA_SECTIONS: { kind: "image" | "audio" | "model3d"; label: string }[] = [
+  { kind: "image", label: "Images" }, { kind: "audio", label: "Audio" }, { kind: "model3d", label: "3D models" },
+]
 // withConfig rather than new: the deny rules in codegoblin.jsonc have to reach
 // the agent this terminal drives, and a test fails if a surface builds one
 // without them.
@@ -1760,7 +1767,7 @@ function openEffortPicker() {
 /** How generation comes out. A popup, because a settings screen should be one. */
 /** Opens Settings; `selectedValue` keeps the cursor on the row just changed. */
 function openSettings(selectedValue?: string) {
-  dialog = Dialogs.open("settings", "Settings  ·  " + selection.provider.label + " " + selection.model.label, settingsRows(), {
+  dialog = Dialogs.open("settings", "Settings  ·  " + settingsTarget().label, settingsFor ? generatorRows() : settingsRows(), {
     footer: "enter changes this setting · esc closes",
     size: "large",
     ...(selectedValue ? { selectedValue } : {}),
@@ -1814,6 +1821,12 @@ function settingsRows(): Dialogs.DialogRow[] {
     { label: "Approvals", hint: permissions.mode, value: "ui:approvals" },
     { label: "Agent profile", hint: agentName || "default", value: "ui:agents" },
   ]
+  // Every generator's settings are reachable from here, whichever model is selected.
+  for (const section of MEDIA_SECTIONS) {
+    const count = selectionsOfKind(section.kind).length
+    general.push({ label: section.label, hint: count + (count === 1 ? " model" : " models") + " - each keeps its own settings", value: "ui:media:" + section.kind })
+  }
+  general.push({ label: "Memory", hint: "what is remembered for this project", value: "ui:memory" })
   if (!options.length) {
     // Say why the list is empty - a chat model has no generation settings at
     // all, which is a different answer from a generator we send nothing to.
@@ -1830,12 +1843,45 @@ function settingsRows(): Dialogs.DialogRow[] {
   }))]
 }
 
+/** One generator's settings, opened from Settings > Images / Audio / 3D models. */
+function generatorRows(): Dialogs.DialogRow[] {
+  const target = settingsTarget()
+  const options = optionsForModel(target.provider, target.model)
+  if (!options.length) return [{ label: "nothing on this model's request can be changed from here", tone: "muted", inert: true }]
+  return options.map((option) => ({ label: option.label, hint: labelOf(option, valueOf(media, target.provider, target.model, option.id), voices), value: option.id }))
+}
+
+/** The models of one kind, to pick whose settings to change. */
+function openGenerators(kind: "image" | "audio" | "model3d") {
+  const section = MEDIA_SECTIONS.find((entry) => entry.kind === kind)!
+  generatorKind = kind
+  settingsFor = undefined
+  const rows: Dialogs.DialogRow[] = selectionsOfKind(kind).map((entry) => {
+    const changed = optionsForModel(entry.provider.id, entry.model.id).filter((option) => valueOf(media, entry.provider.id, entry.model.id, option.id) !== MEDIA_DEFAULT).length
+    return { label: entry.provider.label + " " + entry.model.label, hint: (apiKey(entry.provider.id) ? "" : "not connected · ") + (changed ? changed + " changed" : "defaults"), value: entry.provider.id + "/" + entry.model.id }
+  })
+  dialog = Dialogs.open("generators", section.label, rows.length ? rows : [{ label: "no models of this kind yet", tone: "muted", inert: true }], {
+    footer: "enter opens a model's settings · type to search · esc closes", size: "large", filterable: true,
+  })
+}
+
+/** What is remembered for this project: add one, or forget one with two presses. */
+async function openMemory() {
+  const entries = await memory.list({ project: process.cwd() }).catch(() => [])
+  dialog = Dialogs.open("memory", "Memory  ·  told to the model on every turn here", [
+    { label: "+ Remember something…", hint: "/memory add ...", value: "ui:add" },
+    ...(entries.length ? entries.map((entry) => ({ label: (entry.pinned ? "* " : "") + entry.content, hint: entry.scope === "user" ? "every project" : "this project", value: entry.id }))
+      : [{ label: "nothing remembered yet", tone: "muted" as const, inert: true }]),
+  ], { footer: "enter on a memory forgets it (twice) · esc closes", size: "large" })
+  render()
+}
+
 /** The values one setting takes. Replaces the list rather than stacking on it. */
 function openSettingValues(id: string) {
   const option = optionById(id)
   if (!option) return
   if (option.dynamic === "voices" && !voicesLoaded) void loadVoices()
-  const current = valueOf(media, selection.provider.id, selection.model.id, option.id)
+  const current = valueOf(media, settingsTarget().provider, settingsTarget().model, option.id)
   const pool = option.dynamic === "voices"
     ? [{ id: MEDIA_DEFAULT, label: "account default" }, ...voices]
     : option.choices
@@ -1957,6 +2003,7 @@ function rememberRecent() {
 }
 
 function closeDialog() {
+  settingsFor = undefined
   if (dialog?.kind === "mcp-login" && mcpLogin) { mcpLogin.cancel(); mcpLogin = undefined }
   if (dialog?.kind === "codex-login" && codexLogin) {
     const login = codexLogin
@@ -2243,6 +2290,8 @@ async function chooseInDialog() {
       if (action === "effort") openEffortPicker()
       if (action === "approvals") openApprovalsPicker()
       if (action === "agents") openAgents()
+      if (action.startsWith("media:")) openGenerators(action.slice(6) as "image" | "audio" | "model3d")
+      if (action === "memory") void openMemory()
       if (action === "thinking" || action === "mouse" || action === "pasteSummary" || action === "animations" || action === "diffWrap") {
         settings = { ...settings, [action]: !settings[action] }
         void settingsStore.save(settings)
@@ -2262,8 +2311,25 @@ async function chooseInDialog() {
     return
   }
 
+  if (dialog.kind === "generators") {
+    const chosen = selectionsOfKind(generatorKind).find((entry) => entry.provider.id + "/" + entry.model.id === row.value)
+    if (chosen) { settingsFor = { provider: chosen.provider.id, model: chosen.model.id, label: chosen.provider.label + " " + chosen.model.label }; openSettings() }
+    render()
+    return
+  }
+
+  if (dialog.kind === "memory") {
+    if (row.value === "ui:add") { closeDialog(); input = "/memory add "; cursor = input.length; status = "type what to remember, then Enter"; render(); return }
+    // Two presses, as deleting a conversation takes: the row says so in between.
+    if (dialog.armed !== row.value) { dialog = { ...dialog, armed: row.value }; render(); return }
+    await memory.remove(row.value)
+    await openMemory()
+    render()
+    return
+  }
+
   if (dialog.kind === "setting-value" && settingBeing) {
-    media = withValue(media, selection.provider.id, selection.model.id, settingBeing, row.value)
+    media = withValue(media, settingsTarget().provider, settingsTarget().model, settingBeing, row.value)
     void saveMedia(media)
     const option = optionById(settingBeing)
     status = option ? option.label + ": " + labelOf(option, row.value, voices) : "saved"
