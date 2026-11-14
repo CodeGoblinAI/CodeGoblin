@@ -16,6 +16,34 @@ export const TAGLINE = "your local AI goblin for code, images and agents"
 export const HOME_TIP = "/ for commands  \u00b7  @ for files  \u00b7  shift+tab changes mode"
 
 /**
+ * One thing worth knowing, under the start line - a different one each time, as the fork's home screen has.
+ * Each names something that is here and works; nothing is advertised that is not.
+ */
+export const TIPS = [
+  "F2 switches to your next recent model",
+  "ctrl+x then m opens the models; ctrl+f there stars a favourite",
+  "drop or paste a picture to show it to the model",
+  "a line starting with ! runs that command in your shell",
+  "/effort sets how hard this model thinks",
+  "/undo takes back the files the last turn changed",
+  "/resume reopens a conversation; ctrl+p there pins it",
+  "/search finds anything said in this conversation",
+  "/diff shows what the last turn changed",
+  "/compact shrinks a long conversation to a summary",
+  "/memory keeps facts from one conversation to the next",
+  "/boost lets the model hand work to subagents",
+  "/theme changes the colours; /settings has the rest",
+  "esc twice stops a turn; what was done so far is kept",
+  "/connect adds a provider's key; /model picks from what you have",
+]
+let tip = ""
+/** Sets the tip the home screen shows; empty for none. */
+export function setHomeTip(text: string) {
+  tip = text
+}
+export const pickTip = (random: () => number = Math.random) => TIPS[Math.floor(random() * TIPS.length)] ?? ""
+
+/**
  * The empty conversation: the wordmark over a gold rule, the tagline, a line
  * of how to start and where you are - set in the middle of the space above
  * the composer rather than hung from the top of it.
@@ -42,6 +70,8 @@ export function homeScreen(
   if (fits(TAGLINE)) extras.push(["", paint.gold + centred(TAGLINE) + paint.reset])
   if (fits(HOME_TIP)) extras.push(["", paint.dim + centred(HOME_TIP) + paint.reset])
   if (where && fits(where)) extras.push([paint.dim + centred(where) + paint.reset])
+  // Last, so it is the first thing given up when rows are short.
+  if (tip && fits("tip: " + tip)) extras.push([paint.dim + centred("tip: " + tip) + paint.reset])
   for (const extra of extras) {
     if (block.length + extra.length > height) break
     block.push(...extra)

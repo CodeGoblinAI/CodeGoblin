@@ -10,7 +10,7 @@ import { ansi, theme, dim, invert, noInvert, applyTheme as paintTheme } from "./
 import { APPEARANCES, effectiveTheme, terminalLooksLight } from "../core/theme"
 import { LEADER_DEFAULTS, loadKeymap, type LeaderAction } from "./keybinds"
 import os from "node:os"
-import { homeLayout } from "./wordmark"
+import { homeLayout, pickTip, setHomeTip } from "./wordmark"
 import { toolDetail, type DetailLine } from "./tool-detail"
 import { THEMES } from "../core/theme"
 import { EFFORTS } from "../core/settings"
@@ -2066,6 +2066,23 @@ async function starModel(id: string) {
   }
 }
 
+/**
+ * F2 and shift+F2: the next or previous recently used model, as in the fork. The order of Recent is left
+ * alone while cycling - reordering on every press would bounce between the same two models.
+ */
+function cycleRecentModel(direction: 1 | -1) {
+  if (streaming) { status = "the model can change once this turn ends"; return }
+  const current = selection.provider.id + "/" + selection.model.id
+  const recent = settings.recents.filter((id) => resolveSelection(id))
+  if (recent.filter((id) => id !== current).length === 0) { status = "no other recent model yet - /model picks one"; return }
+  const at = recent.indexOf(current)
+  const next = resolveSelection(recent[(at + direction + recent.length) % recent.length]!)!
+  selection = next
+  resumeModelMissing = false
+  key = apiKey(next.provider.id)
+  status = next.provider.label + " " + next.model.label + "  (F2 for the next recent model)"
+}
+
 /** The model just switched to goes to the top of Recent. */
 function rememberRecent() {
   const id = selection.provider.id + "/" + selection.model.id
@@ -2696,6 +2713,7 @@ async function send() {
       spend = { input: 0, output: 0 }
       overlay = undefined
       status = "new conversation"
+      setHomeTip(pickTip())
     }
     // /help is a picker too. Printed, it was twenty-five lines that stayed in
     // the conversation for good.
@@ -3532,6 +3550,7 @@ function refreshConnected() {
   }).catch(() => {})
 }
 refreshConnected()
+setHomeTip(pickTip())
 
 async function loadSettings() {
   settings = await settingsStore.load()
@@ -3819,6 +3838,11 @@ process.stdin.on("data", (chunk) => {
       }
       if (target === "usage") openUsage()
       render(); continue
+    }
+    if (pressed.type === "fn" && pressed.n === 2 && !dialog && !secret) {
+      cycleRecentModel(pressed.shift ? -1 : 1)
+      render()
+      continue
     }
     if (pressed.type === "shifttab") {
       changePermissionMode(nextMode(permissions.mode))

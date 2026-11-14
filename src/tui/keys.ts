@@ -32,6 +32,8 @@ export type Key =
   | { type: "paste"; value: string }
   | { type: "escape" }
   | { type: "ctrl"; value: string }
+  /** A function key. Only F2 is read: it cycles recent models, as in the fork. */
+  | { type: "fn"; n: number; shift?: boolean }
 
 const CSI: Record<string, Key["type"]> = {
   A: "up",
@@ -153,7 +155,11 @@ export function parseKeys(input: string): Key[] {
         continue
       }
 
-      if (final === "~") {
+      // F2 arrives as ESC O Q, ESC [ 12 ~, or with a modifier as ESC [ 1 ; 2 Q and ESC [ 12 ; 2 ~.
+      const f2 = final === "Q" ? params.split(";")[1] ?? "1" : final === "~" && params.split(";")[0] === "12" ? params.split(";")[1] ?? "1" : undefined
+      if (f2 !== undefined) {
+        keys.push({ type: "fn", n: 2, ...(((Number(f2) - 1) & 1) === 1 ? { shift: true } : {}) })
+      } else if (final === "~") {
         const type = TILDE[params.split(";")[0] ?? ""]
         if (type) keys.push({ type } as Key)
       } else if (final && CSI[final]) {

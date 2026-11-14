@@ -98,3 +98,14 @@ describe("a paste that arrives in pieces", () => {
     expect(read("abc").map((k) => k.type)).toEqual(["char", "char", "char"])
   })
 })
+
+test("F2 and shift+F2 are read in each form a terminal sends them", () => {
+  const E = String.fromCharCode(27)
+  expect(parseKeys(E + "OQ")).toEqual([{ type: "fn", n: 2 }])
+  expect(parseKeys(E + "[12~")).toEqual([{ type: "fn", n: 2 }])
+  expect(parseKeys(E + "[1;2Q")).toEqual([{ type: "fn", n: 2, shift: true }])
+  expect(parseKeys(E + "[12;2~")).toEqual([{ type: "fn", n: 2, shift: true }])
+  // Its neighbours are still what they were.
+  expect(parseKeys(E + "[3~")).toEqual([{ type: "delete" }])
+  expect(parseKeys(E + "[A")).toEqual([{ type: "up" }])
+})

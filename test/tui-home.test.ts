@@ -82,3 +82,21 @@ describe("the empty conversation's layout around the composer", () => {
     expect(listed.above.findIndex((line) => line.includes(WORDMARK[0]!))).toBe(quiet.above.findIndex((line) => line.includes(WORDMARK[0]!)))
   })
 })
+
+describe("the tip under the start line", () => {
+  test("is shown when set, is the first thing dropped when rows are short, and every tip fits an 80-column window", async () => {
+    const { TIPS, pickTip, setHomeTip } = await import("../src/tui/wordmark")
+    try {
+      setHomeTip(TIPS[0]!)
+      expect(homeScreen(120, 30, "~/proj:main", plain).join("\n")).toContain("tip: " + TIPS[0])
+      // Twelve rows hold everything but the tip.
+      const tight = homeScreen(120, 12, "~/proj:main", plain).join("\n")
+      expect(tight).toContain("~/proj:main")
+      expect(tight).not.toContain("tip: ")
+    } finally { setHomeTip("") }
+    expect(homeScreen(120, 30, "~/proj:main", plain).join("\n")).not.toContain("tip: ")
+    for (const tip of TIPS) expect(("tip: " + tip).length).toBeLessThanOrEqual(78)
+    expect(pickTip(() => 0)).toBe(TIPS[0]!)
+    expect(pickTip(() => 0.999)).toBe(TIPS.at(-1)!)
+  })
+})
