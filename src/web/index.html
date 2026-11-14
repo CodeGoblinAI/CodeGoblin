@@ -254,6 +254,10 @@
   .prow.active .pvalue { color: var(--goblin); }
   .prow.active .phint { color: var(--text); opacity: 1; }
   .tool.note { border-color: var(--line); }
+  /* Scrolled up: a way back down, above the composer, as Claude Code has it. */
+  #jump-bottom { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 15; border: 1px solid var(--line-strong); background: var(--panel2); color: var(--text); border-radius: 999px; padding: 5px 14px; font: inherit; font-size: 12.5px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.35); white-space: nowrap; }
+  #jump-bottom:hover { border-color: var(--goblin); }
+  #jump-bottom.fresh { border-color: var(--goblin); color: var(--goblin); }
   pre.typed-output { margin: 4px 0 0; padding: 8px 11px; max-height: 320px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.45; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .tool.note .tname { color: var(--muted); font-family: var(--font); }
   .send.stopping { background: linear-gradient(#ff8f9b, #cc5566); color: #2a0508; }
@@ -292,6 +296,7 @@
     <div id="terminal-view"></div>
   </section>
   <div class="composer">
+    <button type="button" id="jump-bottom" hidden>Jump to bottom <span aria-hidden="true">↓</span></button>
     <!-- What is attached, before it is sent. Above the box rather than inside
          it: a thumbnail row that grew the box would move the caret. -->
     <div class="attached" id="attached" hidden></div>

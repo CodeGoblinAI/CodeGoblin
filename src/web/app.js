@@ -659,6 +659,30 @@ function markdown(text) {
 }
 
 const atBottom = () => thread.scrollHeight - thread.scrollTop - thread.clientHeight < 60
+
+/**
+ * Scrolled up: a "Jump to bottom" button above the composer, saying so when
+ * new output has arrived below - the conversation does not move while you
+ * read further up, so something has to say there is more.
+ */
+const jumpButton = document.getElementById("jump-bottom")
+let freshBelow = false
+function updateJump() {
+  const away = !atBottom() && Boolean(thread.querySelector(".turn"))
+  if (!away) freshBelow = false
+  jumpButton.hidden = !away
+  jumpButton.classList.toggle("fresh", freshBelow)
+  jumpButton.firstChild.textContent = freshBelow ? "New output · jump to bottom " : "Jump to bottom "
+}
+function jumpToBottom() {
+  freshBelow = false
+  thread.scrollTo({ top: thread.scrollHeight, behavior: document.body.classList.contains("no-animations") ? "auto" : "smooth" })
+  updateJump()
+}
+jumpButton.onclick = jumpToBottom
+thread.addEventListener("scroll", updateJump, { passive: true })
+new MutationObserver(() => { if (!atBottom()) freshBelow = Boolean(thread.querySelector(".turn")); updateJump() })
+  .observe(thread, { childList: true, subtree: true, characterData: true })
 const scrollDown = () => { thread.scrollTop = thread.scrollHeight }
 
 function emptyState() {
@@ -2401,6 +2425,7 @@ function recoverChatDraft(text, images, reply) {
 async function submit() {
   const text = input.value.trim().replace(/^\/[^\s]+/, (name) => paletteData.aliases?.[name] || name)
   if (!text && !attachments.length) return
+  noteCommands(text)
   if (sessionNavigation.pending() && !/^\/(?:clear|new|resume|sessions|continue)(?:\s|$)/.test(text)) {
     note("Conversation is still loading; your draft and attachments are kept. Wait, or choose New session before sending.")
     return
@@ -2768,6 +2793,9 @@ input.onkeydown = (e) => {
   // The palette owns enter while it is open, otherwise this would submit the
   // half-typed command the palette was about to complete.
   if (paletteItems.length) return
+  // With nothing typed, the page keys move through the conversation and Ctrl+End goes back down.
+  if (!input.value && (e.key === "PageUp" || e.key === "PageDown")) { e.preventDefault(); thread.scrollBy({ top: (e.key === "PageUp" ? -1 : 1) * (thread.clientHeight - 60) }); return }
+  if (!input.value && e.ctrlKey && e.key === "End") { e.preventDefault(); jumpToBottom(); return }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit() }
 }
 document.getElementById("new-session").onclick = () => {
@@ -3184,8 +3212,7 @@ function itemsFor(text, cursor) {
     // completes files there. Argument lists stay line-start only.
     const token = slashToken(text, cursor)
     if (!token) return []
-    const query = token.toLowerCase()
-    return (paletteData.commands || []).filter((c) => c.value.startsWith(query)).slice(0, 8)
+    return rankCommands(paletteData.commands || [], token, paletteData.recentCommands || []).slice(0, 8)
   }
   const [head] = text.split(" ")
   const hasArgument = text.includes(" ")
@@ -3272,13 +3299,67 @@ function itemsFor(text, cursor) {
   // Matching only the first word kept the palette open after "/rename a new
   // title", and enter then picked the bare "/rename" item and submitted that
   // instead - so the title the user typed was silently thrown away.
-  // The app's own commands first, then skills and custom commands A to Z - the
-  // way the terminal lists them. They used to come in whatever order they were
-  // found, dozens of skills mixed in with the commands.
-  const matching = paletteData.commands.filter((c) => c.value.startsWith(text))
-  const own = matching.filter((c) => !c.invocation)
-  const invoked = matching.filter((c) => c.invocation).sort((a, b) => a.value.localeCompare(b.value))
-  return [...own, ...invoked]
+  // Once an argument is being typed the command is chosen; only its own name still matches.
+  if (/\s/.test(text)) return paletteData.commands.filter((c) => c.value.startsWith(text))
+  // Ranked as the terminal ranks them: closest match first, recently used first among equals.
+  return rankCommands(paletteData.commands, text, paletteData.recentCommands || [])
+}
+
+/**
+ * How well a query matches a command or skill; -1 for no match, higher is better.
+ * A copy of commandScore in core/command-rank.ts - a test checks they agree.
+ */
+function commandScore(value, hint, query) {
+  const q = query.toLowerCase().replace(/^\//, "")
+  const name = value.toLowerCase().replace(/^\//, "")
+  if (!q) return 1
+  const short = Math.min(name.length, 99)
+  if (name === q) return 1000
+  if (name.startsWith(q)) return 900 - short
+  if (name.split(/[-_:.\s/]+/).some((word) => word.startsWith(q))) return 700 - short
+  if (name.includes(q)) return 600 - short
+  const about = hint.toLowerCase()
+  if (q.length >= 3 && about.split(/[^a-z0-9]+/).some((word) => word.startsWith(q))) return 300
+  if (q.length >= 2) {
+    let from = 0
+    let last = -1
+    let gaps = 0
+    let found = true
+    for (const char of q) {
+      const at = name.indexOf(char, from)
+      if (at < 0) { found = false; break }
+      if (last >= 0) gaps += at - last - 1
+      last = at
+      from = at + 1
+    }
+    if (found) return 280 - Math.min(gaps * 5, 180)
+  }
+  if (q.length >= 4 && about.includes(q)) return 150
+  return -1
+}
+
+/** Matching items, best first; recently used ones rise among equals. A copy of rankCommands in core/command-rank.ts. */
+function rankCommands(items, query, recent) {
+  const bonus = (value) => {
+    const at = recent.indexOf(value)
+    return at < 0 ? 0 : 60 * (1 - at / Math.max(recent.length, 1))
+  }
+  return items
+    .map((item, index) => ({ item, index, score: commandScore(item.value, item.hint || "", query) }))
+    .filter((entry) => entry.score >= 0)
+    .map((entry) => ({ ...entry, score: entry.score + bonus(entry.item.value) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.item)
+}
+
+/** Remembers the commands and skills in a sent message, so they lead the list next time - in the terminal too. */
+function noteCommands(text) {
+  for (const word of text.match(/(?:^|\s)\/[^\s/]+/g) || []) {
+    const value = word.trim()
+    if (!(paletteData.commands || []).some((c) => c.value === value)) continue
+    paletteData.recentCommands = [value, ...(paletteData.recentCommands || []).filter((each) => each !== value)].slice(0, 30)
+    fetch("/api/commands/used", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ value }) }).catch(() => {})
+  }
 }
 
 function renderPalette() {
@@ -3287,13 +3368,7 @@ function renderPalette() {
   paletteEl.hidden = false
 
   paletteItems.forEach((item, index) => {
-    // A heading where the skills start, so the two groups read as two.
-    if (item.invocation && (index === 0 || !paletteItems[index - 1].invocation)) {
-      const heading = document.createElement("div")
-      heading.className = "psection"
-      heading.textContent = "skills and custom commands"
-      paletteEl.appendChild(heading)
-    }
+    // Commands and skills are ranked together now; a skill's hint already says "skill".
     const row = document.createElement("div")
     row.className = "prow" + (index === paletteIndex ? " active" : "")
     row.innerHTML = '<span class="pvalue"></span><span class="phint"></span>'

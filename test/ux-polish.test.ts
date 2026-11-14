@@ -45,9 +45,9 @@ describe("the web page", () => {
     expect(app).toContain('scrollIntoView({ block: "nearest" })')
   })
 
-  test("its slash menu puts the app's commands before skills, and skills A to Z", () => {
-    expect(app).toContain("return [...own, ...invoked]")
-    expect(app).toContain("sort((a, b) => a.value.localeCompare(b.value))")
+  test("its slash menu ranks commands and skills together, as the terminal does", () => {
+    // Commands and skills are ranked together, closest match first (core/command-rank.ts).
+    expect(app).toContain("rankCommands(paletteData.commands, text, paletteData.recentCommands || [])")
   })
 
   test("puts your messages on the right", () => {

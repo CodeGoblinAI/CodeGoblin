@@ -113,7 +113,8 @@ import { browserStatus, switchBrowser } from "../core/browser"
 import { SubagentManager, listAgents, selectedAgent, agentSelection, type SubagentEvent } from "../core/subagents"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
-import { setAgents, setInvocations, setModelLists } from "./palette"
+import { setAgents, setInvocations, setModelLists, setRecentCommands, isListedCommand } from "./palette"
+import { loadRecentCommands, noteCommandUse } from "../core/command-rank"
 import { agentMention } from "../core/subagents"
 import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
 import { formatterStatus } from "../core/formatter"
@@ -273,6 +274,7 @@ const subagents = new SubagentManager(
 // Custom commands and skills join the slash picker. Read once here for the
 // picker; a message reads them fresh, so one written mid-session still runs.
 setInvocations(invocationItems(process.cwd()))
+setRecentCommands(loadRecentCommands())
 setAgents(listAgents(process.cwd()))
 
 /**
@@ -321,6 +323,16 @@ let resumeModelMissing = false
 let input = ""
 let cursor = 0
 let scroll = 0
+/** Last frame's transcript height and window, for keeping the view still and for paging. */
+let drawnLines = 0
+let lastRoom = 10
+let lastTop = 0
+/** Where each of your messages starts in the transcript, for ctrl+up and ctrl+down. */
+let userStarts: number[] = []
+/** Output arrived below while scrolled up. */
+let newBelow = false
+/** Esc pressed once during a turn: a second press before this time stops it. */
+let stopArmedUntil = 0
 const history: string[] = []
 let historyIndex = -1
 let streaming = false
@@ -794,10 +806,13 @@ function render() {
       lines.push(dim + "  " + earlierNotice(leftOut, historyArchived).slice(0, width) + ansi.reset)
       lines.push("")
     }
+    const starts: number[] = []
     for (const entry of drawn) {
       if (entry === jumpTo) jumpLine = lines.length
+      if (entry.kind === "user") starts.push(lines.length)
       for (const line of entryLines(entry, width)) lines.push(line)
     }
+    userStarts = starts
     // What was typed while it worked is your next message, so it is drawn as
     // one - where it will go, marked as waiting - rather than as a note by the box.
     if (queued && !secret) for (const line of queuedLines(queued, width)) lines.push(line)
@@ -838,7 +853,7 @@ function render() {
     pending: pending && !input ? decisionsFor(pending.tool).length + 3 : !pending && asking && !asking.typing ? asking.question.options.length + 5 : 0,
     queued: false,
     images: Boolean(pendingImages.length && !secret),
-    scrolled: scroll > 3,
+    scrolled: false,
     notice: Number(streaming && !pending && !asking) + Number(Boolean(status)),
   }
   // Editing a wrapped draft during inference still draws all its lines.
@@ -858,17 +873,37 @@ function render() {
   const composerHeight = footerHeight({ ...footer, overlay: overlayHeight, palette: paletteLines.length, plan: planLines.length })
   const room = Math.max(1, rows - composerHeight - 1)
 
+  // Reading further up while it writes: the view stays on what was being read,
+  // instead of the text sliding away under the eye as each line arrives.
+  if (scroll > 0 && drawnLines > 0 && lines.length > drawnLines) { scroll += lines.length - drawnLines; newBelow = true }
+  // The same when the space for it changes - the working line going, a popup
+  // opening: the top line stays the top line.
+  if (scroll > 0 && drawnLines > 0 && room !== lastRoom) scroll = Math.max(0, scroll - (room - lastRoom))
+  if (scroll === 0) newBelow = false
+  drawnLines = transcript.length ? lines.length : 0
+  lastRoom = room
   const maxScroll = Math.max(0, lines.length - room)
   // /timeline: the chosen message at the top of the screen, once.
   if (jumpLine !== undefined) { scroll = Math.max(0, lines.length - room - jumpLine); jumpTo = undefined }
   scroll = Math.min(scroll, maxScroll)
   const cut = lines.length - room - scroll
+  lastTop = Math.max(0, cut)
   // The empty conversation puts the composer under the wordmark; what is left of the window goes below it.
   const home = transcript.length === 0
     ? homeLayout(main, room + paletteLines.length + footer.notice, paletteLines.length + footer.notice, homeWhere(), { goblin: theme.goblin, gold: theme.gold, dim, reset: ansi.reset }, footer.notice)
     : undefined
   const body = home ? home.above : lines.length > room ? lines.slice(Math.max(0, cut), Math.max(0, cut) + room) : lines
   if (!home) while (body.length < room) body.push("")
+  // Scrolled up: a way back down, on the last line of the conversation, as
+  // Claude Code has it - shown from the first line up, and saying when there
+  // is new output it has not seen.
+  latestPill = undefined
+  if (!home && scroll > 0 && body.length) {
+    const label = newBelow ? " New output \u00b7 jump to bottom (ctrl+end) \u2193 " : " Jump to bottom (ctrl+end) \u2193 "
+    const from = Math.max(0, Math.floor((main - displayWidth(label)) / 2))
+    body[body.length - 1] = " ".repeat(from) + theme.text + invert + label + noInvert + ansi.reset
+    latestPill = { row: body.length, from: from + 1, to: from + displayWidth(label) }
+  }
 
   // A side panel on wide terminals: session, spend and servers at a glance,
   // the way the original shows them beside the conversation. Narrow screens
@@ -1042,7 +1077,8 @@ function render() {
   if (streaming && !pending && !asking) {
     body.push(
       theme.goblin + "  " + spinnerFrame() + " working" + ansi.reset +
-        dim + " \u00b7 " + sessions.workedFor(Date.now() - workingSince) + " \u00b7 esc to stop" + ansi.reset,
+        dim + " \u00b7 " + sessions.workedFor(Date.now() - workingSince) + " \u00b7 " + ansi.reset +
+        (Date.now() < stopArmedUntil ? theme.gold + "press esc again to stop" : dim + "esc twice to stop") + ansi.reset,
     )
   }
   // What just happened - "switched to ...", "no key for ..." - on a line of
@@ -1052,15 +1088,6 @@ function render() {
   // fork's does: plain when it asks, gold, red at full access, orange while planning.
   const ruleColour = permissions.planning ? theme.warning : permissions.mode === "full" ? theme.error : permissions.mode === "approve" ? theme.gold : theme.border
   body.push(ruleColour + "  " + "\u2500".repeat(inner) + ansi.reset)
-  // Scrolled up a way: a floating way back down, Claude-style, only while
-  // scrolled - a button that is always there teaches nobody anything.
-  latestPill = undefined
-  if (scroll > 3) {
-    const label = "[ ↓ back to latest ]"
-    const from = Math.max(0, Math.floor((cols - displayWidth(label)) / 2))
-    body.push(" ".repeat(from) + theme.gold + label + ansi.reset)
-    latestPill = { row: body.length, from: from + 1, to: from + label.length }
-  }
   // A queued prompt stays on screen in dimmer text, Claude-style: clearing
   // the composer without showing what is waiting reads as the prompt being
   // eaten, and Ctrl+S with an empty composer then looks broken.
@@ -1126,13 +1153,13 @@ function render() {
     : asking && !pending
     ? asking.typing ? "enter answers \u00b7 esc back to the choices" : compactHints ? "number or enter \u00b7 esc" : "up/down \u00b7 number or enter picks \u00b7 esc dismiss"
     : streaming
-    ? (queued ? "queued · esc stop" : compactHints ? "enter queue · esc stop" : "enter queue · ctrl+s now · esc stop")
+    ? (queued ? "queued · esc twice stops" : compactHints ? "enter queue · esc esc stop" : "enter queue · ctrl+s now · esc twice stops")
     : secret
     ? "enter saves · esc cancels · nothing is echoed"
     : overlay
     ? "any key closes"
     : scroll > 0
-      ? "scrolled " + scroll
+      ? compactHints ? "ctrl+end bottom" : "pgup/pgdn page \u00b7 ctrl+\u2191\u2193 your messages \u00b7 ctrl+end bottom"
       : palette
         ? "tab complete · up/down pick"
         : compactHints ? "ctrl+g actions" : "shift+tab mode \u00b7 ctrl+g actions \u00b7 ctrl+c copy/quit"
@@ -2377,6 +2404,10 @@ async function send() {
 
   const text = normalizeCommand(input.trim())
   if (!text) return
+  // Commands and skills used lead the / list next time, here and in the browser.
+  for (const word of text.match(/(?:^|\s)\/[^\s/]+/g) ?? []) {
+    if (isListedCommand(word.trim())) setRecentCommands(noteCommandUse(word.trim()))
+  }
   // What was in the composer when this send began. Resolving an agent profile
   // awaits, and a queued prompt restores the newer draft while that runs - so
   // clearing afterwards must only take away the text being sent, never the
@@ -3139,6 +3170,7 @@ async function send() {
     if (messages.at(-1)?.stopped) transcript.push({ kind: "tool", text: "stopped", state: "failed" })
     else transcript.push({ kind: "worked", text: "worked for " + sessions.workedFor(Date.now() - turnStarted) + " · " + selection.provider.label + " " + selection.model.label })
     streaming = false
+    stopArmedUntil = 0
     stopSpinner()
     turn = undefined
     edits.commit(process.cwd())
@@ -3366,6 +3398,17 @@ function openActions() {
     return [letter ? "ctrl+" + keymap.leader + " " + letter : "", action.keys ?? ""].filter(Boolean).join(" \u00b7 ")
   }
   dialog = Dialogs.open("actions", "goblin commands", ACTIONS.map((action) => ({ label: action.label, hint: keysFor(action), value: action.run })), { footer: "enter runs \u00b7 esc closes", size: "medium" })
+}
+
+/**
+ * Ctrl+Up and Ctrl+Down: your previous or next message at the top of the
+ * screen - the quick way through a long conversation. Down past the last one
+ * goes back to the latest output.
+ */
+function jumpMessage(direction: -1 | 1) {
+  const target = direction < 0 ? [...userStarts].reverse().find((start) => start < lastTop) : userStarts.find((start) => start > lastTop)
+  if (target === undefined) { if (direction > 0) scroll = 0; return }
+  scroll = Math.max(0, drawnLines - lastRoom - target)
 }
 
 /** Runs a slash command as if typed, keeping whatever was being written. */
@@ -3746,9 +3789,14 @@ process.stdin.on("data", (chunk) => {
         if (anchor !== undefined) { anchor = undefined; dragged = false; dirty = true; break }
         if (input) { applyComposer({ text: "", cursor: 0 }, true); dirty = true }
         else if (streaming) {
-          turn?.abort()
-          subagents.stopAll()
-          status = "stopped"
+          // Two presses: Esc closes and clears many things, and one stray
+          // press used to end a long turn - and lose what it was doing.
+          if (Date.now() < stopArmedUntil) {
+            stopArmedUntil = 0
+            turn?.abort()
+            subagents.stopAll()
+            status = "stopped"
+          } else stopArmedUntil = Date.now() + 2000
           dirty = true
         }
         break
@@ -3778,14 +3826,19 @@ process.stdin.on("data", (chunk) => {
         break
       }
       case "home":
+        // Ctrl+Home with nothing typed goes to the start of the conversation.
+        if (pressed.ctrl && !input) { scroll = Number.MAX_SAFE_INTEGER; dirty = true; break }
         applyComposer(moveTo(composerState(), { to: 0, select: Boolean(pressed.shift) }))
         dirty = true
         break
       case "end":
+        // Ctrl+End - or End with nothing typed - goes back to the latest output.
+        if (scroll > 0 && (pressed.ctrl || !input)) { scroll = 0; dirty = true; break }
         applyComposer(moveTo(composerState(), { to: input.length, select: Boolean(pressed.shift) }))
         dirty = true
         break
       case "up":
+        if (pressed.ctrl) { jumpMessage(-1); dirty = true; break }
         if (history.length) {
           historyIndex = historyIndex < 0 ? history.length - 1 : Math.max(0, historyIndex - 1)
           input = history[historyIndex] ?? ""
@@ -3794,6 +3847,7 @@ process.stdin.on("data", (chunk) => {
         }
         break
       case "down":
+        if (pressed.ctrl) { jumpMessage(1); dirty = true; break }
         if (historyIndex >= 0) {
           historyIndex++
           if (historyIndex >= history.length) { historyIndex = -1; input = "" }
@@ -3806,8 +3860,9 @@ process.stdin.on("data", (chunk) => {
       case "wheeldown": scroll = Math.max(0, scroll - 3); dirty = true; break
       case "shiftup": scroll += 1; dirty = true; break
       case "shiftdown": scroll = Math.max(0, scroll - 1); dirty = true; break
-      case "pageup": scroll += 5; dirty = true; break
-      case "pagedown": scroll = Math.max(0, scroll - 5); dirty = true; break
+      // A page at a time, less two lines so the eye keeps its place.
+      case "pageup": scroll += Math.max(3, lastRoom - 2); dirty = true; break
+      case "pagedown": scroll = Math.max(0, scroll - Math.max(3, lastRoom - 2)); dirty = true; break
       case "ctrl":
         // Terminals that hand Ctrl+V to the app (rather than pasting text themselves): picture paste.
         if (pressed.value === "v") void attachClipboardImage(true)

@@ -1,7 +1,8 @@
 # Look at the terminal app in a real Windows Terminal window, without desktop control:
 #   real-terminal.ps1 shot <title> <out.png>     picture of the window whose title contains <title>, even if covered
 #   real-terminal.ps1 keys <pid> <text>          type into the console of process <pid>, without touching focus
-# In <text>: {ENTER} {ESC} {TAB} {UP} {DOWN} {LEFT} {RIGHT} {BACKSPACE} {STAB} (shift+tab) {CTRL+x}; anything else is typed.
+# In <text>: {ENTER} {ESC} {TAB} {UP} {DOWN} {LEFT} {RIGHT} {BACKSPACE} {STAB} (shift+tab) {CTRL+x} {PGUP} {PGDN}
+# {HOME} {END} {CTRLUP} {CTRLDOWN} {CTRLHOME} {CTRLEND}; anything else is typed.
 # Used by tui-window.mjs. Only ever pointed at the window and process that script started.
 param([string]$Action, [string]$Target, [string]$Value)
 
@@ -92,6 +93,14 @@ public static class RealTerminal {
             case "DOWN": vk = 0x28; ch = (char)0; control = 0x100; break;
             case "LEFT": vk = 0x25; ch = (char)0; control = 0x100; break;
             case "RIGHT": vk = 0x27; ch = (char)0; control = 0x100; break;
+            case "PGUP": vk = 0x21; ch = (char)0; control = 0x100; break;
+            case "PGDN": vk = 0x22; ch = (char)0; control = 0x100; break;
+            case "HOME": vk = 0x24; ch = (char)0; control = 0x100; break;
+            case "END": vk = 0x23; ch = (char)0; control = 0x100; break;
+            case "CTRLUP": vk = 0x26; ch = (char)0; control = 0x108; break;
+            case "CTRLDOWN": vk = 0x28; ch = (char)0; control = 0x108; break;
+            case "CTRLHOME": vk = 0x24; ch = (char)0; control = 0x108; break;
+            case "CTRLEND": vk = 0x23; ch = (char)0; control = 0x108; break;
             default:
               if (name.StartsWith("CTRL+") && name.Length == 6) { char c = name[5]; vk = (ushort)c; ch = (char)(c - 64); control = 0x08; }
               else continue;

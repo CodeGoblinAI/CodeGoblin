@@ -21,7 +21,11 @@ describe("palette expansion", () => {
   })
 
   test("filters as you type", () => {
-    expect(paletteFor("/mod")?.every((i) => i.value.startsWith("/mod"))).toBe(true)
+    // Names that start with what was typed come first; looser matches follow them, never before.
+    const mod = paletteFor("/mod")!.map((i) => i.value)
+    const firstLoose = mod.findIndex((value) => !value.startsWith("/mod"))
+    expect(mod[0]!.startsWith("/mod")).toBe(true)
+    if (firstLoose >= 0) expect(mod.slice(firstLoose).some((value) => value.startsWith("/mod"))).toBe(false)
   })
 
   // Regression: /model + enter printed the help text instead of offering
@@ -104,7 +108,7 @@ describe("slash mid-prompt", () => {
     expect(slashRange("hi there /cl", 12)).toEqual({ start: 9, end: 12 })
     const items = paletteFor("hi there /cl", 12)
     expect(items?.length).toBeGreaterThan(0)
-    expect(items?.every((i) => i.value.startsWith("/cl"))).toBe(true)
+    expect(items![0]!.value.startsWith("/cl")).toBe(true)
     expect(items?.some((i) => i.value === "/clear")).toBe(true)
   })
 

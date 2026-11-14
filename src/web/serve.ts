@@ -55,6 +55,7 @@ import { runTypedCommand, typedCommand } from "../core/user-shell"
 import { BrowserConsent } from "./consent"
 import { McpManager, withoutServers } from "../core/mcp"
 import { browserMode, browserStatus, switchBrowser } from "../core/browser"
+import { loadRecentCommands, noteCommandUse } from "../core/command-rank"
 import { SubagentManager, agentMention, listAgents, selectedAgent, agentSelection, type SubagentContext } from "../core/subagents"
 import { configPath, checkpointEvery, idleCompactMin } from "../core/config"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
@@ -468,6 +469,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
         ...invocationItems(root).map((item) => ({ ...item, invocation: true })),
       ],
       agents: listAgents(root).map(({ name, description }) => ({ name, description })),
+      // Used last, newest first, shared with the terminal: they lead the / list.
+      recentCommands: loadRecentCommands(),
       models,
       aliases: COMMAND_ALIASES,
       pending: PENDING_COMMANDS,
@@ -524,6 +527,10 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     const id = url.searchParams.get("sessionId") ?? ""
     const saved = /^[a-zA-Z0-9_-]+$/.test(id) ? await sessions.load(id).catch(() => undefined) : undefined
     return json({ servers: mcp.statuses(), config: configPath(), off: saved?.mcpOff ?? pendingMcpOff.get(id) ?? [] })
+  }
+  if (url.pathname === "/api/commands/used" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { value?: unknown }
+    return json({ recentCommands: typeof body.value === "string" ? noteCommandUse(body.value) : loadRecentCommands() })
   }
   // /browser: status, or on (own profile) / mine (the person's Chrome) / off, for this run of the server.
   if (url.pathname === "/api/browser") {

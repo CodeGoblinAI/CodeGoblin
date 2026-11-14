@@ -10,6 +10,7 @@ import {
 } from "../core/providers"
 import { pickerRows } from "../core/favourites"
 import { findMention } from "../core/mention"
+import { rankCommands } from "../core/command-rank"
 import { theme, dim, ansi } from "./ansi"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
 
@@ -51,11 +52,27 @@ export function setFileCache(files: string[]) {
   fileCache = files
 }
 
-/** Custom commands and skills, offered after the built-ins. Filled by the app, like the file list. */
+/** Custom commands and skills, ranked with the built-ins. Filled by the app, like the file list. */
 let invocations: PaletteItem[] = []
 export function setInvocations(items: PaletteItem[]) {
-  // A to Z, so a skill is found where its name says it will be.
+  // A to Z, so equal matches come in an order that can be scanned.
   invocations = [...items].sort((a, b) => a.value.localeCompare(b.value))
+}
+
+/** The commands and skills used last, newest first: they lead the list. */
+let recentCommands: string[] = []
+export function setRecentCommands(list: string[]) {
+  recentCommands = [...list]
+}
+
+/** Every command and skill, for ranking. */
+function commandItems(): PaletteItem[] {
+  return [...COMMANDS.map((command) => ({ value: command.name, hint: command.description })), ...invocations]
+}
+
+/** Whether a /word is a command or skill in the list - worth remembering as used. */
+export function isListedCommand(value: string): boolean {
+  return commandItems().some((item) => item.value === value)
 }
 
 
@@ -114,13 +131,8 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
   if (!input.startsWith("/")) {
     const token = slashToken(input, cursor)
     if (!token) return undefined
-    const query = token.toLowerCase()
-    const matches = COMMANDS.filter((command) => command.name.startsWith(query)).map((command) => ({
-      value: command.name,
-      hint: command.description,
-    }))
-    for (const item of invocations) if (item.value.toLowerCase().startsWith(query)) matches.push(item)
-    return matches.length ? matches.slice(0, LIST_LIMIT) : undefined
+    const ranked = rankCommands(commandItems(), token, recentCommands)
+    return ranked.length ? ranked.slice(0, LIST_LIMIT) : undefined
   }
 
   // "/model " with an argument lists models instead of commands; "/favourite "
@@ -169,13 +181,14 @@ function paletteMatches(input: string, cursor: number): PaletteItem[] | undefine
   // conversation is opened and the only place one can be deleted, and a
   // second way in that skips it means the delete is never found.
 
-  const query = input.toLowerCase()
-  const matches = COMMANDS.filter((command) => command.name.startsWith(query)).map((command) => ({
-    value: command.name,
-    hint: command.description,
-  }))
-  for (const item of invocations) if (item.value.toLowerCase().startsWith(query)) matches.push(item)
-  return matches.length ? matches.slice(0, LIST_LIMIT) : undefined
+  // Once an argument is being typed the command is chosen; only its own name still matches.
+  if (/\s/.test(input)) {
+    const query = input.toLowerCase()
+    const matches = commandItems().filter((item) => item.value.toLowerCase().startsWith(query))
+    return matches.length ? matches.slice(0, LIST_LIMIT) : undefined
+  }
+  const ranked = rankCommands(commandItems(), input, recentCommands)
+  return ranked.length ? ranked.slice(0, LIST_LIMIT) : undefined
 }
 
 /**
