@@ -1,5 +1,10 @@
 # CodeGoblin — build-up plan
 
+> **Historical (written 2026-08).** This is the plan the repository started from. It is kept for the
+> reasoning, not as a description of today: the app no longer builds on Pi or any agent framework - the
+> agent loop, providers, tools, terminal app and web app are all in `src/`, and the only runtime
+> dependencies are the ones in `package.json`. The status and order of work below are out of date.
+
 A fresh repo that depends on published libraries instead of forking them, so
 this git history contains only our commits.
 
