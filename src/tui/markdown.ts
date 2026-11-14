@@ -22,7 +22,9 @@ export function renderMarkdown(text: string, width: number): string[] {
       if (!inCode) {
         inCode = true
         codeLang = raw.trim().slice(3).trim()
-        out.push(theme.border + "  ┌─ " + (codeLang || "code") + ansi.reset)
+        // The top edge runs as far as the bottom one, so the block reads as a box and not a stray corner.
+        const label = "─ " + (codeLang || "code") + " "
+        out.push(theme.border + "  ┌" + label + "─".repeat(Math.max(0, Math.max(2, Math.min(width, 40)) - label.length)) + ansi.reset)
       } else {
         inCode = false
         out.push(theme.border + "  └" + "─".repeat(Math.max(2, Math.min(width, 40))) + ansi.reset)

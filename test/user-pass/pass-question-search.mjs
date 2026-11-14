@@ -38,7 +38,7 @@ try {
   await t.until((s) => /Which runtime should the script target\?/.test(s), 10000, "second question")
   await t.until((s) => /Type your own answer/.test(s), 5000, "second picker"); await delay(400)
   for (const key of ["\x1b[B", "\x1b[B", "\x1b[B", "\r"]) { t.write(key); await delay(150) } // Type your own answer
-  await t.until((s) => /type your answer and press enter/.test(s), 5000, "typing mode")
+  await t.until((s) => /type your answer\.\.\./.test(s), 5000, "typing mode")
   t.write("Python, actually\r")
   await t.until((s) => /allow websearch/.test(s), 10000, "second approval")
   t.write("\x1b[B\x1b[B\r") // reject the search this time

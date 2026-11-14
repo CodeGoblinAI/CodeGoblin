@@ -892,7 +892,7 @@ function render() {
       })),
       { label: "Type your own answer", hint: "" },
     ]
-    const keys = entry.question.multiple ? "space picks . enter sends . esc dismisses" : "enter picks . esc dismisses"
+    const keys = entry.question.multiple ? "space picks · enter sends · esc dismisses" : "enter picks · esc dismisses"
     const labelWidth = Math.max(...rows.map((row) => displayWidth(row.label))) + 2
     const wanted = Math.max(3 + labelWidth + Math.max(0, ...rows.map((row) => displayWidth(row.hint))), displayWidth(title), displayWidth(keys) + 2) + 1
     const inner = Math.max(24, Math.min(wanted, cols - 6))
@@ -905,7 +905,7 @@ function render() {
       const hint = truncateToWidth(row.hint, Math.max(0, inner - 3 - labelWidth))
       body.push(theme.border + "  │" + ansi.reset + padToWidth(marker + label + dim + hint + ansi.reset, inner) + theme.border + "│" + ansi.reset)
     }
-    body.push(theme.border + "  │" + ansi.reset + dim + padToWidth("  " + keys, inner) + ansi.reset + theme.border + "│" + ansi.reset)
+    body.push(theme.border + "  │" + ansi.reset + dim + padToWidth("   " + keys, inner) + ansi.reset + theme.border + "│" + ansi.reset)
     body.push(theme.border + "  ╰" + "─".repeat(inner) + "╯" + ansi.reset)
   }
 
@@ -959,6 +959,9 @@ function render() {
     shown =
       theme.gold + pending.tool + ansi.reset + " " +
       dim + askedFor(pending.tool, pending.detail).replace(/\s+/g, " ").slice(0, Math.max(10, visibleInput - 24)) + ansi.reset
+  } else if (asking && !pending && !input) {
+    caretOffset = 0
+    shown = dim + (asking.typing ? "type your answer..." : "pick an answer above") + ansi.reset
   } else if (streaming && !input) {
     caretOffset = 0
     shown =
@@ -1065,24 +1068,26 @@ function render() {
   // Usage stays on the bar even while a status is showing: a transient
   // message used to replace the model, context and spend readout entirely,
   // so "no key" also hid what you were connected to.
-  const usage = selection.provider.label + " . " + selection.model.id + (context.limit > 0 ? "  ~" + context.percent + "% ctx" : "  ctx window unknown") + spendTag
+  const usage = selection.provider.label + " · " + selection.model.id + (context.limit > 0 ? "  ~" + context.percent + "% ctx" : "  ctx window unknown") + spendTag
   const left = status ? status + "   " + usage : modeTag.trim() + (modeTag ? "  " : "") + usage
   const compactHints = cols < 75
   const right = dialog
-    ? compactHints ? "enter . esc close" : "up/down . enter choose . esc close"
+    ? compactHints ? "enter · esc close" : "up/down · enter choose · esc close"
     : pending && !input
-    ? compactHints ? "enter confirm . esc reject" : "up/down . enter confirm . esc reject"
+    ? compactHints ? "enter confirm · esc reject" : "up/down · enter confirm · esc reject"
+    : asking && !pending
+    ? asking.typing ? "enter answers · esc back to the choices" : compactHints ? "enter pick · esc dismiss" : "up/down · enter pick · esc dismiss"
     : streaming
-    ? (queued ? "queued . esc stop" : compactHints ? "enter queue . esc stop" : "enter queue . ctrl+s now . esc stop")
+    ? (queued ? "queued · esc stop" : compactHints ? "enter queue · esc stop" : "enter queue · ctrl+s now · esc stop")
     : secret
-    ? "enter saves . esc cancels . nothing is echoed"
+    ? "enter saves · esc cancels · nothing is echoed"
     : overlay
     ? "any key closes"
     : scroll > 0
       ? "scrolled " + scroll
       : palette
-        ? "tab complete . up/down pick"
-        : compactHints ? "ctrl+c copy/quit" : "shift+tab mode . ctrl+c copy/quit"
+        ? "tab complete · up/down pick"
+        : compactHints ? "ctrl+c copy/quit" : "shift+tab mode · ctrl+c copy/quit"
   // A long status gives way to the key hints rather than pushing them off the
   // edge: "mode: Full access - never ask - only the rules..." ran into them.
   const statusRoom = Math.max(10, cols - displayWidth(right) - 4)
@@ -1102,7 +1107,7 @@ function render() {
     toolbar += item.label + " "
     toolbarTargets.push({ from, to: from + item.label.length - 1, command: item.command })
   }
-  body.push(theme.goblin + toolbar + ansi.reset)
+  body.push(theme.muted + toolbar + ansi.reset)
 
   // Clamp on display width: CJK and emoji are two columns, so a line that
   // looks short by .length can still overflow and wrap.
@@ -1209,7 +1214,7 @@ async function openDiff() {
   }
   diffOpen.clear()
   dialog = Dialogs.open("diff", "Changes  " + summarise(changes), diffRows(changes), {
-    footer: "enter opens a file . n/p next and previous . q or esc closes",
+    footer: "enter opens a file · n/p next and previous · q or esc closes",
     size: "full",
   })
   lastChanges = changes
@@ -1265,10 +1270,10 @@ async function openSessions() {
     saved.map((entry) => ({
       label: (entry.id === session.id ? "\u2022 " : "  ") + entry.title,
       // The age tells apart conversations that share a title, as the web sidebar does.
-      hint: (entry.id === session.id ? "open . " : "") + sessions.ago(entry.updated),
+      hint: (entry.id === session.id ? "open · " : "") + sessions.ago(entry.updated),
       value: entry.id,
     })),
-    { footer: "enter opens . ctrl+d twice deletes . esc closes", size: "large" },
+    { footer: "enter opens · ctrl+d twice deletes · esc closes", size: "large" },
   )
 }
 
@@ -1293,7 +1298,7 @@ function openDisconnect() {
       hint: item.type + (item.hint ? "  " + item.hint : ""),
       value: item.id,
     })),
-    { footer: "enter twice removes this key . esc closes", size: "medium" },
+    { footer: "enter twice removes this key · esc closes", size: "medium" },
   )
 }
 
@@ -1427,7 +1432,7 @@ function accountDialog(rows: [string, string][]) {
     { label: "Refresh quotas", value: "refresh" },
     { label: accountSource === "cursor" ? "Cursor Spending: https://cursor.com/dashboard (copy)" : "Sign in through official CLI", value: "login" },
     ...rows.map(([label, value]) => ({ label: label + ": " + value, value: "info" })),
-  ], { size: "large", footer: "up/down scroll . enter refresh/sign-in . esc closes" })
+  ], { size: "large", footer: "up/down scroll · enter refresh/sign-in · esc closes" })
 }
 
 function openAccount(source: "codex" | "claude" | "cursor" = "codex") {
@@ -1452,7 +1457,7 @@ function openLogin(source: "codex" | "cursor" = "codex") {
     { label: source === "cursor" ? "SDK login is separate from Cursor CLI login" : "Signing in changes the official CLI's shared account", inert: true },
     { label: source === "cursor" ? "Creates a named SDK key billed to your Cursor plan" : "No token or password is copied into CG-Next", inert: true },
     ...(source === "cursor" ? [{ label: "Key stored in this CG profile; native SDK tools disabled", inert: true }, { label: "Replaces this profile's SDK sign-in on completion", inert: true }, { label: "For an existing key: /connect cursor-api", inert: true }] : []),
-  ], { footer: "enter chooses . esc closes", size: "large" })
+  ], { footer: "enter chooses · esc closes", size: "large" })
 }
 
 async function beginLogin(source: "codex" | "cursor" = "codex") {
@@ -1475,7 +1480,7 @@ async function beginLogin(source: "codex" | "cursor" = "codex") {
       { label: source === "cursor" ? "Creates a profile-local SDK key; expires in 5 minutes" : "Uses the official CLI's shared sign-in; expires in 5 minutes", inert: true },
       { label: source === "cursor" ? "Billed to your user plan; native SDK tools disabled" : "No token or password is copied into CG-Next", inert: true },
       ...(source === "cursor" ? [{ label: "Cancel stops pending login; a completed key stays stored", inert: true }] : []),
-    ], { footer: "enter chooses . esc cancels", size: "large" })
+    ], { footer: "enter chooses · esc cancels", size: "large" })
   } catch { status = source === "cursor" ? "Could not start Cursor SDK sign-in; check SDK compatibility" : "Could not start Codex sign-in; run codex login" }
   render()
 }
@@ -1503,7 +1508,7 @@ async function openImport(source: ImportSource, cursor?: string) {
       })),
       ...(result.next ? [{ label: "More conversations…", value: "page:" + result.next }] : []),
       ...(!result.sessions.length ? [{ label: "No " + name + " conversations for this project", inert: true }] : []),
-    ], { size: "large", footer: "enter selects . confirmation before copying . esc closes" })
+    ], { size: "large", footer: "enter selects · confirmation before copying · esc closes" })
     status = "Choose a conversation; source stays unchanged"
   } catch { if (dialog === view) status = "Could not list " + name + " sessions; check CLI compatibility" }
   render()
@@ -1519,7 +1524,7 @@ function confirmImport(source: ImportSource, id: string, title: string) {
     { label: IMPORTERS[source].omitted, inert: true },
     { label: "Source untouched; current conversation not replaced", inert: true },
     { label: "Continuing sends copied text to your selected model", inert: true },
-  ], { size: "large", footer: "enter confirms . esc cancels" })
+  ], { size: "large", footer: "enter confirms · esc cancels" })
 }
 
 /**
@@ -1550,7 +1555,7 @@ function openLocalPull() {
     label: `${entry.label} · ${gbOf(entry.bytes)} · ${entry.about}`,
     value: entry.id,
     hint: isInstalled(entry) ? "installed" : running?.entry.id === entry.id ? "downloading" : undefined,
-  })), { size: "large", footer: "enter chooses . esc closes . official Qwen files, checked against a pinned SHA-256" })
+  })), { size: "large", footer: "enter chooses · esc closes · official Qwen files, checked against a pinned SHA-256" })
 }
 
 /** Nothing is fetched until this is answered: it says how big, from where, and to where. */
@@ -1563,7 +1568,7 @@ function confirmLocalPull(entry: (typeof LOCAL_CATALOG)[number]) {
     { label: "To " + ownedModelsDir(), inert: true },
     { label: "Kept only if size and SHA-256 match", inert: true },
     { label: "/local cancel stops it; /local pull resumes it", inert: true },
-  ], { size: "large", footer: "enter confirms . esc cancels" })
+  ], { size: "large", footer: "enter confirms · esc cancels" })
 }
 
 /** Session, spend and servers beside the transcript on wide terminals. */
@@ -1611,7 +1616,7 @@ function openApprovalsPicker() {
       hint: mode.hint,
       value: mode.id,
     })),
-    { footer: "enter chooses . esc closes . shift+tab cycles", size: "medium" },
+    { footer: "enter chooses · esc closes · shift+tab cycles", size: "medium" },
   )
 }
 
@@ -1626,7 +1631,7 @@ function openPlanPicker() {
       { label: "Keep planning", hint: "say what to change about the plan", value: "stay" },
       { label: "Stop planning", hint: "planning ends and nothing is sent", value: "stop" },
     ],
-    { footer: "enter chooses . esc keeps planning", size: "medium" },
+    { footer: "enter chooses · esc keeps planning", size: "medium" },
   )
 }
 
@@ -1639,7 +1644,7 @@ function openThemePicker() {
       hint: entry.label,
       value: name,
     })),
-    { footer: "enter applies . esc closes", size: "medium" },
+    { footer: "enter applies · esc closes", size: "medium" },
   )
 }
 
@@ -1664,7 +1669,7 @@ function openEffortPicker() {
       value: level,
     })),
     // A level saved for this model that it does not have (left from before) is said, not hidden.
-    { footer: (saved !== "auto" && !levels.includes(saved) ? `saved "${saved}" is not one of this model's levels, so nothing is sent . ` : "") + "enter applies . esc closes", size: "medium", selectedValue: saved },
+    { footer: (saved !== "auto" && !levels.includes(saved) ? `saved "${saved}" is not one of this model's levels, so nothing is sent · ` : "") + "enter applies · esc closes", size: "medium", selectedValue: saved },
   )
 }
 
@@ -1672,7 +1677,7 @@ function openEffortPicker() {
 /** Opens Settings; `selectedValue` keeps the cursor on the row just changed. */
 function openSettings(selectedValue?: string) {
   dialog = Dialogs.open("settings", "Settings  ·  " + selection.provider.label + " " + selection.model.label, settingsRows(), {
-    footer: "enter changes this setting . esc closes",
+    footer: "enter changes this setting · esc closes",
     size: "large",
     ...(selectedValue ? { selectedValue } : {}),
   })
@@ -1812,7 +1817,7 @@ function openModelPicker(selectedValue = selection.provider.id + "/" + selection
   dialog = Dialogs.open("model-picker", "Choose model", modelPickerRows(), {
     size: "large",
     selectedValue,
-    footer: "enter choose . ctrl+f favourite . esc close",
+    footer: "enter choose · ctrl+f favourite · esc close",
   })
 }
 
@@ -1825,7 +1830,7 @@ function openTimeline() {
     label: entry.text.replace(/\s+/g, " ").slice(0, 70),
     hint: entry.at ? sessions.clockTime(entry.at) : undefined,
     value: String(transcript.length - drawn.length + index),
-  })), { size: "large", footer: "enter jumps there . esc closes" })
+  })), { size: "large", footer: "enter jumps there · esc closes" })
 }
 
 /** Stars or unstars a model; the change is written straight to the shared settings file. */
@@ -1919,7 +1924,7 @@ async function chooseInDialog() {
         {label:"Copy official sign-in command",value:handoff.command},
         {label:handoff.command,inert:true}, {label:handoff.warning,inert:true},
         {label:"Run in your terminal; check afterward: " + handoff.statusCommand,inert:true},
-      ], {size:"large",footer:"enter copies command . esc closes"})
+      ], {size:"large",footer:"enter copies command · esc closes"})
     }
     if (row.value === "login" && accountSource === "cursor") { await copyText("https://cursor.com/dashboard"); status="Cursor Spending dashboard URL copied" }
     render(); return
@@ -2208,7 +2213,7 @@ async function deleteInDialog() {
     saved.map((entry) => ({
       label: (entry.id === session.id ? "\u2022 " : "  ") + entry.title,
       // The age tells apart conversations that share a title, as the web sidebar does.
-      hint: (entry.id === session.id ? "open . " : "") + sessions.ago(entry.updated),
+      hint: (entry.id === session.id ? "open · " : "") + sessions.ago(entry.updated),
       value: entry.id,
     })),
   )
@@ -2332,8 +2337,8 @@ async function send() {
     applyComposer({ text: "", cursor: 0 }, true)
     palette = undefined
     status = replaced
-      ? "replaced queued prompt - sending when this turn ends . Ctrl+S sends now"
-      : "queued - sending when this turn ends . Ctrl+S sends now"
+      ? "replaced queued prompt - sending when this turn ends · Ctrl+S sends now"
+      : "queued - sending when this turn ends · Ctrl+S sends now"
     render()
     return
   }
@@ -2393,7 +2398,7 @@ async function send() {
         "invoke",
         "Commands",
         COMMANDS.map((command) => ({ label: command.name, hint: command.description, value: command.name })),
-        { footer: "enter puts it in the prompt . wheel or pgup/pgdn scroll . esc closes", size: "large" },
+        { footer: "enter puts it in the prompt · wheel or pgup/pgdn scroll · esc closes", size: "large" },
       )
       render()
       return
@@ -2566,7 +2571,7 @@ async function send() {
                 value: "/" + skill.name,
               })),
           ],
-          { footer: "enter puts it in the prompt . wheel or pgup/pgdn scroll . esc closes", size: "large" },
+          { footer: "enter puts it in the prompt · wheel or pgup/pgdn scroll · esc closes", size: "large" },
         )
       }
     }
@@ -3503,7 +3508,8 @@ process.stdin.on("data", (chunk) => {
         if (pressed.type === "enter") {
           if (askingChoice === own) {
             entry.typing = true
-            status = "type your answer and press enter - esc goes back to the choices"
+            // The box and the key hints say what to do now; a third copy in the status only pushed the model name off the line.
+            status = ""
             render(); continue
           }
           const chosen = entry.question.multiple && entry.picked.size
