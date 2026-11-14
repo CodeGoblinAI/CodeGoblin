@@ -1145,8 +1145,7 @@ function render() {
   // so "no key" also hid what you were connected to.
   const usage = selection.provider.label + " " + selection.model.label + (context.limit > 0 ? "  ~" + context.percent + "% ctx" : "  ctx window unknown") + spendTag
   const left = usage + modeTag
-  const compactHints = cols < 75
-  const right = dialog
+  const rightFor = (compactHints: boolean) => dialog
     ? compactHints ? "enter · esc close" : "up/down · enter choose · esc close"
     : pending && !input
     ? compactHints ? "enter confirm · esc reject" : "up/down · enter confirm · esc reject"
@@ -1163,6 +1162,11 @@ function render() {
       : palette
         ? "tab complete · up/down pick"
         : compactHints ? "ctrl+g actions" : "shift+tab mode \u00b7 ctrl+g actions \u00b7 ctrl+c copy/quit"
+  // The model, context and cost matter more than key hints: when the long hints would cut the readout
+  // short ("$0.0…" on a 120-column window with a long model name), the short hints are used instead.
+  const roomBeside = (hints: string) => cols - displayWidth(hints) - 4 - displayWidth(modeLabel) - 3
+  const fullHints = rightFor(cols < 75)
+  const right = displayWidth(left) > roomBeside(fullHints) - 2 ? rightFor(true) : fullHints
   // A long status gives way to the key hints rather than pushing them off the
   // edge: "mode: Full access - never ask - only the rules..." ran into them.
   const statusRoom = Math.max(10, cols - displayWidth(right) - 4 - displayWidth(modeLabel) - 3)

@@ -417,7 +417,11 @@ describe("showing a model a picture", () => {
 
     expect(Array.isArray(content)).toBe(true)
     expect(content[0]).toEqual({ type: "text", text: "what is this" })
-    expect(content[1]).toEqual({ type: "image_url", image_url: { url: PICTURE.dataUrl } })
+    // The picture is named and said to be in view, so a model with tools does not go and open the file instead.
+    expect(content[1].type).toBe("text")
+    expect(content[1].text).toContain(PICTURE.name)
+    expect(content[1].text).toContain("you can see directly")
+    expect(content[2]).toEqual({ type: "image_url", image_url: { url: PICTURE.dataUrl } })
   })
 
   test("a model that cannot see is told one was attached, and not sent it", async () => {

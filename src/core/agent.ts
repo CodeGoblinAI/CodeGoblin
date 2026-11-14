@@ -160,6 +160,9 @@ const wire = (messages: Message[], memory?: string, images = false, instructions
         role,
         content: [
           ...(content ? [{ type: "text", text: content }] : []),
+          // Named, and said to be in view: with tools on hand DeepSeek V4.1 Flash went off to open "@swatch.png"
+          // with the shell (three approvals) instead of looking at the picture it had been sent.
+          { type: "text", text: `(${attached.map((image) => image.name).join(", ")}: attached below as ${attached.length === 1 ? "an image" : "images"} you can see directly - no need to open the file)` },
           ...attached.map((image) => ({ type: "image_url", image_url: { url: image.dataUrl } })),
         ],
         tool_calls,
