@@ -1292,6 +1292,28 @@ function openSettingsDialog(startSection = "General") {
     row(section, title, about, button)
   }
 
+  // Which model's settings each generation section is showing, and what is remembered (loaded once open).
+  const shownModel = {}
+  let memories
+  const rebuild = () => { if (modal.open) { build(); paint() } }
+  const saveMediaFor = async (model, option, value) => {
+    const result = await fetch("/api/media-settings", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ option, value, model }),
+    }).then((r) => r.json()).catch(() => null)
+    if (result && result.ok) paletteData.media = result.settings
+    else note((result && result.message) || "could not save that")
+  }
+  const remember = async (argument) => {
+    const result = await fetch("/api/memory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ argument }) }).then((r) => r.json()).catch(() => null)
+    const listed = await fetch("/api/memory").then((r) => r.json()).catch(() => null)
+    memories = (listed && listed.entries) || []
+    rebuild()
+    return result
+  }
+  void fetch("/api/memory").then((r) => r.json()).catch(() => null).then((listed) => { memories = (listed && listed.entries) || []; rebuild() })
+
+  const build = () => {
+  entries.length = 0
   action("General", "Agent profile", "The instructions and tools the goblin works with in this conversation.", currentAgent || "default", () => { modal.close(); void openAgentsDialog() })
   toggle("General", "Show thinking", "Show the model's reasoning above its answer, when it shares any.", !!webSettings.thinking, (thinking) => saveSettings({ thinking }))
   toggle("General", "Paste summary", "Fold a long paste into [Pasted ~N lines] in the box. The model still gets every line.", webSettings.pasteSummary !== false, (pasteSummary) => saveSettings({ pasteSummary }))
@@ -1317,6 +1339,56 @@ function openSettingsDialog(startSection = "General") {
       refreshPalette()
     })
   }
+
+  // Images, audio and 3D: every generator keeps its own settings, so each section says whose it is showing.
+  for (const [kind, section, word, example] of [
+    ["image", "Images", "image", "/image a goblin reading code"],
+    ["audio", "Audio", "voice", "/audio hello there"],
+    ["model3d", "3D models", "3D", "/model3d a small stone bridge"],
+  ]) {
+    const models = modelOptions.filter((option) => option.kind === kind)
+    if (!models.length) { row(section, "No " + word + " models", "None are in the model list yet. Connect a provider that has them.", el("span")); continue }
+    const model = models.find((option) => option.value === shownModel[kind]) || models.find((option) => option.value === currentModel) || models.find((option) => option.ready) || models[0]
+    shownModel[kind] = model.value
+    choice(section, "Model", "Whose settings show below. Each " + word + " model keeps its own.", models.map((option) => [option.value, option.label + (option.ready ? "" : " (not connected)")]), model.value, (value) => { shownModel[kind] = value; rebuild() })
+    const selected = model.value === currentModel
+    action(section, selected ? "Selected" : "Use this model", selected
+      ? "It is the model on the picker: what you type is generated. " + example + " also works from any model."
+      : "Put it on the picker, so what you type is generated rather than answered.", selected ? "In use" : "Select", async () => { if (!selected) { await runCommand("/model " + model.value); rebuild() } })
+    const options = (paletteData.mediaOptions || []).filter((option) => model.settings.includes(option.id))
+    for (const option of options) {
+      if (option.dynamic === "voices" && voicesState === "cold") void loadVoices().then(rebuild)
+      const pool = option.dynamic === "voices" ? [{ id: "default", label: voicesState === "loaded" ? "account default" : "account default (loading voices…)" }].concat(mediaVoices) : option.choices || []
+      if (!pool.length) continue
+      choice(section, option.label, option.about || "", pool.map((entry) => [entry.id, entry.label]), (paletteData.media || {})[model.value + ":" + option.id] || "default", (value) => saveMediaFor(model.value, option.id, value))
+    }
+    if (!options.length) row(section, "Nothing to change", "This model's request has no settings.", el("span"))
+  }
+
+  // Memory: what the goblin is told at the start of every turn in this project.
+  {
+    const field = el("input")
+    field.type = "text"; field.placeholder = "e.g. tests run with bun run test"; field.setAttribute("aria-label", "Something to remember")
+    field.onkeydown = (event) => { if (event.key === "Enter" && field.value.trim()) { event.preventDefault(); void remember("add " + field.value.trim()) } }
+    row("Memory", "Remember something", "A short fact or preference. It is given to the model on every turn in this project. Enter saves it.", field)
+    if (!memories) row("Memory", "Loading…", "", el("span"))
+    else if (!memories.length) row("Memory", "Nothing remembered yet", "/memory add ... does the same from the prompt.", el("span"))
+    for (const entry of memories || []) {
+      const forget = el("button", "", "Forget")
+      forget.type = "button"
+      forget.onclick = () => { forget.disabled = true; void remember("forget " + entry.id) }
+      row("Memory", entry.content, (entry.pinned ? "pinned · " : "") + (entry.scope === "user" ? "every project" : "this project"), forget)
+    }
+    if (memories && memories.length > 1) {
+      const all = el("button", "", "Forget all")
+      all.type = "button"
+      // Two clicks: the first only asks.
+      all.onclick = () => { if (all.dataset.sure) void remember("clear"); else { all.dataset.sure = "1"; all.textContent = "Really forget all " + memories.length + "?" } }
+      row("Memory", "Forget everything", "Removes every memory above. This cannot be undone.", all)
+    }
+  }
+  }
+  build()
 
   const sections = [...new Set(entries.map((entry) => entry.section))]
   let current = sections.includes(startSection) ? startSection : sections[0]

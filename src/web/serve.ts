@@ -776,6 +776,12 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     return json({ message: gone ? "disconnected " + provider : "no stored key for " + provider })
   }
 
+  // What is remembered for this project, as a list the Settings page can draw and forget from.
+  if (url.pathname === "/api/memory" && request.method === "GET") {
+    const entries = await memory.list({ project: root }).catch(() => [])
+    return json({ entries: entries.map((entry) => ({ id: entry.id, content: entry.content, scope: entry.scope, pinned: Boolean(entry.pinned) })) })
+  }
+
   if (url.pathname === "/api/memory" && request.method === "POST") {
     const body = (await request.json()) as { argument?: string; sessionId?: string }
     const parsed = runCommand("/memory " + (body.argument ?? "").trim())
