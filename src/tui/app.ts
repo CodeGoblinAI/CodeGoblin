@@ -850,7 +850,7 @@ function render() {
    */
   const footer = {
     prompt: promptHeight,
-    pending: pending && !input ? decisionsFor(pending.tool).length + 3 : !pending && asking && !asking.typing ? asking.question.options.length + 5 : 0,
+    pending: pending && !input ? decisionsFor(pending.tool).length + 3 : !pending && asking && !asking.typing ? asking.question.options.length + 4 + wrapWords(asking.question.question, Math.max(23, cols - 7)).length : 0,
     queued: false,
     images: Boolean(pendingImages.length && !secret),
     scrolled: false,
@@ -966,7 +966,9 @@ function render() {
     const wanted = Math.max(3 + labelWidth + Math.max(0, ...rows.map((row) => displayWidth(row.hint))), displayWidth(title), displayWidth(keys) + 2) + 1
     const inner = Math.max(24, Math.min(wanted, cols - 6))
     body.push(theme.border + "  ╭" + "─".repeat(inner) + "╮" + ansi.reset)
-    body.push(theme.border + "  │" + ansi.reset + theme.gold + padToWidth(truncateToWidth(title, inner), inner) + ansi.reset + theme.border + "│" + ansi.reset)
+    // A question longer than the window wraps: in a 44-column terminal it used to be cut mid-word.
+    for (const [index, piece] of wrapWords(entry.question.question, inner - 1).entries())
+      body.push(theme.border + "  │" + ansi.reset + theme.gold + padToWidth(" " + piece, inner) + ansi.reset + theme.border + "│" + ansi.reset)
     for (const [index, row] of rows.entries()) {
       const active = index === askingChoice
       const marker = active ? theme.goblin + " ❯ " + ansi.reset : "   "
@@ -1033,7 +1035,7 @@ function render() {
     shown = dim + (asking.typing ? "type your answer..." : "pick an answer above") + ansi.reset
   } else if (streaming && !input) {
     caretOffset = 0
-    shown = dim + "type to queue a message for when this finishes" + ansi.reset
+    shown = dim + (cols < 60 ? "type to queue a message" : "type to queue a message for when this finishes") + ansi.reset
   } else if (secret) {
     // Dots, and one per character rather than a fixed run, so backspace is
     // visible without the key ever being.
@@ -1152,7 +1154,7 @@ function render() {
     : asking && !pending
     ? asking.typing ? "enter answers \u00b7 esc back to the choices" : compactHints ? "number or enter \u00b7 esc" : "up/down \u00b7 number or enter picks \u00b7 esc dismiss"
     : streaming
-    ? (queued ? "queued · esc twice stops" : compactHints ? "enter queue · esc esc stop" : "enter queue · ctrl+s now · esc twice stops")
+    ? (queued ? (compactHints ? "esc esc stop" : "queued · esc twice stops") : compactHints ? "enter queue · esc esc stop" : "enter queue · ctrl+s now · esc twice stops")
     : secret
     ? "enter saves · esc cancels · nothing is echoed"
     : overlay
@@ -1160,7 +1162,7 @@ function render() {
     : scroll > 0
       ? compactHints ? "ctrl+end bottom" : "pgup/pgdn page \u00b7 ctrl+\u2191\u2193 your messages \u00b7 ctrl+end bottom"
       : palette
-        ? "tab complete · up/down pick"
+        ? compactHints ? "tab completes" : "tab complete · up/down pick"
         : compactHints ? "ctrl+g actions" : "shift+tab mode \u00b7 ctrl+g actions \u00b7 ctrl+c copy/quit"
   // The model, context and cost matter more than key hints: when the long hints would cut the readout
   // short ("$0.0…" on a 120-column window with a long model name), the short hints are used instead.

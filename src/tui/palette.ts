@@ -224,6 +224,9 @@ export function slashRange(input: string, cursor: number): { start: number; end:
 const LIST_LIMIT = 60
 const VISIBLE_ROWS = 9
 
+const cut = (text: string, width: number) =>
+  displayWidth(text) > width ? truncateToWidth(text, Math.max(0, width - 1)) + "…" : text
+
 export function renderPalette(items: PaletteItem[], selected: number, width: number, maxHeight = Infinity): string[] {
   if (maxHeight < 4) return []
   const visibleRows = Math.max(1, Math.min(VISIBLE_ROWS, Math.floor(maxHeight) - 3))
@@ -234,7 +237,10 @@ export function renderPalette(items: PaletteItem[], selected: number, width: num
   const longestHint = items.reduce((max, item) => Math.max(max, displayWidth(item.hint)), 0)
 
   const available = Math.max(30, Math.min(width - 6, 110))
-  const valueColumn = Math.min(longestValue, available - 12)
+  // In a narrow window the names give up room too: a 33-column skill name used to leave six columns
+  // of description in a 44-column terminal. Names keep at least half, and what is cut ends in an ellipsis.
+  const wanted = Math.min(longestValue, available - 12)
+  const valueColumn = wanted + longestHint + 6 > available ? Math.min(wanted, Math.max(14, Math.ceil((available - 6) / 2))) : wanted
   const hintColumn = Math.min(longestHint, Math.max(0, available - valueColumn - 6))
 
   // marker(2) + value + gap(2) + hint
@@ -251,8 +257,8 @@ export function renderPalette(items: PaletteItem[], selected: number, width: num
     const index = start + offset
     const active = index === selected
     const marker = active ? theme.goblin + "❯ " + ansi.reset : "  "
-    const value = padToWidth(truncateToWidth(item.value, valueColumn), valueColumn)
-    const hint = padToWidth(truncateToWidth(item.hint, hintColumn), hintColumn)
+    const value = padToWidth(cut(item.value, valueColumn), valueColumn)
+    const hint = padToWidth(cut(item.hint, hintColumn), hintColumn)
     const body = marker + (active ? theme.text : theme.muted) + value + ansi.reset + "  " + dim + hint + ansi.reset
     // Close the row so the box reads as a box rather than an open bracket.
     lines.push(theme.border + "  │" + ansi.reset + body + theme.border + "│" + ansi.reset)

@@ -312,9 +312,12 @@ export function compose(base: string[], boxLines: string[], cols: number, rows: 
   for (const [offset, boxLine] of boxLines.entries()) {
     const row = top + offset
     const under = padToWidth(plain(out[row] ?? ""), cols)
-    const before = truncateToWidth(under, left)
+    // With only a sliver either side (a narrow terminal) the conversation showing through read as stray
+    // marks beside the frame - a lone "|" or the end of a word - so the sliver is left blank.
+    const sliver = left < 8
+    const before = sliver ? "" : truncateToWidth(under, left)
     const afterStart = left + width
-    const after = [...under].slice(afterStart).join("")
+    const after = sliver ? "" : [...under].slice(afterStart).join("")
     out[row] =
       dim + padToWidth(before, left) + ansi.reset +
       boxLine +
