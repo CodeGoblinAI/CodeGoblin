@@ -28,6 +28,8 @@ fs.writeFileSync(path.join(project, "README.md"), "# demo\n")
 try { execFileSync("git", ["init", "-q", "-b", "main", project]) } catch {}
 const profile = tempDir("cg-window-profile-")
 const title = "CGN-TEST-" + process.pid
+// CG_THEME=paper starts on that theme; CG_SCHEME="One Half Light" gives the window a Windows Terminal colour scheme.
+if (process.env.CG_THEME) { fs.mkdirSync(path.join(profile, "state"), { recursive: true }); fs.writeFileSync(path.join(profile, "state", "settings.json"), JSON.stringify({ theme: process.env.CG_THEME, appearance: process.env.CG_THEME === "paper" ? "light" : "dark" })) }
 // Windows Terminal may already be running, in which case a new window does not inherit this process's
 // environment - so the window runs a small launcher that sets it.
 const launcher = path.join(os.tmpdir(), "cg-window-" + process.pid + ".cmd")
@@ -40,7 +42,7 @@ fs.writeFileSync(launcher, [
   "cd /d " + project,
   "bun C:\\Users\\shawn\\code\\CG-Next\\src\\tui\\app.ts --model local",
 ].join("\r\n"))
-spawn("wt.exe", ["-w", "new", "--size", cols + "," + rows, "new-tab", "--title", title, "--suppressApplicationTitle", "cmd.exe", "/c", launcher], { detached: true, stdio: "ignore" }).unref()
+spawn("wt.exe", ["-w", "new", "--size", cols + "," + rows, "new-tab", "--title", title, "--suppressApplicationTitle", ...(process.env.CG_SCHEME ? ["--colorScheme", process.env.CG_SCHEME] : []), "cmd.exe", "/c", launcher], { detached: true, stdio: "ignore" }).unref()
 console.log("TITLE " + title)
 // The app's process: the bun started from this launcher's folder.
 let pid = ""
