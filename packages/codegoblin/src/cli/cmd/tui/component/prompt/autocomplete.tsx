@@ -1,6 +1,5 @@
 import type { BoxRenderable, TextareaRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { pathToFileURL } from "bun"
-import fuzzysort from "fuzzysort"
 import path from "path"
 import { firstBy } from "remeda"
 import { createMemo, createResource, createEffect, onMount, onCleanup, Index, Show, createSignal } from "solid-js"
@@ -21,11 +20,7 @@ import { useBindings, useCommandSlashes, useOpencodeModeStack } from "../../keym
 import { Reference } from "@/reference/reference"
 import { ConfigReference } from "@/config/reference"
 import { displayCharAt, mentionTriggerIndex, slashTriggerIndex } from "@/cli/cmd/prompt-display"
-
-function removeLineRange(input: string) {
-  const hashIndex = input.lastIndexOf("#")
-  return hashIndex !== -1 ? input.substring(0, hashIndex) : input
-}
+import { builtinFirst, searchAutocomplete } from "./autocomplete-search"
 
 function extractLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -68,6 +63,7 @@ export type AutocompleteOption = {
   isDirectory?: boolean
   onSelect?: () => void
   path?: string
+  builtin?: boolean
 }
 
 export function Autocomplete(props: {
@@ -548,7 +544,7 @@ export function Autocomplete(props: {
     // so UI commands are hidden; at the start of the prompt the classic
     // execute-a-command list applies. Skills are listed in both cases.
     const inline = store.visible === "/" && store.index > 0
-    const results: AutocompleteOption[] = inline ? [] : [...slashes()]
+    const results: AutocompleteOption[] = inline ? [] : slashes().map((option) => ({ ...option, builtin: true }))
 
     for (const serverCommand of sync.data.command) {
       const label = serverCommand.source === "mcp" ? ":mcp" : serverCommand.source === "skill" ? ":skill" : ""
@@ -572,7 +568,7 @@ export function Autocomplete(props: {
       })
     }
 
-    results.sort((a, b) => a.display.localeCompare(b.display))
+    results.sort((a, b) => builtinFirst(a, b) || a.display.localeCompare(b.display))
 
     const max = firstBy(results, [(x) => x.display.length, "desc"])?.display.length
     if (!max) return results
@@ -607,25 +603,7 @@ export function Autocomplete(props: {
       return prev
     }
 
-    const result = fuzzysort.go(removeLineRange(searchValue), mixed, {
-      keys: [
-        (obj) => removeLineRange((obj.value ?? obj.display).trimEnd()),
-        "description",
-        (obj) => obj.aliases?.join(" ") ?? "",
-      ],
-      limit: 10,
-      scoreFn: (objResults) => {
-        const displayResult = objResults[0]
-        let score = objResults.score
-        if (displayResult && displayResult.target.startsWith(store.visible + searchValue)) {
-          score *= 2
-        }
-        const frecencyScore = objResults.obj.path ? frecency.getFrecency(objResults.obj.path) : 0
-        return score * (1 + frecencyScore)
-      },
-    })
-
-    return result.map((arr) => arr.obj)
+    return searchAutocomplete(searchValue, mixed, store.visible, (path) => frecency.getFrecency(path))
   })
 
   createEffect(() => {
