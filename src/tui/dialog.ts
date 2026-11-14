@@ -1,5 +1,6 @@
 import { theme, dim, ansi } from "./ansi"
 import { displayWidth, truncateToWidth, padToWidth } from "./width"
+import { commandScore } from "../core/command-rank"
 
 /**
  * A popup.
@@ -20,6 +21,10 @@ export type Tone = "text" | "muted" | "gold" | "added" | "removed" | "heading"
 
 export type DialogRow = {
   label: string
+  /** Filterable dialogs: the text matched, when it is more than the label - a whole message. */
+  search?: string
+  /** With search: when filtered, the label becomes the part of the text around the match. */
+  snippet?: boolean
   /** Dimmer text at the right-hand end of the row. */
   hint?: string
   tone?: Tone
@@ -49,6 +54,14 @@ export type Dialog = {
    * worse than the thing it protects against.
    */
   armed?: string
+  /**
+   * Type to narrow the list, as every list in the fork can: a search line
+   * under the title, rows matched as the / list matches commands. `all` is
+   * the full list; `rows` is what matches `query`.
+   */
+  filterable?: boolean
+  query?: string
+  all?: DialogRow[]
 }
 
 const WIDTHS = { medium: 60, large: 88, full: 0 } as const
@@ -60,7 +73,7 @@ export function dialogWidth(dialog: Dialog, cols: number): number {
 
 /** How many rows of content fit, leaving room for the frame and the footer. */
 export function dialogHeight(dialog: Dialog, rows: number): number {
-  const chrome = dialog.footer ? 5 : 4
+  const chrome = (dialog.footer ? 5 : 4) + (dialog.filterable ? 1 : 0)
   // Room is left for the prompt and the status bar beneath: a long list such
   // as /help or /skills used to draw its bottom edge over both.
   return Math.max(1, Math.min(dialog.rows.length, rows - chrome - 9))
@@ -74,7 +87,7 @@ export function open(
   kind: string,
   title: string,
   rows: DialogRow[],
-  options: { footer?: string; size?: Dialog["size"]; selectedValue?: string } = {},
+  options: { footer?: string; size?: Dialog["size"]; selectedValue?: string; filterable?: boolean } = {},
 ): Dialog {
   const choices = selectable(rows)
   const first = (options.selectedValue === undefined ? undefined : choices.find((index) => rows[index]!.value === options.selectedValue)) ?? choices[0] ?? 0
@@ -85,7 +98,40 @@ export function open(
     index: first,
     footer: options.footer,
     size: options.size ?? "medium",
+    ...(options.filterable ? { filterable: true, query: "", all: rows } : {}),
   }
+}
+
+/**
+ * Narrow a filterable dialog to the rows matching `query`, closest first.
+ *
+ * A row with `search` text is matched on all of it - a whole message, say -
+ * and with `snippet` its label becomes the part around the match, so a hit in
+ * the middle of a long message shows where it is. Other rows are matched on
+ * label and hint the way the / list matches names and descriptions. Headings
+ * drop out while something is typed: they head groups that no longer exist.
+ */
+export function filter(dialog: Dialog, query: string): Dialog {
+  if (!dialog.filterable) return dialog
+  const all = dialog.all ?? dialog.rows
+  const q = query.trim().toLowerCase()
+  const rows = !q ? all : all
+    .filter((row) => !row.inert)
+    .map((row, at) => {
+      if (row.search === undefined) return { row, at, score: commandScore(row.label, row.hint ?? "", q) }
+      const found = row.search.toLowerCase().indexOf(q)
+      if (found < 0) return { row, at, score: -1 }
+      if (!row.snippet) return { row, at, score: 500 }
+      const flat = row.search.replace(/\s+/g, " ")
+      const where = flat.toLowerCase().indexOf(q)
+      const from = Math.max(0, where - 24)
+      return { row: { ...row, label: (from > 0 ? "\u2026" : "") + flat.slice(from, from + 90) }, at, score: 500 }
+    })
+    .filter((entry) => entry.score >= 0)
+    .sort((a, b) => b.score - a.score || a.at - b.at)
+    .map((entry) => entry.row)
+  const choices = selectable(rows)
+  return { ...dialog, rows, query, index: choices[0] ?? 0, armed: undefined }
 }
 
 /**
@@ -112,6 +158,8 @@ export function selected(dialog: Dialog): DialogRow | undefined {
 
 /** Replace the rows, keeping the selection where it can still go. */
 export function withRows(dialog: Dialog, rows: DialogRow[]): Dialog {
+  // A filtered list keeps its search: the new rows are the full list, narrowed again.
+  if (dialog.filterable) return filter({ ...dialog, all: rows }, dialog.query ?? "")
   const options = selectable(rows)
   const index = options.includes(dialog.index) ? dialog.index : (options[0] ?? 0)
   return { ...dialog, rows, index, armed: undefined }
@@ -173,6 +221,14 @@ export function box(dialog: Dialog, cols: number, rows: number): string[] {
       theme.borderStrong + "│" + ansi.reset,
   )
   lines.push(theme.borderStrong + "├" + rule + "┤" + ansi.reset)
+
+  // The search line: what has been typed, or that typing searches.
+  if (dialog.filterable) {
+    const typed = dialog.query ?? ""
+    const text = typed ? theme.text + " \u2315 " + typed + ansi.reset + theme.goblin + "\u2588" + ansi.reset : dim + " \u2315 type to search" + ansi.reset
+    lines.push(theme.borderStrong + "\u2502" + ansi.reset + padToWidth(text, inner) + theme.borderStrong + "\u2502" + ansi.reset)
+    if (!dialog.rows.length) lines.push(theme.borderStrong + "\u2502" + ansi.reset + dim + padToWidth("   nothing matches", inner) + ansi.reset + theme.borderStrong + "\u2502" + ansi.reset)
+  }
 
   for (const [offset, row] of shown.entries()) {
     const index = start + offset

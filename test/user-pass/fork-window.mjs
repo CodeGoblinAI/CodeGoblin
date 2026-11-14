@@ -12,8 +12,13 @@ import { execFileSync, spawn } from "node:child_process"
 import { tempDir, delay } from "./harness.mjs"
 
 const [cols = "120", rows = "36"] = process.argv.slice(2)
+// FORK_SOURCE=<a checkout> runs that checkout from source instead of the installed release.
+const source = process.env.FORK_SOURCE
 const exe = path.join(process.env.APPDATA ?? "", "npm", "node_modules", "@codegoblin-io", "codegoblin", "bin", "codegoblin.exe")
-if (!fs.existsSync(exe)) throw new Error("the fork is not installed where expected: " + exe)
+const entry = source ? path.join(source, "packages", "codegoblin", "src", "index.ts") : exe
+if (!fs.existsSync(entry)) throw new Error("the fork is not where expected: " + entry)
+const run = source ? "bun run --conditions=browser src/index.ts" : '"' + exe + '"'
+const processName = source ? "bun.exe" : "codegoblin.exe"
 
 const reply = "Here is what I found.\n\n## Plan\n\n1. Read `src/core/agent.ts`\n2. Add the guard\n\n```ts\nexport function guard(n: number) {\n  return n > 0\n}\n```\n\n| File | Change |\n| --- | --- |\n| agent.ts | guard added |\n\nDone: **1 file** changed."
 const textOf = (message) => typeof message?.content === "string" ? message.content : (message?.content ?? []).map((part) => part.text ?? "").join(" ")
@@ -99,8 +104,10 @@ fs.writeFileSync(launcher, [
   "set CODEGOBLIN_RUNTIME_DIR=" + dirs.runtime,
   "set CODEGOBLIN_DISABLE_AUTOUPDATE=1",
   "set CLAUDE_CODE_MESSAGING_TOKEN=",
-  "cd /d " + project,
-  '"' + exe + '"',
+  // From source, bun must start in the package folder to read its bunfig.toml (the JSX setup);
+  // the project folder is then passed as the argument, as the fork's own dev script does.
+  source ? "cd /d " + path.dirname(path.dirname(entry)) : "cd /d " + project,
+  source ? run + ' "' + project + '"' : run,
 ].join("\r\n"))
 spawn("wt.exe", ["-w", "new", "--size", cols + "," + rows, "new-tab", "--title", title, "--suppressApplicationTitle", "cmd.exe", "/c", launcher], { detached: true, stdio: "ignore" }).unref()
 console.log("TITLE " + title)
@@ -110,7 +117,7 @@ let pid = ""
 for (let attempt = 0; attempt < 40 && !pid; attempt++) {
   await delay(500)
   try {
-    pid = execFileSync("powershell", ["-NoProfile", "-Command", `$cmd = Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" | Where-Object { $_.CommandLine -match '${launcherName}' } | Select-Object -First 1; if ($cmd) { (Get-CimInstance Win32_Process -Filter "Name='codegoblin.exe'" | Where-Object { $_.ParentProcessId -eq $cmd.ProcessId } | Select-Object -First 1).ProcessId }`], { encoding: "utf8" }).trim()
+    pid = execFileSync("powershell", ["-NoProfile", "-Command", `$cmd = Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" | Where-Object { $_.CommandLine -match '${launcherName}' } | Select-Object -First 1; if ($cmd) { (Get-CimInstance Win32_Process -Filter "Name='${processName}'" | Where-Object { $_.ParentProcessId -eq $cmd.ProcessId } | Select-Object -First 1).ProcessId }`], { encoding: "utf8" }).trim()
   } catch {}
 }
 console.log("PID " + pid)

@@ -53,6 +53,7 @@ export type CommandResult =
   | { kind: "branch"; name?: string }
   | { kind: "editor" }
   | { kind: "timeline" }
+  | { kind: "search"; query?: string }
   | { kind: "fold" }
   | { kind: "timestamps" }
   | { kind: "connect"; provider?: string }
@@ -75,6 +76,7 @@ export const COMMANDS = [
   { name: "/terminal", description: "a shell in the project folder, in the browser (ctrl+`)" },
   { name: "/open", description: "find a project file and read it (web); /open <path> opens one" },
   { name: "/timeline", description: "jump to an earlier message in this conversation - ctrl+x g" },
+  { name: "/search", description: "search this conversation - your messages and the answers: /search <words>" },
   { name: "/fold", description: "fold every answer to its first lines, or unfold them" },
   { name: "/timestamps", description: "show or hide when each message was written" },
   { name: "/editor", description: "write the prompt in your editor ($VISUAL / $EDITOR, else Notepad) - ctrl+x e" },
@@ -248,6 +250,8 @@ export function runCommand(text: string): CommandResult {
       return { kind: "editor" }
     case "/timeline":
       return { kind: "timeline" }
+    case "/search":
+      return { kind: "search", query: argument || undefined }
     case "/open":
       return { kind: "message", text: "/open is the browser's file viewer; here, @path mentions a file and the model can read_file it" }
     case "/fold":

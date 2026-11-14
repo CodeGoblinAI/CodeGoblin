@@ -1351,7 +1351,7 @@ async function openSessions() {
       hint: (entry.id === session.id ? "open · " : "") + sessions.ago(entry.updated),
       value: entry.id,
     })),
-    { footer: "enter opens · ctrl+d twice deletes · esc closes", size: "large" },
+    { footer: "type to search · enter opens · ctrl+d twice deletes · esc closes", size: "large", filterable: true },
   )
 }
 
@@ -1895,7 +1895,8 @@ function openModelPicker(selectedValue = selection.provider.id + "/" + selection
   dialog = Dialogs.open("model-picker", "Choose model", modelPickerRows(), {
     size: "large",
     selectedValue,
-    footer: "enter choose · ctrl+f favourite · esc close",
+    filterable: true,
+    footer: "type to search · enter choose · ctrl+f favourite · esc close",
   })
 }
 
@@ -1908,7 +1909,27 @@ function openTimeline() {
     label: entry.text.replace(/\s+/g, " ").slice(0, 70),
     hint: entry.at ? sessions.clockTime(entry.at) : undefined,
     value: String(transcript.length - drawn.length + index),
-  })), { size: "large", footer: "enter jumps there · esc closes" })
+  })), { size: "large", footer: "type to search · enter jumps there · esc closes", filterable: true })
+}
+
+/**
+ * /search: every message in the conversation - yours and the answers - to
+ * search as you type, each shown around where it matches; enter goes there.
+ * The timeline lists only what you asked; an answer is often what you want
+ * back.
+ */
+function openSearch(query = "") {
+  const drawn = transcript.length > TRANSCRIPT_WINDOW ? transcript.slice(-TRANSCRIPT_WINDOW) : transcript
+  const messages = drawn.map((entry, index) => ({ entry, index })).filter(({ entry }) => entry.kind === "user" || entry.kind === "agent")
+  if (!messages.length) { status = "nothing to search yet"; return }
+  dialog = Dialogs.open("search", "Search this conversation", messages.reverse().map(({ entry, index }) => ({
+    label: entry.text.replace(/\s+/g, " ").slice(0, 90),
+    hint: (entry.kind === "user" ? "you" : "goblin") + (entry.at ? " · " + sessions.clockTime(entry.at) : ""),
+    value: String(transcript.length - drawn.length + index),
+    search: entry.text,
+    snippet: true,
+  })), { size: "large", footer: "type to search · enter goes to it · esc closes", filterable: true })
+  if (query) dialog = Dialogs.filter(dialog, query)
 }
 
 /** Stars or unstars a model; the change is written straight to the shared settings file. */
@@ -2102,7 +2123,7 @@ async function chooseInDialog() {
     render()
     return
   }
-  if (dialog.kind === "timeline") {
+  if (dialog.kind === "timeline" || dialog.kind === "search") {
     jumpTo = transcript[Number(row.value)]
     closeDialog(); render(); return
   }
@@ -2701,6 +2722,10 @@ async function send() {
     }
     if (result.kind === "timeline") {
       openTimeline()
+      render(); return
+    }
+    if (result.kind === "search") {
+      openSearch(result.query)
       render(); return
     }
     if (result.kind === "project") {
@@ -3383,6 +3408,7 @@ const ACTIONS: { label: string; run: string; leader?: LeaderAction; keys?: strin
   { label: "Compact the conversation", run: "leader:compact", leader: "compact" },
   { label: "Copy the last answer", run: "leader:copy", leader: "copy" },
   { label: "Export as Markdown", run: "leader:export", leader: "export" },
+  { label: "Search this conversation", run: "/search" },
   { label: "Jump to a message", run: "leader:timeline", leader: "timeline" },
   { label: "Write the prompt in your editor", run: "leader:editor", leader: "editor" },
   { label: "Browser", run: "/browser" },
@@ -3397,7 +3423,7 @@ function openActions() {
     const letter = action.leader ? Object.entries(keymap.letters).find(([, each]) => each === action.leader)?.[0] : undefined
     return [letter ? "ctrl+" + keymap.leader + " " + letter : "", action.keys ?? ""].filter(Boolean).join(" \u00b7 ")
   }
-  dialog = Dialogs.open("actions", "goblin commands", ACTIONS.map((action) => ({ label: action.label, hint: keysFor(action), value: action.run })), { footer: "enter runs \u00b7 esc closes", size: "medium" })
+  dialog = Dialogs.open("actions", "goblin commands", ACTIONS.map((action) => ({ label: action.label, hint: keysFor(action), value: action.run })), { footer: "type to search \u00b7 enter runs \u00b7 esc closes", size: "medium", filterable: true })
 }
 
 /**
@@ -3601,6 +3627,9 @@ process.stdin.on("data", (chunk) => {
       if (pressed.type === "end") { dialog = Dialogs.move(dialog, dialog.rows.length); render(); continue }
       if (pressed.type === "enter") { void chooseInDialog(); continue }
       if (pressed.type === "ctrl" && pressed.value === "d") { void deleteInDialog(); continue }
+      // In a list you can search, typing narrows it and backspace widens it again.
+      if (dialog.filterable && pressed.type === "char") { dialog = Dialogs.filter(dialog, (dialog.query ?? "") + pressed.value); render(); continue }
+      if (dialog.filterable && pressed.type === "backspace") { dialog = Dialogs.filter(dialog, (dialog.query ?? "").slice(0, -1)); render(); continue }
       // ctrl+f stars the highlighted model, as in the fork's model dialog.
       if (dialog.kind === "model-picker" && pressed.type === "ctrl" && pressed.value === "f") {
         const value = Dialogs.selected(dialog)?.value

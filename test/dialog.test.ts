@@ -1,4 +1,5 @@
 import { expect, test, describe } from "bun:test"
+import * as Dialogs from "../src/tui/dialog"
 import {
   open,
   move,
@@ -208,5 +209,55 @@ describe("arming shows", () => {
   test("an unarmed row keeps its own hint", () => {
     const dialog = open("test", "T", [{ label: "a chat", hint: "open", value: "a" }])
     expect(box(dialog, 80, 30).map(plain).join(" ")).toContain("open")
+  })
+})
+
+describe("a list you can search", () => {
+  const rows = [
+    { label: "Text models", inert: true },
+    { label: "DeepSeek V4 Flash", hint: "no key", value: "deepseek/deepseek-v4-flash" },
+    { label: "GLM 5.3 Flash", hint: "Z.ai", value: "zai/glm-5.3-flash" },
+    { label: "GPT-5.6", hint: "OpenAI", value: "openai/gpt-5.6" },
+  ]
+
+  test("typing narrows it, closest first, headings drop out; clearing brings everything back", () => {
+    const open = Dialogs.open("model-picker", "Choose model", rows, { filterable: true })
+    expect(open.filterable).toBe(true)
+    const flash = Dialogs.filter(open, "flash")
+    // Equally close matches: the shorter name first.
+    expect(flash.rows.map((row) => row.value)).toEqual(["zai/glm-5.3-flash", "deepseek/deepseek-v4-flash"])
+    expect(Dialogs.selected(flash)?.value).toBe("zai/glm-5.3-flash")
+    expect(Dialogs.filter(open, "openai").rows.map((row) => row.value)).toEqual(["openai/gpt-5.6"])
+    expect(Dialogs.filter(open, "zzz").rows).toEqual([])
+    expect(Dialogs.filter(flash, "").rows).toEqual(rows)
+  })
+
+  test("the box shows what was typed, or that typing searches, and says when nothing matches", () => {
+    const open = Dialogs.open("x", "Pick", rows, { filterable: true })
+    expect(Dialogs.box(open, 100, 40).map(Dialogs.plain).join("\n")).toContain("type to search")
+    const none = Dialogs.box(Dialogs.filter(open, "zzz"), 100, 40).map(Dialogs.plain).join("\n")
+    expect(none).toContain("⌕ zzz")
+    expect(none).toContain("nothing matches")
+    // A list that does not search is drawn as before.
+    expect(Dialogs.box(Dialogs.open("x", "Pick", rows), 100, 40).map(Dialogs.plain).join("\n")).not.toContain("type to search")
+  })
+
+  test("a whole message is searched, and the row shows the part around the match", () => {
+    const long = "Here is a long answer. ".repeat(6) + "The guard goes in the agent loop, before the next request."
+    const open = Dialogs.open("search", "Search", [
+      { label: long.slice(0, 40), search: long, snippet: true, value: "1" },
+      { label: "nothing here", search: "nothing here", snippet: true, value: "2" },
+    ], { filterable: true })
+    const found = Dialogs.filter(open, "guard")
+    expect(found.rows).toHaveLength(1)
+    expect(found.rows[0]!.label.startsWith("…")).toBe(true)
+    expect(found.rows[0]!.label).toContain("The guard goes in the agent loop")
+  })
+
+  test("new rows for a searched list keep the search", () => {
+    const searched = Dialogs.filter(Dialogs.open("x", "Pick", rows, { filterable: true }), "glm")
+    const refreshed = Dialogs.withRows(searched, [...rows, { label: "GLM 5.3", value: "zai/glm-5.3" }])
+    expect(refreshed.query).toBe("glm")
+    expect(refreshed.rows.map((row) => row.value)).toEqual(["zai/glm-5.3", "zai/glm-5.3-flash"])
   })
 })
