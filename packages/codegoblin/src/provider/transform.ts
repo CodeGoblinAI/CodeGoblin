@@ -638,6 +638,16 @@ function googleThinkingBudgetMax(apiId: string) {
 export function variants(model: Provider.Model): Record<string, Record<string, any>> {
   if (!model.capabilities.reasoning) return {}
 
+  // Refuseless rejects the generic OpenAI-compatible "medium" effort.
+  // Its free route, unlike the other DeepSeek routes, does not accept "off".
+  if (model.providerID === "refuseless") {
+    const efforts =
+      model.api.id.startsWith("deepseek-") && !model.api.id.endsWith("-free")
+        ? ["off", "low", "high", "max"]
+        : ["low", "high", "max"]
+    return Object.fromEntries(efforts.map((effort) => [effort, { reasoningEffort: effort }]))
+  }
+
   const id = model.id.toLowerCase()
   const adaptiveEfforts = anthropicAdaptiveEfforts(model.api.id)
   if (
