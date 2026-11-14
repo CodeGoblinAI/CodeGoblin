@@ -20,7 +20,8 @@ try {
   await key(t, "/new\r", 600)
   await key(t, "newer talk about plums\r", 1500)
   await key(t, "/sessions\r", 800); show("list", t)
-  const order = () => screen(t).split("\n").filter((line) => /talk about/.test(line) && /│/.test(line)).map((line) => /zebras/.test(line) ? "zebras" : "plums")
+  // Only the dialog's columns: the side panel names the open conversation too.
+  const order = () => screen(t).split("\n").map((line) => line.slice(0, 130)).filter((line) => /talk about/.test(line) && /│/.test(line)).map((line) => /zebras/.test(line) ? "zebras" : "plums")
   check("the list starts newest first", order().join(",") === "plums,zebras", order().join(","))
   await key(t, "\x1b[B", 200); await key(t, "\x10", 900); show("pinned", t)
   check("ctrl+p pins: it moves to the top with a star", order().join(",") === "zebras,plums" && /★ older talk/.test(screen(t)), order().join(","))
