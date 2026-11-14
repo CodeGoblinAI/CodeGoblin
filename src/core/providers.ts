@@ -76,6 +76,12 @@ export type Provider = {
   runtime?: boolean
   /** Sends stream_options.include_usage: OpenAI-style APIs omit usage on streams unless asked, and spend stays unknown. */
   usageOnStream?: boolean
+  /**
+   * About how many minutes an unused prompt-cache entry lasts, where the
+   * provider says. Only used to decide whether an idle conversation is worth
+   * compacting before then (core/idle-compact.ts); absent means unknown.
+   */
+  cacheMinutes?: number
   /** The usage block carries `cost`, in US dollars, for the request (Experiential Labs does). It is used instead of the price table. */
   reportsCost?: boolean
   /**
@@ -194,6 +200,8 @@ export const PROVIDERS: Record<string, Provider> = {
     id: "deepseek",
     label: "DeepSeek",
     baseUrl: "https://api.deepseek.com/chat/completions",
+    // "Usually within a few hours to a few days" (api-docs.deepseek.com/guides/kv_cache); the short end.
+    cacheMinutes: 120,
     models: [
       // Both think unless told not to (DeepSeek's docs); "none" turns it off.
       { id: "deepseek-v4-flash", label: "V4 Flash", reasoning: true, ...DEEPSEEK_EFFORT, contextWindow: 128000, price: { input: 0.15, output: 0.6, cacheRead: 0.003, peak: DEEPSEEK_PEAK } },
@@ -279,16 +287,18 @@ export const PROVIDERS: Record<string, Provider> = {
     // Chat and pictures from one key. The image model still goes to its
     // generator - what a prompt becomes is decided by the model's kind.
     baseUrl: "https://api.openai.com/v1/chat/completions",
+    // Extended retention "typically keeps entries available for around 30 minutes" (OpenAI's prompt caching guide); it is the default.
+    cacheMinutes: 30,
     usageOnStream: true,
     models: [
-      { id: "gpt-5.6", label: "GPT-5.6", reasoning: true, contextWindow: 1_050_000, price: { input: 4, output: 20 }, capabilities: { input: { text: true, image: true } } },
-      { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", reasoning: true, contextWindow: 1_050_000, price: { input: 2, output: 12 }, capabilities: { input: { text: true, image: true } } },
-      { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", reasoning: true, contextWindow: 1_050_000, price: { input: 0.2, output: 1.2 }, capabilities: { input: { text: true, image: true } } },
-      { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", reasoning: true, contextWindow: 1_050_000, price: { input: 4, output: 20 }, capabilities: { input: { text: true, image: true } } },
-      { id: "gpt-6-astra", label: "GPT-6 Astra", reasoning: true, contextWindow: 1_050_000, price: { input: 10, output: 50 }, capabilities: { input: { text: true, image: true } } },
-      { id: "gpt-5.5", label: "GPT-5.5", reasoning: true, contextWindow: 1_050_000, price: { input: 5, output: 30 }, capabilities: { input: { text: true, image: true } } },
-      { id: "gpt-5.4-mini", label: "GPT-5.4 mini", reasoning: true, contextWindow: 400_000, price: { input: 0.75, output: 4.5 }, capabilities: { input: { text: true, image: true } } },
-      { id: "gpt-5.4-nano", label: "GPT-5.4 nano", reasoning: true, contextWindow: 400_000, price: { input: 0.2, output: 1.25 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.6", label: "GPT-5.6", reasoning: true, contextWindow: 1_050_000, price: { input: 4, output: 20, cacheRead: 0.4 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", reasoning: true, contextWindow: 1_050_000, price: { input: 2, output: 12, cacheRead: 0.2 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", reasoning: true, contextWindow: 1_050_000, price: { input: 0.2, output: 1.2, cacheRead: 0.02 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", reasoning: true, contextWindow: 1_050_000, price: { input: 4, output: 20, cacheRead: 0.4 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-6-astra", label: "GPT-6 Astra", reasoning: true, contextWindow: 1_050_000, price: { input: 10, output: 50, cacheRead: 1 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.5", label: "GPT-5.5", reasoning: true, contextWindow: 1_050_000, price: { input: 5, output: 30, cacheRead: 0.5 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.4-mini", label: "GPT-5.4 mini", reasoning: true, contextWindow: 400_000, price: { input: 0.75, output: 4.5, cacheRead: 0.075 }, capabilities: { input: { text: true, image: true } } },
+      { id: "gpt-5.4-nano", label: "GPT-5.4 nano", reasoning: true, contextWindow: 400_000, price: { input: 0.2, output: 1.25, cacheRead: 0.02 }, capabilities: { input: { text: true, image: true } } },
       {
         id: "gpt-image-1",
         label: "GPT Image 1",
@@ -304,9 +314,9 @@ export const PROVIDERS: Record<string, Provider> = {
     baseUrl: "https://api.xiaomimimo.com/v1/chat/completions",
     liveModels: { context: 262_144 },
     models: [
-      { id: "mimo-v2.5-pro", label: "V2.5 Pro", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.435, output: 0.87 } },
-      { id: "mimo-v2.5", label: "V2.5", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.14, output: 0.28 }, capabilities: { input: { text: true, image: true } } },
-      { id: "mimo-v2.5-pro-ultraspeed", label: "V2.5 Pro Ultraspeed", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 1.305, output: 2.61 } },
+      { id: "mimo-v2.5-pro", label: "V2.5 Pro", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.435, output: 0.87, cacheRead: 0.0036 } },
+      { id: "mimo-v2.5", label: "V2.5", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.14, output: 0.28, cacheRead: 0.0028 }, capabilities: { input: { text: true, image: true } } },
+      { id: "mimo-v2.5-pro-ultraspeed", label: "V2.5 Pro Ultraspeed", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 1.305, output: 2.61, cacheRead: 0.0108 } },
       { id: "mimo-v2-pro", label: "V2 Pro", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.435, output: 0.87 } },
       { id: "mimo-v2-flash", label: "V2 Flash", reasoning: true, effort: false, contextWindow: 262_144, price: { input: 0.14, output: 0.28 } },
       { id: "mimo-v2-omni", label: "V2 Omni", reasoning: true, effort: false, contextWindow: 262_144, price: { input: 0.14, output: 0.28 }, capabilities: { input: { text: true, image: true } } },
@@ -318,10 +328,10 @@ export const PROVIDERS: Record<string, Provider> = {
     baseUrl: "https://api.meta.ai/v1/chat/completions",
     liveModels: { context: 1_048_576 },
     models: [
-      { id: "muse-spark-1.3", label: "1.3", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 1.25, output: 4.25 }, capabilities: { input: { text: true, image: true } } },
-      { id: "muse-spark-1.3-contributor", label: "1.3 Contributor", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.1, output: 0.2 }, capabilities: { input: { text: true, image: true } } },
-      { id: "muse-spark-1.2", label: "1.2", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 1.25, output: 4.25 }, capabilities: { input: { text: true, image: true } } },
-      { id: "muse-spark-1.2-contributor", label: "1.2 Contributor", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.1, output: 0.2 }, capabilities: { input: { text: true, image: true } } },
+      { id: "muse-spark-1.3", label: "1.3", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 1.25, output: 4.25, cacheRead: 0.15 }, capabilities: { input: { text: true, image: true } } },
+      { id: "muse-spark-1.3-contributor", label: "1.3 Contributor", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.1, output: 0.2, cacheRead: 0.002 }, capabilities: { input: { text: true, image: true } } },
+      { id: "muse-spark-1.2", label: "1.2", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 1.25, output: 4.25, cacheRead: 0.15 }, capabilities: { input: { text: true, image: true } } },
+      { id: "muse-spark-1.2-contributor", label: "1.2 Contributor", reasoning: true, effort: false, contextWindow: 1_048_576, price: { input: 0.1, output: 0.2, cacheRead: 0.002 }, capabilities: { input: { text: true, image: true } } },
     ],
   },
   // Filled from Experiential Labs' live catalog; the last good copy is cached.

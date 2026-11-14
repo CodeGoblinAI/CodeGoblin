@@ -62,7 +62,7 @@ export type Config = {
    * nothing to stop it but a person noticing. A value of the wrong shape falls
    * back to the default rather than to off: a typo must not remove the brake.
    */
-  autonomy: { checkpoint: number; spend: number }
+  autonomy: { checkpoint: number; spend: number; idleCompact: number }
   /** Why the file did not parse cleanly, so a broken config is reported rather than read as empty. */
   problems: string[]
 }
@@ -135,6 +135,23 @@ function spendLimit(value: unknown): number {
   return typeof found === "number" && Number.isFinite(found) && found >= 0 ? found : DEFAULT_SPEND_LIMIT
 }
 
+export const DEFAULT_IDLE_COMPACT = 0.1
+
+/**
+ * `autonomy.idleCompact`: compact a conversation left idle, before the
+ * provider's cache expires, when that saves at least this many dollars on the
+ * next message. 0 turns it off; anything malformed is the default.
+ */
+function idleCompact(value: unknown): number {
+  const found = isRecord(value) ? value.idleCompact : undefined
+  return typeof found === "number" && Number.isFinite(found) && found >= 0 ? found : DEFAULT_IDLE_COMPACT
+}
+
+/** Read fresh, like the other brakes. */
+export function idleCompactMin(file?: string): number {
+  return loadConfig(file).autonomy.idleCompact
+}
+
 /**
  * How many tool calls per turn before asking to continue, read fresh so an
  * edit applies to the next turn rather than the next launch. 0 means never.
@@ -159,7 +176,7 @@ export function parseConfig(text: string): Config {
     instructions: Array.isArray(root.instructions)
       ? root.instructions.filter((entry): entry is string => typeof entry === "string")
       : [],
-    autonomy: { checkpoint: checkpoint(root.autonomy), spend: spendLimit(root.autonomy) },
+    autonomy: { checkpoint: checkpoint(root.autonomy), spend: spendLimit(root.autonomy), idleCompact: idleCompact(root.autonomy) },
     formatter: formatter(root.formatter),
     problems: errors.map((error) => printParseErrorCode(error.error) + " at offset " + error.offset),
   }

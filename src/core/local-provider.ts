@@ -46,11 +46,20 @@ export function localProvider(env: Record<string, string | undefined> = process.
   if (!Number.isInteger(contextWindow) || contextWindow < 512) throw new Error("CODEGOBLIN_LOCAL_CONTEXT must be an integer of at least 512")
   if (env.CODEGOBLIN_LOCAL_TOOLS && !["0", "1"].includes(env.CODEGOBLIN_LOCAL_TOOLS)) throw new Error("CODEGOBLIN_LOCAL_TOOLS must be 0 or 1")
   if (env.CODEGOBLIN_LOCAL_THINKING && !["0", "1"].includes(env.CODEGOBLIN_LOCAL_THINKING)) throw new Error("CODEGOBLIN_LOCAL_THINKING must be 0 or 1")
+  // A loopback server can be a proxy in front of a paid model. CODEGOBLIN_LOCAL_PRICE
+  // ("input,output" or "input,output,cacheRead", dollars per million tokens) and
+  // CODEGOBLIN_LOCAL_CACHE_MINUTES say what is behind it, so spend and idle compaction work.
+  const numbers = (env.CODEGOBLIN_LOCAL_PRICE ?? "").split(",").map((part) => Number(part.trim()))
+  if (env.CODEGOBLIN_LOCAL_PRICE && (numbers.length < 2 || numbers.length > 3 || numbers.some((each) => !Number.isFinite(each) || each < 0))) throw new Error("CODEGOBLIN_LOCAL_PRICE must be input,output or input,output,cacheRead in dollars per million tokens")
+  const price = env.CODEGOBLIN_LOCAL_PRICE ? { input: numbers[0]!, output: numbers[1]!, ...(numbers[2] !== undefined ? { cacheRead: numbers[2] } : {}) } : { input: 0, output: 0 }
+  const cacheMinutes = Number(env.CODEGOBLIN_LOCAL_CACHE_MINUTES ?? "")
+  if (env.CODEGOBLIN_LOCAL_CACHE_MINUTES && !(cacheMinutes > 0)) throw new Error("CODEGOBLIN_LOCAL_CACHE_MINUTES must be a number of minutes above 0")
   return {
     id: "local", label: "Local server", baseUrl: url.href, local: true,
+    ...(env.CODEGOBLIN_LOCAL_CACHE_MINUTES ? { cacheMinutes } : {}),
     localTools: env.CODEGOBLIN_LOCAL_TOOLS === "1",
     ...(env.CODEGOBLIN_LOCAL_THINKING ? { localThinking: env.CODEGOBLIN_LOCAL_THINKING === "1" } : {}),
     auth: () => ({}),
-    models: [{ id, label: id + (env.CODEGOBLIN_LOCAL_TOOLS === "1" ? " (local tools)" : " (local chat)"), contextWindow, price: { input: 0, output: 0 } }],
+    models: [{ id, label: id + (env.CODEGOBLIN_LOCAL_TOOLS === "1" ? " (local tools)" : " (local chat)"), contextWindow, price }],
   }
 }

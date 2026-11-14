@@ -1118,6 +1118,7 @@ async function openSession(id) {
     thread.innerHTML = ""
     // A long conversation opens at its recent end, like the terminal does.
     if (data.hiddenMessages || data.archived) note(earlierNotice(data.hiddenMessages, data.archived))
+    if (data.idleNote) note(data.idleNote)
     for (const m of data.session.messages) {
       if (m.role === "user" && m.typed) typedRow(m.display || m.content, true)
       else if (m.role === "user") turn("user", m.display || m.content, undefined, m.at)

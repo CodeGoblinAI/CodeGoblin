@@ -34,6 +34,8 @@ export type Session = {
   root?: string
   /** MCP servers switched off for this conversation (/mcp). */
   mcpOff?: string[]
+  /** Set when the conversation was compacted while idle: when, and the estimated dollars saved. Shown once it is next opened. */
+  idleCompacted?: { at: number; saving: number }
 }
 
 const dir = path.join(Global.Path.state, "sessions")

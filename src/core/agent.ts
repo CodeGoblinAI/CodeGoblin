@@ -752,6 +752,33 @@ async function* summariseCli(input: {
 
 
 /**
+ * Compacts a conversation outside a turn: /compact, and the idle compaction.
+ *
+ * The same summary the loop writes when the window fills - made by the model,
+ * with everything it replaces archived first. `keepWindow` plans against a
+ * smaller window than the model's, to keep less word for word. With `strict`
+ * a summary that cannot be had leaves the conversation exactly as it was,
+ * which is what an unattended compaction must do.
+ */
+export async function* compactConversation(input: {
+  provider: Provider; modelId: string; apiKey: string; messages: Message[]; contextWindow: number
+  keepWindow?: number; strict?: boolean; signal?: AbortSignal; archive?: (replaced: Message[]) => Promise<void>
+}): AsyncGenerator<AgentEvent, boolean> {
+  const window = Math.min(input.contextWindow, input.keepWindow ?? input.contextWindow)
+  const plan = planCompaction(input.messages, window)
+  if (!plan.summarise.length) return false
+  const before = input.messages.length
+  // What is condensed is bounded by the model's real window, not the smaller one planned against.
+  const { messages: condensing } = boundSummaryInput(plan.summarise, input.contextWindow)
+  const summary = input.provider.cli ? yield* summariseCli(input, condensing) : yield* summarise(input, condensing, input.strict)
+  input.signal?.throwIfAborted()
+  await input.archive?.(plan.summarise)
+  input.messages.splice(0, input.messages.length, ...applyCompaction(plan.system, summary, plan.keep))
+  yield { type: "compacted", before, after: input.messages.length }
+  return true
+}
+
+/**
  * One non-streaming call to summarise the older half of a conversation.
  * Failure is not fatal: a crude fallback beats losing the turn.
  *
@@ -762,6 +789,8 @@ async function* summariseCli(input: {
 async function* summarise(
   input: { provider: Provider; modelId: string; apiKey: string; signal?: AbortSignal },
   messages: Message[],
+  /** Throw rather than fall back to the crude list - for a compaction nobody is waiting on. */
+  strict = false,
 ): AsyncGenerator<AgentEvent, string> {
   try {
     const response = await fetch(chatEndpoint(input.provider, input.modelId), {
@@ -783,7 +812,7 @@ async function* summarise(
     throw new Error("empty summary")
   } catch (error) {
     // A stop is a stop, not a reason to invent a summary and carry on.
-    if (input.signal?.aborted) throw error
+    if (input.signal?.aborted || strict) throw error
     return messages
       .filter((message) => message.role === "user")
       .map((message) => "- " + message.content.slice(0, 160))

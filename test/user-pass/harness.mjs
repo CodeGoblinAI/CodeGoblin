@@ -32,6 +32,12 @@ export async function fakeModel(reply) {
       const sent = JSON.parse(body)
       seen.push(sent)
       const answer = await reply(sent, seen.length)
+      // A request that did not ask to stream (the summary call) gets one JSON body, as a real server gives.
+      if (sent.stream === false) {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer.text ?? "ok" } }], ...(answer.usage ? { usage: answer.usage } : {}) }))
+        return
+      }
       response.writeHead(200, { "content-type": "text/event-stream" })
       const tools = answer.tools ?? (answer.tool ? [{ name: answer.tool, args: answer.args }] : [])
       // { usage } is sent as the provider's usage block, on its own last chunk.

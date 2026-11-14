@@ -84,12 +84,12 @@ describe("reading codegoblin.jsonc", () => {
 
   test("both autonomy brakes are on by default; 0 turns one off, and a malformed value keeps the default", async () => {
     const { checkpointEvery, spendLimitPerPrompt, DEFAULT_CHECKPOINT, DEFAULT_SPEND_LIMIT } = await import("../src/core/config")
-    const defaults = { checkpoint: DEFAULT_CHECKPOINT, spend: DEFAULT_SPEND_LIMIT }
+    const defaults = { checkpoint: DEFAULT_CHECKPOINT, spend: DEFAULT_SPEND_LIMIT, idleCompact: 0.1 }
     expect(DEFAULT_CHECKPOINT).toBeGreaterThan(0)
     expect(DEFAULT_SPEND_LIMIT).toBeGreaterThan(0)
     expect(parseConfig(`{}`).autonomy).toEqual(defaults)
-    expect(parseConfig(`{ "autonomy": { "checkpoint": 20, "spend": 1.5 } }`).autonomy).toEqual({ checkpoint: 20, spend: 1.5 })
-    expect(parseConfig(`{ "autonomy": { "checkpoint": 0, "spend": 0 } }`).autonomy).toEqual({ checkpoint: 0, spend: 0 })
+    expect(parseConfig(`{ "autonomy": { "checkpoint": 20, "spend": 1.5 } }`).autonomy).toEqual({ checkpoint: 20, spend: 1.5, idleCompact: 0.1 })
+    expect(parseConfig(`{ "autonomy": { "checkpoint": 0, "spend": 0 } }`).autonomy).toEqual({ checkpoint: 0, spend: 0, idleCompact: 0.1 })
     for (const text of [
       `{ "autonomy": { "checkpoint": -5, "spend": -1 } }`,
       `{ "autonomy": { "checkpoint": 2.5, "spend": "lots" } }`,

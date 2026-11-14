@@ -9,7 +9,8 @@
 import { file } from "bun"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { localChatMessages, runAgent, type Message } from "../core/agent"
+import { compactConversation, localChatMessages, runAgent, type Message } from "../core/agent"
+import { idleCompaction, idleNote } from "../core/idle-compact"
 import { cliStatuses } from "../core/cli-status"
 import { isLocalChat } from "../core/local-provider"
 import { findEngine, ownedModelsDir } from "../core/local-runtime"
@@ -44,6 +45,7 @@ import {
   CONNECTABLE,
   connectChoices,
 } from "../core/providers"
+import type { Model, Provider } from "../core/providers"
 import { apiKey } from "../core/auth"
 import * as auth from "../core/auth"
 import * as sessions from "../core/sessions"
@@ -54,7 +56,7 @@ import { BrowserConsent } from "./consent"
 import { McpManager, withoutServers } from "../core/mcp"
 import { browserMode, browserStatus, switchBrowser } from "../core/browser"
 import { SubagentManager, agentMention, listAgents, selectedAgent, agentSelection, type SubagentContext } from "../core/subagents"
-import { configPath, checkpointEvery } from "../core/config"
+import { configPath, checkpointEvery, idleCompactMin } from "../core/config"
 import { customCommands, invocationItems, resolveInvocation } from "../core/invocations"
 import { listSkills, skillIndex } from "../core/skills"
 import { systemPrompt } from "../core/system-prompt"
@@ -184,6 +186,56 @@ function editsFor(sessionId: string, review?: unknown): History {
   created.restoreReview(root, review)
   editsBySession.set(sessionId, created)
   return created
+}
+
+/**
+ * Idle compaction, per conversation: after a turn is saved, a timer is set for
+ * shortly before the provider's cache would expire, where compacting then
+ * saves real money on the next message (core/idle-compact.ts decides, per
+ * model). A new turn cancels it. It works on the saved conversation and only
+ * writes it back if nothing else has touched it meanwhile.
+ */
+const idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
+function cancelIdleCompact(id: string) {
+  clearTimeout(idleTimers.get(id))
+  idleTimers.delete(id)
+}
+function scheduleIdleCompact(session: sessions.Session, provider: Provider, model: Model, key: string) {
+  cancelIdleCompact(session.id)
+  const due = idleCompaction({ messages: session.messages as Message[], provider, model, min: idleCompactMin() })
+  if (!due) return
+  const id = session.id
+  const timer = setTimeout(() => void runIdleCompact(id, provider, model, key), due.afterMs)
+  timer.unref?.()
+  idleTimers.set(id, timer)
+}
+async function runIdleCompact(id: string, provider: Provider, model: Model, key: string) {
+  idleTimers.delete(id)
+  if (activeTurns.has(id)) return
+  const saved = await sessions.load(id).catch(() => undefined)
+  if (!saved) return
+  const due = idleCompaction({ messages: saved.messages as Message[], provider, model, min: idleCompactMin() })
+  if (!due) return
+  const stamp = saved.updated
+  const working = [...(saved.messages as Message[])]
+  let spend = saved.spend ?? { input: 0, output: 0 }
+  try {
+    for await (const event of compactConversation({
+      provider, modelId: model.id, apiKey: key, messages: working, contextWindow: model.contextWindow, keepWindow: due.keepWindow, strict: true,
+      archive: sessions.appendArchive.bind(null, id),
+    })) {
+      if (event.type === "spend") spend = addSpend(spend, { ...event, dollars: costOf(event, model.price) })
+    }
+    // A turn started, or the conversation was changed or deleted, while the summary was written: theirs stands.
+    const now = await sessions.load(id).catch(() => undefined)
+    if (!now || now.updated !== stamp || activeTurns.has(id)) return
+    now.messages = working
+    now.spend = spend
+    now.idleCompacted = { at: Date.now(), saving: due.saving }
+    await sessions.save(now)
+  } catch {
+    // Unattended: nothing is changed and nothing is said.
+  }
 }
 
 async function saveReviewSession(session: sessions.Session) {
@@ -577,6 +629,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
       session: { ...session, messages: shown!.messages },
       hiddenMessages: shown!.hidden,
       archived: await sessions.hasArchive(session.id),
+      idleNote: session.idleCompacted ? idleNote(session.idleCompacted.saving) : undefined,
       selection: selected ? selected.provider.id + "/" + selected.model.id : undefined,
       context: selected ? usage(isLocalChat(selected.provider, selected.model.id) ? localChatMessages(session.messages) : session.messages, selected.model.contextWindow) : undefined,
       reviewNotice: editsFor(session.id, session.review).reviewNotice,
@@ -1018,6 +1071,9 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
       return json({ error: "An answer is still running in this conversation; wait for it to finish or stop it first." }, 409)
     }
     activeTurns.set(session.id, { controller: turn, done })
+    cancelIdleCompact(session.id)
+    // The note about an idle compaction is for the next time it is opened, once.
+    delete session.idleCompacted
     lockedId = session.id
     // Switched off before the conversation had been saved: carried into it now.
     if (!loaded && pendingMcpOff.has("")) { session.mcpOff = pendingMcpOff.get(""); pendingMcpOff.delete("") }
@@ -1177,6 +1233,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
           sessions.stampNew(session.messages, turnFrom)
           await saveReviewSession(session)
           if (session.messages.at(-1)?.stopped) send({ type: "stopped" })
+          else scheduleIdleCompact(session, provider, model, key)
           send({ type: "saved", id: session.id, title: session.title })
         } catch (error) {
           // Stopping mid-stream throws out of the loop. The TUI keeps the

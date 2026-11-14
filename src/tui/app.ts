@@ -88,7 +88,8 @@ import * as memory from "../core/memory"
 import { globFiles } from "../core/search"
 import { defaultSelection, resolveSelection, acceptsImages, effortFor, effortHint, effortLevels, effortProblem, takesEffort, type Selection, kindOf } from "../core/providers"
 import { apiKey, connect, disconnect, connections, storePath, envVariable } from "../core/auth"
-import { localChatMessages, runAgent, type Attachment, type Message } from "../core/agent"
+import { compactConversation, localChatMessages, runAgent, type Attachment, type Message } from "../core/agent"
+import { idleCompaction, idleNote } from "../core/idle-compact"
 import type { AskUser, Question } from "../core/question"
 import { COMMANDS, isCommand, runCommand } from "../core/commands"
 import * as sessions from "../core/sessions"
@@ -116,7 +117,7 @@ import { agentMention } from "../core/subagents"
 import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
 import { formatterStatus } from "../core/formatter"
 import { systemPrompt } from "../core/system-prompt"
-import { configPath, checkpointEvery, spendLimitPerPrompt } from "../core/config"
+import { configPath, checkpointEvery, spendLimitPerPrompt, idleCompactMin } from "../core/config"
 
 const argv = process.argv.slice(2)
 
@@ -2211,7 +2212,68 @@ async function deleteInDialog() {
   render()
 }
 
+/**
+ * Idle compaction: once a turn ends, a timer is set for shortly before the
+ * provider's cache would expire - only where compacting then saves real money
+ * on the next message (core/idle-compact.ts decides, per model). Anything the
+ * person does first cancels it; so does a draft in the box, since someone
+ * typing is not away.
+ */
+let idleTimer: ReturnType<typeof setTimeout> | undefined
+let idleCompacting = false
+/** The conversation the timer was set for; a different one when it fires means the person moved on. */
+let idleStamp = ""
+const idleStampNow = () => session.id + ":" + messages.length
+function cancelIdleCompact() {
+  clearTimeout(idleTimer)
+  idleTimer = undefined
+}
+function scheduleIdleCompact() {
+  cancelIdleCompact()
+  const due = idleCompaction({ messages, provider: selection.provider, model: selection.model, min: idleCompactMin() })
+  if (!due) return
+  idleStamp = idleStampNow()
+  idleTimer = setTimeout(() => void runIdleCompact(), due.afterMs)
+  // A pending compaction must not keep the app alive after quit.
+  idleTimer.unref?.()
+}
+async function runIdleCompact() {
+  idleTimer = undefined
+  if (streaming || idleCompacting || dialog || pending || asking || secret || input.trim() || queued || idleStamp !== idleStampNow()) return
+  // Decided again now: the model or the conversation may have changed since the timer was set.
+  const due = idleCompaction({ messages, provider: selection.provider, model: selection.model, min: idleCompactMin() })
+  if (!due) return
+  idleCompacting = true
+  const working = [...messages]
+  const forSession = session.id
+  let spent = spend
+  try {
+    for await (const event of compactConversation({
+      provider: selection.provider, modelId: selection.model.id, apiKey: key ?? "", messages: working,
+      contextWindow: selection.model.contextWindow, keepWindow: due.keepWindow, strict: true,
+      archive: (replaced) => sessions.appendArchive(forSession, replaced),
+    })) {
+      if (event.type === "spend") spent = addSpend(spent, { input: event.input, output: event.output, ...(event.cached ? { cached: event.cached } : {}), dollars: costOf(event, selection.model.price) })
+    }
+    // The person came back while it ran, or opened another conversation: theirs stands.
+    if (streaming || session.id !== forSession || input.trim()) return
+    messages = working
+    spend = spent
+    historyArchived = true
+    session.messages = messages
+    session.spend = spend
+    transcript.push({ kind: "tool", text: idleNote(due.saving) })
+    void sessions.save(session).catch(() => {})
+    render()
+  } catch {
+    // Unattended, so nothing is said and nothing is changed; the next turn simply costs what it costs.
+  } finally {
+    idleCompacting = false
+  }
+}
+
 async function send() {
+  cancelIdleCompact()
   // The person's own answer to the model's question, not a new prompt.
   if (asking?.typing) {
     const typed = input.trim()
@@ -2724,16 +2786,26 @@ async function send() {
       if (window <= 0) status = "context window unavailable; history unchanged (CLI transport compaction remains automatic)"
       else if (!plan.summarise.length) status = "nothing to compact yet - the whole conversation still fits in the recent part that is kept as it is"
       else {
-        // Every replaced message goes to the archive first; the crude summary
-        // below covers only what fits, like the automatic one.
-        await sessions.appendArchive(session.id, plan.summarise)
-        const summary = boundSummaryInput(plan.summarise, window).messages
-          .filter((m) => m.role === "user")
-          .map((m) => "- " + m.content.slice(0, 160))
-          .join(String.fromCharCode(10))
-        messages = applyCompaction(plan.system, summary, plan.keep)
-        historyArchived = true
-        status = "compacted to " + messages.length + " messages"
+        // The model writes the summary, as it does when the window fills; a
+        // list of the first words of each prompt was all /compact used to
+        // leave. Every replaced message goes to the archive first.
+        status = "compacting..."
+        render()
+        try {
+          for await (const event of compactConversation({
+            provider: selection.provider, modelId: selection.model.id, apiKey: key ?? "", messages, contextWindow: window,
+            archive: (replaced) => sessions.appendArchive(session.id, replaced),
+          })) {
+            if (event.type === "spend") spend = addSpend(spend, { input: event.input, output: event.output, ...(event.cached ? { cached: event.cached } : {}), dollars: costOf(event, selection.model.price) })
+          }
+          historyArchived = true
+          session.messages = messages
+          session.spend = spend
+          void sessions.save(session).catch(() => {})
+          status = "compacted to " + messages.length + " messages"
+        } catch (error) {
+          status = "could not compact: " + (error instanceof Error ? error.message : "unknown") + " - history unchanged"
+        }
       }
     }
     if (result.kind === "resume") {
@@ -3004,6 +3076,7 @@ async function send() {
     session.activity = normaliseActivity(session.activity, true)
     void sessions.save(session).then(refreshSessionCache).catch(() => {})
     void refreshFileCache(true)
+    scheduleIdleCompact()
 
     boostOnce = false
 
