@@ -70,8 +70,6 @@ export function homeScreen(
   if (fits(TAGLINE)) extras.push(["", paint.gold + centred(TAGLINE) + paint.reset])
   if (fits(HOME_TIP)) extras.push(["", paint.dim + centred(HOME_TIP) + paint.reset])
   if (where && fits(where)) extras.push([paint.dim + centred(where) + paint.reset])
-  // Last, so it is the first thing given up when rows are short.
-  if (tip && fits("tip: " + tip)) extras.push([paint.dim + centred("tip: " + tip) + paint.reset])
   for (const extra of extras) {
     if (block.length + extra.length > height) break
     block.push(...extra)
@@ -119,7 +117,15 @@ export function homeLayout(
     const blank = above.at(-1) === "" ? above.length - 1 : above.indexOf("")
     above.splice(blank >= 0 ? blank : above.length - 1, 1)
   }
-  const rest = Math.max(0, full - top - Math.min(block.length, full) - gap)
+  let rest = Math.max(0, full - top - Math.min(block.length, full) - gap)
+  // The tip goes under the start line when the window has rows to spare (judged on the whole room, so opening
+  // the command list does not make it come and go). Its row comes from below the composer, which moves down
+  // one; the wordmark stays exactly where it was.
+  const tipText = "tip: " + tip
+  if (tip && notice === 0 && [...tipText].length <= width - 2 && room - top - block.length - gap >= 4 && rest >= 1 && block.length >= 3) {
+    above.splice(above.length - gap, 0, paint.dim + " ".repeat(Math.max(0, Math.floor((width - [...tipText].length) / 2))) + tipText + paint.reset)
+    rest -= 1
+  }
   const place = where && [...where].length <= width - 4 && rest >= 2 ? [paint.dim + "  " + where + paint.reset] : []
   return { above, below: [...Array.from({ length: rest - place.length }, () => ""), ...place] }
 }

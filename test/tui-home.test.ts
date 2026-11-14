@@ -84,17 +84,23 @@ describe("the empty conversation's layout around the composer", () => {
 })
 
 describe("the tip under the start line", () => {
-  test("is shown when set, is the first thing dropped when rows are short, and every tip fits an 80-column window", async () => {
-    const { TIPS, pickTip, setHomeTip } = await import("../src/tui/wordmark")
-    try {
-      setHomeTip(TIPS[0]!)
-      expect(homeScreen(120, 30, "~/proj:main", plain).join("\n")).toContain("tip: " + TIPS[0])
-      // Twelve rows hold everything but the tip.
-      const tight = homeScreen(120, 12, "~/proj:main", plain).join("\n")
-      expect(tight).toContain("~/proj:main")
-      expect(tight).not.toContain("tip: ")
-    } finally { setHomeTip("") }
-    expect(homeScreen(120, 30, "~/proj:main", plain).join("\n")).not.toContain("tip: ")
+  test("is shown when rows are spare without moving the wordmark, and every tip fits an 80-column window", async () => {
+    const { TIPS, homeLayout, pickTip, setHomeTip } = await import("../src/tui/wordmark")
+    const artRow = (lines: string[]) => lines.findIndex((line) => line.includes(WORDMARK[0]!.trim().slice(0, 3)) || line.includes(COMPACT))
+    for (const [cols, room] of [[120, 30], [70, 14]] as const) {
+      const without = homeLayout(cols, room, 0, "~/proj:main", plain)
+      try {
+        setHomeTip(TIPS[0]!)
+        const withTip = homeLayout(cols, room, 0, "~/proj:main", plain)
+        expect(withTip.above.join("\n")).toContain("tip: " + TIPS[0])
+        expect(artRow(withTip.above)).toBe(artRow(without.above))
+        // The frame is the same height: the tip's row came from under the composer.
+        expect(withTip.above.length + withTip.below.length).toBe(without.above.length + without.below.length)
+        expect(withTip.above.length).toBe(without.above.length + 1)
+        // Short of rows, it is left out.
+        expect(homeLayout(cols, 9, 0, "~/proj:main", plain).above.join("\n")).not.toContain("tip: ")
+      } finally { setHomeTip("") }
+    }
     for (const tip of TIPS) expect(("tip: " + tip).length).toBeLessThanOrEqual(78)
     expect(pickTip(() => 0)).toBe(TIPS[0]!)
     expect(pickTip(() => 0.999)).toBe(TIPS.at(-1)!)
