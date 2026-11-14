@@ -11,6 +11,7 @@ import { APPEARANCES, effectiveTheme, terminalLooksLight } from "../core/theme"
 import { LEADER_DEFAULTS, loadKeymap, type LeaderAction } from "./keybinds"
 import os from "node:os"
 import { homeLayout } from "./wordmark"
+import { toolDetail, type DetailLine } from "./tool-detail"
 import { THEMES } from "../core/theme"
 import { EFFORTS } from "../core/settings"
 import { createKeyReader } from "./keys"
@@ -187,7 +188,11 @@ type Entry = {
   last?: number
   /** When it was written, for /timestamps. */
   at?: number
+  /** Tool rows: what came of the call, drawn under it - a command's output, what a file now says. */
+  detail?: DetailLine[]
 }
+/** Each running call's arguments, so its row can show what it did once it ends. */
+const callArgs = new Map<string, string>()
 /** /fold: every answer drawn as its first lines. A view, not a setting. */
 let foldAnswers = false
 /** /timestamps: when each message was written, beside who wrote it. */
@@ -432,7 +437,8 @@ function settleQuestion(entry: Asking, answer: string[] | undefined) {
     waitingQuestions.splice(at, 1)
   }
   entry.resolve(answer)
-  if (answer) status = "answered: " + answer.join(", ").slice(0, 80)
+  // The answer is on the question's row in the conversation; the status line need not say it again.
+  if (answer) status = ""
   render()
 }
 
@@ -662,12 +668,26 @@ function entryLines(entry: Entry, width: number): string[] {
   const key = [width, settings.theme, settings.thinking, entry.kind, entry.state ?? "", entry.by ?? selection.provider.label, entry.text.length,
     // Thinking folds once it is finished, and Ctrl+O flips every fold.
     entry.kind === "thinking" ? String(expandThinking) + (entry === transcript.at(-1) && streaming) : "",
-    entry.kind === "agent" ? String(foldAnswers) : "", showTimes && entry.at ? sessions.clockTime(entry.at) : ""].join("|")
+    entry.kind === "agent" ? String(foldAnswers) : "", showTimes && entry.at ? sessions.clockTime(entry.at) : "", entry.detail?.length ?? 0].join("|")
   const cached = drawnRows.get(entry)
   if (cached && cached.key === key) return cached.rows
   const rows = drawEntry(entry, width)
   drawnRows.set(entry, { key, rows })
   return rows
+}
+
+/** A message typed while the goblin works: drawn as yours, dimmer, marked as waiting. */
+function queuedLines(text: string, width: number): string[] {
+  const room = Math.max(10, width - 6)
+  const wrapped = text.split(String.fromCharCode(10)).flatMap((line) => wrapWords(line, Math.floor(room * 0.75))).slice(0, 6)
+  const label = "queued \u00b7 sends when this finishes"
+  const block = wrapped.reduce((widest, line) => Math.max(widest, displayWidth(line)), Math.min(displayWidth(label), Math.floor(room * 0.75)))
+  const indent = " ".repeat(Math.max(2, width - block - 4))
+  return [
+    theme.gold + indent + padStartToWidth(truncateToWidth(label, block + 2), block + 2) + ansi.reset,
+    ...wrapped.map((line) => indent + dim + padToWidth(line, block) + ansi.reset + theme.gold + " |" + ansi.reset),
+    "",
+  ]
 }
 
 function drawEntry(entry: Entry, width: number): string[] {
@@ -685,6 +705,12 @@ function drawEntry(entry: Entry, width: number): string[] {
         out.push(theme.muted + (first ? "  " + mark + " " : "    ") + indent + (index ? "  " : "") + piece + ansi.reset)
         first = false
       }
+    }
+    // Under the row, behind a rule: output is cut at the edge rather than
+    // wrapped, so a long line costs one row, not five.
+    for (const line of entry.detail ?? []) {
+      const colour = line.tone === "add" ? theme.goblin : line.tone === "remove" ? theme.error : dim
+      out.push(theme.border + "    \u2502 " + ansi.reset + colour + truncateToWidth(line.text, Math.max(10, width - 6)) + ansi.reset)
     }
     out.push("")
     return out
@@ -772,6 +798,9 @@ function render() {
       if (entry === jumpTo) jumpLine = lines.length
       for (const line of entryLines(entry, width)) lines.push(line)
     }
+    // What was typed while it worked is your next message, so it is drawn as
+    // one - where it will go, marked as waiting - rather than as a note by the box.
+    if (queued && !secret) for (const line of queuedLines(queued, width)) lines.push(line)
   }
 
   const planLines: string[] = []
@@ -807,7 +836,7 @@ function render() {
   const footer = {
     prompt: promptHeight,
     pending: pending && !input ? decisionsFor(pending.tool).length + 3 : !pending && asking && !asking.typing ? asking.question.options.length + 5 : 0,
-    queued: Boolean(queued && !secret),
+    queued: false,
     images: Boolean(pendingImages.length && !secret),
     scrolled: scroll > 3,
     notice: Number(streaming && !pending && !asking) + Number(Boolean(status)),
@@ -891,12 +920,13 @@ function render() {
     const title = " " + entry.question.question
     const rows = [
       ...options.map((option, index) => ({
-        label: (entry.question.multiple ? (entry.picked.has(index) ? "[x] " : "[ ] ") : "") + option.label,
+        label: (index + 1) + ". " + (entry.question.multiple ? (entry.picked.has(index) ? "[x] " : "[ ] ") : "") + option.label,
         hint: option.description ?? "",
       })),
-      { label: "Type your own answer", hint: "" },
+      { label: (options.length + 1) + ". Type your own answer", hint: "" },
     ]
-    const keys = entry.question.multiple ? "space picks · enter sends · esc dismisses" : "enter picks · esc dismisses"
+    const count = options.length + 1
+    const keys = entry.question.multiple ? "1-" + options.length + " or space picks · enter sends · esc dismisses" : "1-" + count + " or enter picks · esc dismisses"
     const labelWidth = Math.max(...rows.map((row) => displayWidth(row.label))) + 2
     const wanted = Math.max(3 + labelWidth + Math.max(0, ...rows.map((row) => displayWidth(row.hint))), displayWidth(title), displayWidth(keys) + 2) + 1
     const inner = Math.max(24, Math.min(wanted, cols - 6))
@@ -1018,7 +1048,10 @@ function render() {
   // What just happened - "switched to ...", "no key for ..." - on a line of
   // its own. Sharing the status line, it pushed the model's name off the end.
   if (status) body.push(theme.muted + "  " + truncateToWidth(status, Math.max(10, cols - 4)) + ansi.reset)
-  body.push(theme.border + "  " + "\u2500".repeat(inner) + ansi.reset)
+  // The box takes the colour of how much it may do without asking, as the
+  // fork's does: plain when it asks, gold, red at full access, orange while planning.
+  const ruleColour = permissions.planning ? theme.warning : permissions.mode === "full" ? theme.error : permissions.mode === "approve" ? theme.gold : theme.border
+  body.push(ruleColour + "  " + "\u2500".repeat(inner) + ansi.reset)
   // Scrolled up a way: a floating way back down, Claude-style, only while
   // scrolled - a button that is always there teaches nobody anything.
   latestPill = undefined
@@ -1031,10 +1064,7 @@ function render() {
   // A queued prompt stays on screen in dimmer text, Claude-style: clearing
   // the composer without showing what is waiting reads as the prompt being
   // eaten, and Ctrl+S with an empty composer then looks broken.
-  if (queued && !secret) {
-    const preview = queued.replace(/\s+/g, " ")
-    body.push(dim + "  queued: " + truncateToWidth(preview, Math.max(0, cols - 14)) + ansi.reset)
-  }
+
   // Clipboard pictures waiting to ride along. Named on screen so nothing
   // reaches the model unseen; a new conversation lets them go.
   if (pendingImages.length && !secret) {
@@ -1070,7 +1100,7 @@ function render() {
     input && composerRows.length
       ? { first: body.length - composerRows.length + 1, rows: [...composerRows], before: rowsBefore }
       : undefined
-  body.push(theme.border + "  " + "\u2500".repeat(inner) + ansi.reset)
+  body.push(ruleColour + "  " + "\u2500".repeat(inner) + ansi.reset)
 
   const context = contextUsage()
   // How much it will ask before acting is always on show, coloured by how
@@ -1094,7 +1124,7 @@ function render() {
     : pending && !input
     ? compactHints ? "enter confirm · esc reject" : "up/down · enter confirm · esc reject"
     : asking && !pending
-    ? asking.typing ? "enter answers · esc back to the choices" : compactHints ? "enter pick · esc dismiss" : "up/down · enter pick · esc dismiss"
+    ? asking.typing ? "enter answers \u00b7 esc back to the choices" : compactHints ? "number or enter \u00b7 esc" : "up/down \u00b7 number or enter picks \u00b7 esc dismiss"
     : streaming
     ? (queued ? "queued · esc stop" : compactHints ? "enter queue · esc stop" : "enter queue · ctrl+s now · esc stop")
     : secret
@@ -1105,7 +1135,7 @@ function render() {
       ? "scrolled " + scroll
       : palette
         ? "tab complete · up/down pick"
-        : compactHints ? "ctrl+c copy/quit" : "shift+tab mode · ctrl+c copy/quit"
+        : compactHints ? "ctrl+g actions" : "shift+tab mode \u00b7 ctrl+g actions \u00b7 ctrl+c copy/quit"
   // A long status gives way to the key hints rather than pushing them off the
   // edge: "mode: Full access - never ask - only the rules..." ran into them.
   const statusRoom = Math.max(10, cols - displayWidth(right) - 4 - displayWidth(modeLabel) - 3)
@@ -1893,6 +1923,12 @@ async function chooseInDialog() {
   if (!dialog) return
   const row = Dialogs.selected(dialog)
   if (!row || !row.value) { render(); return }
+  if (dialog.kind === "actions") {
+    closeDialog()
+    if (row.value.startsWith("leader:")) await LEADER_RUN[row.value.slice("leader:".length) as LeaderAction]()
+    else await runQuick(row.value)
+    render(); return
+  }
   if (dialog.kind === "agents") {
     closeDialog()
     await chooseAgent(row.value === "ui:default-agent" ? undefined : row.value)
@@ -2360,8 +2396,9 @@ async function send() {
     applyComposer({ text: "", cursor: 0 }, true)
     palette = undefined
     status = replaced
-      ? "replaced queued prompt - sending when this turn ends · Ctrl+S sends now"
-      : "queued - sending when this turn ends · Ctrl+S sends now"
+      // The message itself shows in the conversation, marked as waiting; this says what else can be done with it.
+      ? "replaced the queued message · Ctrl+S sends it now"
+      : "Ctrl+S sends it now"
     render()
     return
   }
@@ -3006,6 +3043,7 @@ async function send() {
       }
       if (event.type === "tool_start") {
         current = undefined
+        callArgs.set(event.id, event.args)
         // Summarised as approvals are, so an edit's row names its file before the cut.
         transcript.push({ kind: "tool", call: event.id, text: toolLabel(event.name) + " " + askedFor(event.name, event.args).replace(/\s+/g, " ").slice(0, 60), state: "running" })
       }
@@ -3074,8 +3112,10 @@ async function send() {
         const row = rowFor(event.id)
         if (row) {
           if (row.state !== "failed") row.state = /^(error|stopped)/.test(event.result) ? "failed" : "done"
-          const firstLine = event.result.split(String.fromCharCode(10))[0] ?? ""
-          row.text += "  ->  " + firstLine.slice(0, 50)
+          const shown = toolDetail(event.name, callArgs.get(event.id) ?? "", event.result)
+          callArgs.delete(event.id)
+          if (shown.summary) row.text += "  ->  " + shown.summary
+          if (shown.lines.length) row.detail = shown.lines
         }
       }
       render()
@@ -3292,6 +3332,42 @@ if (keymap.problems.length) status = "tui.json: " + keymap.problems[0]
 const leaderLabel = (action: LeaderAction) => LEADER_DEFAULTS.find((entry) => entry.action === action)!.label
 let leaderUntil = 0
 
+/**
+ * Ctrl+G: everything there is to do, each with the keys that do it - the
+ * fork's "goblin commands". The leader letters are read from the keymap, so a
+ * letter moved in tui.json shows where it went.
+ */
+const ACTIONS: { label: string; run: string; leader?: LeaderAction; keys?: string }[] = [
+  { label: "Switch model", run: "leader:model", leader: "model" },
+  { label: "Approval mode", run: "/approvals", keys: "shift+tab" },
+  { label: "Settings", run: "/settings" },
+  { label: "Conversations", run: "leader:sessions", leader: "sessions" },
+  { label: "New conversation", run: "leader:new", leader: "new" },
+  { label: "Status", run: "leader:status", leader: "status" },
+  { label: "Usage and balance", run: "/usage" },
+  { label: "Undo the last change", run: "leader:undo", leader: "undo" },
+  { label: "Redo", run: "leader:redo", leader: "redo" },
+  { label: "Review changes", run: "/diff" },
+  { label: "Compact the conversation", run: "leader:compact", leader: "compact" },
+  { label: "Copy the last answer", run: "leader:copy", leader: "copy" },
+  { label: "Export as Markdown", run: "leader:export", leader: "export" },
+  { label: "Jump to a message", run: "leader:timeline", leader: "timeline" },
+  { label: "Write the prompt in your editor", run: "leader:editor", leader: "editor" },
+  { label: "Browser", run: "/browser" },
+  { label: "MCP servers", run: "/mcp" },
+  { label: "Theme", run: "leader:theme", leader: "theme" },
+  { label: "Agents", run: "leader:agents", leader: "agents" },
+  { label: "All commands", run: "/help" },
+  { label: "Quit", run: "leader:quit", leader: "quit", keys: "ctrl+c twice" },
+]
+function openActions() {
+  const keysFor = (action: { leader?: LeaderAction; keys?: string }) => {
+    const letter = action.leader ? Object.entries(keymap.letters).find(([, each]) => each === action.leader)?.[0] : undefined
+    return [letter ? "ctrl+" + keymap.leader + " " + letter : "", action.keys ?? ""].filter(Boolean).join(" \u00b7 ")
+  }
+  dialog = Dialogs.open("actions", "goblin commands", ACTIONS.map((action) => ({ label: action.label, hint: keysFor(action), value: action.run })), { footer: "enter runs \u00b7 esc closes", size: "medium" })
+}
+
 /** Runs a slash command as if typed, keeping whatever was being written. */
 async function runQuick(command: string) {
   const draft = { text: input, cursor }
@@ -3357,6 +3433,10 @@ process.stdin.on("data", (chunk) => {
         render(); continue
       }
       if (armed) { status = ""; render(); continue }
+    }
+    if (pressed.type === "ctrl" && pressed.value === "g" && !secret) {
+      openActions()
+      render(); continue
     }
     if (pressed.type === "ctrl" && pressed.value === "c") {
       const span = composerSelection(composerState())
@@ -3524,12 +3604,25 @@ process.stdin.on("data", (chunk) => {
         if (pressed.type === "up") { askingChoice = Math.max(0, askingChoice - 1); render(); continue }
         if (pressed.type === "down") { askingChoice = Math.min(own, askingChoice + 1); render(); continue }
         if (pressed.type === "escape") { settleQuestion(entry, undefined); continue }
+        // A number picks that choice: on a single choice it answers at once,
+        // on several it ticks or unticks it, and the last number is typing your own.
+        let picked = false
+        if (pressed.type === "char" && /^[1-9]$/.test(pressed.value) && Number(pressed.value) <= own + 1) {
+          const index = Number(pressed.value) - 1
+          askingChoice = index
+          if (entry.question.multiple && index < own) {
+            if (entry.picked.has(index)) entry.picked.delete(index)
+            else entry.picked.add(index)
+            render(); continue
+          }
+          picked = true
+        }
         if (pressed.type === "char" && pressed.value === " " && entry.question.multiple && askingChoice < own) {
           if (entry.picked.has(askingChoice)) entry.picked.delete(askingChoice)
           else entry.picked.add(askingChoice)
           render(); continue
         }
-        if (pressed.type === "enter") {
+        if (pressed.type === "enter" || picked) {
           if (askingChoice === own) {
             entry.typing = true
             // The box and the key hints say what to do now; a third copy in the status only pushed the model name off the line.
