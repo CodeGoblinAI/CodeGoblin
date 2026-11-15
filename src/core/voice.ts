@@ -3,7 +3,7 @@ import os from "node:os"
 import path from "node:path"
 import { createHash } from "node:crypto"
 import { createRequire } from "node:module"
-import { fileURLToPath } from "node:url"
+import { workerCommand } from "../platform/self"
 import { Global } from "../platform/paths"
 import { downloadModel, cancelDownload, type CatalogEntry, type Progress } from "./local-downloads"
 
@@ -147,7 +147,7 @@ let nextId = 1
 const IDLE_MS = 5 * 60_000
 
 function startWorker() {
-  const proc = Bun.spawn([process.execPath, fileURLToPath(new URL("./voice-worker.ts", import.meta.url))], {
+  const proc = Bun.spawn(workerCommand("voice", new URL("./voice-worker.ts", import.meta.url)), {
     stdin: "pipe", stdout: "pipe", stderr: "ignore", windowsHide: true,
     env: { ...process.env, CG_VOICE_DIR: voiceDir() },
   })

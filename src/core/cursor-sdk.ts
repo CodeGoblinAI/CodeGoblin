@@ -1,5 +1,5 @@
 import path from "node:path"
-import { fileURLToPath } from "node:url"
+import { workerCommand } from "../platform/self"
 import { Global } from "../platform/paths"
 import { apiKey } from "./auth"
 import { PROVIDERS } from "./providers"
@@ -14,7 +14,7 @@ const authPath = path.join(Global.Path.data, "cursor-sdk-auth.json")
 /** A bounded, owned process boundary keeps SDK credentials and diagnostics out of CG history. */
 async function* packets(input: { op: string; mode: Mode; apiKey?: string; prompt?: string; system?: string; modelId?: string }, signal?: AbortSignal, command?: string[], timeout = 15_000) {
   signal?.throwIfAborted()
-  const proc = Bun.spawn(command ?? [process.execPath, fileURLToPath(new URL("./cursor-worker.ts", import.meta.url))], {
+  const proc = Bun.spawn(command ?? workerCommand("cursor", new URL("./cursor-worker.ts", import.meta.url)), {
     stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true, env: cursorEnvironment(process.env),
   })
   const reader = proc.stdout.getReader()

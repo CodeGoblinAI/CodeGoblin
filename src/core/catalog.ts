@@ -3,6 +3,7 @@ import path from "node:path"
 import { Global } from "../platform/paths"
 import type { Model, Provider } from "./providers"
 import type { Price } from "./context"
+import snapshot from "./catalog-snapshot.json"
 
 /**
  * Provider breadth from models.dev, the open catalog the fork reads.
@@ -20,7 +21,8 @@ import type { Price } from "./context"
  * Fetched at most once a day and cached, trimmed to what is used; a fetch
  * that fails keeps the cache, and no cache means only the built-ins.
  */
-const URL_ = "https://models.dev/api.json"
+/** CODEGOBLIN_MODELS_URL points somewhere else: a mirror, or nowhere, to see what a run without a connection does. */
+const URL_ = process.env.CODEGOBLIN_MODELS_URL || "https://models.dev/api.json"
 const MAX_AGE_MS = 24 * 60 * 60 * 1000
 const cacheFile = () => path.join(Global.Path.cache, "models-dev.json")
 
@@ -139,6 +141,13 @@ function readCache(): Cached | undefined {
   }
 }
 
+/** The catalogue as it was when this program was built (script/build.ts fills it in); empty from source. */
+function bundledCatalog(): Cached | undefined {
+  const carried = snapshot as unknown as Partial<Cached>
+  if (!Array.isArray(carried.providers) || !carried.providers.length) return undefined
+  return { at: typeof carried.at === "number" ? carried.at : 0, providers: carried.providers, prices: carried.prices ?? {}, vision: carried.vision ?? {} }
+}
+
 /** Built-in providers' prices from the last catalog that loaded; empty until one has. */
 let prices: Record<string, Record<string, Price>> = {}
 export function catalogPrices() {
@@ -153,7 +162,9 @@ export function catalogVision() {
 /** The usable catalog: from the cache when it is fresh, else fetched (and cached), else whatever cache there is. */
 export async function loadCatalog(options: { fetch?: typeof fetch; now?: number; force?: boolean } = {}): Promise<CatalogProvider[]> {
   const now = options.now ?? Date.now()
-  const cached = readCache()
+  // With no cache yet - a first run - the catalogue the build carried stands in, so a first run with no
+  // connection still lists every provider. From source it is empty and changes nothing.
+  const cached = readCache() ?? bundledCatalog()
   prices = cached?.prices ?? {}
   vision = cached?.vision ?? {}
   // A cache written before prices or vision were kept is refetched once, to get them.

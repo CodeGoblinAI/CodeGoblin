@@ -69,9 +69,15 @@ export function env(model, profile, extra = {}) {
   return { ...process.env, CODEGOBLIN_DIR: profile, CODEGOBLIN_LOCAL_URL: model.url, CODEGOBLIN_LOCAL_MODEL: "fixture", CODEGOBLIN_LOCAL_TOOLS: "1", ...extra }
 }
 
+// What is started: the one entry point from source, or - with CG_BIN set to a built program - that program,
+// so every pass can be run against what is shipped.
+const started = (word, args) => process.env.CG_BIN
+  ? [process.env.CG_BIN, [...word, ...args]]
+  : [process.platform === "win32" ? "bun.exe" : "bun", [(process.env.CG_ROOT ?? "C:/Users/shawn/code/CG-Next") + "/src/cli/main.ts", ...word, ...args]]
+
 export async function tui({ model, cwd, profile = tempDir("cg-pass-profile-"), cols = 140, rows = 42, extraEnv = {}, args = ["--model", "local"] }) {
   let out = ""
-  const term = pty.spawn("bun.exe", [(process.env.CG_ROOT ?? "C:/Users/shawn/code/CG-Next") + "/src/tui/app.ts", ...args], { cwd, cols, rows, name: "xterm-256color", env: env(model, profile, extraEnv) })
+  const term = pty.spawn(...started([], args), { cwd, cols, rows, name: "xterm-256color", env: env(model, profile, extraEnv) })
   term.onData((d) => out += d)
   const api = {
     term, profile,
@@ -91,7 +97,7 @@ export async function tui({ model, cwd, profile = tempDir("cg-pass-profile-"), c
 }
 
 export async function web({ model, cwd, profile = tempDir("cg-pass-web-"), extraEnv = {}, viewport = { width: 1280, height: 860 }, browserArgs = [], permissions = [] }) {
-  const server = spawn("bun", [(process.env.CG_ROOT ?? "C:/Users/shawn/code/CG-Next") + "/src/web/serve.ts"], { cwd, env: env(model, profile, extraEnv), windowsHide: true })
+  const server = spawn(...started(["web"], []), { cwd, env: env(model, profile, extraEnv), windowsHide: true })
   let log = ""
   server.stderr.on("data", (d) => log += d)
   const url = await new Promise((resolve, reject) => { let t = ""; server.stdout.on("data", (d) => { t += d; const m = /http:\/\/localhost:(\d+)/.exec(t); if (m) resolve(m[0]) }); setTimeout(() => reject(new Error("web did not start: " + t + log)), 25000) })

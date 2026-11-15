@@ -8,7 +8,7 @@
  */
 import { file } from "bun"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
+import { ASSETS } from "./assets"
 import { compactConversation, localChatMessages, runAgent, type Message } from "../core/agent"
 import { idleCompaction, idleNote } from "../core/idle-compact"
 import { cliStatuses } from "../core/cli-status"
@@ -91,9 +91,8 @@ import * as memory from "../core/memory"
 import { runCommand, COMMANDS, COMMAND_ALIASES, PENDING_COMMANDS } from "../core/commands"
 import { resolveInside } from "../core/tools"
 
-// fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..."
-// with a leading slash, which fails to open.
-const page = fileURLToPath(new URL("./index.html", import.meta.url))
+// The page and its files, as paths that hold from source and inside the built program (see assets.ts).
+const page = ASSETS.page
 /**
  * The project this server works in. It starts as the folder it was launched
  * from and changes with the project switcher; the process's own working
@@ -297,9 +296,9 @@ async function projectFiles(force = false): Promise<string[]> {
 
 /** The xterm.js files the terminal panel loads, served from node_modules and nothing else. */
 const VENDOR: Record<string, { file: string; type: string }> = {
-  "/vendor/xterm.js": { file: "../../node_modules/@xterm/xterm/lib/xterm.js", type: "text/javascript; charset=utf-8" },
-  "/vendor/xterm.css": { file: "../../node_modules/@xterm/xterm/css/xterm.css", type: "text/css; charset=utf-8" },
-  "/vendor/addon-fit.js": { file: "../../node_modules/@xterm/addon-fit/lib/addon-fit.js", type: "text/javascript; charset=utf-8" },
+  "/vendor/xterm.js": { file: ASSETS.xtermJs, type: "text/javascript; charset=utf-8" },
+  "/vendor/xterm.css": { file: ASSETS.xtermCss, type: "text/css; charset=utf-8" },
+  "/vendor/addon-fit.js": { file: ASSETS.addonFit, type: "text/javascript; charset=utf-8" },
 }
 
 async function handle(request: Request, server?: Bun.Server<TerminalSocket["data"]>): Promise<Response | undefined> {
@@ -320,7 +319,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
   }
   if (VENDOR[url.pathname]) {
     const entry = VENDOR[url.pathname]!
-    return new Response(file(fileURLToPath(new URL(entry.file, import.meta.url))), { headers: { "content-type": entry.type, "cache-control": "max-age=3600" } })
+    return new Response(file(entry.file), { headers: { "content-type": entry.type, "cache-control": "max-age=3600" } })
   }
 
   if (url.pathname.startsWith("/api/") && !sameOrigin(request, url)) {
@@ -1347,13 +1346,13 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
   }
 
   if (url.pathname === "/logo.png") {
-    return new Response(file(fileURLToPath(new URL("./logo.png", import.meta.url))), {
+    return new Response(file(ASSETS.logo), {
       headers: { "content-type": "image/png", "cache-control": "max-age=86400" },
     })
   }
 
   if (url.pathname === "/app.js") {
-    return new Response(file(fileURLToPath(new URL("./app.js", import.meta.url))), {
+    return new Response(file(ASSETS.appJs), {
       headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" },
     })
   }

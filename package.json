@@ -1,12 +1,18 @@
 {
   "name": "codegoblin",
-  "version": "0.0.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Local-first AI coding agent with image, 3D and voice generation.",
   "license": "MIT",
+  "bin": {
+    "codegoblin": "src/cli/main.ts",
+    "cg": "src/cli/main.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "start": "bun src/cli/main.ts",
+    "build": "bun script/build.ts",
     "tui": "bun src/tui/app.ts",
     "web": "bun src/web/serve.ts",
     "prompt": "bun src/cli/prompt.ts",
