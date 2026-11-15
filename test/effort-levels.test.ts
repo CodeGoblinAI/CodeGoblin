@@ -31,8 +31,8 @@ test("a level is sent only to a model that has it - never translated to a neighb
 test("auto says what it means on this model", () => {
   expect(effortHint(model("zai/glm-5.3"), "auto")).toBe("this model's default (max)")
   expect(effortHint(model("deepseek/deepseek-v4-pro"), "auto")).toBe("this model's default (high)")
-  expect(effortHint(model("claude-code/opus"), "max")).toBe("the most this model offers")
-  expect(effortHint(model("zai/glm-5.3"), "none")).toBe("thinking off")
+  expect(effortHint(model("claude-code/opus"), "max")).toBe("the most this model offers: slowest, costs the most")
+  expect(effortHint(model("zai/glm-5.3"), "none")).toBe("thinking off: fastest and cheapest")
 })
 
 test("Codex keeps every level each model reports, and its default", async () => {

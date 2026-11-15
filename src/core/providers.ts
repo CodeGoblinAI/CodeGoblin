@@ -165,9 +165,13 @@ export const takesEffort = (model: Model): boolean => effortLevels(model).length
 /** What a level means on this model, in a few words, for pickers and status lines. */
 export function effortHint(model: Model, level: string): string {
   if (level === "auto") return "this model's default" + (model.defaultEffort ? " (" + model.defaultEffort + ")" : "")
-  if (level === "none") return "thinking off"
+  if (level === "none" || level === "off") return "thinking off: fastest and cheapest"
   const levels = effortLevels(model)
-  if (level === levels.at(-1)) return "the most this model offers"
+  if (level === levels.at(-1)) return "the most this model offers: slowest, costs the most"
+  // The first level that thinks at all, then whatever lies between it and the top.
+  const thinking = levels.filter((each) => each !== "none" && each !== "off")
+  if (level === thinking[0]) return "a little thinking: quick, for simple work"
+  if (thinking.includes(level)) return "more thinking: slower, for harder problems"
   return ""
 }
 

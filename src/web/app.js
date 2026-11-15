@@ -1717,7 +1717,10 @@ function effortChoices() {
   const option = modelOptions.find((o) => o.value === currentModel)
   const levels = option?.efforts || []
   const describe = (level) => level === "auto" ? "auto - this model's default" + (option?.defaultEffort ? " (" + option.defaultEffort + ")" : "")
-    : level === "none" ? "none - thinking off" : level === levels.at(-1) ? level + " - the most this model offers" : level
+    : level === "none" || level === "off" ? level + " - thinking off: fastest and cheapest"
+    : level === levels.at(-1) ? level + " - the most this model offers: slowest, costs the most"
+    : level === levels.find((each) => each !== "none" && each !== "off") ? level + " - a little thinking: quick, for simple work"
+    : level + " - more thinking: slower, for harder problems"
   return { option, levels, choices: ["auto", ...levels].map((level) => [level, describe(level)]) }
 }
 
