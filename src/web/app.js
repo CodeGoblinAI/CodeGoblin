@@ -358,7 +358,7 @@ function planPrompt() {
 /** Sends text as though it had been typed. */
 function sendText(text) {
   input.value = text
-  submit()
+  return submit()
 }
 /**
  * Pictures attached to the next message.
@@ -550,13 +550,28 @@ function showUsage(value) {
     : `${used.input.toLocaleString()}${used.cached ? " (" + used.cached.toLocaleString() + " cached)" : ""} in / ${used.output.toLocaleString()} out · ${used.dollars === undefined ? "cost unknown / subscription" : "$" + used.dollars.toFixed(4) + (used.unpriced ? " + unpriced usage" : " estimated")}${contextLabel}`
 }
 let busy = false
-let deferredAction
+// What was asked for while a turn was running, in the order it was asked. Each runs once the turn before it
+// has finished - a second message used to replace the first.
+const deferredActions = []
+let deferredFront = false
+let draining = false
 function deferUntilIdle(action, label) {
   if (!busy) return false
-  const replaced = Boolean(deferredAction)
-  deferredAction = action
-  note((replaced ? "Replaced queued action: " : "Queued until this turn finishes: ") + label)
+  const ahead = deferredActions.length
+  if (deferredFront) deferredActions.unshift(action)
+  else deferredActions.push(action)
+  note(deferredFront || !ahead ? "Queued until this turn finishes: " + label : "Queued behind " + ahead + " other" + (ahead === 1 ? "" : "s") + ": " + label)
   return true
+}
+async function drainDeferred() {
+  if (draining) return
+  draining = true
+  try {
+    await Promise.resolve()
+    while (!busy && deferredActions.length) {
+      try { await deferredActions.shift()() } catch { /* one failed action does not hold the rest */ }
+    }
+  } finally { draining = false }
 }
 let controller = null
 let stopRequested = false
@@ -832,13 +847,96 @@ function toolChip(name, args, id) {
   // Several tools can be running at once, so "the last running chip" was no
   // longer a safe way to guess which one had just finished.
   if (id) chip.dataset.call = id
-  chip.innerHTML = '<span class="spin"></span><span class="tname"></span><span class="targs"></span>'
+  chip.innerHTML = '<span class="spin"></span><span class="tname"></span><span class="targs"></span><span class="tage"></span>'
   chip.querySelector(".tname").textContent = name
   chip.querySelector(".targs").textContent = (args || "").slice(0, 70)
+  chip.dataset.started = String(Date.now())
   thread.appendChild(chip)
   scrollDown()
   return chip
 }
+
+// --- watching a call run, and opening it afterwards -----------------------------------------------------
+// While a command runs its row says for how long and shows the last lines it printed. Finished, the row is
+// one line again; a click opens it to the whole command and its output, another click folds it.
+const LIVE_LINES = 5
+const OPEN_LINES = 300
+const toolRuns = new WeakMap() // chip -> { args, live, result }
+
+function toolOutBox(chip) {
+  let box = chip.nextElementSibling
+  if (!box || !box.matches("pre.tool-out")) { box = document.createElement("pre"); box.className = "tool-out"; chip.after(box) }
+  return box
+}
+
+function elapsedLabel(ms) {
+  const seconds = Math.floor(ms / 1000)
+  return seconds < 60 ? seconds + "s" : Math.floor(seconds / 60) + "m " + (seconds % 60) + "s"
+}
+
+setInterval(() => {
+  for (const chip of thread.querySelectorAll(".tool.running[data-call]")) {
+    const ms = Date.now() - Number(chip.dataset.started || Date.now())
+    const age = chip.querySelector(".tage")
+    if (age && ms >= 3000) age.textContent = "· " + elapsedLabel(ms)
+  }
+}, 1000)
+
+function toolStarted(chip, args) {
+  toolRuns.set(chip, { args: args || "", live: "", result: undefined })
+}
+
+function toolPrinted(id, text) {
+  const chip = id && thread.querySelector('.tool.running[data-call="' + id + '"]')
+  const run = chip && toolRuns.get(chip)
+  if (!run) return
+  run.live = (run.live + text).slice(-8000)
+  const lines = run.live.replace(/\r\n?/g, "\n").split("\n").filter((line) => line.trim()).slice(-LIVE_LINES)
+  if (!lines.length) return
+  const box = toolOutBox(chip)
+  box.classList.add("live")
+  box.textContent = lines.join("\n")
+}
+
+function toolFinished(chip, result) {
+  const run = chip && toolRuns.get(chip)
+  if (!run) return
+  run.result = String(result ?? "")
+  const age = chip.querySelector(".tage")
+  const box = chip.nextElementSibling
+  if (box && box.matches("pre.tool-out")) box.remove()
+  const count = run.result.split("\n").filter((line) => line.trim()).length
+  const still = /still running after ([^.]+)\. It was not stopped: it carries on in the background as (job\d+)/.exec(run.result)
+  if (age) age.textContent = still ? "· still running after " + still[1] + " - carries on as " + still[2] : count > 1 ? "· " + count + " lines" : ""
+  chip.classList.add("openable")
+  chip.tabIndex = 0
+  chip.setAttribute("role", "button")
+  chip.setAttribute("aria-expanded", "false")
+  chip.title = "Click to show the whole call and what it returned"
+}
+
+function toggleToolRow(chip) {
+  const run = toolRuns.get(chip)
+  if (!run || run.result === undefined) return
+  const open = chip.classList.toggle("open")
+  chip.setAttribute("aria-expanded", String(open))
+  if (!open) { const box = chip.nextElementSibling; if (box && box.matches("pre.tool-out")) box.remove(); return }
+  let asked = run.args
+  try { const parsed = JSON.parse(run.args || "{}"); asked = typeof parsed.command === "string" ? "$ " + parsed.command : JSON.stringify(parsed, null, 2) } catch { /* shown as it came */ }
+  const lines = run.result.split("\n")
+  const more = lines.length - OPEN_LINES
+  const box = toolOutBox(chip)
+  box.classList.remove("live")
+  box.textContent = asked + "\n\n" + lines.slice(0, OPEN_LINES).join("\n") + (more > 0 ? "\n… " + more + " more lines" : "")
+}
+
+thread.addEventListener("click", (event) => {
+  const chip = event.target.closest?.(".tool.openable")
+  if (chip && !window.getSelection()?.toString()) toggleToolRow(chip)
+})
+thread.addEventListener("keydown", (event) => {
+  if ((event.key === "Enter" || event.key === " ") && event.target.matches?.(".tool.openable")) { event.preventDefault(); toggleToolRow(event.target) }
+})
 
 // Mirrors decisionHints() in core/permission.ts: at an autonomy checkpoint,
 // allowing once runs on to the next checkpoint and rejecting stops the turn.
@@ -1037,11 +1135,7 @@ function setBusy(state) {
     ? "Enter to queue · Ctrl+S to send now · Shift+Enter for a new line"
     : "Enter to send · Shift+Enter for a new line"
   try { activityBusy(state) } catch { /* panel not built yet during startup */ }
-  if (!state && deferredAction) {
-    const action = deferredAction
-    deferredAction = undefined
-    queueMicrotask(action)
-  }
+  if (!state && deferredActions.length) void drainDeferred()
 }
 
 function relativeTime(ms) {
@@ -2555,25 +2649,27 @@ async function submit() {
     input.value = ""
     paletteItems = []
     renderPalette()
-    if (/^\/(?:approvals|mode|help|status|usage|balance|account|settings|theme|thinking|effort)(?:\s|$)/.test(text)) {
+    // Looking at things runs at once; whatever changes the conversation waits its turn.
+    if (/^\/(?:approvals|mode|help|status|usage|balance|account|settings|theme|thinking|effort|jobs|timeline|fold|timestamps)(?:\s|$)/.test(text)) {
       await runCommand(text)
       return
     }
     const queuedImages = attachments
     attachments = []
     renderAttached()
-    deferUntilIdle(() => {
+    deferUntilIdle(async () => {
       // Keep any new unsent draft in the composer after submitting the queued turn.
       const draft = input.value
       const draftImages = attachments
       attachments = queuedImages
-      sendText(text)
+      const sent = sendText(text)
       if (!text.startsWith("/") || draft || draftImages.length) {
         input.value = draft
         attachments = draftImages
         renderAttached()
         refreshPalette()
       }
+      await sent
     }, text || "attached images")
     return
   }
@@ -2787,11 +2883,12 @@ async function submit() {
           body = null
           thinking = null
           stepThinking = null
-          toolChip(event.name, event.asked || event.args, event.id)
+          toolStarted(toolChip(event.name, event.asked || event.args, event.id), event.args)
           toolArgsByCall.set(event.id, event.args)
           runningTools.push(event.name)
           renderActivity()
         }
+        if (event.type === "tool_output") { toolPrinted(event.id, event.text); continue }
         if (event.type === "attached") note("attached " + event.files.join(", "))
         if (event.type === "usage") showUsage(event)
         if (event.type === "plan") { planItems = event.todos; renderActivity() }
@@ -2837,6 +2934,7 @@ async function submit() {
             chip.classList.add(event.result.startsWith("error:") ? "failed" : "done")
             chip.querySelector(".spin").textContent = event.result.startsWith("error:") ? "\u2717" : "\u2713"
           }
+          if (chip && chip.dataset.call === event.id) toolFinished(chip, event.result)
         }
         if (event.type === "retry") {
           const hintEl = document.getElementById("hint")
@@ -3634,7 +3732,8 @@ input.addEventListener("keydown", (event) => {
   // turn end sends it as soon as the abort lands.
   if (event.ctrlKey && event.key.toLowerCase() === "s") {
     event.preventDefault()
-    if (busy && input.value.trim()) { void stopTurn().then(() => submit()) }
+    // Queued ahead of anything already waiting, then the running turn is stopped.
+    if (busy && input.value.trim()) { deferredFront = true; void submit(); deferredFront = false; void stopTurn() }
     return
   }
   if (event.key === "Enter" && event.shiftKey) return

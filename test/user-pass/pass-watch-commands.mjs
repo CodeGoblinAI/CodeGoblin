@@ -50,6 +50,10 @@ try {
   check("and all of its output", /step 14 of 14/.test(opened) && /step 1 of 14/.test(opened) && /click to fold/.test(opened))
   await click(find("✓ shell bun slow.js"))
   check("another click folds it again", !/step 14 of 14/.test(screen()) && /… 8 more lines · click to show/.test(screen()))
+  t.write("\x0f"); await delay(500)
+  check("ctrl+o opens the last command without the mouse", screen().includes(LONG) && /step 14 of 14/.test(screen()), screen().split("\n").filter((l) => /shell|step|ctrl/.test(l)).join("\n"))
+  t.write("\x0f"); await delay(500)
+  check("and ctrl+o again folds it", !/step 14 of 14/.test(screen()) && /… 8 more lines · click to show/.test(screen()))
 
   // --- 3. a command that outlives its wait ---
   const before = model.seen.length

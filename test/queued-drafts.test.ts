@@ -3,7 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 
 const source = fs.readFileSync(path.join(import.meta.dir, "../src/web/app.js"), "utf8")
-const start = source.indexOf("deferUntilIdle(() => {", source.indexOf("async function submit()"))
+const start = source.indexOf("deferUntilIdle(async () => {", source.indexOf("async function submit()"))
 const end = source.indexOf('}, text || "attached images")', start) + '}, text || "attached images")'.length
 // Execute the actual handoff, with only the UI/send boundary replaced. The
 // real browser and PTY passes separately exercise asynchronous model changes.

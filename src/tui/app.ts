@@ -4606,7 +4606,14 @@ process.stdin.on("data", (chunk) => {
       case "ctrl":
         // Terminals that hand Ctrl+V to the app (rather than pasting text themselves): picture paste.
         if (pressed.value === "v") void attachClipboardImage(true)
-        if (pressed.value === "o") { expandThinking = !expandThinking; status = expandThinking ? "showing reasoning in full" : "reasoning folded to one line"; dirty = true }
+        if (pressed.value === "o") {
+          // The keyboard's way to what a click does: reasoning in full, and the latest call opened.
+          expandThinking = !expandThinking
+          const latest = transcript.filter((entry) => entry.kind === "tool" && entry.tool?.result !== undefined).at(-1)
+          if (latest) latest.open = expandThinking
+          status = expandThinking ? "showing reasoning" + (latest ? " and the last command" : "") + " in full - ctrl+o folds" : "reasoning" + (latest ? " and the last command" : "") + " folded"
+          dirty = true
+        }
         if (pressed.value === "u") { applyComposer({ text: "", cursor: 0 }, true); dirty = true; refreshPalette() }
         if (pressed.value === "k") { applyComposer(deleteRange(composerState(), "toEnd"), true); dirty = true; refreshPalette() }
         if (pressed.value === "z") {

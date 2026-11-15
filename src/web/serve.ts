@@ -1249,8 +1249,19 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
               : event,
           )
         }
+        // What a running command prints, for its row in the browser: gathered for a moment so a chatty
+        // command is a few events a second, and scrubbed of stored keys. It never goes to the model.
+        const printed = new Map<string, string>()
+        let printedTimer: ReturnType<typeof setTimeout> | undefined
+        const outputSecrets = storedSecrets()
+        const sendPrinted = () => {
+          printedTimer = undefined
+          for (const [id, text] of printed) send({ type: "tool_output", id, text: redactSecrets(text, outputSecrets).slice(-8000) })
+          printed.clear()
+        }
         try {
           for await (const event of runAgent({
+            onToolOutput: (id, text) => { printed.set(id, (printed.get(id) ?? "") + text); printedTimer ??= setTimeout(sendPrinted, 120) },
             provider,
             modelId: model.id,
             apiKey: key,
@@ -1275,6 +1286,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
             signal: turn.signal,
           })) {
             recordActivity(session.activity!, event)
+            if (event.type === "tool_end" && printed.size) { clearTimeout(printedTimer); sendPrinted() }
             // A refused call carries who refused it; the label is composed here
             // so the browser and the terminal say the same words about it.
             if (event.type === "spend") {

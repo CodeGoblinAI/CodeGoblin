@@ -40,6 +40,9 @@ const MAX_OUTPUT = 24_000
 export const SKIP_DIRS = new Set([
   "node_modules", ".git", "dist", ".next", "build", "coverage",
   "output", ".playwright-cli", "_RECOVERED_LOCAL_2026-08-29",
+  // Caches and environments: never what a search is for, and from a home folder they were most of the
+  // first fifty thousand files. Named as the folder to search (path), any of them is searched as usual.
+  "AppData", ".bun", ".cache", ".npm", ".cargo", ".rustup", ".nuget", ".gradle", "__pycache__", ".venv",
 ])
 
 /**

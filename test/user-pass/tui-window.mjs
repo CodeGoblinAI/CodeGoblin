@@ -20,11 +20,16 @@ const model = await fakeModel(async (sent) => {
   if (/testing/i.test(text)) return { stream: [{ reasoning: "The user is just testing." }, { text: "All" }, { reasoning: " " }, { text: " good on my end - tools, shell, and files are ready when you need them." }] }
   if (/question/i.test(text)) return { tool: "question", args: { question: "Which runtime should the script target?", options: [{ label: "Bun (Recommended)", description: "what the repo uses" }, { label: "Node" }, { label: "Deno" }] } }
   if (/write|edit|change/i.test(text)) return { tool: "write_file", args: { path: "notes.md", content: "# Notes\n\n- a guard was added\n" } }
+  // "watch" runs a command that prints for a few seconds; "forever" one that outlives its (short) wait.
+  if (/watch/i.test(text)) return { tool: "shell", args: { command: "bun slow.js --label=a-very-long-argument-that-goes-well-past-sixty-characters-in-total" } }
+  if (/forever/i.test(text)) return { tool: "shell", args: { command: "bun forever.js", timeout_ms: 4000 } }
   if (/run|shell/i.test(text)) return { tool: "shell", args: { command: "git status" } }
   return { tool: "glob", args: { pattern: "*.md" }, usage: { prompt_tokens: 4200, completion_tokens: 30 } }
 })
 const project = tempDir("cg-window-project-")
 fs.writeFileSync(path.join(project, "README.md"), "# demo\n")
+fs.writeFileSync(path.join(project, "slow.js"), "let n = 0; const t = setInterval(() => { console.log('step ' + ++n + ' of 14'); if (n === 14) { clearInterval(t) } }, 600)")
+fs.writeFileSync(path.join(project, "forever.js"), "let n = 0; setInterval(() => console.log('file ' + ++n + ' of 3000000000'), 300)")
 try { execFileSync("git", ["init", "-q", "-b", "main", project]) } catch {}
 const profile = tempDir("cg-window-profile-")
 const title = "CGN-TEST-" + process.pid

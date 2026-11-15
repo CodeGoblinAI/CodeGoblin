@@ -102,6 +102,12 @@
   .tool .tname { color: var(--text); }
   .tool .targs { opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tool .tdenied { color: var(--red); white-space: nowrap; }
+  .tool .tage { opacity: .65; white-space: nowrap; margin-left: auto; }
+  .tool.openable { cursor: pointer; }
+  .tool.openable:hover, .tool.openable:focus-visible { border-color: var(--goblin); outline: none; }
+  .tool.open .targs { white-space: normal; overflow-wrap: anywhere; }
+  pre.tool-out { margin: 4px 0 0; padding: 8px 11px; max-height: 420px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.45; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  pre.tool-out.live { border-style: dashed; }
   .tool.done .spin { color: var(--goblin); } .tool.failed .spin { color: var(--red); }
   .tool.running .spin { width: 9px; height: 9px; border: 1.5px solid var(--line); border-top-color: var(--goblin); border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }

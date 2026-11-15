@@ -111,8 +111,18 @@ function splitAlternatives(body: string): string[] {
  */
 export const MAX_FILES_SCANNED = 50_000
 
-/** Why a walk ended early, if it did. */
-export type WalkEnd = { stopped: boolean; capped: boolean }
+/**
+ * How long one search may run before it reports what it has and says it stopped. The file cap alone did not
+ * bound it: from a home folder the first 50,000 files are caches, extensions and media, and reading them took
+ * over a minute and a half - a turn that looked stuck on a simple question. Twenty seconds is far more than a
+ * search inside a project needs (under one).
+ */
+export const SEARCH_BUDGET_MS = 20_000
+/** Above this size a file's first bytes are checked before the whole of it is read, so a large binary costs nothing. */
+const SNIFF_ABOVE_BYTES = 256_000
+
+/** Why a walk ended early, if it did. `seen` is how many files it had looked at. */
+export type WalkEnd = { stopped: boolean; capped: boolean; timedOut?: boolean; seen?: number; budgetMs?: number }
 
 async function* walk(root: string, dir: string, signal?: AbortSignal): AsyncGenerator<string> {
   if (signal?.aborted) return
@@ -134,8 +144,10 @@ async function* walk(root: string, dir: string, signal?: AbortSignal): AsyncGene
 /** The walk, counted: ends at the cap or on stop, and says which. */
 async function* bounded(root: string, end: WalkEnd, signal?: AbortSignal, cap = MAX_FILES_SCANNED): AsyncGenerator<string> {
   let seen = 0
+  const deadline = Date.now() + (end.budgetMs ?? SEARCH_BUDGET_MS)
   for await (const relative of walk(root, root, signal)) {
     if (++seen > cap) { end.capped = true; return }
+    if (Date.now() > deadline) { end.timedOut = true; end.seen = seen - 1; return }
     yield relative
   }
   if (signal?.aborted) end.stopped = true
@@ -144,6 +156,7 @@ async function* bounded(root: string, end: WalkEnd, signal?: AbortSignal, cap = 
 /** The sentence a search adds when it did not look everywhere. */
 export function walkNote(end: WalkEnd, cap = MAX_FILES_SCANNED): string {
   if (end.stopped) return "stopped by the user part way through"
+  if (end.timedOut) return `stopped after ${Math.round((end.budgetMs ?? SEARCH_BUDGET_MS) / 1000)}s, having looked at the first ${(end.seen ?? 0).toLocaleString("en-US")} files: this folder is too large to search whole - give a folder (path) or a file pattern to narrow it`
   if (end.capped) return `searched the first ${cap.toLocaleString("en-US")} files and stopped - narrow it with a folder or pattern`
   return ""
 }
@@ -184,8 +197,9 @@ export async function grepFiles(
   query: string,
   include?: string,
   signal?: AbortSignal,
+  budgetMs?: number,
 ): Promise<{ matches: string[]; truncated: boolean; skipped: string[]; secret: string[]; total: number; end: WalkEnd }> {
-  const end: WalkEnd = { stopped: false, capped: false }
+  const end: WalkEnd = { stopped: false, capped: false, budgetMs }
   let pattern: RegExp
   try {
     pattern = new RegExp(query, "i")
@@ -215,6 +229,8 @@ export async function grepFiles(
       continue
     }
 
+    if (stat.size > SNIFF_ABOVE_BYTES && await looksBinary(absolute)) continue
+
     let content: string
     try {
       content = await fs.readFile(absolute, "utf8")
@@ -236,6 +252,20 @@ export async function grepFiles(
   }
 
   return { matches, truncated: total > matches.length, skipped, secret, total, end }
+}
+
+/** Whether a file's first bytes hold a NUL - the cheap way to tell a large binary without reading it. */
+async function looksBinary(absolute: string): Promise<boolean> {
+  let handle
+  try {
+    handle = await fs.open(absolute, "r")
+    const { bytesRead, buffer } = await handle.read(Buffer.alloc(4096), 0, 4096, 0)
+    return buffer.subarray(0, bytesRead).includes(0)
+  } catch {
+    return false
+  } finally {
+    await handle?.close().catch(() => {})
+  }
 }
 
 /** Kept here so the search tools share the sandbox check with the file tools. */

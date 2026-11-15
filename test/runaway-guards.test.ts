@@ -209,4 +209,38 @@ describe("searches stay bounded and stoppable", () => {
     expect(end.stopped).toBe(true)
     expect(walkNote({ stopped: false, capped: true })).toContain("narrow it")
   })
+
+  test("a search that runs out of time reports what it has and says to narrow it", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cg-grep-budget-"))
+    for (let i = 0; i < 30; i++) fs.writeFileSync(path.join(dir, `f${i}.txt`), "needle\n")
+    // A budget already spent: it ends before the first file rather than reading all thirty.
+    const grep = await grepFiles(dir, "needle", undefined, undefined, -1)
+    expect(grep.end.timedOut).toBe(true)
+    expect(grep.matches).toEqual([])
+    expect(walkNote(grep.end)).toContain("too large to search whole")
+    expect(walkNote(grep.end)).toContain("give a folder (path) or a file pattern")
+    // With the usual budget the same folder is searched whole, and nothing is said.
+    const whole = await grepFiles(dir, "needle")
+    expect(whole.total).toBe(30)
+    expect(walkNote(whole.end)).toBe("")
+  })
+
+  test("a large binary is passed over without being read; a large text file is still searched", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cg-grep-binary-"))
+    fs.writeFileSync(path.join(dir, "model.bin"), Buffer.concat([Buffer.alloc(300_000), Buffer.from("\nneedle\n")]))
+    fs.writeFileSync(path.join(dir, "big.log"), "filler line\n".repeat(30_000) + "needle here\n")
+    const found = await grepFiles(dir, "needle")
+    expect(found.matches).toEqual(["big.log:30001: needle here"])
+  })
+
+  test("caches and environments above a project are not walked", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cg-grep-caches-"))
+    for (const folder of ["AppData", ".bun", ".cache", "__pycache__", ".venv", "src"]) {
+      fs.mkdirSync(path.join(dir, folder))
+      fs.writeFileSync(path.join(dir, folder, "a.txt"), "needle\n")
+    }
+    expect((await grepFiles(dir, "needle")).matches).toEqual(["src/a.txt:1: needle"])
+    // Asked for by name, one of them is searched like any other folder.
+    expect((await grepFiles(path.join(dir, ".bun"), "needle")).matches).toEqual(["a.txt:1: needle"])
+  })
 })

@@ -27,6 +27,9 @@ never print it, and use a throwaway profile.
     bun test/user-pass/real-image.ts [provider/model]   # is a picture really seen: by full path, and through read_file
     bun test/user-pass/real-refuseless.ts [model]       # Refuseless: effort levels, a tool round trip, usage
     bun test/user-pass/real-jobs.ts [provider/model]    # does a model start a dev server in the background unprompted
+    bun test/user-pass/real-runaway.ts [provider/model] # a command far bigger than it looked: is it handed back, and what does the model do
+    bun test/user-pass/real-turn-profile.ts [provider/model] [effort]   # where one simple task's time goes, step by step
+    bun test/user-pass/real-effort-time.ts [provider/model] [efforts]   # the same tiny task at each reasoning effort
     bun test/user-pass/real-cache-check.ts              # prompt-cache reads
     node test/user-pass/pass-real.mjs                   # a whole terminal turn on a real model
 
@@ -46,6 +49,15 @@ Stop the `tui-window.mjs` process when done; it keeps the fake model up.
 `pass-jobs-tui.mjs` and `pass-jobs-web.mjs` have a scripted model start a real server process in the
 background, then check the running-jobs indicator, `/jobs` (output and Stop), that the process is
 really gone after Stop, and (terminal) that quitting ends what is still running.
+
+## Watching a command
+
+`pass-watch-commands.mjs` (terminal) and `pass-watch-web.mjs` (browser) run a command that prints for a
+few seconds and one that never ends. They check the running row (elapsed time, last five lines), that a
+finished row opens and folds (click; Ctrl+O in the terminal, Enter in the browser), that a command
+outliving its wait comes back to the model as a background job rather than being killed, and that
+while a turn runs `/jobs` opens at once and two typed messages are both kept and sent in order.
+In `tui-window.mjs`, "watch" and "forever" in a prompt run the same two commands in a real window.
 
 ## Unexpected errors
 
