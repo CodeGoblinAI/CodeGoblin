@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { endedUntold, jobTail, listJobs, readJob, resetJobs, runningJobs, startJob, stopAllJobs, stopJob, MAX_RUNNING } from "../src/core/jobs"
-import { runTool, TOOL_SCHEMA } from "../src/core/tools"
+import { runTool, shellWait, SHELL_WAIT_MAX_MS, SHELL_WAIT_MS, TOOL_SCHEMA } from "../src/core/tools"
 import { Permissions } from "../src/core/permission"
 import { runAgent } from "../src/core/agent"
 import type { Provider } from "../src/core/providers"
@@ -146,12 +146,85 @@ describe("the job tools", () => {
     expect(asked).toEqual(["shell"])
   })
 
-  test("a foreground command killed at its timeout says where a long one belongs", async () => {
+})
+
+describe("a command that outlives its wait", () => {
+  test("is not stopped: it carries on as a job, and the answer has its output so far and its id", async () => {
     const root = project()
-    const result = await runTool("shell", { command: "bun pid.js", timeout_ms: 700 }, root)
-    expect(result).toContain("killed after 700ms")
-    expect(result).toContain("background: true")
+    const began = Date.now()
+    const result = await runTool("shell", { command: "bun server.js", timeout_ms: 1200 }, root)
+    expect(Date.now() - began).toBeLessThan(6000)
+    expect(result).toContain("starting")
+    expect(result).toContain("Ready on http://localhost:4000")
+    expect(result).toContain("still running after 1s")
+    expect(result).toContain("carries on in the background as job1")
+    expect(result).toContain('job_output with id "job1"')
+    // Neither a failure nor a stop, as far as anything reading the first word is concerned.
+    expect(/^(error|stopped)/.test(result)).toBe(false)
+    expect(listJobs(root).map((job) => [job.id, job.running, job.command])).toEqual([["job1", true, "bun server.js"]])
+
+    // What it had already printed was in the answer; reading the job gives only what came after.
+    const next = await readJob({ id: "job1", wait_ms: 1500 }, root)
+    expect(next).toContain("tick")
+    expect(next).not.toContain("starting")
+    expect(await runTool("job_stop", { id: "job1" }, root)).toContain("job1 stopped")
+    expect(runningJobs()).toBe(0)
   }, 20_000)
+
+  test("the process itself is the one that carries on, and stopping the job ends it", async () => {
+    const root = project()
+    const result = await runTool("shell", { command: "bun pid.js", timeout_ms: 900 }, root)
+    const pid = Number(/pid (\d+)/.exec(result)?.[1])
+    expect(pid).toBeGreaterThan(0)
+    expect(alive(pid)).toBe(true)
+    stopAllJobs()
+    await sleep(600)
+    expect(alive(pid)).toBe(false)
+  }, 20_000)
+
+  test("one that ends in time is answered as before, and is no job", async () => {
+    const root = project()
+    expect(await runTool("shell", { command: "bun broken.js", timeout_ms: 8000 }, root)).toBe("Error: cannot find module left-pad" + NL + "exit code 3")
+    expect(listJobs(root)).toEqual([])
+  }, 20_000)
+
+  test("what it prints is passed on as it prints it, for a person to watch", async () => {
+    const root = project()
+    const seen: string[] = []
+    const result = await runTool("shell", { command: "bun brief.js", timeout_ms: 9000 }, root, undefined, undefined, (text) => seen.push(text))
+    expect(result).toContain("built in 0.4s")
+    expect(seen.join("")).toContain("built in 0.4s")
+  }, 20_000)
+
+  test("stopping the turn ends a command that is being waited for", async () => {
+    const root = project()
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 700)
+    const result = await runTool("shell", { command: "bun pid.js", timeout_ms: 30_000 }, root, undefined, controller.signal)
+    expect(result.startsWith("stopped by the user")).toBe(true)
+    const pid = Number(/pid (\d+)/.exec(result)?.[1])
+    await sleep(600)
+    expect(alive(pid)).toBe(false)
+    expect(listJobs(root)).toEqual([])
+  }, 20_000)
+
+  test("with every job slot taken it is ended, and says why", async () => {
+    const root = project()
+    for (let n = 0; n < MAX_RUNNING; n++) await startJob("bun pid.js", root, { firstLookMs: 50 })
+    const result = await runTool("shell", { command: "bun pid.js", timeout_ms: 700 }, root)
+    expect(result).toContain("ended after 1s")
+    expect(result).toContain(MAX_RUNNING + " background jobs are already running")
+    expect(runningJobs()).toBe(MAX_RUNNING)
+  }, 30_000)
+
+  test("the wait defaults to two minutes and is never more than ten, whatever is asked for", () => {
+    expect(shellWait(undefined)).toBe(SHELL_WAIT_MS)
+    expect(shellWait("soon")).toBe(SHELL_WAIT_MS)
+    expect(shellWait(-5)).toBe(SHELL_WAIT_MS)
+    expect(shellWait(1500)).toBe(1500)
+    expect(shellWait(86_400_000)).toBe(SHELL_WAIT_MAX_MS)
+    expect([SHELL_WAIT_MS, SHELL_WAIT_MAX_MS]).toEqual([120_000, 600_000])
+  })
 })
 
 describe("the agent and its jobs", () => {

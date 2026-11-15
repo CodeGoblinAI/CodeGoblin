@@ -18,7 +18,7 @@ export type Tool = {
   description: string
   parameters: Record<string, unknown>
   /** signal is the turn's: a tool that can take long ends when the person stops it. */
-  run: (args: any, root: string, signal?: AbortSignal) => Promise<string>
+  run: (args: any, root: string, signal?: AbortSignal, progress?: (text: string) => void) => Promise<string>
   /** Changes the file at args.path, so its previous state is worth keeping. */
   writes?: boolean
   /**
@@ -286,24 +286,23 @@ export const EXTRA_TOOLS: Tool[] = [
     name: "shell",
     description:
       "Run a shell command in the working directory and return its combined output and exit code. " +
-      "Use this for tests, builds, git, and anything the file tools cannot do. It waits for the command and " +
-      "ends it at the timeout, so anything that keeps running - a dev server, a watcher, a long build - " +
-      "goes in the background instead: background: true answers at once with a job id.",
+      "Use this for tests, builds, git, and anything the file tools cannot do. It waits for the command up to " +
+      "timeout_ms; one still running then is not stopped but carries on as a background job, and you get its " +
+      "id and its output so far. Something meant to keep running - a dev server, a watcher - is started with " +
+      "background: true, which answers at once with a job id.",
     parameters: {
       type: "object",
       properties: {
         command: { type: "string", description: "The command to run." },
-        timeout_ms: { type: "number", description: "Optional timeout, default 30000. Not used in the background." },
+        timeout_ms: { type: "number", description: "How long to wait for it, default 120000, at most 600000. A command still running then is not stopped: it carries on as a background job and you are given its id and its output so far." },
         background: { type: "boolean", description: "Keep it running and answer at once with a job id; job_output reads it, job_stop ends it." },
       },
       required: ["command"],
     },
-    run: async (args, root, signal) => {
-      if (args.background === true) {
-        const { startJob } = await import("./jobs")
-        return startJob(String(args.command ?? ""), root, { signal })
-      }
-      return runShell(String(args.command ?? ""), root, Number(args.timeout_ms) || 30_000, signal)
+    run: async (args, root, signal, progress) => {
+      const { startJob, runForeground } = await import("./jobs")
+      if (args.background === true) return startJob(String(args.command ?? ""), root, { signal })
+      return runForeground(String(args.command ?? ""), root, { timeoutMs: shellWait(args.timeout_ms), signal, onOutput: progress })
     },
   },
   {
@@ -562,6 +561,15 @@ export function shellEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.P
   return Object.fromEntries(Object.entries(env).filter(([name]) => !SECRET_NAME.test(name)))
 }
 
+/** How long the shell tool waits for a command when the model does not say, and the most it may ask for. */
+export const SHELL_WAIT_MS = 120_000
+export const SHELL_WAIT_MAX_MS = 600_000
+/** The wait for one command: the default when none or nonsense is given, never more than the cap. */
+export function shellWait(asked: unknown): number {
+  const value = Number(asked)
+  return Number.isFinite(value) && value > 0 ? Math.min(value, SHELL_WAIT_MAX_MS) : SHELL_WAIT_MS
+}
+
 /**
  * Ends a command and everything it started. Killing only the shell left the
  * program it ran behind: a real model's `ping -t` kept pinging after its
@@ -577,53 +585,6 @@ export function killTree(child: { pid?: number; kill: () => boolean }) {
     try { child.kill() } catch {}
   }
 }
-
-async function runShell(command: string, root: string, timeoutMs: number, signal?: AbortSignal): Promise<string> {
-  if (!command.trim()) return "error: empty command"
-  if (signal?.aborted) return "stopped by the user before it ran"
-
-  const { spawn } = await import("../platform/process")
-  const isWindows = process.platform === "win32"
-  const argv = isWindows ? ["cmd.exe", "/d", "/s", "/c", command] : ["/bin/sh", "-c", command]
-
-  return new Promise<string>((resolve) => {
-    // Its own process group off Windows, so a timeout can end everything it started.
-    const child = spawn(argv, { cwd: root, stdio: ["ignore", "pipe", "pipe"], env: shellEnvironment(), detached: !isWindows })
-    let output = ""
-    let settled = false
-
-    const finish = (text: string, kill = false) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      signal?.removeEventListener("abort", onStop)
-      if (kill) killTree(child)
-      // Whole, up to a bound: the agent loop fits it to the model and keeps the rest in a file (fitResult).
-      resolve(text.length > MAX_KEPT ? text.slice(0, MAX_KEPT / 2) + `\n… ${text.length - MAX_KEPT} characters dropped …\n` + text.slice(-MAX_KEPT / 2) : text)
-    }
-
-    const timer = setTimeout(() => finish(output + NEWLINE + `... killed after ${timeoutMs}ms (a command meant to keep running goes in the background: shell with background: true)`, true), timeoutMs)
-    // Stopping the turn ends the command. It used to run on to its timeout -
-    // 90 seconds, when the model chose that - with the turn waiting on it.
-    const onStop = () => finish("stopped by the user" + (output.trim() ? NEWLINE + output.trim() : ""), true)
-    signal?.addEventListener("abort", onStop, { once: true })
-
-    // A command that never stops printing must not grow this without limit: past twice the bound, the middle goes.
-    const take = (chunk: Buffer) => {
-      output += chunk.toString()
-      if (output.length > MAX_KEPT * 2) output = output.slice(0, MAX_KEPT / 2) + `\n… output dropped …\n` + output.slice(-MAX_KEPT / 2)
-    }
-    child.stdout?.on("data", take)
-    child.stderr?.on("data", take)
-    child.once("error", (error: Error) => finish("error: " + error.message))
-    child.once("close", (code: number | null) => {
-      const trailer = code === 0 ? "" : NEWLINE + `exit code ${code ?? "unknown"}`
-      finish((output.trim() || "(no output)") + trailer)
-    })
-  })
-}
-
-
 
 /** Every occurrence of a known secret, replaced by a marker that says what was there. */
 export function redactSecrets(text: string, secrets: string[]): string {
@@ -655,6 +616,8 @@ export async function runTool(
   /** Called with the path a writing tool is about to change, before it changes. */
   onWrite?: (relative: string) => Promise<void>,
   signal?: AbortSignal,
+  /** Given what a running tool prints as it prints it (the shell's output), for a person to watch. */
+  progress?: (text: string) => void,
 ): Promise<string> {
   const tool = ALL_TOOLS.find((candidate) => candidate.name === name)
   if (!tool) return `unknown tool: ${name}`
@@ -677,7 +640,7 @@ export async function runTool(
   try {
     const target = tool.writes ? (args as { path?: unknown }).path : undefined
     if (tool.writes && onWrite && typeof target === "string") await onWrite(target)
-    const result = await tool.run(args, root, signal)
+    const result = await tool.run(args, root, signal, progress)
     // A write that landed is formatted in the project's style, when the config says to.
     if (tool.writes && typeof target === "string" && !result.startsWith("error")) {
       const { formatAfterWrite } = await import("./formatter")

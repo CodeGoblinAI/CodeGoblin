@@ -406,6 +406,8 @@ async function* runTurns(input: {
   spendLimit?: number
   maxTurns?: number
   signal?: AbortSignal
+  /** Given what a running tool prints, as it prints it (a shell command's output), by the call's id. For showing, not for the model. */
+  onToolOutput?: (id: string, text: string) => void
   /** An internal inference transport seam; never exposed through UI/config. Consent stays here. */
   completion?: typeof cliCompletion
 }): AsyncGenerator<AgentEvent, void, unknown> {
@@ -718,6 +720,7 @@ async function* runTurns(input: {
                   await input.history?.record(input.root, relative)
                 },
                 input.signal,
+                input.onToolOutput ? (text) => input.onToolOutput!(entry.call.id, text) : undefined,
               )
 
     // read_file on a picture: the model is shown it if it can see, and told plainly if it cannot. Read as

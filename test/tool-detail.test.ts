@@ -49,4 +49,17 @@ describe("what shows under a finished tool call", () => {
     expect(toolDetail("job_output", args({ id: "job1" }), "job1: running for 9s\n(nothing new since it was last read)")).toEqual({ summary: "job1: running for 9s", lines: [] })
     expect(toolDetail("job_stop", args({ id: "job1" }), "job1 stopped: bun dev").summary).toBe("job1 stopped: bun dev")
   })
+
+  test("a command that outlived its wait says so on its row, with what it had printed under it", () => {
+    const trailer = '... still running after 2m. It was not stopped: it carries on in the background as job2.\n(job_output with id "job2" reads what it prints next - wait_ms waits for more, "until" for a particular line; job_stop ends it.)'
+    expect(toolDetail("shell", args({ command: "bun index.js" }), "indexed 40 / 2800000\nindexed 80 / 2800000\n" + trailer)).toEqual({
+      summary: "still running after 2m - carries on as job2 (/jobs)",
+      lines: [{ text: "indexed 40 / 2800000" }, { text: "indexed 80 / 2800000" }],
+    })
+    expect(toolDetail("shell", args({ command: "sleep 900" }), "(no output yet)\n" + trailer)).toEqual({ summary: "still running after 2m - carries on as job2 (/jobs)", lines: [] })
+    // Opened by a click, the same call shows far more of its output.
+    const long = Array.from({ length: 40 }, (_, n) => "line " + (n + 1)).join("\n")
+    expect(toolDetail("shell", args({ command: "x" }), long).lines.length).toBe(7)
+    expect(toolDetail("shell", args({ command: "x" }), long, 300).lines.length).toBe(40)
+  })
 })

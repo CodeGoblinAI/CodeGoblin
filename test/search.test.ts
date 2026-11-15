@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { globToRegExp, globFiles, grepFiles } from "../src/core/search"
 import { runTool, SKIP_DIRS } from "../src/core/tools"
+import { stopAllJobs } from "../src/core/jobs"
 
 const root = process.cwd()
 
@@ -101,11 +102,12 @@ describe("shell tool", () => {
     expect(result).toContain("exit code 3")
   })
 
-  test("kills a command that overruns its timeout", async () => {
+  test("stops waiting for a command that overruns its wait, without ending it", async () => {
     const started = Date.now()
     const result = await runTool("shell", { command: "ping -n 20 127.0.0.1", timeout_ms: 1200 }, root)
-    expect(result).toContain("killed after")
+    expect(result).toContain("still running after 1s")
     expect(Date.now() - started).toBeLessThan(8000)
+    expect(stopAllJobs()).toBe(1)
   })
 
   test("refuses an empty command", async () => {

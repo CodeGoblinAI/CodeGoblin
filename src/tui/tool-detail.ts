@@ -45,6 +45,13 @@ export function toolDetail(name: string, argsText: string, result: string, max =
   }
 
   if (name === "shell") {
+    // A command that outlived its wait: the row says it is still going, and as which job, rather than
+    // leaving that at the bottom of output nobody scrolls to.
+    const handed = /\s*\.\.\. still running after ([^.]+)\. It was not stopped: it carries on in the background as (job\d+)\.[\s\S]*$/.exec(result)
+    if (handed) {
+      const printed = result.slice(0, handed.index)
+      return { summary: "still running after " + handed[1] + " - carries on as " + handed[2] + " (/jobs)", lines: printed.trim() && printed.trim() !== "(no output yet)" ? capped(printed, max) : [] }
+    }
     // The exit code is the verdict, so it goes on the row; the output goes under it.
     const code = /\nexit code (\S+)\s*$/.exec(result)?.[1]
     const output = code ? result.slice(0, result.lastIndexOf(NEWLINE + "exit code")) : result

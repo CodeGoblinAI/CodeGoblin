@@ -212,7 +212,22 @@ type Entry = {
   at?: number
   /** Tool rows: what came of the call, drawn under it - a command's output, what a file now says. */
   detail?: DetailLine[]
+  /** Tool rows: the call itself, so a click can show the whole command and far more of what came back. */
+  tool?: { name: string; args: string; result?: string }
+  /** Opened by a click: the command in full and its output at length. */
+  open?: boolean
+  /** While it runs: when it started, and the end of what it has printed so far. */
+  startedAt?: number
+  live?: string
 }
+/** How many lines of a running command's output are shown under its row, and of an opened row's. */
+const LIVE_LINES = 5
+const OPEN_LINES = 300
+/** How much of a result an opened row can show; the model's copy is not affected. */
+const OPEN_KEEP = 200_000
+/** Which transcript entry each drawn line belongs to, so a click on a row finds it. */
+let lineOwners: (Entry | undefined)[] = []
+let linesOverflow = false
 /** Each running call's arguments, so its row can show what it did once it ends. */
 const callArgs = new Map<string, string>()
 /** /fold: every answer drawn as its first lines. A view, not a setting. */
@@ -376,6 +391,14 @@ let turn: AbortController | undefined
  * until the model is finished.
  */
 let queued: string | undefined
+/** What was sent after that while it still worked: each goes in its turn, oldest first. */
+let queuedMore: string[] = []
+/** Adds to what is waiting, and says how many are ahead of it. */
+function enqueue(text: string): number {
+  if (!queued) { queued = text; return 0 }
+  queuedMore.push(text)
+  return queuedMore.length
+}
 
 /**
  * What this session has cost.
@@ -532,7 +555,12 @@ const MEDIA_SECTIONS: { kind: "image" | "audio" | "model3d"; label: string }[] =
 const permissions = Permissions.withConfig(
   (tool, detail, cover, from) => {
     if (turn?.signal.aborted) return Promise.resolve<Decision>("reject")
-    return new Promise<Decision>((resolve) => {
+    return new Promise<Decision>((answered) => {
+      // The time a call has run is counted from when it was allowed, not from when it was asked about.
+      const resolve = (decision: Decision) => {
+        for (const entry of transcript) if (entry.kind === "tool" && entry.state === "running") entry.startedAt = Date.now()
+        answered(decision)
+      }
       const ask = { tool, detail, cover, from, resolve }
       if (pending) waitingAsks.push(ask)
       else {
@@ -727,7 +755,8 @@ function entryLines(entry: Entry, width: number): string[] {
   const key = [width, settings.theme, settings.thinking, entry.kind, entry.state ?? "", entry.by ?? selection.provider.label, entry.text.length,
     // Thinking folds once it is finished, and Ctrl+O flips every fold.
     entry.kind === "thinking" ? String(expandThinking) + (entry === transcript.at(-1) && streaming) : "",
-    entry.kind === "agent" ? String(foldAnswers) : "", showTimes && entry.at ? sessions.clockTime(entry.at) : "", entry.detail?.length ?? 0].join("|")
+    entry.kind === "agent" ? String(foldAnswers) : "", showTimes && entry.at ? sessions.clockTime(entry.at) : "", entry.detail?.length ?? 0,
+    entry.open ? "open" : "", entry.live?.length ?? 0, entry.state === "running" && entry.startedAt ? Math.floor((Date.now() - entry.startedAt) / 1000) : ""].join("|")
   const cached = drawnRows.get(entry)
   if (cached && cached.key === key) return cached.rows
   const rows = drawEntry(entry, width)
@@ -755,7 +784,13 @@ function drawEntry(entry: Entry, width: number): string[] {
     // Every row used to start with "x", so a read that worked looked like one that failed.
     const mark = entry.state === "done" ? "✓" : entry.state === "failed" ? "✗" : entry.state === "running" ? "…" : "·"
     let first = true
-    for (const line of entry.text.split(String.fromCharCode(10))) {
+    // Opened by a click: the call in full - a long command is no longer cut at sixty characters - and its
+    // output at length. Closed, it is the one line and the first few lines of output, as before.
+    const opened = entry.open && entry.tool?.result !== undefined ? toolDetail(entry.tool.name, entry.tool.args, entry.tool.result, OPEN_LINES) : undefined
+    // A command still running says for how long, once that is worth saying.
+    const running = entry.state === "running" && entry.startedAt && Date.now() - entry.startedAt >= 3000 ? "  \u00b7 " + ago(Date.now() - entry.startedAt) : ""
+    const text = opened ? toolLabel(entry.tool!.name) + " " + askedFor(entry.tool!.name, entry.tool!.args) + (opened.summary ? "  ->  " + opened.summary : "") : entry.text + running
+    for (const line of text.split(String.fromCharCode(10))) {
       // Wrapped under its own indent rather than cut: command output such as
       // /local or /skills is mostly paths and sentences, and the end was lost.
       const indent = /^ */.exec(line)![0].slice(0, 12)
@@ -767,10 +802,16 @@ function drawEntry(entry: Entry, width: number): string[] {
     }
     // Under the row, behind a rule: output is cut at the edge rather than
     // wrapped, so a long line costs one row, not five.
-    for (const line of entry.detail ?? []) {
+    // While it runs, the last lines of what it is printing: enough to see whether it is getting anywhere.
+    const liveLines: DetailLine[] = entry.state === "running" && entry.live?.trim()
+      ? entry.live.replace(/\r\n?/g, String.fromCharCode(10)).split(String.fromCharCode(10)).map((line) => line.split("\r").at(-1)!).filter((line) => line.trim()).slice(-LIVE_LINES).map((line) => ({ text: line.replace(/\t/g, "  ") }))
+      : []
+    const closedDetail = (entry.detail ?? []).map((line) => line.tone === "more" && entry.tool?.result !== undefined ? { ...line, text: line.text + " \u00b7 click to show" } : line)
+    for (const line of opened ? opened.lines : liveLines.length ? liveLines : closedDetail) {
       const colour = line.tone === "add" ? theme.goblin : line.tone === "remove" ? theme.error : dim
       out.push(theme.border + "    \u2502 " + ansi.reset + colour + truncateToWidth(line.text, Math.max(10, width - 6)) + ansi.reset)
     }
+    if (opened) out.push(dim + "    click to fold" + ansi.reset)
     out.push("")
     return out
   }
@@ -848,6 +889,7 @@ function draw() {
   const main = railShown ? cols - RAIL_WIDTH - 1 : cols
   const width = Math.max(20, main - 6)
   const lines: string[] = []
+  const owners: (Entry | undefined)[] = []
   /** Where /timeline's chosen message starts, when one was chosen. */
   let jumpLine: number | undefined
 
@@ -863,12 +905,17 @@ function draw() {
     for (const entry of drawn) {
       if (entry === jumpTo) jumpLine = lines.length
       if (entry.kind === "user") starts.push(lines.length)
-      for (const line of entryLines(entry, width)) lines.push(line)
+      for (const line of entryLines(entry, width)) { owners[lines.length] = entry; lines.push(line) }
     }
     userStarts = starts
     // What was typed while it worked is your next message, so it is drawn as
     // one - where it will go, marked as waiting - rather than as a note by the box.
-    if (queued && !secret) for (const line of queuedLines(queued, width)) lines.push(line)
+    if (queued && !secret) {
+      const drawnQueue = queuedLines(queued, width)
+      // The rest wait behind it; one line says so rather than a column of them.
+      if (queuedMore.length) drawnQueue.splice(drawnQueue.length - 1, 0, dim + " ".repeat(Math.max(2, width - 26)) + "+ " + queuedMore.length + " more after it" + ansi.reset)
+      for (const line of drawnQueue) lines.push(line)
+    }
   }
 
   const planLines: string[] = []
@@ -917,7 +964,7 @@ function draw() {
   }
   const overlayHeight = overlay ? overlayRows.length + 3 : 0
   const paletteBudget = Math.max(0, rows - footerHeight({ ...footer, overlay: overlayHeight }) - 2)
-  const paletteLines = palette && !streaming ? renderPalette(palette, paletteIndex, cols, paletteBudget) : []
+  const paletteLines = palette ? renderPalette(palette, paletteIndex, cols, paletteBudget) : []
   const planBudget = Math.max(0, paletteBudget - paletteLines.length)
   if (planLines.length > planBudget) {
     planLines.splice(planBudget)
@@ -941,6 +988,8 @@ function draw() {
   scroll = Math.min(scroll, maxScroll)
   const cut = lines.length - room - scroll
   lastTop = Math.max(0, cut)
+  lineOwners = transcript.length ? owners : []
+  linesOverflow = lines.length > room
   // The empty conversation puts the composer under the wordmark; what is left of the window goes below it.
   const home = transcript.length === 0
     ? homeLayout(main, room + paletteLines.length + footer.notice, paletteLines.length + footer.notice, homeWhere(), { goblin: theme.goblin, gold: theme.gold, dim, reset: ansi.reset }, footer.notice)
@@ -2320,7 +2369,7 @@ async function chooseInDialog() {
   if (dialog.kind === "model-picker") {
     const next = resolveSelection(row.value)
     if (next) {
-      if (streaming) { queued = "/model " + row.value; status = "model switch queued until this turn ends" }
+      if (streaming) { enqueue("/model " + row.value); status = "model switch queued until this turn ends" }
       else {
         selection = next; resumeModelMissing = false; key = apiKey(next.provider.id); status = next.provider.label + " " + next.model.label; rememberRecent()
         // As the fork does: a model with effort levels asks for one the first time it is chosen.
@@ -2731,13 +2780,12 @@ async function send() {
   const invoked = isCommand(text) ? resolveInvocation(text, process.cwd()) : undefined
 
   if (streaming && (invoked || !isLiveCommand(text))) {
-    const replaced = Boolean(queued)
-    queued = text
+    const ahead = enqueue(text)
     applyComposer({ text: "", cursor: 0 }, true)
     palette = undefined
-    status = replaced
+    status = ahead
       // The message itself shows in the conversation, marked as waiting; this says what else can be done with it.
-      ? "replaced the queued message · Ctrl+S sends it now"
+      ? "queued behind " + ahead + " other" + (ahead === 1 ? "" : "s") + " · they send in order when this finishes"
       : "Ctrl+S sends it now"
     render()
     return
@@ -3386,6 +3434,7 @@ async function send() {
       // the target model's own saved effort, never the parent model's.
       effort: effortFor(selection.model, currentEffort()),
       signal: turn.signal,
+      onToolOutput: showToolOutput,
       memory: await memory.recall({ project: process.cwd(), session: session.id }),
       instructions: [profile ? "Active agent: " + profile.name + "\n" + profile.prompt : undefined, skillIndex(listSkills(process.cwd())), withoutServers(mcp, session.mcpOff ?? []).notice()].filter(Boolean).join(String.fromCharCode(10, 10)) || undefined,
     })) {
@@ -3417,7 +3466,7 @@ async function send() {
         stepAnswer = undefined
         callArgs.set(event.id, event.args)
         // Summarised as approvals are, so an edit's row names its file before the cut.
-        transcript.push({ kind: "tool", call: event.id, text: toolLabel(event.name) + " " + askedFor(event.name, event.args).replace(/\s+/g, " ").slice(0, 60), state: "running" })
+        transcript.push({ kind: "tool", call: event.id, text: toolLabel(event.name) + " " + askedFor(event.name, event.args).replace(/\s+/g, " ").slice(0, 60), state: "running", startedAt: Date.now(), tool: { name: event.name, args: event.args } })
       }
       if (event.type === "spend") {
         spend = addSpend(spend, {
@@ -3493,6 +3542,8 @@ async function send() {
           if (row.state !== "failed") row.state = /^(error|stopped)/.test(event.result) ? "failed" : "done"
           const shown = toolDetail(event.name, callArgs.get(event.id) ?? "", event.result)
           callArgs.delete(event.id)
+          row.live = undefined
+          if (row.tool) row.tool.result = event.result.length > OPEN_KEEP ? event.result.slice(0, OPEN_KEEP / 2) + String.fromCharCode(10) + "\u2026 the middle is not kept here \u2026" + String.fromCharCode(10) + event.result.slice(-OPEN_KEEP / 2) : event.result
           if (shown.summary) row.text += "  ->  " + shown.summary
           if (shown.lines.length) row.detail = shown.lines
         }
@@ -3542,18 +3593,7 @@ async function send() {
 
     // Anything typed mid-turn goes now, without a keystroke to remind it.
     if (queued) {
-      const next = queued
-      queued = undefined
-      status = "sending now"
-      const draft = composerState()
-      input = next
-      cursor = next.length
-      void send()
-      if (!isCommand(next) || draft.text) {
-        applyComposer(draft)
-        refreshPalette()
-        render()
-      }
+      void sendQueued()
       return
     }
     render()
@@ -3675,6 +3715,44 @@ process.stdin.resume()
 // One reader for the whole session, so a paste split across chunks is still
 // one paste.
 const readKeys = createKeyReader()
+
+/**
+ * Sends what was typed while it worked, in the order it was typed. A message starts a turn, and the turn's
+ * own end comes back here for the next; a command (/jobs, /fold) is over at once, so the loop carries on.
+ */
+async function sendQueued() {
+  while (queued && !streaming) {
+    const next = queued
+    queued = queuedMore.shift()
+    status = "sending now"
+    const draft = composerState()
+    input = next
+    cursor = next.length
+    const sent = send()
+    if (!isCommand(next) || draft.text) {
+      applyComposer(draft)
+      refreshPalette()
+      render()
+    }
+    await sent.catch(() => {})
+  }
+}
+
+/** What a running command prints, kept on its row; drawn at most ten times a second however fast it prints. */
+let outputDraw: ReturnType<typeof setTimeout> | undefined
+function showToolOutput(id: string, text: string) {
+  const row = [...transcript].reverse().find((entry) => entry.kind === "tool" && entry.call === id)
+  if (!row || row.state !== "running") return
+  row.live = ((row.live ?? "") + redactSecrets(text, storedSecrets())).slice(-8000)
+  if (outputDraw) return
+  outputDraw = setTimeout(() => { outputDraw = undefined; render() }, 100)
+}
+
+/** The transcript entry drawn on a screen row (1-based), if that row is part of the conversation. */
+function entryAtRow(row: number): Entry | undefined {
+  if (!transcript.length || row < 1 || row > lastRoom) return undefined
+  return lineOwners[(linesOverflow ? lastTop : 0) + row - 1]
+}
 
 function changePermissionMode(mode: PermissionMode) {
   permissions.mode = mode
@@ -4096,6 +4174,8 @@ process.stdin.on("data", (chunk) => {
     if (pressed.type === "ctrl" && pressed.value === "s") {
       if (streaming && !secret && !dialog && (input.trim() || queued)) {
         if (input.trim()) {
+          // Sent now means next: ahead of anything already waiting.
+          if (queued) queuedMore.unshift(queued)
           queued = input
           input = ""
           cursor = 0
@@ -4167,6 +4247,13 @@ process.stdin.on("data", (chunk) => {
       // The floating pill goes back to the latest output.
       if (latestPill && pressed.row === latestPill.row && pressed.col >= latestPill.from && pressed.col <= latestPill.to) {
         scroll = 0
+        render(); continue
+      }
+      // A finished call opens to its whole command and far more of its output, and folds again.
+      const clicked = entryAtRow(pressed.row)
+      if (clicked?.kind === "tool" && clicked.tool?.result !== undefined) {
+        clicked.open = !clicked.open
+        status = clicked.open ? "opened - click it again to fold" : ""
         render(); continue
       }
       // A release in the composer ends the gesture: dragged keeps its

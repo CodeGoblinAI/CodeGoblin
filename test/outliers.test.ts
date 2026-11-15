@@ -5,6 +5,7 @@ import path from "node:path"
 import { closeOpenCalls, type Message } from "../src/core/agent"
 import { systemPrompt } from "../src/core/system-prompt"
 import { runTool } from "../src/core/tools"
+import { stopAllJobs } from "../src/core/jobs"
 import { Global } from "../src/platform/paths"
 import { requireSandbox } from "./sandbox"
 
@@ -82,11 +83,12 @@ describe("stopping a turn while a tool runs", () => {
   })
 })
 
-describe.if(process.platform === "win32")("a shell command killed at its timeout", () => {
+describe.if(process.platform === "win32")("a shell command that outlives its wait, once stopped", () => {
   test("takes the program it started with it", async () => {
     // An address nothing else pings, so the process can be found by its command line.
     const result = await runTool("shell", { command: "ping -n 40 127.0.0.93", timeout_ms: 1500 }, project)
-    expect(result).toContain("killed after")
+    expect(result).toContain("still running after")
+    stopAllJobs()
     await new Promise((done) => setTimeout(done, 500))
     const found = spawnSync(
       "powershell",

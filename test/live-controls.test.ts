@@ -8,6 +8,11 @@ test("display and approval commands run live; mutations and prompts queue", () =
   for (const text of ["hello", "/clear", "/resume", "/model local", "/undo", "/compact", "/plan fix this", "/boost", "/custom", "/approvals-extra", "/login codex", "/import codex"]) expect(isLiveCommand(text)).toBe(false)
 })
 
+test("looking at things runs while the agent works; whatever changes the conversation waits its turn", () => {
+  for (const text of ["/jobs", "/bg", "/background", "/job", "/timeline", "/search port", "/fold", "/timestamps"]) expect(isLiveCommand(text)).toBe(true)
+  for (const text of ["/fork", "/rename x", "/skills", "/voice", "/jobsworth", "/editor", "/worktree"]) expect(isLiveCommand(text)).toBe(false)
+})
+
 test("mode changes release normal requests but preserve forced ask, deny and plan", () => {
   const permissions = new Permissions(async () => "reject", () => ({ "git push*": "ask", "git reset*": "deny" }))
   const child = permissions.forSubagent("test")

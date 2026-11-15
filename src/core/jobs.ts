@@ -60,6 +60,13 @@ const jobs = new Map<string, Job>()
 let counter = 0
 let hooked = false
 
+/** Nothing started here outlives the app. */
+function hookExit() {
+  if (hooked) return
+  hooked = true
+  process.on("exit", () => stopAllJobs())
+}
+
 const sameRoot = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
 const running = (job: Job) => job.endedAt === undefined
 const wake = (job: Job) => { for (const waiter of [...job.waiters]) waiter() }
@@ -140,11 +147,7 @@ export async function startJob(command: string, root: string, options: { signal?
   if (runningJobs() >= MAX_RUNNING) {
     return `error: ${MAX_RUNNING} background jobs are already running - job_output lists them; stop one with job_stop first`
   }
-  if (!hooked) {
-    hooked = true
-    // Nothing started here outlives the app.
-    process.on("exit", () => stopAllJobs())
-  }
+  hookExit()
 
   const isWindows = process.platform === "win32"
   const argv = isWindows ? ["cmd.exe", "/d", "/s", "/c", command] : ["/bin/sh", "-c", command]
@@ -185,6 +188,106 @@ export async function startJob(command: string, root: string, options: { signal?
     (first ? first + NEWLINE : "(no output yet)" + NEWLINE) +
     `(still running. job_output with id "${job.id}" reads what it prints next - give it "until" to wait for a line such as the one a server prints when it is ready; job_stop ends it. It ends when CG-Next closes.)`
   )
+}
+
+/** How much of a waited-for command's output is handed back: the whole of it up to this, then its two ends. */
+const MAX_KEPT = 4_000_000
+
+/**
+ * Runs a command and waits for it - but only so long.
+ *
+ * A command that outlives its wait used to be killed, which threw away whatever it had done and taught
+ * models to ask for enormous timeouts; then a loop over far more files than anyone expected held the whole
+ * turn, with the model unable to notice. Now the wait ending does not end the command: it becomes a
+ * background job, and the model gets back what it has printed so far and the job's id. From there it is the
+ * model's call - read on, wait longer, or stop it and do the thing another way.
+ *
+ * `onOutput` is given everything the command prints as it prints it, so a person can watch.
+ */
+export async function runForeground(
+  command: string,
+  root: string,
+  options: { timeoutMs: number; signal?: AbortSignal; onOutput?: (text: string) => void },
+): Promise<string> {
+  if (!command.trim()) return "error: empty command"
+  if (options.signal?.aborted) return "stopped by the user before it ran"
+
+  const isWindows = process.platform === "win32"
+  const argv = isWindows ? ["cmd.exe", "/d", "/s", "/c", command] : ["/bin/sh", "-c", command]
+  // Its own process group off Windows, so ending it ends everything it started.
+  const child = spawn(argv, { cwd: root, stdio: ["ignore", "pipe", "pipe"], env: shellEnvironment(), detached: !isWindows })
+  // Not in the list of jobs unless it outlives the wait.
+  const job: Job = { id: "", command, root, startedAt: Date.now(), output: "", total: 0, seen: 0, told: false, child, waiters: new Set() }
+  let whole = ""
+  let waiting = true
+
+  return new Promise<string>((resolve) => {
+    let settled = false
+    const bounded = (text: string) => text.length > MAX_KEPT ? text.slice(0, MAX_KEPT / 2) + `\n… ${text.length - MAX_KEPT} characters dropped …\n` + text.slice(-MAX_KEPT / 2) : text
+    const finish = (text: string, kill = false) => {
+      if (settled) return
+      settled = true
+      waiting = false
+      clearTimeout(timer)
+      options.signal?.removeEventListener("abort", onStop)
+      if (kill) killTree(child)
+      resolve(bounded(text))
+    }
+
+    const take = (chunk: Buffer) => {
+      const text = chunk.toString()
+      job.total += text.length
+      job.output += text
+      if (job.output.length > KEEP * 1.5) job.output = job.output.slice(-KEEP)
+      if (waiting) {
+        whole += text
+        // A command that never stops printing must not grow this without limit: past twice the bound, the middle goes.
+        if (whole.length > MAX_KEPT * 2) whole = whole.slice(0, MAX_KEPT / 2) + `\n… output dropped …\n` + whole.slice(-MAX_KEPT / 2)
+        try { options.onOutput?.(text) } catch {}
+      }
+      wake(job)
+    }
+    const end = (code: number | null) => {
+      if (running(job)) {
+        job.endedAt = Date.now()
+        job.exitCode = code
+        wake(job)
+        if (job.id) forget()
+      }
+      finish((whole.trim() || "(no output)") + (code === 0 ? "" : NEWLINE + `exit code ${code ?? "unknown"}`))
+    }
+
+    const onTime = () => {
+      if (settled) return
+      const waited = ago(options.timeoutMs)
+      if (runningJobs() >= MAX_RUNNING) {
+        finish(whole + NEWLINE + `... ended after ${waited}: it was still running, and ${MAX_RUNNING} background jobs are already running, so it could not be left to carry on (job_output lists them)`, true)
+        return
+      }
+      // It carries on, as a job. What it has printed so far is in this answer, so job_output starts after it.
+      job.id = "job" + ++counter
+      job.seen = job.total
+      jobs.set(job.id, job)
+      hookExit()
+      finish(
+        (whole.trim() ? whole.trimEnd() + NEWLINE : "(no output yet)" + NEWLINE) +
+        `... still running after ${waited}. It was not stopped: it carries on in the background as ${job.id}.` + NEWLINE +
+        `(job_output with id "${job.id}" reads what it prints next - wait_ms waits for more, "until" for a particular line; job_stop ends it.)`,
+      )
+    }
+    const timer = setTimeout(onTime, options.timeoutMs)
+    // Stopping the turn ends a command that is being waited for.
+    const onStop = () => finish("stopped by the user" + (whole.trim() ? NEWLINE + whole.trim() : ""), true)
+    options.signal?.addEventListener("abort", onStop, { once: true })
+
+    child.stdout?.on("data", take)
+    child.stderr?.on("data", take)
+    child.once("error", (error: Error) => {
+      if (running(job)) { job.endedAt = Date.now(); job.exitCode = null; wake(job) }
+      finish("error: " + error.message)
+    })
+    child.once("close", (code: number | null) => end(code))
+  })
 }
 
 /** What a job has printed since it was last read. With no id, the list of this project's jobs. */
