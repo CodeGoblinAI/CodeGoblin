@@ -10,6 +10,8 @@ import { ansi, theme, dim, invert, noInvert, applyTheme as paintTheme } from "./
 import { APPEARANCES, effectiveTheme, terminalLooksLight } from "../core/theme"
 import { LEADER_DEFAULTS, loadKeymap, type LeaderAction } from "./keybinds"
 import os from "node:os"
+import path from "node:path"
+import { Global } from "../platform/paths"
 import { homeLayout, pickTip, setHomeTip } from "./wordmark"
 import { toolDetail, type DetailLine } from "./tool-detail"
 import { THEMES } from "../core/theme"
@@ -18,6 +20,7 @@ import { createKeyReader } from "./keys"
 import { parseLaunch } from "./args"
 import { lastUsedModel, resolveStartupModel } from "../core/model-selection"
 import { isEmpty, paint, textOf, type Span } from "./screen-select"
+import { carryOn, errorLine, errorText, farewell, logEntry, writeCrash } from "./crash"
 import { isLiveCommand } from "./live-commands"
 import { footerHeight } from "./layout"
 import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
@@ -818,7 +821,12 @@ let toolbarRow = 0
 let toolbarTargets: { from: number; to: number; command: string }[] = []
 /** The floating back-to-latest pill, when one is drawn: its screen row and span. */
 let latestPill: { row: number; from: number; to: number } | undefined
+/** Draws the screen. An error in the drawing itself ends the app (see crash.ts): the next redraw would only throw it again. */
 function render() {
+  try { draw() } catch (error) { unexpected("drawing the screen", error, true) }
+}
+
+function draw() {
   if (!homeDrawn) { homeDrawn = true; readHomeBranch() }
   const { cols, rows } = size()
   // With the side panel showing, the transcript gets the columns left of it -
@@ -3995,6 +4003,12 @@ async function voiceCommand(argument: string) {
 }
 
 process.stdin.on("data", (chunk) => {
+  // For the crash walkthrough only (test/user-pass/pass-crash.mjs): F12 throws, in the way the variable names.
+  if (process.env.CODEGOBLIN_DEBUG_CRASH && chunk.toString() === "\x1b[24~") {
+    if (process.env.CODEGOBLIN_DEBUG_CRASH === "later") { void Promise.reject(new Error("a made-up background failure")); return }
+    if (process.env.CODEGOBLIN_DEBUG_CRASH === "draw") { status = { length: 1 } as unknown as string; render(); return }
+    throw new Error("a made-up failure")
+  }
   let dirty = false
   // A held space bar repeats alone; spaces inside typed or pasted text come with other characters.
   const onlySpaces = /^ +$/.test(chunk.toString())
@@ -4526,3 +4540,29 @@ process.stdin.on("data", (chunk) => {
 })
 
 process.on("SIGINT", shutdown)
+
+// Anything thrown that nothing caught. It used to be printed into the app's own screen, painted over by the
+// next redraw, and the process ended with the terminal still in that screen: a dead picture of the app with
+// a shell prompt through it and no word of why. Now it is logged, shown, and survived where it can be.
+const crashFile = path.join(Global.Path.log, "tui-crash.log")
+const crashTimes: number[] = []
+let ending = false
+function unexpected(kind: string, error: unknown, drawing = false) {
+  if (ending) return
+  const file = writeCrash(crashFile, logEntry(kind, error, new Date(), "bun " + Bun.version + ", " + process.cwd()))
+  if (carryOn(crashTimes, Date.now(), drawing)) {
+    // The whole of it goes in the conversation, where it can be read and copied; the model is not sent it.
+    transcript.push({ kind: "tool", text: "something went wrong (" + kind + ")" + String.fromCharCode(10) + errorText(error) + (file ? String.fromCharCode(10) + "saved in " + file : "") })
+    status = "something went wrong: " + errorLine(error) + " - the details are above"
+    render()
+    return
+  }
+  ending = true
+  try { stopAllJobs(); stopRecorder(); stopVoice(); turn?.abort(); subagents.stopAll() } catch {}
+  try { process.stdin.setRawMode?.(false) } catch {}
+  try { out.write("\x1b[0m" + ansi.pasteOff + "\x1b[?1002l\x1b[?1006l" + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen) } catch {}
+  try { process.stderr.write(farewell(kind, error, file)) } catch {}
+  process.exit(1)
+}
+process.on("uncaughtException", (error) => unexpected("an error nothing caught", error))
+process.on("unhandledRejection", (error) => unexpected("a background task failed", error))

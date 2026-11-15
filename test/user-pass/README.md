@@ -47,6 +47,13 @@ Stop the `tui-window.mjs` process when done; it keeps the fake model up.
 background, then check the running-jobs indicator, `/jobs` (output and Stop), that the process is
 really gone after Stop, and (terminal) that quitting ends what is still running.
 
+## Unexpected errors
+
+`pass-crash.mjs` makes the terminal app throw (F12, only with `CODEGOBLIN_DEBUG_CRASH` set: `now`,
+`later` for a background failure, `draw` for one while drawing). One error is shown, logged to
+`log/tui-crash.log` and survived; repeated ones, or one while drawing, end the app with the terminal
+handed back and the error printed.
+
 ## Voice
 
 `pass-voice-tui.mjs` and `pass-voice-web.mjs` run the real speech model against a spoken test
