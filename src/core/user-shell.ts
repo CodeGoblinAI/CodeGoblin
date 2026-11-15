@@ -1,4 +1,4 @@
-import { runTool, redactSecrets } from "./tools"
+import { runTool, redactSecrets, fitResult } from "./tools"
 import { storedSecrets } from "./auth"
 import type { Permissions } from "./permission"
 import type { Message } from "./agent"
@@ -26,7 +26,7 @@ export async function runTypedCommand(command: string, root: string, permissions
   const verdict = permissions.typedCommandVerdict(command)
   if (!verdict.allowed) return { command, output: verdict.reason, refused: verdict.reason }
   // Scrubbed like a model's tool output: this text is sent to the model and saved with the session.
-  const output = redactSecrets(await runTool("shell", { command, timeout_ms: TYPED_TIMEOUT_MS }, root, undefined, signal), storedSecrets())
+  const output = await fitResult(redactSecrets(await runTool("shell", { command, timeout_ms: TYPED_TIMEOUT_MS }, root, undefined, signal), storedSecrets()), "typed")
   const lines = output.split("\n")
   const shown = lines.length > DISPLAY_LINES ? [...lines.slice(0, DISPLAY_LINES), `... ${lines.length - DISPLAY_LINES} more lines`].join("\n") : output
   return {

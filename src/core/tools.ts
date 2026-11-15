@@ -1,6 +1,7 @@
 import { spawnSync as nodeSpawnSync } from "node:child_process"
 import { realpathSync } from "node:fs"
 import fsSync from "node:fs"
+import { Global } from "../platform/paths"
 import { inRepoCache } from "./repos"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -47,7 +48,7 @@ export const SKIP_DIRS = new Set([
  * Writing tools never use this - they stay inside the project.
  */
 export function resolveReadable(root: string, target: string): string {
-  if (path.isAbsolute(target) && inRepoCache(target)) return path.resolve(target)
+  if (path.isAbsolute(target) && (inRepoCache(target) || inSpill(target))) return path.resolve(target)
   return resolveInside(root, target)
 }
 
@@ -107,8 +108,57 @@ export function assertWritable(relative: string) {
   }
 }
 
+/** How much of an oversized result the model is shown from each end. */
+const HEAD = 16_000
+const TAIL = 7_000
+/** The most a command's output is kept at all, in memory and in its spill file. */
+const MAX_KEPT = 4_000_000
+
+/**
+ * Fits text to what a model should be handed: the start and the end, with the middle cut.
+ *
+ * It used to keep only the start, and the end is where a build or a test run says what went wrong.
+ */
 export const clip = (text: string) =>
-  text.length > MAX_OUTPUT ? text.slice(0, MAX_OUTPUT) + `\n… truncated at ${MAX_OUTPUT} characters` : text
+  text.length > MAX_OUTPUT
+    ? text.slice(0, HEAD) + `\n\n… ${text.length - HEAD - TAIL} characters cut from the middle …\n\n` + text.slice(-TAIL)
+    : text
+
+/** Where oversized command output is kept whole. The OS clears its temp folder; nothing here deletes. */
+export const spillDir = () => path.join(Global.Path.tmp, "tool-output")
+const inSpill = (target: string) => {
+  const relative = path.relative(spillDir(), path.resolve(target))
+  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative)
+}
+
+/**
+ * A result fit for the model. When it is too long, the whole of it (as given - redact first) is written to a
+ * file the model can read in parts, and the model gets the two ends and where the rest is.
+ */
+export async function fitResult(text: string, id: string): Promise<string> {
+  if (text.length <= MAX_OUTPUT) return text
+  const lines = text.split("\n").length
+  try {
+    await fs.mkdir(spillDir(), { recursive: true })
+    const file = path.join(spillDir(), id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80) + "-" + Date.now().toString(36) + ".txt")
+    await fs.writeFile(file, text, { mode: 0o600 })
+    return clip(text) + `\n\n(the full output, ${lines} lines, is in ${file} - read_file with offset and limit reads any part of it)`
+  } catch {
+    return clip(text)
+  }
+}
+
+/** A window of a file's lines, numbered from 1; says what it left out. */
+function lineWindow(text: string, offset: unknown, limit: unknown): string {
+  if (offset === undefined && limit === undefined) return clip(text)
+  const lines = text.split("\n")
+  const from = Math.max(1, Math.floor(Number(offset) || 1))
+  const count = Math.max(1, Math.floor(Number(limit) || 400))
+  const shown = lines.slice(from - 1, from - 1 + count)
+  if (!shown.length) return `(the file has ${lines.length} lines; nothing at line ${from})`
+  const to = from + shown.length - 1
+  return clip(shown.join("\n")) + (to < lines.length || from > 1 ? `\n(lines ${from}-${to} of ${lines.length})` : "")
+}
 
 export const TOOLS: Tool[] = [
   {
@@ -117,10 +167,14 @@ export const TOOLS: Tool[] = [
     description: "Read a UTF-8 text file, relative to the working directory (or an absolute path inside a repository repo_clone fetched). An image (png, jpg, gif, webp) is shown to you as a picture if you can see images.",
     parameters: {
       type: "object",
-      properties: { path: { type: "string", description: "File path relative to the working directory." } },
+      properties: {
+        path: { type: "string", description: "File path relative to the working directory." },
+        offset: { type: "number", description: "Line to start from (1 is the first). For a long file, with limit." },
+        limit: { type: "number", description: "How many lines to read from offset (default 400)." },
+      },
       required: ["path"],
     },
-    run: async (args, root) => clip(await fs.readFile(resolveReadable(root, args.path), "utf8")),
+    run: async (args, root) => lineWindow(await fs.readFile(resolveReadable(root, args.path), "utf8"), args.offset, args.limit),
   },
   {
     name: "list_files",
@@ -504,7 +558,8 @@ async function runShell(command: string, root: string, timeoutMs: number, signal
       clearTimeout(timer)
       signal?.removeEventListener("abort", onStop)
       if (kill) killTree(child)
-      resolve(clip(text))
+      // Whole, up to a bound: the agent loop fits it to the model and keeps the rest in a file (fitResult).
+      resolve(text.length > MAX_KEPT ? text.slice(0, MAX_KEPT / 2) + `\n… ${text.length - MAX_KEPT} characters dropped …\n` + text.slice(-MAX_KEPT / 2) : text)
     }
 
     const timer = setTimeout(() => finish(output + NEWLINE + `... killed after ${timeoutMs}ms`, true), timeoutMs)
@@ -513,8 +568,13 @@ async function runShell(command: string, root: string, timeoutMs: number, signal
     const onStop = () => finish("stopped by the user" + (output.trim() ? NEWLINE + output.trim() : ""), true)
     signal?.addEventListener("abort", onStop, { once: true })
 
-    child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString() })
-    child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString() })
+    // A command that never stops printing must not grow this without limit: past twice the bound, the middle goes.
+    const take = (chunk: Buffer) => {
+      output += chunk.toString()
+      if (output.length > MAX_KEPT * 2) output = output.slice(0, MAX_KEPT / 2) + `\n… output dropped …\n` + output.slice(-MAX_KEPT / 2)
+    }
+    child.stdout?.on("data", take)
+    child.stderr?.on("data", take)
     child.once("error", (error: Error) => finish("error: " + error.message))
     child.once("close", (code: number | null) => {
       const trailer = code === 0 ? "" : NEWLINE + `exit code ${code ?? "unknown"}`

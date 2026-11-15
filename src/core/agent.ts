@@ -2,8 +2,11 @@ import { authHeaders, kindOf, type Provider } from "./providers"
 import { isLocalChat, verifyLocalModel } from "./local-provider"
 import { localRuntime, type Lease } from "./local-runtime"
 import { cliCompletion } from "./cli-completion"
-import { TOOL_SCHEMA, runTool, isConcurrent, redactSecrets, resolveReadable } from "./tools"
+import { TOOL_SCHEMA, runTool, isConcurrent, redactSecrets, resolveReadable, fitResult } from "./tools"
 import { imageTypeOf, readImageFile } from "./mention"
+
+/** How many identical results in a turn before the model is told it is repeating itself. */
+const REPEAT_NUDGES = [3, 5, 8]
 import { storedSecrets } from "./auth"
 import { checkpointEvery, spendLimitPerPrompt } from "./config"
 import { configuredInstructions } from "./instructions"
@@ -434,6 +437,8 @@ async function* runTurns(input: {
   // and at each full window the person is asked whether to keep going. 0 means never.
   let toolCallsThisTurn = 0
   let nextCheckpoint = windowOf()
+  // The same call with the same answer, how many times this turn: a model going round in a circle.
+  const repeats = new Map<string, number>()
   for (let turn = 0; turn < maxTurns; turn++) {
     if (input.signal?.aborted) return
     if (turn > 0) await verifyLocalModel(input.provider, input.modelId, input.signal)
@@ -711,7 +716,21 @@ async function* runTurns(input: {
     // Stored keys never reach the model, the saved conversation or the screen,
     // whichever tool printed them - a shell `type auth.json` did once.
     const secrets = storedSecrets()
-    for (const [id, result] of results) results.set(id, redactSecrets(result, secrets))
+    for (const [id, result] of results) results.set(id, await fitResult(redactSecrets(result, secrets), id))
+
+    // A nudge, never a block: the third, fifth and eighth time a call comes back exactly as before, the result
+    // says so. Counted on the answer as well as the arguments, so re-running the tests after an edit - same
+    // command, different outcome - is left alone.
+    for (const { call, allowed } of decided) {
+      const result = results.get(call.id)
+      if (!allowed || result === undefined) continue
+      const key = call.name + "\u0000" + call.args + "\u0000" + result
+      const seen = (repeats.get(key) ?? 0) + 1
+      repeats.set(key, seen)
+      if (REPEAT_NUDGES.includes(seen)) {
+        results.set(call.id, result + `\n\n(This is the ${seen === 3 ? "third" : seen === 5 ? "fifth" : "eighth"} time ${call.name} was called with these arguments and gave this same result. Calling it again will not change it: use what it says, try something different, or say what is in the way.)`)
+      }
+    }
 
     // Reported in the order the model asked for them, whatever order they
     // finished in, so a transcript reads the same way twice.
