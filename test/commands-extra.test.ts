@@ -101,7 +101,13 @@ describe("settings", () => {
       recents: [],
       voiceHold: true,
       voiceLanguage: "auto",
+      approvalMode: "ask",
     })
+    // The approval mode the app was left in is kept; anything that is not one of the three is "ask".
+    expect(normalise({ approvalMode: "full" }).approvalMode).toBe("full")
+    expect(normalise({ approvalMode: "approve" }).approvalMode).toBe("approve")
+    expect(normalise({ approvalMode: "everything" }).approvalMode).toBe("ask")
+    expect(normalise({ approvalMode: true }).approvalMode).toBe("ask")
     expect(normalise({ theme: "not-a-theme", thinking: "yes" })).toEqual(defaults())
     expect(normalise(null)).toEqual(defaults())
     expect(normalise("garbage")).toEqual(defaults())

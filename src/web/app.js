@@ -233,10 +233,25 @@ async function setMode(id) {
     }).then((response) => response.json()).catch(() => null)
     if (!result?.ok) { note("Could not change the running turn's approval mode. Try again."); return }
   }
-  currentMode = id
+  showMode(choice)
+  // Remembered, so the next page (and the terminal) opens in the mode this one was left in.
+  if (webSettings.approvalMode !== id) {
+    webSettings = { ...webSettings, approvalMode: id }
+    void fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approvalMode: id }) }).catch(() => {})
+  }
+}
+
+function showMode(choice) {
+  currentMode = choice.id
   modeBtn.querySelector(".picker-label").textContent = choice.label
-  modeBtn.classList.toggle("full", id === "full")
+  modeBtn.classList.toggle("full", choice.id === "full")
   renderModeMenu()
+}
+
+/** A page opened fresh starts in the mode the app was last left in. */
+function restoreMode() {
+  const choice = modeChoices().find((each) => each.id === webSettings.approvalMode)
+  if (choice && choice.id !== currentMode && !busy) showMode(choice)
 }
 
 function setPlanning(on) {
@@ -3313,6 +3328,7 @@ async function loadCommands() {
   if (paletteData.project) void refreshProjectName()
   if (paletteData.settings) {
     webSettings = paletteData.settings
+    restoreMode()
     applyLook()
     document.body.classList.toggle("hide-thinking", !webSettings.thinking)
   }

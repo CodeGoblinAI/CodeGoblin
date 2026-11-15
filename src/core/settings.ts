@@ -53,7 +53,12 @@ export type Settings = {
   voiceHold: boolean
   /** A language hint for voice input; "auto" lets the model tell. */
   voiceLanguage: string
+  /** The approval mode the app was last left in, so it opens the same way: ask, approve for me, or full access. */
+  approvalMode: ApprovalMode
 }
+
+export type ApprovalMode = "ask" | "approve" | "full"
+export const isApprovalMode = (value: unknown): value is ApprovalMode => value === "ask" || value === "approve" || value === "full"
 
 /**
  * Sent as the model's own effort level, except for "auto", which is sent as
@@ -87,6 +92,7 @@ export const defaults = (): Settings => ({
   recents: [],
   voiceHold: true,
   voiceLanguage: "auto",
+  approvalMode: "ask",
 })
 
 export function normalise(raw: unknown): Settings {
@@ -108,6 +114,7 @@ export function normalise(raw: unknown): Settings {
     favourites: modelList(value.favourites),
     recents: modelList(value.recents),
     voiceHold: typeof value.voiceHold === "boolean" ? value.voiceHold : base.voiceHold,
+    approvalMode: isApprovalMode(value.approvalMode) ? value.approvalMode : base.approvalMode,
     voiceLanguage: typeof value.voiceLanguage === "string" && ["auto", "en", "zh", "yue", "ja", "ko"].includes(value.voiceLanguage) ? value.voiceLanguage : base.voiceLanguage,
   }
 }

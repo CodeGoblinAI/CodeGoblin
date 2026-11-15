@@ -27,12 +27,22 @@ import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } 
 import { activateCatalog, refreshCatalog, refreshExperientialModels, refreshLiveModels, refreshRefuselessModels, selectionsByKind, selectionsOfKind } from "../core/providers"
 import { apiKey as storedKey } from "../core/auth"
 
+// Set once the screen is first drawn. Startup waits on a file or two (the settings, for the model used
+// last), and a task started before that wait - the catalogue below, which answers at once from its cache -
+// can finish during it. Drawing then would read state this file has not reached yet, and that ended the app.
+let started = false
+// Kept up here for the same reason: an error can arrive before the end of this file has run.
+const crashFile = path.join(Global.Path.log, "tui-crash.log")
+const crashTimes: number[] = []
+let ending = false
+
 // Model lists that change often are read live once, without holding up startup.
 void refreshExperientialModels()
 void refreshRefuselessModels()
 void refreshLiveModels(storedKey)
 // models.dev: every provider for /connect, and the ones with a key in the picker.
-void refreshCatalog(storedKey).then(() => { refreshConnected(); render() })
+// Before the first draw there is nothing to refresh: startup reads the same lists itself when it gets there.
+void refreshCatalog(storedKey).then(() => { if (started) { refreshConnected(); render() } })
 import { isLocalChat } from "../core/local-provider"
 import { localCommand } from "../core/local-command"
 import { runTypedCommand, typedCommand } from "../core/user-shell"
@@ -823,6 +833,7 @@ let toolbarTargets: { from: number; to: number; command: string }[] = []
 let latestPill: { row: number; from: number; to: number } | undefined
 /** Draws the screen. An error in the drawing itself ends the app (see crash.ts): the next redraw would only throw it again. */
 function render() {
+  if (!started) return
   try { draw() } catch (error) { unexpected("drawing the screen", error, true) }
 }
 
@@ -3642,6 +3653,12 @@ async function loadSettings() {
   media = await loadMedia()
   applyTheme(settings.theme)
   applyMouse()
+  // Open in the approval mode it was left in. Anything looser than "ask" is said out loud, once, so that
+  // full access is never something the app is quietly in.
+  if (settings.approvalMode !== permissions.mode) {
+    permissions.mode = settings.approvalMode
+    if (!status) status = "approvals: " + MODES.find((entry) => entry.id === settings.approvalMode)!.label.toLowerCase() + ", as you left it - shift+tab changes it"
+  }
   // The recorder takes about a second to come up; started now, the first hold of the space bar is instant.
   if (settings.voiceHold && voiceUsable()) warmRecorder()
   render()
@@ -3649,6 +3666,7 @@ async function loadSettings() {
 void loadSettings()
 
 out.write(ansi.altScreen + ansi.ownMouse + ansi.pasteOn)
+started = true
 render()
 out.on("resize", render)
 
@@ -3660,6 +3678,7 @@ const readKeys = createKeyReader()
 
 function changePermissionMode(mode: PermissionMode) {
   permissions.mode = mode
+  if (settings.approvalMode !== mode) { settings = { ...settings, approvalMode: mode }; void settingsStore.save(settings).catch(() => {}) }
   const entry = MODES.find((entry) => entry.id === mode)!
   status = "mode: " + entry.label + " - " + entry.hint
   if (dialog?.kind === "approvals") {
@@ -4544,13 +4563,10 @@ process.on("SIGINT", shutdown)
 // Anything thrown that nothing caught. It used to be printed into the app's own screen, painted over by the
 // next redraw, and the process ended with the terminal still in that screen: a dead picture of the app with
 // a shell prompt through it and no word of why. Now it is logged, shown, and survived where it can be.
-const crashFile = path.join(Global.Path.log, "tui-crash.log")
-const crashTimes: number[] = []
-let ending = false
 function unexpected(kind: string, error: unknown, drawing = false) {
   if (ending) return
   const file = writeCrash(crashFile, logEntry(kind, error, new Date(), "bun " + Bun.version + ", " + process.cwd()))
-  if (carryOn(crashTimes, Date.now(), drawing)) {
+  if (started && carryOn(crashTimes, Date.now(), drawing)) {
     // The whole of it goes in the conversation, where it can be read and copied; the model is not sent it.
     transcript.push({ kind: "tool", text: "something went wrong (" + kind + ")" + String.fromCharCode(10) + errorText(error) + (file ? String.fromCharCode(10) + "saved in " + file : "") })
     status = "something went wrong: " + errorLine(error) + " - the details are above"
