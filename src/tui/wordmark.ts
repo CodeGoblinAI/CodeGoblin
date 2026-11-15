@@ -23,6 +23,7 @@ export const TIPS = [
   "F2 switches to your next recent model",
   "ctrl+x then m opens the models; ctrl+f there stars a favourite",
   "drop or paste a picture to show it to the model",
+  "drag over any text to copy it",
   "a line starting with ! runs that command in your shell",
   "/effort sets how hard this model thinks",
   "/voice lets you speak a prompt; once set up, hold space to talk",

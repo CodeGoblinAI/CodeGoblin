@@ -20,9 +20,9 @@ export type Settings = {
    *
    * A real trade, and the original makes it a setting rather than a choice:
    * taking the mouse gets wheel scrolling and clickable things, and costs
-   * the terminal's own drag-to-select. On by default for clickable controls;
-   * it can be switched off in Settings or /mouse. Shift+drag
-   * still selects in most terminals when it is on.
+   * the terminal's own drag-to-select - so the app selects and copies itself
+   * (tui/screen-select). On by default; it can be switched off in Settings or
+   * /mouse, which hands selection back to the terminal.
    */
   mouse: boolean
   /**

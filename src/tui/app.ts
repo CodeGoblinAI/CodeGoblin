@@ -16,7 +16,8 @@ import { THEMES } from "../core/theme"
 import { EFFORTS } from "../core/settings"
 import { createKeyReader } from "./keys"
 import { parseLaunch } from "./args"
-import { resolveStartupModel } from "../core/model-selection"
+import { lastUsedModel, resolveStartupModel } from "../core/model-selection"
+import { isEmpty, paint, textOf, type Span } from "./screen-select"
 import { isLiveCommand } from "./live-commands"
 import { footerHeight } from "./layout"
 import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
@@ -153,7 +154,8 @@ if (requested) {
 
 const launchModel = parseLaunch(argv).model
 if (launchModel && !resolveSelection(launchModel)) process.stderr.write("Checking requested model " + launchModel + "…\n")
-const launched = await resolveStartupModel(launchModel)
+// Asked for a model: that one. Otherwise the one used last, in any conversation, terminal or web.
+const launched = launchModel ? await resolveStartupModel(launchModel) : await lastUsedModel((await settingsStore.load().catch(() => settingsStore.defaults())).recents)
 if (!launched) {
   process.stderr.write("No such available model: " + launchModel + ". Check provider sign-in and the model picker.\n")
   process.exit(1)
@@ -554,6 +556,14 @@ let caretAt: { row: number; col: number } | undefined
 let composerMap: { first: number; rows: string[]; before: number } | undefined
 /** Whether the mouse has dragged since the press: a clean release is a caret move. */
 let dragged = false
+/** The frame as last drawn, so a drag can be turned into the text under it. */
+let lastFrame: string[] = []
+/**
+ * Text being selected on the screen with the mouse, or just copied. `done` is after the button came up:
+ * the highlight stays until a key is pressed or what is under it changes (`copied` is what it was).
+ */
+let screenSel: { span: Span; done: boolean; copied?: string } | undefined
+const SELECTED = "\x1b[48;2;38;79;120m\x1b[38;2;255;255;255m"
 
 function composerOffset(col: number, row: number): number | undefined {
   const map = composerMap
@@ -1124,7 +1134,8 @@ function render() {
   // Clipboard pictures waiting to ride along. Named on screen so nothing
   // reaches the model unseen; a new conversation lets them go.
   if (pendingImages.length && !secret) {
-    body.push(dim + "  images: " + truncateToWidth(pendingImages.map((image) => image.name).join(", "), Math.max(0, cols - 14)) + ansi.reset)
+    const how = cols >= 70 ? "  ·  backspace at the start removes " + (pendingImages.length > 1 ? "the last" : "it") : ""
+    body.push(dim + "  images: " + truncateToWidth(pendingImages.map((image) => image.name).join(", "), Math.max(0, cols - 14 - how.length)) + how + ansi.reset)
   }
   if (composerRows.length > 1) {
     let seen = rowsBefore
@@ -1248,9 +1259,13 @@ function render() {
   const framed = home ? [...clamped, ...home.below] : clamped
   const painted = dialog ? Dialogs.compose(framed, Dialogs.box(dialog, cols, rows), cols, rows) : framed
   const showCaret = caretAt && !dialog
+  lastFrame = painted
+  // A finished selection is dropped once the text under it is no longer what was copied.
+  if (screenSel && (dialog || (screenSel.done && textOf(painted, screenSel.span) !== screenSel.copied))) screenSel = undefined
 
   out.write(
     theme.ground + ansi.hideCursor + ansi.clear + painted.join(String.fromCharCode(10)) +
+      (screenSel && !isEmpty(screenSel.span) ? paint(painted, screenSel.span, SELECTED, ansi.reset) : "") +
       (showCaret ? ansi.moveTo(caretAt!.row, caretAt!.col) + ansi.showCursor : ""),
   )
 }
@@ -1677,7 +1692,7 @@ async function attachClipboardImage(fromPaste = false) {
   try {
     const picture = await readClipboardImage()
     pendingImages.push(picture)
-    status = "attached " + picture.name + " - sends with the next message" + (acceptsImages(selection) ? "" : " (this model cannot see images; pick a vision model)")
+    status = "attached " + picture.name + " - sends with the next message; backspace in an empty prompt removes it" + (acceptsImages(selection) ? "" : " (this model cannot see images; pick a vision model)")
   } catch (error) {
     // Ctrl+V with nothing pasteable is not worth an error message.
     status = fromPaste ? "nothing to paste - the clipboard has no text or image" : error instanceof Error ? error.message : "could not read the clipboard"
@@ -3265,6 +3280,8 @@ async function send() {
   session.provider = selection.provider.id
   session.model = selection.model.id
   session.agent = profile?.name
+  // The model a message was sent to is the one the app opens on next time.
+  if (settings.recents[0] !== selection.provider.id + "/" + selection.model.id) rememberRecent()
   // Mentions are read here rather than in the agent so the stored message
   // carries the files with it: a resumed conversation keeps its context.
   // What was folded away goes back before anything sees it.
@@ -3983,6 +4000,16 @@ process.stdin.on("data", (chunk) => {
   const onlySpaces = /^ +$/.test(chunk.toString())
 
   for (const pressed of readKeys(chunk.toString())) {
+    // A selection made with the mouse: Ctrl+C copies it again, and any key lets it go.
+    if (screenSel && pressed.type !== "press" && pressed.type !== "drag" && pressed.type !== "click" && pressed.type !== "wheelup" && pressed.type !== "wheeldown") {
+      const held = screenSel
+      screenSel = undefined
+      if (held.done && held.copied && pressed.type === "ctrl" && pressed.value === "c") {
+        void copyText(held.copied).then(() => { status = "copied " + held.copied!.length + " chars to clipboard"; render() }).catch(() => {})
+        render(); continue
+      }
+      render()
+    }
     // While recording, the keyboard is the recorder's: space keeps a hold alive or ends a /voice recording,
     // enter ends it, escape throws it away. Nothing typed by accident lands in the prompt.
     if (listening) {
@@ -4054,6 +4081,16 @@ process.stdin.on("data", (chunk) => {
     // the way shift+arrows do from the keyboard. Backspace deletes it, typing
     // replaces it, Ctrl+C copies it; Escape below drops it.
     if (pressed.type === "press" || pressed.type === "drag") {
+      // Outside the prompt box a press and drag selects what is on the screen, as a terminal does; letting
+      // go copies it. The app has the mouse, so the terminal's own selection never sees the drag.
+      if (!dialog && pressed.type === "press") {
+        screenSel = !secret && composerOffset(pressed.col, pressed.row) !== undefined ? undefined : { span: { from: { row: pressed.row, col: pressed.col }, to: { row: pressed.row, col: pressed.col } }, done: false }
+        if (screenSel) { render(); continue }
+      }
+      if (!dialog && pressed.type === "drag" && screenSel && !screenSel.done) {
+        screenSel.span = { from: screenSel.span.from, to: { row: pressed.row, col: pressed.col } }
+        render(); continue
+      }
       if (!dialog && !secret) {
         const hit = composerOffset(pressed.col, pressed.row)
         if (hit !== undefined) {
@@ -4069,6 +4106,16 @@ process.stdin.on("data", (chunk) => {
         }
       }
       continue
+    }
+    if (pressed.type === "click" && screenSel && !screenSel.done) {
+      const text = isEmpty(screenSel.span) ? "" : textOf(lastFrame, screenSel.span)
+      // A press and release in one place is a click, handled below; a drag over nothing selects nothing.
+      if (!text) screenSel = undefined
+      else {
+        screenSel = { ...screenSel, done: true, copied: text }
+        void copyText(text).then(() => { status = "copied " + text.length + " chars to clipboard"; render() }).catch(() => { status = "could not reach the clipboard"; render() })
+        render(); continue
+      }
     }
     if (pressed.type === "click") {
       if (dialog) {
@@ -4368,6 +4415,13 @@ process.stdin.on("data", (chunk) => {
         break
       case "enter": void send(); return
       case "backspace":
+        // At the very start of the prompt there is nothing to delete but what is attached: the last picture.
+        if (cursor === 0 && !composerSelection(composerState()) && pendingImages.length && !secret) {
+          const gone = pendingImages.pop()!
+          status = "removed " + gone.name + (pendingImages.length ? " - " + pendingImages.length + " still attached" : "")
+          dirty = true
+          break
+        }
         applyComposer(deleteRange(composerState(), "back"), true)
         dirty = true
         refreshPalette()

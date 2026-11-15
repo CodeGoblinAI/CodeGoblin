@@ -422,8 +422,11 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
   if (url.pathname === "/api/providers") {
     const cli = await cliStatuses()
     const engine = findEngine()
+    const stored = await settingsStore.load()
     return json({
-      providers: pickerRows(selectionsByKind(), await settingsStore.load()).map(({ selection: s, section, favourite }) => ({
+      // The model used last, in the terminal or here: what a newly opened page starts on.
+      last: stored.recents.find((id) => exactSelection(id)) ?? null,
+      providers: pickerRows(selectionsByKind(), stored).map(({ selection: s, section, favourite }) => ({
         kind: kindOf(s.model),
         section,
         favourite,

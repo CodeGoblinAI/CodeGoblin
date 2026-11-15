@@ -81,6 +81,7 @@ async function toggleFavourite(value, reopen = false) {
 }
 
 /** A model chosen by the person goes to the top of Recent, in both surfaces. */
+let lastSentModel = ""
 function rememberRecent(value) {
   void fetch("/api/recent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: value }) }).catch(() => {})
 }
@@ -2641,6 +2642,8 @@ async function submit() {
   controller = request
   const turnStarted = Date.now()
 
+  // The model a message was sent to is the one the app opens on next time.
+  if (currentModel && currentModel !== lastSentModel) { lastSentModel = currentModel; rememberRecent(currentModel) }
   let response
   try {
     response = await fetch("/api/chat", {
@@ -2957,8 +2960,11 @@ async function loadProviders() {
     modelOptions.find((option) => option.kind === "text" && option.ready) ||
     modelOptions.find((option) => option.kind === "text")
   const keep = previous && modelOptions.some((option) => option.value === previous) ? previous : null
+  // A page opened fresh starts on the model used last, not on the first in the list.
+  const last = !previous && typeof data.last === "string" && modelOptions.some((option) => option.value === data.last) ? data.last : null
   if (resumeModelMissing) renderModelMenu()
   else if (keep) setModel(keep)
+  else if (last) setModel(last)
   else if (firstChat || modelOptions.length) setModel((firstChat || modelOptions[0]).value)
   const ready = data.providers.filter((p) => p.ready).length
   hint.textContent = ready ? "" : "no API keys found"
