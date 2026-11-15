@@ -5,6 +5,11 @@ import { cliCompletion } from "./cli-completion"
 import { TOOL_SCHEMA, runTool, isConcurrent, redactSecrets, resolveReadable, fitResult } from "./tools"
 import { imageTypeOf, readImageFile } from "./mention"
 
+/** Waits before sending a failed request again: three tries, about twelve seconds in all. */
+const RETRY_WAITS = [1000, 3000, 8000]
+/** Answers that mean "not now" rather than "no": too many requests, and the server-side failures. */
+const RETRY_STATUS = new Set([408, 429, 500, 502, 503, 504, 529])
+
 /** How many identical results in a turn before the model is told it is repeating itself. */
 const REPEAT_NUDGES = [3, 5, 8]
 import { storedSecrets } from "./auth"
@@ -100,6 +105,8 @@ export type AgentEvent =
    */
   | { type: "tool_denied"; id: string; name: string; by: "rule" | "plan" | "user"; rule?: string }
   | { type: "compacted"; before: number; after: number }
+  /** The provider was busy or unreachable; the request is being sent again after `waitMs`. */
+  | { type: "retry"; attempt: number; of: number; waitMs: number; reason: string }
   | { type: "plan"; todos: Todo[] }
   /** `cached` is the part of `input` the provider read from its prompt cache, when it says. */
   | { type: "spend"; input: number; output: number; cached?: number; /** What the provider says the request cost, when it says. */ dollars?: number }
@@ -354,6 +361,8 @@ async function* runTurns(input: {
   contextWindow?: number
   /** Whether this model can be shown a picture; see acceptsImages in providers. */
   images?: boolean
+  /** Waits (ms) before each retry of a failed request; empty turns retrying off. Default: 1 s, 3 s, 8 s. */
+  retryWaits?: number[]
   permissions?: Permissions
   /** What is remembered, folded into the system prompt for this request. */
   memory?: string
@@ -477,7 +486,9 @@ async function* runTurns(input: {
         yield event
       }
     } else {
-    const response = await fetch(chatEndpoint(input.provider, input.modelId), {
+    // Worked out once, outside the retry: a model with nowhere to send a message is an error, not a busy signal.
+    const endpoint = chatEndpoint(input.provider, input.modelId)
+    const send = () => fetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders(input.provider, input.apiKey) },
       body: JSON.stringify({
@@ -505,6 +516,33 @@ async function* runTurns(input: {
       if (input.provider.runtime) throw new Error(localRuntime.status().lastError ?? `CG-Next's local model server stopped answering; /local shows its state.`, { cause: error })
       throw new Error(`Cannot reach the local model server at ${input.provider.baseUrl}. Start the server, wait until it is ready, and try again. CG-Next starts servers only for installed models under Local.`, { cause: error })
     })
+
+    // A provider that is busy or briefly broken is asked again, a few times, with a wait between. Without
+    // this a single 429 in the middle of an hour's work ended the turn. Only before any of the answer has
+    // arrived, never for a local server (its failures are not passing ones), and never after a stop.
+    let response: Response
+    const waits = input.retryWaits ?? RETRY_WAITS
+    for (let attempt = 0; ; attempt++) {
+      let failure: unknown
+      let got: Response | undefined
+      try { got = await send() } catch (error) { failure = error }
+      const again = !input.provider.local && !input.signal?.aborted && attempt < waits.length && (got ? RETRY_STATUS.has(got.status) : true)
+      if (!again) {
+        if (!got) throw failure
+        response = got
+        break
+      }
+      const asked = got ? Number(got.headers.get("retry-after")) : NaN
+      const waitMs = Math.min(30_000, Number.isFinite(asked) && asked > 0 ? asked * 1000 : waits[attempt]!)
+      await got?.body?.cancel().catch(() => {})
+      yield { type: "retry", attempt: attempt + 1, of: waits.length, waitMs, reason: got ? "HTTP " + got.status : "no connection" }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(done, waitMs)
+        function done() { clearTimeout(timer); input.signal?.removeEventListener("abort", done); resolve() }
+        input.signal?.addEventListener("abort", done, { once: true })
+      })
+      if (input.signal?.aborted) return
+    }
 
     if (!response.ok || !response.body) {
       const detail = await response.text().catch(() => "")

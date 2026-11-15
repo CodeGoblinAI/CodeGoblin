@@ -3372,6 +3372,11 @@ async function send() {
       if (event.type === "plan") {
         plan = event.todos
       }
+      if (event.type === "retry") {
+        status = selection.provider.label + " " + (event.reason === "no connection" ? "could not be reached" : "is busy (" + event.reason + ")") + " - trying again in " + Math.round(event.waitMs / 1000) + "s (" + event.attempt + " of " + event.of + ")"
+        render()
+        continue
+      }
       if (event.type === "compacted") {
         historyArchived = true
         transcript.push({ kind: "tool", text: "compacted context: " + event.before + " -> " + event.after + " messages" })

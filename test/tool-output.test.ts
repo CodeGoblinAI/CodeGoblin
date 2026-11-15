@@ -101,3 +101,51 @@ describe("a model repeating itself", () => {
     expect(results.some((r) => r.includes("gave this same result"))).toBe(false)
   })
 })
+
+describe("a provider that is busy", () => {
+  const original = globalThis.fetch
+  afterEach(() => { globalThis.fetch = original })
+  const provider: Provider = { id: "test", label: "Test", baseUrl: "https://example.invalid/v1/chat/completions", models: [{ id: "m", label: "M", contextWindow: 128000 }] }
+  const answer = () => new Response("data: " + JSON.stringify({ choices: [{ delta: { content: "hello" } }] }) + NL + NL + "data: [DONE]" + NL + NL)
+
+  async function run(responses: (() => Response | Promise<Response>)[], extra: Record<string, unknown> = {}) {
+    let calls = 0
+    globalThis.fetch = (async () => { const next = responses[Math.min(calls, responses.length - 1)]!; calls++; return next() }) as unknown as typeof fetch
+    const events: any[] = []
+    let error = ""
+    try {
+      for await (const event of runAgent({ provider, modelId: "m", apiKey: "k", messages: [{ role: "user", content: "hi" }], root: process.cwd(), maxTurns: 1, retryWaits: [1, 1], ...extra } as never)) events.push(event)
+    } catch (caught) { error = caught instanceof Error ? caught.message : String(caught) }
+    return { calls, error, retries: events.filter((event) => event.type === "retry"), text: events.filter((event) => event.type === "text").map((event) => event.delta).join("") }
+  }
+
+  test("a 429 and a dropped connection are tried again, and the answer arrives", async () => {
+    const result = await run([() => new Response("slow down", { status: 429 }), () => { throw new TypeError("fetch failed") }, answer])
+    expect(result.calls).toBe(3)
+    expect(result.text).toBe("hello")
+    expect(result.retries.map((event) => event.reason)).toEqual(["HTTP 429", "no connection"])
+  })
+
+  test("it gives up after the last wait, with the provider's own words", async () => {
+    const result = await run([() => new Response("overloaded", { status: 503 })])
+    expect(result.calls).toBe(3)
+    expect(result.error).toContain("returned 503")
+    expect(result.error).toContain("overloaded")
+  })
+
+  test("a refusal is not a busy signal: a bad key or a bad request is reported at once", async () => {
+    for (const status of [400, 401, 402, 404]) {
+      const result = await run([() => new Response("no", { status })])
+      expect(result.calls).toBe(1)
+      expect(result.retries.length).toBe(0)
+    }
+  })
+
+  test("retry-after is honoured, and an empty list turns retrying off", async () => {
+    const waited = await run([() => new Response("", { status: 429, headers: { "retry-after": "0.05" } }), answer])
+    expect(waited.retries[0].waitMs).toBe(50)
+    const off = await run([() => new Response("busy", { status: 429 }), answer], { retryWaits: [] })
+    expect(off.calls).toBe(1)
+    expect(off.error).toContain("returned 429")
+  })
+})

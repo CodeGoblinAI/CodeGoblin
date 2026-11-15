@@ -2818,6 +2818,11 @@ async function submit() {
             chip.querySelector(".spin").textContent = event.result.startsWith("error:") ? "\u2717" : "\u2713"
           }
         }
+        if (event.type === "retry") {
+          const hintEl = document.getElementById("hint")
+          if (hintEl) hintEl.textContent = (event.reason === "no connection" ? "the provider could not be reached" : "the provider is busy (" + event.reason + ")") + " - trying again in " + Math.round(event.waitMs / 1000) + "s (" + event.attempt + " of " + event.of + ")"
+          continue
+        }
         if (event.type === "compacted") {
           const note = document.createElement("div")
           note.className = "tool done"
