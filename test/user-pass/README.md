@@ -39,3 +39,11 @@ into it and saves pictures to `output/shots`:
     powershell -File test/user-pass/rt.ps1 <PID> <TITLE> name "k:/model{ENTER}" "w:900" "s:model"
 
 Stop the `tui-window.mjs` process when done; it keeps the fake model up.
+
+## Voice
+
+`pass-voice-tui.mjs` and `pass-voice-web.mjs` run the real speech model against a spoken test
+recording made with Windows' own voice, so no microphone is needed. They look for the model in
+`CG_VOICE_MODEL_DIR`, CG-Next's own data folder, then DeepSeek Harness's (`~/.dsh`), and skip when
+there is none. `CG_VOICE_FAKE_WAV` makes the terminal's recorder return that file instead of
+recording. To try the real microphone, run `tui-window.mjs` with `CG_VOICE_MODEL_DIR` set.
