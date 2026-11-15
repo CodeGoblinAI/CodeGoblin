@@ -44,6 +44,8 @@ import { startCursorLogin } from "../core/cursor-sdk"
 import { IMPORTERS, type ImportSource } from "../core/conversation-import"
 import { openCodexLogin, openCursorLogin } from "../core/open-browser"
 import * as Dialogs from "./dialog"
+import { VOICE_LANGUAGES, VOICE_NEEDS, cancelVoiceSetup, prepareVoice, stopVoice, transcribe, voiceProblem, voiceState, warmVoice } from "../core/voice"
+import { canRecord, record, stopRecorder, warmRecorder, type Recording } from "../core/voice-record"
 import { changesIn, summarise, countsOf, statusLetter, type Changes } from "../core/changes"
 import {
   charAfter,
@@ -483,6 +485,9 @@ let secret: { provider: string } | undefined
 let overlay: { title: string; rows: [string, string][] } | undefined
 /** The popup, when there is one. Only ever one: dialogs replace, not stack. */
 let dialog: Dialogs.Dialog | undefined
+/** Voice input in progress: the microphone is open, or its recording is being turned into text. */
+let listening: Listening | undefined
+let transcribing = false
 /** Which files are expanded in the diff viewer. */
 const diffOpen = new Set<string>()
 /** The last diff computed, so expanding a file does not recompute it. */
@@ -870,7 +875,7 @@ function render() {
     queued: false,
     images: Boolean(pendingImages.length && !secret),
     scrolled: false,
-    notice: Number(streaming && !pending && !asking) + Number(Boolean(status)),
+    notice: Number(streaming && !pending && !asking) + Number(Boolean(status || listening || transcribing)),
   }
   // Editing a wrapped draft during inference still draws all its lines.
   // Reserve those, plus queued/image/latest notices, before the transcript.
@@ -1101,7 +1106,10 @@ function render() {
   }
   // What just happened - "switched to ...", "no key for ..." - on a line of
   // its own. Sharing the status line, it pushed the model's name off the end.
-  if (status) body.push(theme.muted + "  " + truncateToWidth(status, Math.max(10, cols - 4)) + ansi.reset)
+  // While recording, this line is the recorder's: a red dot, the seconds, and how to finish.
+  const heard = listeningLine()
+  if (heard) body.push(truncateToWidth(heard, Math.max(10, cols - 2)) + ansi.reset)
+  else if (status) body.push(theme.muted + "  " + truncateToWidth(status, Math.max(10, cols - 4)) + ansi.reset)
   // The box takes the colour of how much it may do without asking, as the
   // fork's does: plain when it asks, gold, red at full access, orange while planning.
   const ruleColour = permissions.planning ? theme.warning : permissions.mode === "full" ? theme.error : permissions.mode === "approve" ? theme.gold : theme.border
@@ -1873,6 +1881,7 @@ function settingsRows(): Dialogs.DialogRow[] {
     general.push({ label: section.label, hint: count + (count === 1 ? " model" : " models") + " - each keeps its own settings", value: "ui:media:" + section.kind })
   }
   general.push({ label: "Memory", hint: "what is remembered for this project", value: "ui:memory" })
+  general.push({ label: "Voice input", hint: voiceState().ready ? (settings.voiceHold ? "ready - hold space to talk" : "ready - /voice records") : "not set up - speak instead of typing", value: "ui:voice" })
   if (!options.length) {
     // Say why the list is empty - a chat model has no generation settings at
     // all, which is a different answer from a generator we send nothing to.
@@ -2393,6 +2402,7 @@ async function chooseInDialog() {
       if (action === "agents") openAgents()
       if (action.startsWith("media:")) openGenerators(action.slice(6) as "image" | "audio" | "model3d")
       if (action === "memory") void openMemory()
+      if (action === "voice") openVoiceSetup()
       if (action === "thinking" || action === "mouse" || action === "pasteSummary" || action === "animations" || action === "diffWrap") {
         settings = { ...settings, [action]: !settings[action] }
         void settingsStore.save(settings)
@@ -2417,6 +2427,18 @@ async function chooseInDialog() {
     if (chosen) { settingsFor = { provider: chosen.provider.id, model: chosen.model.id, label: chosen.provider.label + " " + chosen.model.label }; openSettings() }
     render()
     return
+  }
+
+  if (dialog.kind === "voice") {
+    if (row.value === "setup") { closeDialog(); setUpVoice(); return }
+    if (row.value === "cancel") { cancelVoiceSetup(); closeDialog(); status = "stopping the download…"; render(); return }
+    if (row.value === "record") { closeDialog(); await startListening(false); return }
+    if (row.value === "hold") { settings = { ...settings, voiceHold: !settings.voiceHold }; void settingsStore.save(settings); if (settings.voiceHold) warmRecorder(); openVoiceSetup(); render(); return }
+    if (row.value === "language") {
+      settings = { ...settings, voiceLanguage: VOICE_LANGUAGES[(VOICE_LANGUAGES.indexOf(settings.voiceLanguage as (typeof VOICE_LANGUAGES)[number]) + 1) % VOICE_LANGUAGES.length]! }
+      void settingsStore.save(settings); openVoiceSetup(); render(); return
+    }
+    closeDialog(); render(); return
   }
 
   if (dialog.kind === "memory") {
@@ -2928,6 +2950,10 @@ async function send() {
     if (result.kind === "fold") {
       foldAnswers = !foldAnswers
       status = foldAnswers ? "answers folded to their first lines - /fold unfolds" : "answers shown in full"
+      render(); return
+    }
+    if (result.kind === "voice") {
+      await voiceCommand(result.argument)
       render(); return
     }
     if (result.kind === "timestamps") {
@@ -3472,6 +3498,8 @@ async function send() {
 }
 
 function shutdown() {
+  stopRecorder()
+  stopVoice()
   turn?.abort()
   subagents.stopAll()
   out.write("[0m" + ansi.pasteOff + "\x1b[?1002l\x1b[?1006l" + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
@@ -3561,6 +3589,8 @@ async function loadSettings() {
   media = await loadMedia()
   applyTheme(settings.theme)
   applyMouse()
+  // The recorder takes about a second to come up; started now, the first hold of the space bar is instant.
+  if (settings.voiceHold && voiceUsable()) warmRecorder()
   render()
 }
 void loadSettings()
@@ -3717,10 +3747,207 @@ function openEditor() {
   render()
 }
 
+
+// --- voice input ------------------------------------------------------------------------------------------
+
+/**
+ * Speaking into the prompt box.
+ *
+ * Two ways in: hold the space bar and let go when done, or /voice to start and Enter (or space) to finish.
+ * A terminal is never told that a key was released, only that it was pressed; a held key shows up as the
+ * same key arriving again and again at the keyboard's repeat rate. So "held" is several spaces close
+ * together, each alone in what the terminal sent, and "let go" is the repeats stopping.
+ */
+type Listening = { recording?: Recording; hold: boolean; startedAt: number; lastSpace: number; ticker: ReturnType<typeof setInterval>; cancelled?: boolean }
+/** Spaces typed so far in what may turn out to be a held space bar, and when the last one came. */
+let heldSpaces = 0
+let lastSpaceAt = 0
+/** A held key repeats about thirty times a second; this is generous to slow keyboards. */
+const REPEAT_GAP_MS = 130
+/** The pause before a held key begins to repeat. */
+const FIRST_GAP_MS = 900
+/** How many spaces in a row, at repeat speed, mean the bar is being held. */
+const HOLD_SPACES = 4
+/** Repeats this long gone mean the bar was let go. */
+const RELEASE_MS = 320
+
+const voiceUsable = () => !voiceProblem() && canRecord()
+
+/** A space that arrived alone. Returns true when it was taken as part of holding the bar. */
+function spaceHeld(now: number): boolean {
+  const gap = now - lastSpaceAt
+  lastSpaceAt = now
+  heldSpaces = heldSpaces === 0 || gap > (heldSpaces === 1 ? FIRST_GAP_MS : REPEAT_GAP_MS) ? 1 : heldSpaces + 1
+  if (heldSpaces < HOLD_SPACES) return false
+  // The spaces typed while finding out are taken back: they were the bar being held, not text.
+  const typed = heldSpaces
+  heldSpaces = 0
+  let state = composerState()
+  for (let i = 0; i < typed && state.cursor > 0 && state.text[state.cursor - 1] === " "; i++) state = deleteRange(state, "back")
+  applyComposer(state, true)
+  void startListening(true)
+  return true
+}
+
+async function startListening(hold: boolean) {
+  if (listening || transcribing) return
+  const why = voiceProblem()
+  if (why) { status = why; render(); return }
+  if (!canRecord()) { status = "no recorder found: install arecord (alsa-utils) or sox to use voice here"; render(); return }
+  const mine: Listening = { hold, startedAt: Date.now(), lastSpace: Date.now(), ticker: setInterval(() => {
+    // Let go of the bar: the repeats have stopped.
+    if (listening === mine && mine.hold && mine.recording && Date.now() - mine.lastSpace > RELEASE_MS) void finishListening()
+    else if (listening === mine) render()
+  }, 80) }
+  listening = mine
+  palette = undefined
+  status = ""
+  render()
+  // The engine loads while you talk, so it is ready by the time you stop.
+  warmVoice()
+  try {
+    const recording = await record()
+    if (mine.cancelled || listening !== mine) { recording.cancel(); return }
+    mine.recording = recording
+    mine.startedAt = Date.now()
+    mine.lastSpace = Date.now()
+    render()
+  } catch (error) {
+    clearInterval(mine.ticker)
+    if (listening === mine) listening = undefined
+    status = error instanceof Error ? error.message : "could not start recording"
+    render()
+  }
+}
+
+function cancelListening() {
+  const mine = listening
+  if (!mine) return
+  mine.cancelled = true
+  clearInterval(mine.ticker)
+  mine.recording?.cancel()
+  listening = undefined
+  status = "recording discarded"
+  render()
+}
+
+async function finishListening() {
+  const mine = listening
+  if (!mine?.recording) { cancelListening(); return }
+  clearInterval(mine.ticker)
+  listening = undefined
+  transcribing = true
+  status = "turning speech into text…"
+  render()
+  try {
+    const text = await transcribe(await mine.recording.stop(), settings.voiceLanguage)
+    if (!text) status = "heard nothing - is the microphone on? " + (mine.hold ? "hold space, wait for the red dot, then speak" : "/voice tries again")
+    else {
+      const state = composerState()
+      const before = state.text.slice(0, state.cursor)
+      applyComposer(insertText(state, (before && !/\s$/.test(before) ? " " : "") + text), true)
+      status = "from your voice - read it over, then enter sends it"
+    }
+  } catch (error) {
+    status = "voice: " + (error instanceof Error ? error.message : "could not transcribe that")
+  } finally {
+    transcribing = false
+    render()
+  }
+}
+
+/** The line shown above the prompt box while recording. */
+function listeningLine(): string | undefined {
+  if (transcribing) return theme.gold + "  ● turning speech into text…" + ansi.reset
+  if (!listening) return undefined
+  if (!listening.recording) return dim + "  ○ starting the microphone…" + ansi.reset
+  const seconds = Math.floor((Date.now() - listening.startedAt) / 1000)
+  return theme.error + "  ● listening " + ansi.reset + dim + seconds + "s  ·  " + (listening.hold ? "let go of space to finish" : "enter or space finishes · esc discards") + ansi.reset
+}
+
+/** What voice input needs, and the button that gets it. A page to read before a 229 MB download, not after. */
+function openVoiceSetup() {
+  const state = voiceState()
+  const rows: Dialogs.DialogRow[] = []
+  const say = (label: string) => rows.push({ label, inert: true })
+  if (!state.runtime) {
+    say("Voice input needs a speech engine that is not installed here.")
+    say("Run  bun install  in the CG-Next folder, then /voice again.")
+    say("(sherpa-onnx-node: Windows x64, macOS, Linux x64 and arm64)")
+  } else if (state.ready) {
+    say("Voice input is set up. Speech is turned into text on this computer;")
+    say("nothing you say is sent anywhere.")
+    rows.push({ label: "Hold space to talk", hint: settings.voiceHold ? "on" : "off - /voice still records", value: "hold" })
+    rows.push({ label: "Language", hint: settings.voiceLanguage === "auto" ? "auto - the model tells" : settings.voiceLanguage, value: "language" })
+    rows.push({ label: "Record now", hint: "enter or space finishes, esc discards", value: "record" })
+    say("Model: " + state.dir)
+  } else if (state.preparing) {
+    say("Downloading the speech model: " + Math.floor((state.preparing.received / state.preparing.total) * 100) + "%")
+    rows.push({ label: "Stop the download", hint: "what is downloaded is kept", value: "cancel" })
+  } else {
+    say("Speak instead of typing. Speech is turned into text on this computer,")
+    say("by a small model (SenseVoice); nothing you say is sent anywhere.")
+    say("")
+    say("Download   " + VOICE_NEEDS.download + ", once, from Hugging Face (checked against a fixed SHA-256)")
+    say("Disk       " + VOICE_NEEDS.disk)
+    say("Memory     " + VOICE_NEEDS.memory)
+    say("Takes      " + VOICE_NEEDS.time)
+    say("Languages  English, Chinese, Cantonese, Japanese, Korean")
+    if (state.problem) say("Last try:  " + state.problem)
+    say("")
+    rows.push({ label: "Download and set up", hint: "then hold space to talk", value: "setup" })
+    rows.push({ label: "Later", value: "later" })
+  }
+  dialog = Dialogs.open("voice", "Voice input", rows, { size: "large", footer: "enter chooses · esc closes" })
+}
+
+function setUpVoice() {
+  status = "voice: starting the download…"
+  render()
+  void prepareVoice({ onProgress: (state) => {
+    if (state.preparing) status = "voice: downloading the " + state.preparing.label + " - " + Math.floor((state.preparing.received / state.preparing.total) * 100) + "% of " + VOICE_NEEDS.download + " · /voice cancel stops it"
+    render()
+  } }).then(() => {
+    warmRecorder()
+    status = "voice is ready - hold space and speak, or /voice"
+    render()
+  }).catch((error: unknown) => {
+    status = "voice: " + (error instanceof Error ? error.message : "setup failed")
+    render()
+  })
+}
+
+async function voiceCommand(argument: string) {
+  if (argument === "cancel") { status = cancelVoiceSetup() ? "stopping the download…" : "no voice download is running"; return }
+  if (argument === "setup" || argument === "settings") { openVoiceSetup(); return }
+  if (argument === "hold") {
+    settings = { ...settings, voiceHold: !settings.voiceHold }
+    void settingsStore.save(settings)
+    status = settings.voiceHold ? "hold space to talk: on" : "hold space to talk: off - /voice still records"
+    return
+  }
+  if (argument) { status = "/voice records · /voice setup · /voice hold · /voice cancel"; return }
+  if (voiceProblem()) { openVoiceSetup(); return }
+  await startListening(false)
+}
+
 process.stdin.on("data", (chunk) => {
   let dirty = false
+  // A held space bar repeats alone; spaces inside typed or pasted text come with other characters.
+  const onlySpaces = /^ +$/.test(chunk.toString())
 
   for (const pressed of readKeys(chunk.toString())) {
+    // While recording, the keyboard is the recorder's: space keeps a hold alive or ends a /voice recording,
+    // enter ends it, escape throws it away. Nothing typed by accident lands in the prompt.
+    if (listening) {
+      if (pressed.type === "char" && pressed.value === " ") {
+        listening.lastSpace = Date.now()
+        if (!listening.hold && listening.recording && Date.now() - listening.startedAt > 400) void finishListening()
+      } else if (pressed.type === "enter") void finishListening()
+      else if (pressed.type === "escape" || (pressed.type === "ctrl" && pressed.value === "c")) cancelListening()
+      continue
+    }
+    if (transcribing && pressed.type === "char" && pressed.value === " " && onlySpaces) continue
     // ctrl+x arms the leader; the next letter picks the shortcut.
     if (pressed.type === "ctrl" && pressed.value === keymap.leader && !secret) {
       leaderUntil = Date.now() + 1500
@@ -4188,6 +4415,9 @@ process.stdin.on("data", (chunk) => {
         applyComposer(insertText(composerState(), pressed.value), true)
         dirty = true
         refreshPalette()
+        if (pressed.value === " " && onlySpaces && settings.voiceHold && !secret && !renaming && !dialog && !pending && !asking && voiceUsable()) {
+          if (spaceHeld(Date.now())) { dirty = false; break }
+        } else heldSpaces = 0
         break
     }
   }

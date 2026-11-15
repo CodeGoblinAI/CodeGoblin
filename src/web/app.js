@@ -2078,6 +2078,13 @@ async function runCommand(text) {
     return true
   }
 
+  if (name === "/voice") {
+    // /voice records (or opens setup when the model is not here yet); /voice setup always shows the page.
+    if (argument === "setup") void fetch("/api/voice").then((r) => r.json()).then(openVoiceSetup).catch(() => note("voice input is not available right now"))
+    else if (voiceRec) void finishVoice()
+    else void startVoice(false)
+    return true
+  }
   if (name === "/timestamps") {
     const on = document.body.classList.toggle("show-times")
     note(on ? "Showing when each message was written." : "Timestamps hidden.")
@@ -3725,3 +3732,194 @@ function noteChange(name, args, result) {
   const counts = /\+(\d+)\s*-(\d+)/.exec(result || "")
   changedFiles.set(path, counts ? "+" + counts[1] + " -" + counts[2] : "written")
 }
+
+// --- voice input ------------------------------------------------------------------------------------------
+// Click the microphone (or hold Space in an empty prompt) and speak; the words land in the prompt box to be
+// read before they are sent. The browser records, the app's own server turns the recording into text with a
+// model on this computer. Nothing is sent to a provider.
+const micBtn = document.getElementById("mic")
+const micTime = document.getElementById("mic-time")
+let voiceRec = null // { stream, recorder, chunks, startedAt, ticker, hold }
+let voiceBusy = false
+
+function voiceHint(text) {
+  const hint = document.getElementById("hint")
+  if (hint) hint.textContent = text
+}
+
+/** The recording as 16 kHz mono 16-bit WAV, which is what the speech model reads. */
+async function toWav(blob) {
+  const Ctx = window.AudioContext || window.webkitAudioContext
+  const ctx = new Ctx()
+  let decoded
+  try { decoded = await ctx.decodeAudioData(await blob.arrayBuffer()) } finally { void ctx.close() }
+  const length = Math.max(1, Math.ceil(decoded.duration * 16000))
+  const offline = new OfflineAudioContext(1, length, 16000)
+  const source = offline.createBufferSource()
+  source.buffer = decoded
+  source.connect(offline.destination)
+  source.start()
+  const samples = (await offline.startRendering()).getChannelData(0)
+  const out = new DataView(new ArrayBuffer(44 + samples.length * 2))
+  const put = (at, text) => { for (let i = 0; i < text.length; i++) out.setUint8(at + i, text.charCodeAt(i)) }
+  put(0, "RIFF"); out.setUint32(4, 36 + samples.length * 2, true); put(8, "WAVE"); put(12, "fmt ")
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true); out.setUint32(24, 16000, true)
+  out.setUint32(28, 32000, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true); put(36, "data"); out.setUint32(40, samples.length * 2, true)
+  for (let i = 0; i < samples.length; i++) out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, samples[i])) * 32767, true)
+  return out.buffer
+}
+
+function insertSpoken(text) {
+  const start = input.selectionStart ?? input.value.length
+  const before = input.value.slice(0, start)
+  const piece = (before && !/\s$/.test(before) ? " " : "") + text
+  input.setRangeText(piece, start, input.selectionEnd ?? start, "end")
+  input.dispatchEvent(new Event("input", { bubbles: true }))
+  input.focus()
+}
+
+function endVoiceUi() {
+  if (voiceRec) { clearInterval(voiceRec.ticker); voiceRec.stream.getTracks().forEach((track) => track.stop()) }
+  voiceRec = null
+  micBtn.classList.remove("listening")
+  micBtn.setAttribute("aria-pressed", "false")
+  micTime.hidden = true
+}
+
+async function startVoice(hold = false) {
+  if (voiceRec || voiceBusy) return
+  const state = await fetch("/api/voice").then((r) => r.json()).catch(() => null)
+  if (!state) { voiceHint("voice input is not available right now"); return }
+  if (!state.ready) { openVoiceSetup(state); return }
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { voiceHint("this browser cannot record audio"); return }
+  let stream
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }) }
+  catch { voiceHint("the microphone is blocked - allow it for this page, then try again"); return }
+  const recorder = new MediaRecorder(stream)
+  const chunks = []
+  recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data) }
+  const startedAt = Date.now()
+  voiceRec = { stream, recorder, chunks, startedAt, hold, ticker: setInterval(() => { micTime.textContent = Math.floor((Date.now() - startedAt) / 1000) + "s" }, 250) }
+  recorder.start()
+  micBtn.classList.add("listening")
+  micBtn.setAttribute("aria-pressed", "true")
+  micTime.textContent = "0s"; micTime.hidden = false
+  voiceHint(hold ? "listening - let go of Space to finish" : "listening - click the microphone or press Enter to finish, Esc to discard")
+}
+
+function cancelVoice() {
+  if (!voiceRec) return
+  const { recorder } = voiceRec
+  recorder.onstop = null
+  try { recorder.stop() } catch {}
+  endVoiceUi()
+  voiceHint("recording discarded")
+}
+
+async function finishVoice() {
+  if (!voiceRec || voiceBusy) return
+  const { recorder, chunks } = voiceRec
+  voiceBusy = true
+  micBtn.classList.add("busy")
+  const stopped = new Promise((resolve) => { recorder.onstop = resolve })
+  try { recorder.stop() } catch {}
+  await stopped
+  endVoiceUi()
+  voiceHint("turning speech into text…")
+  try {
+    const wav = await toWav(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }))
+    const result = await fetch("/api/voice/transcribe", { method: "POST", headers: { "content-type": "audio/wav" }, body: wav }).then((r) => r.json())
+    if (result.message) voiceHint(result.message)
+    else if (!result.text) voiceHint("heard nothing - is the microphone on?")
+    else { insertSpoken(result.text); voiceHint("from your voice - read it over, then Enter sends it") }
+  } catch {
+    voiceHint("could not turn that recording into text")
+  } finally {
+    voiceBusy = false
+    micBtn.classList.remove("busy")
+  }
+}
+
+/** What voice needs, before anything is downloaded; then the download, with its progress. */
+function openVoiceSetup(state) {
+  let dialog = document.getElementById("voice-setup")
+  if (!dialog) {
+    dialog = document.createElement("dialog")
+    dialog.id = "voice-setup"
+    dialog.className = "voice-setup"
+    document.body.appendChild(dialog)
+  }
+  let poll
+  const close = () => { clearInterval(poll); dialog.close() }
+  const button = (row, label, run, primary) => { const made = document.createElement("button"); made.type = "button"; made.textContent = label; if (primary) made.className = "primary"; made.onclick = run; row.appendChild(made); return made }
+  const draw = (now) => {
+    dialog.textContent = ""
+    const add = (tag, text, cls) => { const node = document.createElement(tag); if (cls) node.className = cls; node.textContent = text; dialog.appendChild(node); return node }
+    add("h2", "Voice input")
+    if (!now.runtime) {
+      add("p", "Voice input needs a speech engine that is not installed here. Run “bun install” in the CG-Next folder, then try again.")
+      button(add("div", "", "row"), "Close", close)
+      return
+    }
+    if (now.ready) {
+      add("p", "Voice input is ready. Click the microphone, or hold Space in an empty prompt, and speak.")
+      button(add("div", "", "row"), "Done", close, true)
+      clearInterval(poll)
+      return
+    }
+    add("p", "Speak instead of typing. Speech is turned into text on this computer by a small model (SenseVoice); nothing you say is sent anywhere.")
+    if (now.preparing) {
+      const bar = document.createElement("progress"); bar.max = now.preparing.total; bar.value = now.preparing.received; dialog.appendChild(bar)
+      add("p", "Downloading the " + now.preparing.label + ": " + Math.floor((now.preparing.received / now.preparing.total) * 100) + "% of " + now.needs.download)
+      const row = add("div", "", "row")
+      button(row, "Stop", () => { void fetch("/api/voice/cancel", { method: "POST" }) })
+      button(row, "Keep going in the background", close)
+      return
+    }
+    const list = document.createElement("dl")
+    for (const [name, value] of [["Download", now.needs.download + ", once"], ["Disk", now.needs.disk], ["Memory", now.needs.memory], ["Takes", now.needs.time], ["Languages", "English, Chinese, Cantonese, Japanese, Korean"]]) {
+      const dt = document.createElement("dt"); dt.textContent = name
+      const dd = document.createElement("dd"); dd.textContent = value
+      list.append(dt, dd)
+    }
+    dialog.appendChild(list)
+    if (now.problem) add("p", "Last try: " + now.problem)
+    const row = add("div", "", "row")
+    button(row, "Later", close)
+    button(row, "Download and set up", async () => {
+      const started = await fetch("/api/voice/prepare", { method: "POST" }).then((r) => r.json()).catch(() => null)
+      if (started && started.message) { add("p", started.message); return }
+      void refresh()
+      clearInterval(poll)
+      poll = setInterval(refresh, 1000)
+    }, true)
+  }
+  const refresh = async () => { const now = await fetch("/api/voice").then((r) => r.json()).catch(() => null); if (now && dialog.open) draw(now) }
+  draw(state)
+  dialog.addEventListener("close", () => clearInterval(poll), { once: true })
+  if (!dialog.open) dialog.showModal()
+  if (state.preparing) poll = setInterval(refresh, 1000)
+}
+
+micBtn.addEventListener("click", () => { if (voiceRec) void finishVoice(); else void startVoice(false) })
+
+// Holding Space in an empty prompt records; letting go finishes. A browser does say when a key is released,
+// and marks the repeats of a held key, so a tap of the bar is still just a space.
+let spaceRepeats = 0
+input.addEventListener("keydown", (event) => {
+  if (voiceRec) {
+    if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); cancelVoice() }
+    else if (event.key === "Enter") { event.preventDefault(); event.stopImmediatePropagation(); void finishVoice() }
+    else if (event.key === " ") event.preventDefault()
+    return
+  }
+  if (event.key !== " " || !event.repeat) { spaceRepeats = 0; return }
+  if (input.value.trim()) return
+  event.preventDefault()
+  if (++spaceRepeats === 3) { input.value = ""; input.dispatchEvent(new Event("input", { bubbles: true })); void startVoice(true) }
+}, true)
+input.addEventListener("keyup", (event) => {
+  if (event.key !== " ") return
+  spaceRepeats = 0
+  if (voiceRec && voiceRec.hold) void finishVoice()
+}, true)

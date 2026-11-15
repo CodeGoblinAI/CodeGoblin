@@ -131,6 +131,21 @@
   .box-row .picker-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .send { width: 30px; height: 30px; border: 0; border-radius: 999px; background: var(--goblin); color: #06210a; font-size: 15px; cursor: pointer; flex-shrink: 0; }
   .send:disabled { opacity: .3; cursor: default; }
+  .mic { height: 30px; min-width: 30px; padding: 0 7px; display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; background: none; color: var(--muted); cursor: pointer; flex-shrink: 0; font: inherit; font-size: 12px; }
+  .mic:hover { color: var(--text); background: var(--panel2); }
+  .mic.listening { color: #fff; background: #c0392b; }
+  .mic.busy { color: var(--gold); cursor: progress; }
+  .voice-setup { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); padding: 20px 22px; width: min(460px, calc(100vw - 32px)); }
+  .voice-setup::backdrop { background: rgba(0, 0, 0, .5); }
+  .voice-setup h2 { margin: 0 0 8px; font-size: 16px; }
+  .voice-setup p { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .voice-setup dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0 0 14px; font-size: 13px; }
+  .voice-setup dt { color: var(--muted); }
+  .voice-setup dd { margin: 0; }
+  .voice-setup progress { width: 100%; height: 8px; margin-bottom: 6px; }
+  .voice-setup .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+  .voice-setup button { border: 1px solid var(--line); background: var(--panel2); color: var(--text); border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .voice-setup button.primary { background: var(--goblin); color: #06210a; border-color: transparent; }
   .stop { border: 1px solid var(--line); background: var(--panel2); color: var(--muted); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
   .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 7px 4px 0; font-size: 11px; color: var(--muted); }
   .composer-hint { font-size: 11px; color: var(--muted); opacity: .75; }
@@ -320,6 +335,10 @@
           </button>
           <div class="picker-menu" id="provider-menu" role="listbox" aria-label="Models" tabindex="-1" hidden></div>
         </div>
+        <button class="mic" id="mic" type="button" title="Speak instead of typing (or hold Space in an empty prompt)" aria-label="Voice input" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          <span class="mic-time" id="mic-time" hidden></span>
+        </button>
         <button class="stop" id="stop" hidden>Stop</button>
         <button class="send" id="send" title="Send" aria-label="Send">↑</button>
       </div>

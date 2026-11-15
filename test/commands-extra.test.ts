@@ -95,6 +95,8 @@ describe("settings", () => {
       diffWrap: false,
       favourites: [],
       recents: [],
+      voiceHold: true,
+      voiceLanguage: "auto",
     })
     expect(normalise({ theme: "not-a-theme", thinking: "yes" })).toEqual(defaults())
     expect(normalise(null)).toEqual(defaults())

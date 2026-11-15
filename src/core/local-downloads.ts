@@ -15,6 +15,8 @@ export type CatalogEntry = {
   id: string
   label: string
   repo: string
+  /** An exact commit to download from; without one, the repository's main branch. */
+  revision?: string
   file: string
   bytes: number
   sha256: string
@@ -32,7 +34,7 @@ export const LOCAL_CATALOG: CatalogEntry[] = [
     sha256: "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785", about: "best local coder here; 5/5 with tools" },
 ]
 
-export const sourceUrl = (entry: CatalogEntry) => `https://huggingface.co/${entry.repo}/resolve/main/${entry.file}`
+export const sourceUrl = (entry: CatalogEntry) => `https://huggingface.co/${entry.repo}/resolve/${entry.revision ?? "main"}/${entry.file}`
 
 /** Hugging Face serves LFS files from its CDN; a redirect anywhere else is refused. */
 const TRUSTED = (host: string) => host === "huggingface.co" || host.endsWith(".huggingface.co") || host.endsWith(".hf.co")

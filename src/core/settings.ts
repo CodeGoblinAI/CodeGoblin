@@ -49,6 +49,10 @@ export type Settings = {
   favourites: string[]
   /** Models most recently switched to, newest first. */
   recents: string[]
+  /** Holding the space bar records speech into the prompt box (terminal), once voice input is set up. */
+  voiceHold: boolean
+  /** A language hint for voice input; "auto" lets the model tell. */
+  voiceLanguage: string
 }
 
 /**
@@ -81,6 +85,8 @@ export const defaults = (): Settings => ({
   diffWrap: false,
   favourites: [],
   recents: [],
+  voiceHold: true,
+  voiceLanguage: "auto",
 })
 
 export function normalise(raw: unknown): Settings {
@@ -101,6 +107,8 @@ export function normalise(raw: unknown): Settings {
     diffWrap: typeof value.diffWrap === "boolean" ? value.diffWrap : base.diffWrap,
     favourites: modelList(value.favourites),
     recents: modelList(value.recents),
+    voiceHold: typeof value.voiceHold === "boolean" ? value.voiceHold : base.voiceHold,
+    voiceLanguage: typeof value.voiceLanguage === "string" && ["auto", "en", "zh", "yue", "ja", "ko"].includes(value.voiceLanguage) ? value.voiceLanguage : base.voiceLanguage,
   }
 }
 

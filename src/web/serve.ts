@@ -72,6 +72,7 @@ import { endTerminal, releaseTerminal, reserveTerminal, startTerminal, terminalM
 import { isDirectory, recentProjects, rememberProject, sameFolder } from "../core/projects"
 import { createWorktree, currentBranch, listWorktrees, localBranches, removeWorktree, repoRoot, switchBranch } from "../core/worktrees"
 import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
+import * as voice from "../core/voice"
 import { exportSession, sessionMarkdown } from "../core/export"
 import { runMedia, MEDIA_KINDS, withinMediaOutput } from "../core/media"
 import {
@@ -776,6 +777,34 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     if (provider === "cursor") return json({ message: "Revoke the SDK user-plan key in Cursor's account dashboard; /disconnect cursor-api only removes a CG-stored API key" }, 400)
     const gone = await auth.disconnect(provider)
     return json({ message: gone ? "disconnected " + provider : "no stored key for " + provider })
+  }
+
+  // Voice input: whether it is set up, setting it up, and turning one recording into text.
+  if (url.pathname === "/api/voice" && request.method === "GET") {
+    const settings = await settingsStore.load()
+    return json({ ...voice.voiceState(), needs: voice.VOICE_NEEDS, problem: voice.voiceState().problem ?? null, language: settings.voiceLanguage, languages: voice.VOICE_LANGUAGES })
+  }
+  if (url.pathname === "/api/voice/prepare" && request.method === "POST") {
+    if (!voice.voiceRuntime()) return json({ message: voice.voiceProblem() }, 400)
+    if (!voice.voiceState().preparing && !voice.voiceState().model) void voice.prepareVoice().catch(() => {})
+    return json(voice.voiceState())
+  }
+  if (url.pathname === "/api/voice/cancel" && request.method === "POST") {
+    return json({ cancelled: voice.cancelVoiceSetup() })
+  }
+  if (url.pathname === "/api/voice/transcribe" && request.method === "POST") {
+    const why = voice.voiceProblem()
+    if (why) return json({ message: why }, 409)
+    // Ten minutes of 16 kHz mono is 19 MB; nobody dictates a prompt longer than that.
+    if (Number(request.headers.get("content-length") ?? 0) > 20_000_000) return json({ message: "That recording is too long; ten minutes is the limit." }, 413)
+    try {
+      const wav = new Uint8Array(await request.arrayBuffer())
+      if (wav.byteLength > 20_000_000) return json({ message: "That recording is too long; ten minutes is the limit." }, 413)
+      const settings = await settingsStore.load()
+      return json({ text: await voice.transcribe(wav, url.searchParams.get("language") || settings.voiceLanguage, request.signal) })
+    } catch (error) {
+      return json({ message: error instanceof Error ? error.message : "could not transcribe that" }, 400)
+    }
   }
 
   // What is remembered for this project, as a list the Settings page can draw and forget from.

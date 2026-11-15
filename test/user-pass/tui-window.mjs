@@ -39,6 +39,8 @@ fs.writeFileSync(launcher, [
   "set CODEGOBLIN_LOCAL_URL=" + model.url,
   "set CODEGOBLIN_LOCAL_MODEL=fixture",
   "set CODEGOBLIN_LOCAL_TOOLS=1",
+  // Voice input: a speech model already on this machine, and optionally a recording in place of the microphone.
+  ...["CG_VOICE_MODEL_DIR", "CG_VOICE_FAKE_WAV"].filter((name) => process.env[name]).map((name) => "set " + name + "=" + process.env[name]),
   "cd /d " + project,
   "bun C:\\Users\\shawn\\code\\CG-Next\\src\\tui\\app.ts --model local",
 ].join("\r\n"))

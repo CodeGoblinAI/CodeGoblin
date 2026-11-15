@@ -23,5 +23,8 @@
     "@types/bun": "^1.4.0",
     "@types/node": "^22.10.2",
     "typescript": "^5.9.3"
+  },
+  "optionalDependencies": {
+    "sherpa-onnx-node": "2.0.1"
   }
 }

@@ -25,6 +25,7 @@ export const TIPS = [
   "drop or paste a picture to show it to the model",
   "a line starting with ! runs that command in your shell",
   "/effort sets how hard this model thinks",
+  "/voice lets you speak a prompt; once set up, hold space to talk",
   "/undo takes back the files the last turn changed",
   "/resume reopens a conversation; ctrl+p there pins it",
   "/search finds anything said in this conversation",

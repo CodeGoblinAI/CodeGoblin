@@ -90,14 +90,14 @@ export async function tui({ model, cwd, profile = tempDir("cg-pass-profile-"), c
   return api
 }
 
-export async function web({ model, cwd, profile = tempDir("cg-pass-web-"), extraEnv = {}, viewport = { width: 1280, height: 860 } }) {
+export async function web({ model, cwd, profile = tempDir("cg-pass-web-"), extraEnv = {}, viewport = { width: 1280, height: 860 }, browserArgs = [], permissions = [] }) {
   const server = spawn("bun", [(process.env.CG_ROOT ?? "C:/Users/shawn/code/CG-Next") + "/src/web/serve.ts"], { cwd, env: env(model, profile, extraEnv), windowsHide: true })
   let log = ""
   server.stderr.on("data", (d) => log += d)
   const url = await new Promise((resolve, reject) => { let t = ""; server.stdout.on("data", (d) => { t += d; const m = /http:\/\/localhost:(\d+)/.exec(t); if (m) resolve(m[0]) }); setTimeout(() => reject(new Error("web did not start: " + t + log)), 25000) })
-  const browser = await chromium.launch({ executablePath: "C:/Users/shawn/AppData/Local/ms-playwright/chromium-1248/chrome-win64/chrome.exe", headless: true })
+  const browser = await chromium.launch({ executablePath: "C:/Users/shawn/AppData/Local/ms-playwright/chromium-1248/chrome-win64/chrome.exe", headless: true, args: browserArgs })
   const context = await browser.newContext({ viewport })
-  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: url })
+  await context.grantPermissions(["clipboard-read", "clipboard-write", ...permissions], { origin: url })
   const page = await context.newPage()
   const errors = []
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()) })

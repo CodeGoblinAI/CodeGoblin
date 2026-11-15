@@ -56,6 +56,7 @@ export type CommandResult =
   | { kind: "search"; query?: string }
   | { kind: "fold" }
   | { kind: "timestamps" }
+  | { kind: "voice"; argument: string }
   | { kind: "connect"; provider?: string }
   | { kind: "disconnect"; provider?: string }
   | { kind: "none" }
@@ -79,6 +80,7 @@ export const COMMANDS = [
   { name: "/search", description: "search this conversation - your messages and the answers: /search <words>" },
   { name: "/fold", description: "fold every answer to its first lines, or unfold them" },
   { name: "/timestamps", description: "show or hide when each message was written" },
+  { name: "/voice", description: "speak instead of typing: /voice records (or hold space); /voice setup, hold, cancel" },
   { name: "/editor", description: "write the prompt in your editor ($VISUAL / $EDITOR, else Notepad) - ctrl+x e" },
   { name: "/resume", description: "reopen a saved conversation" },
   { name: "/compact", description: "summarise the conversation to free context" },
@@ -258,6 +260,8 @@ export function runCommand(text: string): CommandResult {
       return { kind: "fold" }
     case "/timestamps":
       return { kind: "timestamps" }
+    case "/voice":
+      return { kind: "voice", argument: argument.trim().toLowerCase() }
     case "/terminal":
       return { kind: "message", text: "/terminal is the browser's built-in shell; here, ! runs a command (!git status), or use another terminal tab" }
     case "/status":
