@@ -59,11 +59,15 @@ describe("a read-only command that reaches outside the project asks", () => {
       asked++
       return "always"
     })
-    await permissions.check("shell", shell("type src\\math.js"))
-    await permissions.check("shell", shell("type src\\other.js"))
-    await permissions.check("shell", shell("type C:\\Windows\\win.ini"))
+    // The same rule on each system, in that system's own spelling of "a file outside the project".
+    const [inside, other, outside, cover] = process.platform === "win32"
+      ? ["type src\\math.js", "type src\\other.js", "type C:\\Windows\\win.ini", '"type" in C:\\Windows']
+      : ["cat src/math.js", "cat src/other.js", "cat /etc/hosts", '"cat" in /etc']
+    await permissions.check("shell", shell(inside))
+    await permissions.check("shell", shell(other))
+    await permissions.check("shell", shell(outside))
     expect(asked).toBe(2)
-    expect(coverOf("shell", shell("type C:\\Windows\\win.ini"))).toBe('"type" in C:\\Windows')
+    expect(coverOf("shell", shell(outside))).toBe(cover)
   })
 })
 
@@ -77,11 +81,19 @@ describe("Allow for this session, outside the project, holds for that folder", (
       return "always"
     })
     permissions.mode = "approve"
-    const downloads = process.env.USERPROFILE ? process.env.USERPROFILE + "\\Downloads" : "C:\\Users\\me\\Downloads"
-    await permissions.check("shell", shell('echo one > "%USERPROFILE%\\Downloads\\test.txt"'))
-    await permissions.check("shell", shell("echo two > " + downloads + "\\test.txt"))
-    await permissions.check("shell", shell("echo three > " + downloads + "\\other.txt"))
-    expect(asked).toBe(process.env.USERPROFILE ? 1 : 2)
+    if (process.platform === "win32") {
+      const downloads = process.env.USERPROFILE ? process.env.USERPROFILE + "\\Downloads" : "C:\\Users\\me\\Downloads"
+      await permissions.check("shell", shell('echo one > "%USERPROFILE%\\Downloads\\test.txt"'))
+      await permissions.check("shell", shell("echo two > " + downloads + "\\test.txt"))
+      await permissions.check("shell", shell("echo three > " + downloads + "\\other.txt"))
+      expect(asked).toBe(process.env.USERPROFILE ? 1 : 2)
+    } else {
+      const downloads = (process.env.HOME ?? "/home/me") + "/Downloads"
+      await permissions.check("shell", shell('echo one > "$HOME/Downloads/test.txt"'))
+      await permissions.check("shell", shell("echo two > " + downloads + "/test.txt"))
+      await permissions.check("shell", shell("echo three > ~/Downloads/other.txt"))
+      expect(asked).toBe(process.env.HOME ? 1 : 2)
+    }
   })
 
   test("but not another folder, and not another program", async () => {

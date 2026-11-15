@@ -50,6 +50,9 @@ describe("/connect's list", () => {
       { id: "nvidia", label: "Nvidia", about: "40 models, from models.dev", more: true },
       { id: "obscure-ai", label: "Obscure AI", about: "2 models, from models.dev", more: true },
     ]
+    // Providers another test file left in the list count too, so the tally is taken before and after.
+    const hiddenIn = (rows: { id: string; label: string }[]) => Number(/(\d+) more provider/.exec(rows.at(-1)?.id === "" ? rows.at(-1)!.label : "")?.[1] ?? 0)
+    const hiddenBefore = hiddenIn(connectChoices("", () => false))
     CONNECTABLE.push(...added)
     try {
       expect(FEATURED_CATALOG).toContain("openrouter")
@@ -59,7 +62,10 @@ describe("/connect's list", () => {
       expect(ids).toContain("openrouter")
       expect(ids).toContain("obscure-ai")
       expect(ids).not.toContain("nvidia")
-      expect(short.at(-1)).toMatchObject({ id: "", label: "… 1 more provider" })
+      // Of the two added as "more", one is connected and so shown; the other joins the hidden ones.
+      expect(short.at(-1)).toMatchObject({ id: "" })
+      expect(hiddenIn(short)).toBe(hiddenBefore + 1)
+      if (!hiddenBefore) expect(short.at(-1)!.label).toBe("… 1 more provider")
       expect(connectChoices("nvid", () => false).map((row) => row.id)).toEqual(["nvidia"])
     } finally {
       CONNECTABLE.splice(CONNECTABLE.length - added.length, added.length)

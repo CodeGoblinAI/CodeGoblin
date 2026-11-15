@@ -99,6 +99,12 @@ export function endTerminal(socket: TerminalSocket) {
   if (!socket.data.shell && !socket.data.reserved) return
   socket.data.reserved = false
   releaseTerminal()
-  try { socket.data.shell?.kill() } catch {}
+  const shell = socket.data.shell
   socket.data.shell = undefined
+  if (!shell) return
+  if (process.platform === "win32") { try { shell.kill() } catch {} ; return }
+  // An interactive shell ignores the polite signal (bash does, by design), so closing the page left it
+  // running. A hang-up is what a closed terminal sends; anything still there a moment later is ended outright.
+  try { shell.kill("SIGHUP") } catch {}
+  setTimeout(() => { if (shell.exitCode === null) { try { shell.kill("SIGKILL") } catch {} } }, 1500).unref()
 }

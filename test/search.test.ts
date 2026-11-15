@@ -104,7 +104,9 @@ describe("shell tool", () => {
 
   test("stops waiting for a command that overruns its wait, without ending it", async () => {
     const started = Date.now()
-    const result = await runTool("shell", { command: "ping -n 20 127.0.0.1", timeout_ms: 1200 }, root)
+    // Something that only waits, for twenty seconds, in each system's own words.
+    const waits = process.platform === "win32" ? "ping -n 20 127.0.0.1" : "sleep 20"
+    const result = await runTool("shell", { command: waits, timeout_ms: 1200 }, root)
     expect(result).toContain("still running after 1s")
     expect(Date.now() - started).toBeLessThan(8000)
     expect(stopAllJobs()).toBe(1)

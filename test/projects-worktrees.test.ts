@@ -10,7 +10,9 @@ import { runCommand } from "../src/core/commands"
 
 const git = (cwd: string, ...args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true })
 function repo(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cg-repo-"))
+  // By its real path: git reports a repository that way, and a temporary folder is often reached through a
+  // link (macOS) or a shortened name (Windows runners).
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "cg-repo-")))
   git(dir, "init", "-q", "-b", "main")
   git(dir, "config", "user.email", "test@example.invalid")
   git(dir, "config", "user.name", "Test")
@@ -87,7 +89,7 @@ describe("worktrees", () => {
 
   test("a worktree CG-Next did not make is never removed here", () => {
     const dir = repo()
-    const elsewhere = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cg-other-")), "wt")
+    const elsewhere = path.join(fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "cg-other-"))), "wt")
     git(dir, "worktree", "add", "-q", "-b", "theirs", elsewhere)
     expect(() => removeWorktree(dir, elsewhere, { recycle })).toThrow("only worktrees CG-Next made")
     expect(fs.existsSync(elsewhere)).toBe(true)

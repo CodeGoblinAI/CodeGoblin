@@ -9,7 +9,12 @@ const project = () => fs.mkdtempSync(path.join(process.env.CODEGOBLIN_TEST_SANDB
 
 test("the five shipped prompts are commands, expanded with what was typed", () => {
   const cwd = project()
-  expect(customCommands(cwd).filter((command) => command.scope === "built-in").map((command) => command.name).sort()).toEqual(["goal", "grill", "init", "review", "teach"])
+  // All five are commands. A file of the same name replaces one (another test file leaves a /review in the
+  // shared profile, and which file runs first differs by system), so only the names are fixed, not who owns them.
+  const commands = customCommands(cwd)
+  expect(PROMPT_COMMANDS.map((command) => command.name).sort()).toEqual(["goal", "grill", "init", "review", "teach"])
+  for (const name of ["goal", "grill", "init", "review", "teach"]) expect(commands.map((command) => command.name)).toContain(name)
+  for (const command of commands.filter((each) => each.scope === "built-in")) expect(["goal", "grill", "init", "review", "teach"]).toContain(command.name)
   const goal = resolveInvocation("/goal make the tests pass on Windows", cwd)!
   expect(goal.kind).toBe("command")
   expect(goal.content).toContain("You are in GOAL mode")

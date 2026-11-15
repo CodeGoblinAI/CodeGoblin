@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import fs from "node:fs/promises"
+import fsSync from "node:fs"
 import path from "node:path"
 import { Global } from "../src/platform/paths"
 import { History, nothingToDo } from "../src/core/undo"
@@ -40,7 +41,9 @@ test("saved baselines survive a new process; a checkpoint with no record of how 
 test("a saved baseline cannot be applied to a different root or an escaping path", async () => {
   const root = await workspace()
   const other = await workspace()
-  const valid = { root: process.platform === "win32" ? root.toLowerCase() : root, files: [{ path: "inside.txt", before: "old" }] }
+  // A root is saved by where it really is: on macOS a temporary folder is reached through a link (/var -> /private/var).
+  const real = fsSync.realpathSync(root)
+  const valid = { root: process.platform === "win32" ? real.toLowerCase() : real, files: [{ path: "inside.txt", before: "old" }] }
   const wrongRoot = new History()
   wrongRoot.restoreReview(other, valid)
   expect(wrongRoot.origins().size).toBe(0)
