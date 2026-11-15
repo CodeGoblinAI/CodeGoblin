@@ -39,4 +39,14 @@ describe("what shows under a finished tool call", () => {
     // Arguments that are not JSON do not break it.
     expect(toolDetail("write_file", "not json", "wrote it").summary).toBe("wrote it")
   })
+
+  test("a background job's row says its state, with what it printed under it", () => {
+    const started = toolDetail("shell", args({ command: "bun dev", background: true }), 'started job1 in the background: bun dev\ncompiling\n(still running. job_output with id "job1" reads what it prints next)')
+    expect(started).toEqual({ summary: "started job1", lines: [{ text: "compiling" }] })
+    expect(toolDetail("shell", args({ command: "bun dev", background: true }), "started job2 in the background: bun dev\n(no output yet)\n(still running. job_output ...)")).toEqual({ summary: "started job2", lines: [] })
+    expect(toolDetail("shell", args({ command: "bun x", background: true }), "job3 ended straight away (ended with exit code 1 after 0s): bun x\nnot found").summary).toBe("job3 ended straight away (ended with exit code 1 after 0s)")
+    expect(toolDetail("job_output", args({ id: "job1" }), "job1: running for 4s\nReady on :4000")).toEqual({ summary: "job1: running for 4s", lines: [{ text: "Ready on :4000" }] })
+    expect(toolDetail("job_output", args({ id: "job1" }), "job1: running for 9s\n(nothing new since it was last read)")).toEqual({ summary: "job1: running for 9s", lines: [] })
+    expect(toolDetail("job_stop", args({ id: "job1" }), "job1 stopped: bun dev").summary).toBe("job1 stopped: bun dev")
+  })
 })

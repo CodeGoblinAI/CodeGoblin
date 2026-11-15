@@ -119,6 +119,9 @@ import { listSkills, skillIndex } from "../core/skills"
 import { setAgents, setInvocations, setModelLists, setRecentCommands, isListedCommand } from "./palette"
 import { loadRecentCommands, noteCommandUse } from "../core/command-rank"
 import { agentMention } from "../core/subagents"
+import { ago, jobTail, listJobs, runningJobs, stopAllJobs, stopJob } from "../core/jobs"
+import { redactSecrets } from "../core/tools"
+import { storedSecrets } from "../core/auth"
 import { FAVOURITES, RECENT, markRecent, pickerRows, toggleFavourite } from "../core/favourites"
 import { formatterStatus } from "../core/formatter"
 import { systemPrompt } from "../core/system-prompt"
@@ -1163,7 +1166,8 @@ function render() {
   const modeTag =
     (permissions.planning ? "  [planning]" : "") +
     (boost || boostOnce ? "  [boost]" : "") +
-    (subagents.running().length ? "  [" + subagents.running().length + " subagent" + (subagents.running().length === 1 ? "" : "s") + " running]" : "")
+    (subagents.running().length ? "  [" + subagents.running().length + " subagent" + (subagents.running().length === 1 ? "" : "s") + " running]" : "") +
+    (runningJobs(process.cwd()) ? "  [" + runningJobs(process.cwd()) + " job" + (runningJobs(process.cwd()) === 1 ? "" : "s") + " running]" : "")
   // Nothing spent on a model that costs nothing is not worth a column.
   const spendTag = spend.input + spend.output > 0 && !(spend.dollars === 0 && !spend.unpriced) ? "  " + formatSpend(spend) : ""
   // Usage stays on the bar even while a status is showing: a transient
@@ -2429,6 +2433,20 @@ async function chooseInDialog() {
     return
   }
 
+  if (dialog.kind === "jobs") {
+    if (row.value === "stop-all") { const count = stopAllJobs(process.cwd()); status = "stopped " + count + " job" + (count === 1 ? "" : "s"); await new Promise((resolve) => setTimeout(resolve, 300)); openJobs(); render(); return }
+    if (row.value.startsWith("stop:")) {
+      const id = row.value.slice(5)
+      status = (await stopJob(id, process.cwd())).split(String.fromCharCode(10))[0] ?? ""
+      openJobs(); render(); return
+    }
+    // The job's last output, in the conversation where it can be scrolled and copied. The model is not told.
+    const job = listJobs(process.cwd()).find((each) => each.id === row.value)
+    closeDialog()
+    if (job) transcript.push({ kind: "tool", text: job.id + " · " + job.command + String.fromCharCode(10) + (redactSecrets(jobTail(job.id, 40), storedSecrets()) || "(no output)") })
+    render(); return
+  }
+
   if (dialog.kind === "voice") {
     if (row.value === "setup") { closeDialog(); setUpVoice(); return }
     if (row.value === "cancel") { cancelVoiceSetup(); closeDialog(); status = "stopping the download…"; render(); return }
@@ -2950,6 +2968,10 @@ async function send() {
     if (result.kind === "fold") {
       foldAnswers = !foldAnswers
       status = foldAnswers ? "answers folded to their first lines - /fold unfolds" : "answers shown in full"
+      render(); return
+    }
+    if (result.kind === "jobs") {
+      openJobs()
       render(); return
     }
     if (result.kind === "voice") {
@@ -3503,6 +3525,7 @@ async function send() {
 }
 
 function shutdown() {
+  stopAllJobs()
   stopRecorder()
   stopVoice()
   turn?.abort()
@@ -3868,6 +3891,24 @@ function listeningLine(): string | undefined {
   if (!listening.recording) return dim + "  ○ starting the microphone…" + ansi.reset
   const seconds = Math.floor((Date.now() - listening.startedAt) / 1000)
   return theme.error + "  ● listening " + ansi.reset + dim + seconds + "s  ·  " + (listening.hold ? "let go of space to finish" : "enter or space finishes · esc discards") + ansi.reset
+}
+
+/** The commands left running, newest first: enter on one shows its last output, the row under it stops it. */
+function openJobs() {
+  const all = listJobs(process.cwd()).reverse()
+  const rows: Dialogs.DialogRow[] = []
+  if (!all.length) {
+    rows.push({ label: "No background jobs.", inert: true })
+    rows.push({ label: "The model starts one when a command should keep running:", inert: true })
+    rows.push({ label: "a dev server, a watcher, a long build. They end when CG-Next closes.", inert: true })
+  }
+  for (const job of all) {
+    const state = job.running ? "running " + ago(Date.now() - job.startedAt) : job.stopped ? "stopped" : job.exitCode === 0 ? "finished" : "ended, exit code " + (job.exitCode ?? "unknown")
+    rows.push({ label: job.id + "  " + job.command, hint: state + " · enter shows its output", value: job.id, ...(job.running ? {} : { tone: "muted" as const }) })
+    if (job.running) rows.push({ label: "   Stop " + job.id, value: "stop:" + job.id })
+  }
+  if (all.filter((job) => job.running).length > 1) rows.push({ label: "Stop all of them", value: "stop-all" })
+  dialog = Dialogs.open("jobs", "Background jobs", rows, { size: "large", footer: all.length ? "enter shows output or stops · esc closes · they end when CG-Next closes" : "esc closes" })
 }
 
 /** What voice input needs, and the button that gets it. A page to read before a 229 MB download, not after. */

@@ -8,6 +8,10 @@ import type { Session } from "../src/core/sessions"
 
 const NEWLINE = String.fromCharCode(10)
 
+test("/jobs opens the background jobs list, by any of its names", () => {
+  for (const name of ["/jobs", "/job", "/bg", "/background"]) expect(runCommand(name)).toEqual({ kind: "jobs" })
+})
+
 describe("the new commands", () => {
   test("every command in the list actually does something", () => {
     for (const command of COMMANDS) {

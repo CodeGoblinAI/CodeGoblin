@@ -2,6 +2,7 @@ import { authHeaders, kindOf, type Provider } from "./providers"
 import { isLocalChat, verifyLocalModel } from "./local-provider"
 import { localRuntime, type Lease } from "./local-runtime"
 import { cliCompletion } from "./cli-completion"
+import { endedUntold } from "./jobs"
 import { TOOL_SCHEMA, runTool, isConcurrent, redactSecrets, resolveReadable, fitResult } from "./tools"
 import { imageTypeOf, readImageFile } from "./mention"
 
@@ -302,7 +303,9 @@ export function usesPatch(modelId: string): boolean {
 
 function offeredTools(input: { modelId?: string; permissions?: Permissions; extraTools?: ExtraTools; subagents?: Subagents; tools?: string[]; askUser?: AskUser }) {
   const planning = input.permissions?.planning === true
-  const listed = (name: string) => (name === "apply_patch" ? Boolean(input.modelId && usesPatch(input.modelId)) && (!input.tools || input.tools.includes("edit_file") || input.tools.includes("apply_patch")) : !input.tools || input.tools.includes(name))
+  // The job tools go with the shell that starts the jobs.
+  const listed = (asked: string): boolean => { const name = asked === "job_output" || asked === "job_stop" ? "shell" : asked; return listedExactly(name) }
+  const listedExactly = (name: string) => (name === "apply_patch" ? Boolean(input.modelId && usesPatch(input.modelId)) && (!input.tools || input.tools.includes("edit_file") || input.tools.includes("apply_patch")) : !input.tools || input.tools.includes(name))
   const own = TOOL_SCHEMA.filter((tool) => listed(tool.function.name) && !(planning && CHANGES_FILES.has(tool.function.name)))
   // MCP tools can do anything, and nothing says which of them only read.
   const mcp = planning || !listed("mcp") ? [] : (input.extraTools?.schema() ?? [])
@@ -768,6 +771,13 @@ async function* runTurns(input: {
       if (REPEAT_NUDGES.includes(seen)) {
         results.set(call.id, result + `\n\n(This is the ${seen === 3 ? "third" : seen === 5 ? "fifth" : "eighth"} time ${call.name} was called with these arguments and gave this same result. Calling it again will not change it: use what it says, try something different, or say what is in the way.)`)
       }
+    }
+
+    // A background job that ended since the model last heard of it is said on the last result of this round.
+    const last = [...decided].reverse().find((entry) => entry.allowed && results.has(entry.call.id))
+    if (last) {
+      const ended = endedUntold(input.root)
+      if (ended) results.set(last.call.id, results.get(last.call.id) + "\n\n" + redactSecrets(ended, secrets))
     }
 
     // Reported in the order the model asked for them, whatever order they

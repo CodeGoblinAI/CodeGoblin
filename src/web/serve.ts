@@ -73,6 +73,9 @@ import { isDirectory, recentProjects, rememberProject, sameFolder } from "../cor
 import { createWorktree, currentBranch, listWorktrees, localBranches, removeWorktree, repoRoot, switchBranch } from "../core/worktrees"
 import { markRecent, pickerRows, toggleFavourite } from "../core/favourites"
 import * as voice from "../core/voice"
+import * as jobs from "../core/jobs"
+import { redactSecrets } from "../core/tools"
+import { storedSecrets } from "../core/auth"
 import { exportSession, sessionMarkdown } from "../core/export"
 import { runMedia, MEDIA_KINDS, withinMediaOutput } from "../core/media"
 import {
@@ -777,6 +780,18 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     if (provider === "cursor") return json({ message: "Revoke the SDK user-plan key in Cursor's account dashboard; /disconnect cursor-api only removes a CG-stored API key" }, 400)
     const gone = await auth.disconnect(provider)
     return json({ message: gone ? "disconnected " + provider : "no stored key for " + provider })
+  }
+
+  // Commands the model left running in this project: listed with their last output, and stopped.
+  if (url.pathname === "/api/jobs" && request.method === "GET") {
+    const secrets = storedSecrets()
+    return json({ jobs: jobs.listJobs(root).map((job) => ({ ...job, tail: redactSecrets(jobs.jobTail(job.id, 14), secrets) })) })
+  }
+  if (url.pathname === "/api/jobs/stop" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { id?: unknown; all?: unknown }
+    if (body.all === true) return json({ stopped: jobs.stopAllJobs(root) })
+    const message = await jobs.stopJob(String(body.id ?? ""), root)
+    return json({ message }, message.startsWith("error") ? 404 : 200)
   }
 
   // Voice input: whether it is set up, setting it up, and turning one recording into text.

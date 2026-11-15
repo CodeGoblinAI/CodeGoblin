@@ -101,7 +101,7 @@ export type Ask = (tool: string, detail: string, cover: string, from?: string) =
 // Starting a subagent and collecting its result change nothing themselves; what
 // a subagent then does is asked about call by call, the same as anything else.
 // A question to the user is the opposite of acting without asking.
-const HARMLESS = new Set(["read_file", "list_files", "grep", "glob", "todo_write", "skill", "task", "task_result", "question", "repo_overview"])
+const HARMLESS = new Set(["read_file", "list_files", "grep", "glob", "todo_write", "skill", "task", "task_result", "question", "repo_overview", "job_output", "job_stop"])
 
 const NEWLINE = String.fromCharCode(10)
 const RETURN = String.fromCharCode(13)
@@ -142,7 +142,8 @@ export function askedFor(tool: string, detail: string): string {
     // Not JSON, so the detail already says it in words.
   }
   if (!args) return detail
-  if (typeof args.command === "string") return args.command
+  // A command that will keep running says so, where it is approved and on its row.
+  if (typeof args.command === "string") return args.command + (tool === "shell" && args.background === true ? "  (kept running in the background)" : "")
   const flat = (value: string, max: number) => {
     const text = value.replace(/\s+/g, " ").trim()
     return text.length > max ? text.slice(0, max - 1) + "…" : text

@@ -2097,6 +2097,7 @@ async function runCommand(text) {
     return true
   }
   if (name === "/timeline") { openTimeline(); return true }
+  if (name === "/jobs") { void openJobsDialog(); return true }
   if (name === "/open") { if (argument) void viewFile(argument.replace(/^@/, "")); else openQuickOpen(); return true }
   // The browser's composer is already a full editor.
   if (name === "/editor") { note("The message box here is already an editor - Shift+Enter adds a line. /editor opens your own editor in the terminal app."); return true }
@@ -2805,6 +2806,7 @@ async function submit() {
           // A refused write changed nothing, so there is nothing to note.
           if (ok) noteChange(event.name, toolArgsByCall.get(event.id), event.result)
           toolArgsByCall.delete(event.id)
+          if (event.name === "shell" || event.name === "job_output" || event.name === "job_stop") void refreshJobs()
           renderActivity()
         }
         if (event.type === "tool_end") {
@@ -3928,3 +3930,62 @@ input.addEventListener("keyup", (event) => {
   spaceRepeats = 0
   if (voiceRec && voiceRec.hold) void finishVoice()
 }, true)
+
+// --- background jobs ------------------------------------------------------------------------------------
+// Commands the model left running (a dev server, a watcher). The chip under the prompt says how many are
+// running; /jobs or a click on it lists them, with their last output and a Stop button each.
+const jobsChip = document.getElementById("jobs-chip")
+let jobsPoll = null
+
+async function refreshJobs() {
+  const data = await fetch("/api/jobs", { cache: "no-store" }).then((r) => r.json()).catch(() => null)
+  const count = data ? data.jobs.filter((job) => job.running).length : 0
+  jobsChip.hidden = !count
+  jobsChip.textContent = count + (count === 1 ? " job running" : " jobs running")
+  // Watched only while something runs, so an idle page asks for nothing.
+  if (count && !jobsPoll) jobsPoll = setInterval(refreshJobs, 5000)
+  if (!count && jobsPoll) { clearInterval(jobsPoll); jobsPoll = null }
+  return data
+}
+
+function jobAge(ms) {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  return seconds < 60 ? seconds + "s" : seconds < 3600 ? Math.floor(seconds / 60) + "m" : Math.floor(seconds / 3600) + "h " + Math.floor((seconds % 3600) / 60) + "m"
+}
+
+async function openJobsDialog() {
+  const modal = makeDialog("Background jobs")
+  modal.classList.add("jobs")
+  const list = document.createElement("div")
+  modal.append(list)
+  const stop = async (body) => { await fetch("/api/jobs/stop", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null); await draw() }
+  const draw = async () => {
+    const data = await refreshJobs()
+    if (!modal.isConnected) return
+    list.textContent = ""
+    const say = (text) => { const p = document.createElement("p"); p.textContent = text; list.append(p); return p }
+    if (!data) { say("Could not reach the server."); return }
+    if (!data.jobs.length) { say("No background jobs. The model starts one when a command should keep running - a dev server, a watcher, a long build. They end when CG-Next closes."); return }
+    const live = data.jobs.filter((job) => job.running)
+    say(live.length ? live.length + " running. They end when CG-Next closes." : "None running now.")
+    for (const job of [...data.jobs].reverse()) {
+      const card = document.createElement("div"); card.className = "job" + (job.running ? " running" : "")
+      const head = document.createElement("div"); head.className = "job-head"
+      const name = document.createElement("code"); name.textContent = job.command
+      const state = document.createElement("span")
+      state.textContent = job.id + " · " + (job.running ? "running " + jobAge(Date.now() - job.startedAt) : job.stopped ? "stopped" : job.exitCode === 0 ? "finished" : "ended, exit code " + (job.exitCode ?? "unknown"))
+      head.append(name, state)
+      if (job.running) { const button = document.createElement("button"); button.textContent = "Stop"; button.setAttribute("aria-label", "Stop " + job.id); button.onclick = () => { button.disabled = true; void stop({ id: job.id }) }; head.append(button) }
+      const out = document.createElement("pre"); out.textContent = job.tail || "(no output)"
+      card.append(head, out); list.append(card)
+      out.scrollTop = out.scrollHeight
+    }
+    if (live.length > 1) { const all = document.createElement("button"); all.textContent = "Stop all " + live.length; all.onclick = () => { all.disabled = true; void stop({ all: true }) }; list.append(all) }
+  }
+  await draw()
+  const ticker = setInterval(() => { if (modal.isConnected) void draw(); else clearInterval(ticker) }, 2000)
+  modal.addEventListener("close", () => clearInterval(ticker), { once: true })
+}
+
+jobsChip.addEventListener("click", () => void openJobsDialog())
+void refreshJobs()

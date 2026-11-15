@@ -36,6 +36,14 @@ export function toolDetail(name: string, argsText: string, result: string, max =
   const first = (result.split(NEWLINE)[0] ?? "").trim()
   if (/^(error|stopped)/.test(result)) return { summary: "", lines: capped(result, 3) }
 
+  // A job's first line is its state ("started job1 in the background: ...", "job1: running for 4s"); the
+  // output under it is what it printed.
+  if ((name === "shell" && args.background === true) || name === "job_output" || name === "job_stop") {
+    const rest = result.split(NEWLINE).slice(1).filter((line) => !/^\(still running\. job_output/.test(line)).join(NEWLINE)
+    const summary = name === "shell" ? (/^(started job\d+|job\d+ ended straight away \([^)]*\))/.exec(first)?.[1] ?? first) : first
+    return { summary: summary.length > 70 ? summary.slice(0, 69) + "…" : summary, lines: rest.trim() && !/^\((no output|nothing new)/.test(rest.trim()) ? capped(rest, max) : [] }
+  }
+
   if (name === "shell") {
     // The exit code is the verdict, so it goes on the row; the output goes under it.
     const code = /\nexit code (\S+)\s*$/.exec(result)?.[1]

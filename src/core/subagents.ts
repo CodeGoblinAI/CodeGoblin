@@ -86,7 +86,7 @@ const CLAUDE_TOOLS: Record<string, string> = {
   todowrite: "todo_write",
   skill: "skill",
 }
-const OWN_TOOLS = new Set(["read_file", "list_files", "grep", "glob", "shell", "edit_file", "write_file", "webfetch", "websearch", "todo_write", "skill", "repo_clone", "repo_overview"])
+const OWN_TOOLS = new Set(["read_file", "list_files", "grep", "glob", "shell", "edit_file", "write_file", "webfetch", "websearch", "todo_write", "skill", "repo_clone", "repo_overview", "job_output", "job_stop"])
 
 export function toolsFrom(value: unknown): string[] | undefined {
   if (typeof value !== "string" || !value.trim()) return undefined

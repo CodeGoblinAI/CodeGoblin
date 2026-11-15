@@ -286,16 +286,56 @@ export const EXTRA_TOOLS: Tool[] = [
     name: "shell",
     description:
       "Run a shell command in the working directory and return its combined output and exit code. " +
-      "Use this for tests, builds, git, and anything the file tools cannot do.",
+      "Use this for tests, builds, git, and anything the file tools cannot do. It waits for the command and " +
+      "ends it at the timeout, so anything that keeps running - a dev server, a watcher, a long build - " +
+      "goes in the background instead: background: true answers at once with a job id.",
     parameters: {
       type: "object",
       properties: {
         command: { type: "string", description: "The command to run." },
-        timeout_ms: { type: "number", description: "Optional timeout, default 30000." },
+        timeout_ms: { type: "number", description: "Optional timeout, default 30000. Not used in the background." },
+        background: { type: "boolean", description: "Keep it running and answer at once with a job id; job_output reads it, job_stop ends it." },
       },
       required: ["command"],
     },
-    run: async (args, root, signal) => runShell(String(args.command ?? ""), root, Number(args.timeout_ms) || 30_000, signal),
+    run: async (args, root, signal) => {
+      if (args.background === true) {
+        const { startJob } = await import("./jobs")
+        return startJob(String(args.command ?? ""), root, { signal })
+      }
+      return runShell(String(args.command ?? ""), root, Number(args.timeout_ms) || 30_000, signal)
+    },
+  },
+  {
+    name: "job_output",
+    description:
+      "Read what a background job (started by shell with background: true) has printed since you last read it, " +
+      "and whether it is still running. Without an id, lists this project's jobs.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "The job id, such as job1. Leave out to list the jobs." },
+        until: { type: "string", description: "Wait until its output contains this text (any case), e.g. the line a server prints when it is ready. Waits 15 s unless wait_ms says otherwise." },
+        wait_ms: { type: "number", description: "How long to wait for new output (or for until), at most 120000. Default: no wait." },
+      },
+    },
+    run: async (args, root, signal) => {
+      const { readJob } = await import("./jobs")
+      return readJob(args ?? {}, root, signal)
+    },
+  },
+  {
+    name: "job_stop",
+    description: "End a background job and everything it started.",
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string", description: "The job id, such as job1." } },
+      required: ["id"],
+    },
+    run: async (args, root) => {
+      const { stopJob } = await import("./jobs")
+      return stopJob(String(args?.id ?? ""), root)
+    },
   },
   {
     name: "todo_write",
@@ -527,7 +567,7 @@ export function shellEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.P
  * program it ran behind: a real model's `ping -t` kept pinging after its
  * timeout, with nothing left that could stop it.
  */
-function killTree(child: { pid?: number; kill: () => boolean }) {
+export function killTree(child: { pid?: number; kill: () => boolean }) {
   try {
     if (!child.pid) child.kill()
     else if (process.platform === "win32") {
@@ -562,7 +602,7 @@ async function runShell(command: string, root: string, timeoutMs: number, signal
       resolve(text.length > MAX_KEPT ? text.slice(0, MAX_KEPT / 2) + `\n… ${text.length - MAX_KEPT} characters dropped …\n` + text.slice(-MAX_KEPT / 2) : text)
     }
 
-    const timer = setTimeout(() => finish(output + NEWLINE + `... killed after ${timeoutMs}ms`, true), timeoutMs)
+    const timer = setTimeout(() => finish(output + NEWLINE + `... killed after ${timeoutMs}ms (a command meant to keep running goes in the background: shell with background: true)`, true), timeoutMs)
     // Stopping the turn ends the command. It used to run on to its timeout -
     // 90 seconds, when the model chose that - with the turn waiting on it.
     const onStop = () => finish("stopped by the user" + (output.trim() ? NEWLINE + output.trim() : ""), true)
