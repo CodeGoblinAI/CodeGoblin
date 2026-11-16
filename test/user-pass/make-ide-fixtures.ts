@@ -29,3 +29,21 @@ store.run("insert into blobs values (?, ?)", [rootId, root])
 store.run("insert into meta values ('0', ?)", [Buffer.from(JSON.stringify({ latestRootBlobId: rootId, name: "Rename button" })).toString("hex")])
 store.close()
 console.log("ok")
+
+// A CodeGoblin 0.3 database: one conversation for the project, with a tool step and reasoning between the question and the answer.
+const fork = new Database(path.join(base, "codegoblin.db"))
+fork.run("create table session (id text primary key, project_id text, parent_id text, directory text, title text, time_created integer, time_updated integer, time_archived integer)")
+fork.run("create table message (id text primary key, session_id text, time_created integer, time_updated integer, data text)")
+fork.run("create table part (id text primary key, message_id text, session_id text, time_created integer, time_updated integer, data text)")
+const ses = "ses_e28f45139ffewBYDiSnKwWNEeo"
+fork.run("insert into session values (?, 'global', null, ?, 'Speed up the build', 1, ?, null)", [ses, project, Date.now()])
+const rows: [string, object[]][] = [
+  ["user", [{ type: "text", text: "why is the build slow?" }]],
+  ["assistant", [{ type: "reasoning", text: "hidden thinking" }, { type: "tool", tool: "bash", state: { status: "completed", output: "hidden tool output" } }]],
+  ["assistant", [{ type: "text", text: "It bundles twice; I removed one pass." }]],
+]
+rows.forEach(([role, parts], index) => {
+  fork.run("insert into message values (?, ?, ?, ?, ?)", ["msg_" + index, ses, index, index, JSON.stringify({ role })])
+  parts.forEach((part, at) => fork.run("insert into part values (?, ?, ?, ?, ?, ?)", ["prt_" + index + "_" + at, "msg_" + index, ses, index, index, JSON.stringify(part)]))
+})
+fork.close()

@@ -4,7 +4,7 @@ import { isEffort, type Effort } from "./settings"
 import { MEDIA_KINDS, type MediaKind } from "./media"
 import { importSource, type ImportSource } from "./conversation-import"
 
-export const IMPORT_USAGE = "Use /import codex, claude, antigravity or cursor [session-id]; imports are new text-only conversations"
+export const IMPORT_USAGE = "Use /import codex, claude, antigravity, cursor or codegoblin (0.3) [session-id]; imports are new text-only conversations"
 
 /**
  * Slash commands.
@@ -67,7 +67,7 @@ export const COMMANDS = [
   { name: "/balance", description: "refresh balance/quota: deepseek, explabs, moonshotai, tripo or elevenlabs" },
   { name: "/account", description: "subscription snapshots: codex, claude or cursor (dashboard)" },
   { name: "/login", description: "official sign-in: /login codex, /login claude or /login cursor" },
-  { name: "/import", description: "copy a conversation for this project as text: /import codex, claude, antigravity or cursor" },
+  { name: "/import", description: "copy a conversation for this project as text: /import codex, claude, antigravity, cursor or codegoblin (0.3)" },
   { name: "/help", description: "show these commands" },
   { name: "/clear", description: "start a fresh conversation" },
   { name: "/model", description: "switch provider: /model zai" },

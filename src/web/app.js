@@ -1972,11 +1972,12 @@ function openCodexLoginDialog(source = "codex") {
 }
 
 async function openImportDialog(source, selectedId) {
-  const name = { claude: "Claude Code", antigravity: "Antigravity", cursor: "Cursor" }[source] || "Codex"
+  const name = { claude: "Claude Code", antigravity: "Antigravity", cursor: "Cursor", codegoblin: "CodeGoblin 0.3" }[source] || "Codex"
   const omitted = {
     claude: "Tool calls and results, thinking, subagents and injected reminders are omitted.",
     antigravity: "Copied from Antigravity's search index: what was said only; tool steps, files and subagents are omitted.",
     cursor: "Cursor agent CLI chats: your queries and the answers only; context blocks, reasoning and tool calls are omitted.",
+    codegoblin: "Conversations from CodeGoblin 0.3, which stay where they are: what was said only; tool calls and output, reasoning, images and subagents are omitted.",
   }[source] || "Native tools, images, reasoning and hidden prompts are omitted."
   const endpoint = "/api/import?source=" + source
   const modal = makeDialog("Import " + name + " text conversation")
@@ -2112,8 +2113,8 @@ async function runCommand(text) {
   if (name === "/import") {
     const [word, id, extra] = argument.split(/\s+/)
     const source = word === "codex" ? "codex" : word === "claude" || word === "claude-code" ? "claude"
-      : word === "antigravity" || word === "agy" ? "antigravity" : word === "cursor" || word === "cursor-agent" ? "cursor" : undefined
-    if (!source || extra) { note("Use /import codex, claude, antigravity or cursor [session-id]; imports are new text-only conversations"); return true }
+      : word === "antigravity" || word === "agy" ? "antigravity" : word === "cursor" || word === "cursor-agent" ? "cursor" : word === "codegoblin" || word === "old" ? "codegoblin" : undefined
+    if (!source || extra) { note("Use /import codex, claude, antigravity, cursor or codegoblin (0.3) [session-id]; imports are new text-only conversations"); return true }
     await openImportDialog(source, id); return true
   }
   if (name === "/copy" && argument && argument !== "last" && argument !== "all") { note("Use /copy for the whole conversation, or /copy last for the latest answer."); return true }

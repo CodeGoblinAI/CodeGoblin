@@ -1,13 +1,14 @@
 import { importCodexSession, listCodexSessions } from "./codex-import"
 import { importClaudeSession, listClaudeSessions } from "./claude-import"
 import { importAntigravity, importCursor, listAntigravity, listCursor } from "./ide-import"
+import { importFork, listFork } from "./fork-import"
 
 /**
  * The CLIs whose conversations /import can copy, through each one's own
  * official interface. Both surfaces read this one table, so a source added
  * here is offered in the terminal and the browser alike.
  */
-export type ImportSource = "codex" | "claude" | "antigravity" | "cursor"
+export type ImportSource = "codex" | "claude" | "antigravity" | "cursor" | "codegoblin"
 
 export type ImportListing = { sessions: { id: string; title: string; updatedAt?: number }[]; next?: string }
 
@@ -33,8 +34,13 @@ export const IMPORTERS: Record<ImportSource, {
     label: "Cursor", list: (root, cursor) => listCursor(root, cursor), copy: (id, root, provider) => importCursor(id, root, provider),
     omitted: "Cursor agent CLI chats: your queries and the answers only - context blocks, reasoning and tool calls omitted",
   },
+  codegoblin: {
+    label: "CodeGoblin 0.3", list: (root, cursor) => listFork(root, cursor), copy: (id, root, provider) => importFork(id, root, provider),
+    // Short enough to be read whole in the terminal's confirmation, which cuts a long line in the middle.
+    omitted: "What was said only - tool calls and output, reasoning and images omitted",
+  },
 }
 
 export const importSource = (word: string | undefined): ImportSource | undefined =>
   word === "codex" ? "codex" : word === "claude" || word === "claude-code" ? "claude"
-    : word === "antigravity" || word === "agy" ? "antigravity" : word === "cursor" || word === "cursor-agent" ? "cursor" : undefined
+    : word === "antigravity" || word === "agy" ? "antigravity" : word === "cursor" || word === "cursor-agent" ? "cursor" : word === "codegoblin" || word === "old" ? "codegoblin" : undefined
