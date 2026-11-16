@@ -1,5 +1,5 @@
 import path from "node:path"
-import { spawn } from "../platform/process"
+import { shellCommand, spawn } from "../platform/process"
 import { killTree, shellEnvironment } from "./tools"
 
 /**
@@ -186,8 +186,8 @@ export async function startJob(command: string, root: string, options: { signal?
   hookExit()
 
   const isWindows = process.platform === "win32"
-  const argv = isWindows ? ["cmd.exe", "/d", "/s", "/c", command] : ["/bin/sh", "-c", command]
-  const child = spawn(argv, { cwd: root, stdio: ["ignore", "pipe", "pipe"], env: shellEnvironment(), detached: !isWindows })
+  const shell = shellCommand(command)
+  const child = spawn(shell.argv, { cwd: root, stdio: ["ignore", "pipe", "pipe"], env: shellEnvironment(), detached: !isWindows, ...shell.options })
   const job: Job = { id: "job" + ++counter, command, root, startedAt: Date.now(), output: "", total: 0, seen: 0, told: false, child, waiters: new Set() }
   jobs.set(job.id, job)
 
@@ -250,9 +250,9 @@ export async function runForeground(
   if (options.signal?.aborted) return "stopped by the user before it ran"
 
   const isWindows = process.platform === "win32"
-  const argv = isWindows ? ["cmd.exe", "/d", "/s", "/c", command] : ["/bin/sh", "-c", command]
+  const shell = shellCommand(command)
   // Its own process group off Windows, so ending it ends everything it started.
-  const child = spawn(argv, { cwd: root, stdio: ["ignore", "pipe", "pipe"], env: shellEnvironment(), detached: !isWindows })
+  const child = spawn(shell.argv, { cwd: root, stdio: ["ignore", "pipe", "pipe"], env: shellEnvironment(), detached: !isWindows, ...shell.options })
   // Not in the list of jobs unless it outlives the wait.
   const job: Job = { id: "", command, root, startedAt: Date.now(), output: "", total: 0, seen: 0, told: false, child, waiters: new Set() }
   let whole = ""
