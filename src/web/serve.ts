@@ -258,15 +258,30 @@ async function saveReviewSession(session: sessions.Session) {
  * - same-origin only. Without this, any web page you happen to visit could
  *   POST to localhost and make the agent read your files and return the
  *   contents to the page.
+ *
+ * Three things are checked. The Host must be this computer, which stops a
+ * name that was made to resolve here (DNS rebinding). An Origin, when there
+ * is one, must be this page's. And the browser's own account of where a
+ * request came from (Sec-Fetch-Site) must be this page or the address bar:
+ * an <img>, <script> or link on another site sends no Origin at all, so
+ * without it every GET was open to any page - including one on another port
+ * of this computer, which counts as the "same site" but is not this app.
+ * Programs that are not browsers send neither header and are let through;
+ * anything already running on this computer can do far more than ask.
  */
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
 
-function sameOrigin(request: Request, url: URL): boolean {
+function hostnameOf(request: Request): string {
   const host = request.headers.get("host") ?? ""
   // Strip the port without a regex; an escaped d is easy to lose in tooling
   // and silently turns this check into deny-everything.
-  const hostname = host.includes(":") && !host.startsWith("[") ? host.slice(0, host.lastIndexOf(":")) : host
-  if (!LOOPBACK.has(hostname)) return false
+  if (host.startsWith("[")) return host.slice(0, host.indexOf("]") + 1)
+  return host.includes(":") ? host.slice(0, host.lastIndexOf(":")) : host
+}
+
+function sameOrigin(request: Request, url: URL): boolean {
+  const host = request.headers.get("host") ?? ""
+  if (!LOOPBACK.has(hostnameOf(request))) return false
 
   const origin = request.headers.get("origin")
   if (origin) {
@@ -276,7 +291,44 @@ function sameOrigin(request: Request, url: URL): boolean {
       return false
     }
   }
+  const from = request.headers.get("sec-fetch-site")
+  if (from && from !== "same-origin" && from !== "none") return false
   return true
+}
+
+/**
+ * What every page and file this server sends says to the browser: load nothing from anywhere else, run no
+ * script but the app's own file, and never show this inside another site's frame - a frame is how a page
+ * gets someone to click "Allow" without knowing it.
+ */
+const PAGE_HEADERS = {
+  "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://localhost:* ws://127.0.0.1:*; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "no-referrer",
+}
+
+/**
+ * Generated media is served from the app's own address, and the model can write any file into that folder.
+ * An HTML or SVG file opened from here would run its script as the app - whose page may open a shell with
+ * nobody asked. So only real media is sent as what it is; anything else is sent as text to download, and
+ * every one of them is sandboxed: whatever it is, the browser runs no script in it.
+ */
+const MEDIA_TYPES: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+  ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac", ".m4a": "audio/mp4",
+  ".mp4": "video/mp4", ".webm": "video/webm",
+  ".glb": "model/gltf-binary", ".gltf": "model/gltf+json", ".obj": "model/obj", ".stl": "model/stl", ".fbx": "application/octet-stream", ".usdz": "model/vnd.usdz+zip",
+}
+function mediaHeaders(name: string): Record<string, string> {
+  const type = MEDIA_TYPES[path.extname(name).toLowerCase()]
+  return {
+    "cache-control": "no-store",
+    "content-type": type ?? "text/plain; charset=utf-8",
+    "content-security-policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'",
+    "x-content-type-options": "nosniff",
+    ...(type ? {} : { "content-disposition": "attachment" }),
+  }
 }
 
 const json = (body: unknown, status = 200) =>
@@ -325,6 +377,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
   if (url.pathname.startsWith("/api/") && !sameOrigin(request, url)) {
     return json({ error: "refused: local same-origin requests only" }, 403)
   }
+  // The page and its files are not secrets, but a name made to resolve here gets nothing at all.
+  if (!LOOPBACK.has(hostnameOf(request))) return json({ error: "refused: this address is not this computer" }, 403)
 
   if (url.pathname === "/api/codex/account" && request.method === "GET") {
     const cached = url.searchParams.get("cached") === "1"
@@ -969,7 +1023,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     }
     const handle = file(absolute)
     if (!(await handle.exists())) return json({ error: "not found" }, 404)
-    return new Response(handle, { headers: { "cache-control": "no-store" } })
+    return new Response(handle, { headers: mediaHeaders(absolute) })
   }
   if (url.pathname === "/api/undo" && request.method === "POST") {
     const body = (await request.json()) as { sessionId?: string; direction?: string }
@@ -1354,18 +1408,18 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
 
   if (url.pathname === "/logo.png") {
     return new Response(file(ASSETS.logo), {
-      headers: { "content-type": "image/png", "cache-control": "max-age=86400" },
+      headers: { "content-type": "image/png", "cache-control": "max-age=86400", "x-content-type-options": "nosniff" },
     })
   }
 
   if (url.pathname === "/app.js") {
     return new Response(file(ASSETS.appJs), {
-      headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" },
+      headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" },
     })
   }
 
   return new Response(file(page), {
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", ...PAGE_HEADERS },
   })
 }
 
