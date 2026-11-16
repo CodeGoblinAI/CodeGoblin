@@ -10,10 +10,6 @@ name: publish-codegoblin-npm
 #   latest  what `npm install -g @codegoblin-io/codegoblin` and `codegoblin upgrade` give everyone.
 # To take a release back: npm dist-tag add @codegoblin-io/codegoblin@<the previous version> latest
 on:
-  # TEMPORARY, to try the dry run before this file is on a default branch (which running it by hand needs).
-  push:
-    branches: ["feat/ship-groundwork"]
-    paths: [".github/workflows/publish-codegoblin-npm.yml"]
   workflow_dispatch:
     inputs:
       version:

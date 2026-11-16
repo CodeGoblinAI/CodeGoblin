@@ -1,0 +1,71 @@
+name: sync-models-catalog
+
+# Keeps the model list fresh for people still on CodeGoblin 0.3.
+#
+# 0.3 reads its list of providers and models from a file on the `dev` branch of this repository
+# (packages/codegoblin/models/api.json), so `dev` stays, frozen, and this is the one thing that still changes
+# on it. 0.4 does not use that file: it asks models.dev itself and carries a copy inside the program.
+#
+# It lives here, on the default branch, because GitHub only runs a schedule from the default branch. `dev` is
+# protected, so the refresh arrives as a pull request against it (one rolling branch, one pull request).
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    if: github.repository == 'CodeGoblinAI/CodeGoblin'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: dev
+
+      - name: Fetch the catalogue
+        run: |
+          curl --fail --silent --show-error --max-time 60 --proto '=https' https://models.dev/api.json -o /tmp/api.json
+          # A catalogue with providers in it, or nothing: an error page must never replace the real file.
+          node -e 'const c = JSON.parse(require("fs").readFileSync("/tmp/api.json", "utf8")); const n = Object.keys(c).length; if (n < 20) { console.error("only " + n + " providers - refusing"); process.exit(1) } console.log(n + " providers")'
+          cp /tmp/api.json packages/codegoblin/models/api.json
+
+      - name: Open a pull request when it changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet packages/codegoblin/models/api.json; then
+            echo "No catalogue changes."
+            exit 0
+          fi
+
+          branch="automation/models-catalog-refresh"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add packages/codegoblin/models/api.json
+          git commit -m "chore(codegoblin): refresh models catalog snapshot"
+          # Automation alone owns this branch, so replacing it is safe.
+          git push --force --no-verify origin "$branch"
+
+          existing="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            echo "Updated existing pull request #$existing."
+            exit 0
+          fi
+
+          printf '%s\n' \
+            'Automated refresh of `packages/codegoblin/models/api.json` from models.dev.' \
+            '' \
+            'Merging this makes new models available to CodeGoblin 0.3 installs, which read the catalogue from `dev`.' \
+            > /tmp/catalog-pr-body.md
+
+          gh pr create \
+            --base dev \
+            --head "$branch" \
+            --title "chore(codegoblin): refresh models catalog snapshot" \
+            --body-file /tmp/catalog-pr-body.md
