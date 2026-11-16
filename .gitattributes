@@ -1,0 +1,3 @@
+# The launcher starts with "#!/usr/bin/env node". With Windows line endings that line names a program called
+# "node\r", and the command fails on Linux and macOS - so it is LF everywhere, whatever the checkout does.
+npm/*.mjs text eol=lf

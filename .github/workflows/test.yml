@@ -53,3 +53,7 @@ jobs:
       - name: The built program runs on its own
         if: always()
         run: node test/user-pass/pass-binary.mjs
+
+      - name: It installs with npm and starts by name
+        if: always()
+        run: node test/user-pass/pass-install.mjs
