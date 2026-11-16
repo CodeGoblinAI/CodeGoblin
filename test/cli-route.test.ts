@@ -66,3 +66,12 @@ describe("what differs between source and the built program", () => {
     if (!fs.existsSync(cacheFile)) expect(await loadCatalog({ fetch: offline })).toEqual([])
   })
 })
+
+test("an option nobody knows is named instead of being ignored", () => {
+  expect(route(["--modle", "zai/glm-5.3"])).toEqual({ kind: "unknown", option: "--modle" })
+  expect(route(["-x"])).toEqual({ kind: "unknown", option: "-x" })
+  expect(route(["../other", "--verbose"])).toEqual({ kind: "unknown", option: "--verbose" })
+  // The two the terminal app takes still reach it, with a folder or without.
+  expect(route(["--provider", "zai"])).toEqual({ kind: "tui", args: ["--provider", "zai"] })
+  expect(route(["../other", "--model", "zai/glm-5.3"])).toEqual({ kind: "tui", args: ["../other", "--model", "zai/glm-5.3"] })
+})

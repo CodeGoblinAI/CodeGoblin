@@ -1,3 +1,4 @@
+import os from "node:os"
 import fs from "node:fs"
 import fsp from "node:fs/promises"
 import path from "node:path"
@@ -40,6 +41,29 @@ function readStore(): Record<string, StoredAuth> {
   }
 }
 
+/**
+ * Owner-only on Windows, where a file mode means nothing.
+ *
+ * There a file is readable by whoever its folder says, and a profile folder collects grants over time: on
+ * the machine this was found on, a sandbox group made by another coding tool and several app containers could
+ * all read the key store. So the file gets a list of its own: this user, and nobody by inheritance. The grant
+ * is made first and checked, so a failure can never leave a file its owner cannot read. Best effort - if
+ * icacls is missing or refuses, the keys are still saved, as they were before.
+ */
+export function ownerOnly(target: string): boolean {
+  if (process.platform !== "win32") return true
+  try {
+    const user = os.userInfo().username
+    const domain = process.env.USERDOMAIN
+    const who = domain ? domain + "\\" + user : user
+    const run = (...args: string[]) => Bun.spawnSync(["icacls", target, ...args], { stdout: "ignore", stderr: "ignore", timeout: 5000, windowsHide: true }).exitCode === 0
+    if (!run("/grant:r", who + ":(F)")) return false
+    return run("/inheritance:r")
+  } catch {
+    return false
+  }
+}
+
 async function writeStore(store: Record<string, StoredAuth>): Promise<void> {
   await fsp.mkdir(path.dirname(file), { recursive: true })
   // Through a temporary file, so an interrupted write cannot leave the store
@@ -47,6 +71,7 @@ async function writeStore(store: Record<string, StoredAuth>): Promise<void> {
   // the start rather than relaxed afterwards.
   const temporary = file + ".tmp"
   await fsp.writeFile(temporary, JSON.stringify(store, null, 2), { encoding: "utf8", mode: SECRET_MODE })
+  ownerOnly(temporary)
   await fsp.rename(temporary, file)
   await fsp.chmod(file, SECRET_MODE).catch(() => {})
 }

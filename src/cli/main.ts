@@ -35,7 +35,17 @@ switch (asked.kind) {
     if (asked.name === "voice") await (await import("../core/voice-worker")).serve()
     else await import("../core/cursor-worker")
     break
+  case "unknown":
+    console.error(`${command}: there is no option ${asked.option}. ${command} --help lists what there is.`)
+    process.exit(2)
   case "tui":
+    // The terminal app draws on a screen and reads keys. Started with its input or output going somewhere
+    // else - a pipe, a file, a script - it used to draw its screen into that and wait for keys that never came.
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      console.error(`${command} opens an app in the terminal, and this is not a terminal (its input or output goes somewhere else).
+For one prompt without a terminal:  ${command} run "<prompt>"`)
+      process.exit(1)
+    }
     hand(asked.args)
     await import("../tui/app")
     break

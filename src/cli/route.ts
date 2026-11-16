@@ -12,6 +12,8 @@ export type Route =
   | { kind: "version" }
   | { kind: "help" }
   | { kind: "upgrade"; args: string[] }
+  /** An option nobody knows. Said, rather than ignored: `--modle zai` used to open the app on the default model with no word about it. */
+  | { kind: "unknown"; option: string }
   /** The app starting a helper copy of itself; never typed by a person. */
   | { kind: "worker"; name: "voice" | "cursor" }
 
@@ -28,6 +30,8 @@ export function route(argv: string[]): Route {
   if (first === "upgrade" || first === "update") return { kind: "upgrade", args: rest }
   // Anything else belongs to the terminal app: a folder to open, --model, or nothing at all. A folder that
   // happens to be called "web" or "run" is opened as ./web.
+  const unknown = argv.find((entry) => entry.startsWith("-") && entry !== "--model" && entry !== "--provider")
+  if (unknown) return { kind: "unknown", option: unknown }
   return { kind: "tui", args: argv }
 }
 
