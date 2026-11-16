@@ -3089,6 +3089,8 @@ loadProviders()
 emptyState()
 setBusy(false)
 refreshSessions()
+// A newer version, said once. The server asks the registry at most once a day and answers from memory otherwise.
+fetch("/api/update").then((r) => r.json()).then((found) => { if (found?.message) note(found.message) }).catch(() => {})
 
 /* ------------------------------------------------------------------ *
  * Slash palette

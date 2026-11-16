@@ -19,7 +19,9 @@ switch (asked.kind) {
     console.log(helpText(command, InstallationVersion))
     break
   case "upgrade":
-    console.log(`Updating from inside the app is not built yet. To update: npm install -g @codegoblin-io/codegoblin@latest`)
+    // Installed through npm, `upgrade` never gets this far: the launcher carries it out before the program
+    // starts, because a running program cannot be replaced on Windows. This is the program started by itself.
+    console.log(`CodeGoblin ${InstallationVersion}\nThis copy was started directly, so it cannot replace itself. To update:\n  npm install -g @codegoblin-io/codegoblin@latest`)
     break
   case "web":
     hand(asked.args)

@@ -53,6 +53,8 @@ export type Config = {
   formatter: FormatterConfig
   mcp: Record<string, McpServer>
   instructions: string[]
+  /** `"autoupdate": false` (0.3's own switch) stops the once-a-day look for a newer version. */
+  autoupdate: boolean
   /**
    * Pause and ask to continue after this many tool calls in one prompt
    * (`checkpoint`), and after this many dollars spent on one prompt (`spend`).
@@ -176,6 +178,7 @@ export function parseConfig(text: string): Config {
     instructions: Array.isArray(root.instructions)
       ? root.instructions.filter((entry): entry is string => typeof entry === "string")
       : [],
+    autoupdate: root.autoupdate !== false,
     autonomy: { checkpoint: checkpoint(root.autonomy), spend: spendLimit(root.autonomy), idleCompact: idleCompact(root.autonomy) },
     formatter: formatter(root.formatter),
     problems: errors.map((error) => printParseErrorCode(error.error) + " at offset " + error.offset),

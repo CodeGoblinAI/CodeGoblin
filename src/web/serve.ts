@@ -662,6 +662,13 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     return json({ ok })
   }
 
+  // A newer published version, or nothing. Asked once by the page after it has loaded.
+  if (url.pathname === "/api/update" && request.method === "GET") {
+    const { availableUpdate, updateLine } = await import("../core/update")
+    const version = await availableUpdate()
+    return json(version ? { version, message: updateLine(version) } : {})
+  }
+
   // Preferences live on the server so the TUI and the browser agree about
   // which theme is current rather than each remembering its own.
   if (url.pathname === "/api/settings" && request.method === "POST") {

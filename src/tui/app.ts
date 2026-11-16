@@ -632,6 +632,19 @@ function homeWhere(): string {
   const folder = cwd.toLowerCase().startsWith(home.toLowerCase()) ? "~" + cwd.slice(home.length) : cwd
   return folder + (homeBranch ? ":" + homeBranch : "")
 }
+/**
+ * A newer version, said once on the status line of the empty conversation and
+ * only if nothing else is using that line. Looked up in the background - the
+ * app is already drawn and usable - and at most once a day.
+ */
+function sayIfNewer() {
+  void import("../core/update").then(async ({ availableUpdate, updateLine }) => {
+    const version = await availableUpdate()
+    if (!version || status || transcript.length !== 0) return
+    status = updateLine(version)
+    render()
+  }).catch(() => {})
+}
 function readHomeBranch() {
   void import("../core/worktrees").then(({ currentBranch }) => {
     const found = currentBranch(process.cwd())
@@ -879,7 +892,7 @@ function render() {
 }
 
 function draw() {
-  if (!homeDrawn) { homeDrawn = true; readHomeBranch() }
+  if (!homeDrawn) { homeDrawn = true; readHomeBranch(); sayIfNewer() }
   const { cols, rows } = size()
   // With the side panel showing, the transcript gets the columns left of it -
   // wrapping to the full width and cutting at the panel lost the right side,

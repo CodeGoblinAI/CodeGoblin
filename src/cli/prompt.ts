@@ -42,7 +42,7 @@ for (let i = 0; i < argv.length; i++) {
 
 const prompt = words.join(" ").trim()
 if (!prompt) {
-  console.error('usage: prompt.ts [--model provider/model] "<your prompt>"')
+  console.error('usage: codegoblin run [--model provider/model] "<your prompt>"')
   process.exit(1)
 }
 
