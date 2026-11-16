@@ -1,4 +1,5 @@
 import { homedir } from "node:os"
+import { statSync } from "node:fs"
 import path from "node:path"
 import { loadConfig, type RuleAction } from "./config"
 import { mostSpecific } from "./wildcard"
@@ -532,6 +533,11 @@ function folderOf(token: string): string {
   value = value.replace(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g, (whole, name: string) => process.env[name] ?? whole)
   if (value.startsWith("~")) value = homedir() + value.slice(1)
   const normal = path.resolve(value)
+  // What is there decides, when something is: /etc/hosts is a file with no dot in its name, and was taken
+  // for a folder. For what does not exist yet, a dot in the last part is the guess.
+  try {
+    return statSync(normal).isDirectory() ? normal : path.dirname(normal)
+  } catch { /* not there: guess from the name */ }
   const last = normal.split(/[\\/]/).pop() ?? ""
   return last.includes(".") ? path.dirname(normal) : normal
 }

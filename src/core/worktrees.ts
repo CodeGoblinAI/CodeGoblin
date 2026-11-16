@@ -37,6 +37,14 @@ export function worktreeHome(repo: string): string {
   return path.join(Global.Path.data, "worktrees", path.basename(repo) + "-" + id)
 }
 
+/**
+ * A folder by where it really is. git reports a worktree that way, while the data folder may be reached through
+ * a link or a shortened name - compared as written, CG-Next did not recognise worktrees it had made itself.
+ */
+const real = (target: string) => {
+  try { return fs.realpathSync.native(target) } catch { return path.resolve(target) }
+}
+
 const under = (child: string, parent: string) => {
   const relative = path.relative(parent, child)
   return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative)
@@ -47,7 +55,7 @@ export function listWorktrees(folder: string): Worktree[] {
   if (!repo) return []
   const result = git(repo, ["worktree", "list", "--porcelain"])
   if (!result.ok) return []
-  const home = worktreeHome(mainCheckout(repo) ?? repo)
+  const home = real(worktreeHome(mainCheckout(repo) ?? repo))
   const list: Worktree[] = []
   let current: Partial<Worktree> | undefined
   for (const line of (result.out + "\n\n").split(/\r?\n/)) {
@@ -55,7 +63,7 @@ export function listWorktrees(folder: string): Worktree[] {
     else if (current && line.startsWith("HEAD ")) current.head = line.slice(5, 12)
     else if (current && line.startsWith("branch ")) current.branch = line.slice(7).replace(/^refs\/heads\//, "")
     else if (current && line === "" && current.path) {
-      list.push({ path: current.path, branch: current.branch, head: current.head, main: list.length === 0, ours: under(current.path, home) })
+      list.push({ path: current.path, branch: current.branch, head: current.head, main: list.length === 0, ours: under(real(current.path), home) })
       current = undefined
     }
   }
@@ -97,8 +105,8 @@ export function uncommitted(folder: string): string[] {
  * never a permanent delete: on Windows the folder goes to the Recycle Bin.
  */
 export function removeWorktree(folder: string, target: string, options: { recycle?: (dir: string) => void } = {}): void {
-  const resolved = path.resolve(target)
-  const tree = listWorktrees(folder).find((each) => path.resolve(each.path).toLowerCase() === resolved.toLowerCase())
+  const resolved = real(path.resolve(target))
+  const tree = listWorktrees(folder).find((each) => real(each.path).toLowerCase() === resolved.toLowerCase())
   if (!tree) throw new Error("that is not a worktree of this repository")
   if (tree.main) throw new Error("the main checkout is never removed")
   if (!tree.ours) throw new Error("only worktrees CG-Next made are removed here; remove that one yourself")

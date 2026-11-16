@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -22,6 +22,8 @@ function project() {
 }
 const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
 
+// Job numbers are counted for the whole run, and another test file may have started one first.
+beforeEach(() => resetJobs())
 afterEach(() => resetJobs())
 
 describe("background jobs", () => {

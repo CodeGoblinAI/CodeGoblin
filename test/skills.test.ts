@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import fs from "node:fs"
 import path from "node:path"
 import { Global } from "../src/platform/paths"
@@ -43,6 +43,14 @@ beforeAll(() => {
   write(path.join(Global.Path.config, "command", "git", "commit.md"), "Commit with message: $ARGUMENTS")
   write(path.join(Global.Path.config, "commands", "plain.md"), "Tell a joke.")
   write(path.join(project, ".codegoblin", "commands", "plain.md"), "Tell a project joke.")
+})
+
+// The global commands go again: the profile is shared by every test file in a run, and a /review left here
+// replaced the shipped one in whichever file happened to run next.
+afterAll(() => {
+  for (const file of [["commands", "review.md"], ["command", "git", "commit.md"], ["commands", "plain.md"]]) {
+    fs.rmSync(path.join(Global.Path.config, ...file), { force: true })
+  }
 })
 
 describe("reading frontmatter", () => {
