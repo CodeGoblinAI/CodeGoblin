@@ -24,6 +24,18 @@ const MAX_HOPS = 5
 const TIMEOUT_MS = 15_000
 const NEWLINE = String.fromCharCode(10)
 
+/** The eight 16-bit groups of an IPv6 address written without a dotted tail, or nothing when it is not one. */
+function expandV6(ip: string): number[] | undefined {
+  const [head = "", tail, extra] = ip.replace(/%.*$/, "").split("::")
+  if (extra !== undefined) return undefined
+  const parse = (text: string) => (text ? text.split(":").map((group) => (/^[0-9a-f]{1,4}$/.test(group) ? parseInt(group, 16) : NaN)) : [])
+  const front = parse(head), back = tail === undefined ? [] : parse(tail)
+  if ([...front, ...back].some(Number.isNaN)) return undefined
+  if (tail === undefined) return front.length === 8 ? front : undefined
+  if (front.length + back.length > 7) return undefined
+  return [...front, ...Array.from({ length: 8 - front.length - back.length }, () => 0), ...back]
+}
+
 /** Ranges no page worth reading lives in, including cloud metadata at 169.254.169.254. */
 export function isPrivateAddress(address: string): boolean {
   const ip = address.toLowerCase()
@@ -32,6 +44,13 @@ export function isPrivateAddress(address: string): boolean {
     // ::ffff:127.0.0.1 is a v4 address wearing v6 clothes.
     const mapped = ip.split(":").pop() ?? ""
     if (mapped.includes(".")) return isPrivateAddress(mapped)
+    // The same address written in hex (::ffff:7f00:1), and the NAT64 prefix that also carries a v4 address
+    // in its last 32 bits (64:ff9b::7f00:1): both reach the v4 host, so both are judged as it.
+    const groups = expandV6(ip)
+    if (!groups) return true
+    const carriesV4 = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff
+    const nat64 = groups[0] === 0x64 && groups[1] === 0xff9b && groups.slice(2, 6).every((group) => group === 0)
+    if (carriesV4 || nat64) return isPrivateAddress([groups[6]! >> 8, groups[6]! & 255, groups[7]! >> 8, groups[7]! & 255].join("."))
     if (ip === "::1" || ip === "::") return true
     // Unique local (fc00::/7) and link-local (fe80::/10).
     return ip.startsWith("fc") || ip.startsWith("fd") || ip.startsWith("fe8") || ip.startsWith("fe9") ||

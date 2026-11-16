@@ -21,7 +21,7 @@ import { contextFor, installedModels, readPrefs, toolsFor } from "./local-runtim
 import { cachedExperientialModels, fetchExperientialModels } from "./experiential"
 import { cachedRefuselessModels, fetchRefuselessModels } from "./refuseless"
 import { EFFORT_NAMES } from "./settings"
-import { asProvider, catalogPrices, catalogVision, loadCatalog, rememberCatalogEnv, type CatalogProvider } from "./catalog"
+import { acceptAddress, addressNotices, asProvider, catalogPrices, catalogVision, loadCatalog, rememberCatalogEnv, type CatalogProvider } from "./catalog"
 import type { Price } from "./context"
 
 export type Capabilities = {
@@ -562,9 +562,17 @@ export function applyCatalogVision(vision: Record<string, string[]>): number {
   return changed
 }
 
-/** Adds every catalog provider that now has a key - after /connect stores one, say. Returns the ids added. */
-export function activateCatalog(keyFor: (id: string) => string | undefined): string[] {
+/**
+ * Adds every catalog provider that now has a key - after /connect stores one, say. Returns the ids added.
+ * `connected` names the provider the person has just connected by hand: that is their yes to wherever the
+ * catalog places it today, so its remembered address is let go and it is set up again.
+ */
+export function activateCatalog(keyFor: (id: string) => string | undefined, connected?: string): string[] {
   const added: string[] = []
+  if (connected && fromCatalog(connected)) {
+    acceptAddress(connected)
+    delete PROVIDERS[connected]
+  }
   for (const entry of catalog) {
     if (PROVIDERS[entry.id] || !keyFor(entry.id)) continue
     PROVIDERS[entry.id] = asProvider(entry)
@@ -807,3 +815,4 @@ export function allSelections(): Selection[] {
     provider.models.map((model) => ({ provider, model })),
   )
 }
+export { addressNotices }

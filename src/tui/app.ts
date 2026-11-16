@@ -24,7 +24,7 @@ import { carryOn, errorLine, errorText, farewell, logEntry, writeCrash } from ".
 import { isLiveCommand } from "./live-commands"
 import { footerHeight } from "./layout"
 import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
-import { activateCatalog, refreshCatalog, refreshExperientialModels, refreshLiveModels, refreshRefuselessModels, selectionsByKind, selectionsOfKind } from "../core/providers"
+import { activateCatalog, addressNotices, refreshCatalog, refreshExperientialModels, refreshLiveModels, refreshRefuselessModels, selectionsByKind, selectionsOfKind } from "../core/providers"
 import { apiKey as storedKey } from "../core/auth"
 
 // Set once the screen is first drawn. Startup waits on a file or two (the settings, for the model used
@@ -42,7 +42,14 @@ void refreshRefuselessModels()
 void refreshLiveModels(storedKey)
 // models.dev: every provider for /connect, and the ones with a key in the picker.
 // Before the first draw there is nothing to refresh: startup reads the same lists itself when it gets there.
-void refreshCatalog(storedKey).then(() => { if (started) { refreshConnected(); render() } })
+void refreshCatalog(storedKey).then(() => {
+  if (!started) return
+  refreshConnected()
+  // A provider the catalog has moved to another host is still called at the old one; say so, once.
+  const notice = addressNotices()[0]
+  if (notice && !status) status = notice
+  render()
+})
 import { isLocalChat } from "../core/local-provider"
 import { localCommand } from "../core/local-command"
 import { runTypedCommand, typedCommand } from "../core/user-shell"
@@ -2759,7 +2766,7 @@ async function send() {
     try {
       await connect(provider, typed)
       // A models.dev provider joins the picker as soon as it has a key.
-      activateCatalog(apiKey)
+      activateCatalog(apiKey, provider)
       refreshConnected()
       // The key this terminal sends is read once at startup and on model
       // switches - storing one without re-reading it left every later prompt

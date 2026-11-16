@@ -195,7 +195,60 @@ export function rememberCatalogEnv(providers: CatalogProvider[]) {
   for (const provider of providers) if (provider.env.length) envNames.set(provider.id, provider.env)
 }
 
-/** A catalog entry as a provider the agent can call. */
+/**
+ * Where each catalog provider's key was first sent, by provider id.
+ *
+ * models.dev says where a provider's API is, and that list is fetched again every day. Without this, a
+ * changed entry - a mistake there, or someone tampering with it - would send a key you connected for one
+ * address to a different one on the next request, with nothing shown. So the address a key is first used
+ * with is remembered, and a later catalog that names another host for the same provider is not followed:
+ * requests keep going where they went before, a notice says so, and connecting the provider again (which is
+ * you saying "yes, there") accepts the new address.
+ */
+const addressFile = () => path.join(Global.Path.state, "provider-addresses.json")
+function readAddresses(): Record<string, string> {
+  try {
+    const saved = JSON.parse(fs.readFileSync(addressFile(), "utf8")) as unknown
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {}
+    return Object.fromEntries(Object.entries(saved).filter((pair): pair is [string, string] => typeof pair[1] === "string" && /^https:\/\/[^\s]+$/.test(pair[1])))
+  } catch {
+    return {}
+  }
+}
+function writeAddresses(all: Record<string, string>) {
+  try {
+    fs.mkdirSync(path.dirname(addressFile()), { recursive: true })
+    fs.writeFileSync(addressFile(), JSON.stringify(all, null, 2))
+  } catch {
+    // Not being able to remember is not a reason to stop working; the next run asks the same question.
+  }
+}
+const hostOf = (url: string) => { try { return new URL(url).host.toLowerCase() } catch { return "" } }
+const moved = new Map<string, { from: string; to: string }>()
+
+/** Providers the catalog now places at another host than their key was connected for, as sentences. */
+export function addressNotices(): string[] {
+  return [...moved].map(([id, change]) => `${id}: the model catalog now lists this provider at ${change.to}, but its key was connected for ${change.from}. Still using ${change.from}. If the move is real, /connect ${id} again to accept it.`)
+}
+
+/** Forget the remembered address, so the catalog's current one is taken: the person has just connected it again. */
+export function acceptAddress(id: string) {
+  const all = readAddresses()
+  if (id in all) { delete all[id]; writeAddresses(all) }
+  moved.delete(id)
+}
+
+/** A catalog entry as a provider the agent can call, at the address its key was first used with. */
 export function asProvider(entry: CatalogProvider): Provider {
-  return { id: entry.id, label: entry.label, baseUrl: entry.baseUrl + "/chat/completions", usageOnStream: true, models: entry.models.map((model) => ({ ...model })) }
+  const all = readAddresses()
+  const remembered = all[entry.id]
+  let baseUrl = entry.baseUrl
+  if (!remembered || hostOf(remembered) === hostOf(entry.baseUrl)) {
+    moved.delete(entry.id)
+    if (remembered !== entry.baseUrl) writeAddresses({ ...all, [entry.id]: entry.baseUrl })
+  } else {
+    baseUrl = remembered
+    moved.set(entry.id, { from: hostOf(remembered), to: hostOf(entry.baseUrl) })
+  }
+  return { id: entry.id, label: entry.label, baseUrl: baseUrl + "/chat/completions", usageOnStream: true, models: entry.models.map((model) => ({ ...model })) }
 }

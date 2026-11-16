@@ -552,6 +552,8 @@ export function isReadOnlyCommand(command: string): boolean {
     .replace(/\d?>&\d/g, "")
     .replace(/\d?>\s*(nul|\/dev\/null)(?=\s|$|[&|;])/gi, "")
   if (writesNothing.includes(">") || command.includes("`") || command.includes("$(")) return false
+  // Process substitution runs a command in the place of a file name: cat <(rm x) is not a read.
+  if (command.includes("<(")) return false
   const segments = segmentsOf(command)
   if (!segments.length) return false
   return segments.every((segment) => {
@@ -574,8 +576,8 @@ export function isReadOnlyCommand(command: string): boolean {
       )
       return sub !== undefined && READ_ONLY_GIT.has(sub) && !unsafeFlag
     }
-    // rg --pre runs a program on every file it searches.
-    if (program === "rg" && tokens.some((token) => token.startsWith("--pre"))) return false
+    // rg --pre runs a program on every file it searches, and --hostname-bin runs one to name this computer.
+    if (program === "rg" && tokens.some((token) => token.startsWith("--pre") || token.startsWith("--hostname-bin"))) return false
     return READ_ONLY_PROGRAMS.has(program)
   })
 }

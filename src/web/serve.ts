@@ -43,6 +43,7 @@ import {
   refreshLiveModels,
   refreshCatalog,
   activateCatalog,
+  addressNotices,
   CONNECTABLE,
   connectChoices,
 } from "../core/providers"
@@ -720,7 +721,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
   if (url.pathname === "/api/update" && request.method === "GET") {
     const { availableUpdate, updateLine } = await import("../core/update")
     const version = await availableUpdate()
-    return json(version ? { version, message: updateLine(version) } : {})
+    return json({ ...(version ? { version, message: updateLine(version) } : {}), notices: addressNotices() })
   }
 
   // Preferences live on the server so the TUI and the browser agree about
@@ -833,7 +834,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     try {
       await auth.connect(provider, String(body.key ?? ""))
       // A models.dev provider joins the picker as soon as it has a key.
-      activateCatalog(auth.apiKey)
+      activateCatalog(auth.apiKey, provider)
       return json({ message: "connected " + provider })
     } catch (error) {
       return json({ message: error instanceof Error ? error.message : "could not store the key" }, 400)

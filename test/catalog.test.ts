@@ -64,3 +64,31 @@ describe("models.dev catalog", () => {
     delete process.env.ACME_KEY
   })
 })
+
+describe("where a connected key is sent", () => {
+  const entry = (id: string, baseUrl: string) => ({ id, label: id, env: [], baseUrl, models: [] })
+
+  test("the address a key was first used with is kept when the catalog later names another host", async () => {
+    const { acceptAddress, addressNotices } = await import("../src/core/catalog")
+    acceptAddress("pinme")
+    expect(asProvider(entry("pinme", "https://api.real.example/v1")).baseUrl).toBe("https://api.real.example/v1/chat/completions")
+    // Same host, another path: an ordinary change, followed.
+    expect(asProvider(entry("pinme", "https://api.real.example/v2")).baseUrl).toBe("https://api.real.example/v2/chat/completions")
+    expect(addressNotices()).toEqual([])
+    // Another host: the key keeps going where it went, and it is said.
+    expect(asProvider(entry("pinme", "https://collect.attacker.example/v1")).baseUrl).toBe("https://api.real.example/v2/chat/completions")
+    expect(addressNotices().join(" ")).toContain("pinme: the model catalog now lists this provider at collect.attacker.example")
+    expect(addressNotices().join(" ")).toContain("/connect pinme again")
+    // A look-alike host is another host.
+    expect(asProvider(entry("pinme", "https://api.real.example.attacker.example/v1")).baseUrl).toBe("https://api.real.example/v2/chat/completions")
+    // The catalog going back to the right host clears the notice.
+    expect(asProvider(entry("pinme", "https://api.real.example/v2")).baseUrl).toBe("https://api.real.example/v2/chat/completions")
+    expect(addressNotices()).toEqual([])
+    // Connecting again is the person accepting the move.
+    asProvider(entry("pinme", "https://new.example/v1"))
+    acceptAddress("pinme")
+    expect(asProvider(entry("pinme", "https://new.example/v1")).baseUrl).toBe("https://new.example/v1/chat/completions")
+    expect(addressNotices()).toEqual([])
+    acceptAddress("pinme")
+  })
+})

@@ -21,6 +21,18 @@ describe("addresses a fetch tool has no business reaching", () => {
     }
   })
 
+  test("a v4 address carried inside a v6 one is judged as the v4 address, however it is written", () => {
+    for (const address of ["::ffff:7f00:1", "::ffff:a00:1", "0:0:0:0:0:ffff:7f00:1", "::ffff:c0a8:101", "::ffff:a9fe:a9fe", "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe", "::ffff:127.0.0.1"]) {
+      expect([address, isPrivateAddress(address)]).toEqual([address, true])
+    }
+    for (const address of ["::ffff:808:808", "64:ff9b::808:808", "2606:4700:4700::1111"]) {
+      expect([address, isPrivateAddress(address)]).toEqual([address, false])
+    }
+    for (const address of ["::ffff:zz:1", "1::2::3", "1:2:3:4:5:6:7:8:9"]) {
+      expect([address, isPrivateAddress(address)]).toEqual([address, true])
+    }
+  })
+
   test("treats anything it cannot parse as private", () => {
     for (const address of ["", "not-an-address", "1.2.3", "1.2.3.4.5", "999.1.1.1"]) {
       expect([address, isPrivateAddress(address)]).toEqual([address, true])
