@@ -15,6 +15,12 @@ test("on Windows the key store is readable by its owner and nobody else", async 
     const listing = Bun.spawnSync(["icacls", storePath()]).stdout.toString()
     const entries = listing.split("\n").map((line) => line.replace(storePath(), "").trim()).filter((line) => /:\(/.test(line))
     // One entry, not inherited: no groups, no sandboxes, no app containers that the folder happens to allow.
+    // Said in full when it fails: which entries, who this is, and what a direct attempt answers.
+    if (entries.length !== 1) {
+      const os = await import("node:os")
+      const attempt = Bun.spawnSync(["icacls", storePath(), "/grant:r", os.userInfo().username + ":(F)"])
+      console.log("owner-only failed:", JSON.stringify({ entries, user: os.userInfo().username, domain: process.env.USERDOMAIN, attemptExit: attempt.exitCode, attemptSays: (attempt.stdout.toString() + attempt.stderr.toString()).trim().slice(0, 300), whoami: Bun.spawnSync(["whoami"]).stdout.toString().trim() }))
+    }
     expect(entries).toHaveLength(1)
     expect(entries[0]).toContain(":(F)")
     expect(entries[0]).not.toContain("(I)")
