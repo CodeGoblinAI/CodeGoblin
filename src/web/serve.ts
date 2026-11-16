@@ -853,6 +853,15 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     const secrets = storedSecrets()
     return json({ jobs: jobs.listJobs(root).map((job) => ({ ...job, tail: redactSecrets(jobs.jobTail(job.id, 14), secrets) })) })
   }
+  // Stop waiting for the command an answer is waiting on: it carries on as a job and the answer goes on.
+  if (url.pathname === "/api/jobs/background" && request.method === "POST") {
+    return json({ sent: jobs.sendToBackground(root), waiting: jobs.foregroundCommands(root).length })
+  }
+  // Jobs that ended by themselves and that the model has not been told about, as a note for it. Asking marks
+  // them told, so the page asks only when it is about to pass the note on.
+  if (url.pathname === "/api/jobs/ended" && request.method === "POST") {
+    return json({ note: jobs.endedUntold(root, true) })
+  }
   if (url.pathname === "/api/jobs/stop" && request.method === "POST") {
     const body = (await request.json().catch(() => ({}))) as { id?: unknown; all?: unknown }
     if (body.all === true) return json({ stopped: jobs.stopAllJobs(root) })

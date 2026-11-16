@@ -156,6 +156,9 @@
   .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 7px 4px 0; font-size: 11px; color: var(--muted); }
   .jobs-chip { margin-left: auto; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--gold); font: inherit; font-size: 11px; padding: 1px 9px; cursor: pointer; }
   .jobs-chip:hover { background: var(--panel2); }
+  .tool .tbg { margin-left: 10px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--gold); font: inherit; font-size: 11px; padding: 0 8px; cursor: pointer; }
+  .tool .tbg:hover { background: var(--panel2); }
+  .tool:not(.running) .tbg { display: none; }
   dialog.jobs { width: min(720px, 94vw); }
   dialog.jobs .job { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; overflow: hidden; }
   dialog.jobs .job.running { border-color: var(--line-strong); }

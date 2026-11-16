@@ -851,6 +851,7 @@ function toolChip(name, args, id) {
   chip.querySelector(".tname").textContent = name
   chip.querySelector(".targs").textContent = (args || "").slice(0, 70)
   chip.dataset.started = String(Date.now())
+  chip.dataset.tool = name
   thread.appendChild(chip)
   scrollDown()
   return chip
@@ -879,6 +880,20 @@ setInterval(() => {
     const ms = Date.now() - Number(chip.dataset.started || Date.now())
     const age = chip.querySelector(".tage")
     if (age && ms >= 3000) age.textContent = "· " + elapsedLabel(ms)
+    // A command still going after a few seconds gets a way to stop waiting for it: it carries on in the
+    // background and the answer goes on without it.
+    if (chip.dataset.tool === "shell" && ms >= 3000 && !chip.querySelector(".tbg")) {
+      const later = document.createElement("button")
+      later.type = "button"; later.className = "tbg"; later.textContent = "run in background"
+      later.title = "Stop waiting for this command. It keeps running as a background job and the answer carries on."
+      later.onclick = async (event) => {
+        event.stopPropagation()
+        later.disabled = true
+        const result = await fetch("/api/jobs/background", { method: "POST" }).then((r) => r.json()).catch(() => null)
+        if (!result?.sent) { later.disabled = false; note(result?.waiting ? "8 background jobs are already running - stop one first (/jobs)" : "that command has already finished") }
+      }
+      chip.appendChild(later)
+    }
   }
 }, 1000)
 
@@ -1124,6 +1139,8 @@ function setBusy(state) {
   // A finished plan stays for the answer that finished it, then goes.
   // (This runs once while the page loads, before the plan exists; reading it then throws, hence the try.)
   try { if (!state && planItems.length && planItems.every((t) => t.status === "completed")) { planItems = []; renderActivity() } } catch {}
+  // An answer has ended: a job that finished while it ran may still need passing on to the model.
+  if (!state) setTimeout(() => { void refreshJobs() }, 900)
   // The send button becomes stop while a turn runs. A separate small button
   // was there before and was easy to miss, especially on fast models where
   // it appears for barely a second.
@@ -2639,6 +2656,9 @@ function recoverChatDraft(text, images, reply) {
 }
 
 async function submit() {
+  // A message from the person starts the count of automatic follow-ups again.
+  if (!jobWaking) jobWakes = 0
+  jobWaking = false
   const text = input.value.trim().replace(/^\/[^\s]+/, (name) => paletteData.aliases?.[name] || name)
   if (!text && !attachments.length) return
   noteCommands(text)
@@ -4073,7 +4093,27 @@ async function refreshJobs() {
   // Watched only while something runs, so an idle page asks for nothing.
   if (count && !jobsPoll) jobsPoll = setInterval(refreshJobs, 5000)
   if (!count && jobsPoll) { clearInterval(jobsPoll); jobsPoll = null }
+  if (data && count < jobsRunningBefore) void wakeForEndedJobs()
+  if (data) jobsRunningBefore = count
   return data
+}
+
+/**
+ * A background job has ended and nothing is being answered: tell the model, so the work carries on without
+ * anyone asking. Not while something is typed or an answer is running, and at most four times in a row
+ * without a message from the person - a job that starts a job cannot run on by itself for ever.
+ */
+let jobsRunningBefore = 0
+let jobWakes = 0
+let jobWaking = false
+async function wakeForEndedJobs() {
+  if (busy || input.value.trim() || document.querySelector("dialog[open]")) return
+  if (jobWakes >= 4) { note("A background job ended. Say something to carry on (four in a row were followed up automatically)."); return }
+  const result = await fetch("/api/jobs/ended", { method: "POST" }).then((r) => r.json()).catch(() => null)
+  if (!result?.note || busy || input.value.trim()) return
+  jobWakes++
+  jobWaking = true
+  await sendText(result.note + "\n\nThe background job above has ended. Carry on with what you were doing, or say what this means if nothing is left to do.")
 }
 
 function jobAge(ms) {
