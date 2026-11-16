@@ -46,7 +46,8 @@ function readStore(): Record<string, StoredAuth> {
  *
  * There a file is readable by whoever its folder says, and a profile folder collects grants over time: on
  * the machine this was found on, a sandbox group made by another coding tool and several app containers could
- * all read the key store. So the file gets a list of its own: this user, and nobody by inheritance. The grant
+ * all read the key store. So the file gets a list of its own: this user, and nobody by inheritance. (Where
+ * the system and administrators are named on a file outright they stay; they can read any file anyway.) The grant
  * is made first and checked, so a failure can never leave a file its owner cannot read. Best effort - if
  * icacls is missing or refuses, the keys are still saved, as they were before.
  */
@@ -56,8 +57,7 @@ export function ownerOnly(target: string): boolean {
     const user = os.userInfo().username
     const domain = process.env.USERDOMAIN
     const run = (...args: string[]) => Bun.spawnSync(["icacls", target, ...args], { stdout: "ignore", stderr: "ignore", timeout: 5000, windowsHide: true }).exitCode === 0
-    // The plain name first: under a service or a remote session the "domain" in the environment is a
-    // workgroup name that no account belongs to, and the grant is refused (seen on a CI runner).
+    // The plain name, then the name with its domain: either may be the one this machine resolves.
     const names = [user, ...(domain ? [domain + "\\" + user] : [])]
     if (!names.some((who) => run("/grant:r", who + ":(F)"))) return false
     return run("/inheritance:r")
