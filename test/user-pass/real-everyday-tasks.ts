@@ -57,6 +57,7 @@ for (const name of wanted.length ? wanted : Object.keys(TASKS)) {
   console.log(`\n=== ${name}: "${task.ask}"`)
   const started = Date.now()
   const at = () => ((Date.now() - started) / 1000).toFixed(1).padStart(6) + "s  "
+  let outside = 0
   let mark = started, calls = 0, steps = 0, failedCalls = 0, waiting = 0, toolTime = 0, dollars = 0, text = ""
   const begun = new Map<string, number>()
   const names: string[] = []
@@ -65,7 +66,14 @@ for (const name of wanted.length ? wanted : Object.keys(TASKS)) {
   try {
     for await (const event of runAgent({
       provider: selection.provider, modelId, apiKey: secret, root, maxTurns: 40, effort: effortFor(selection.model, "auto"), contextWindow: selection.model.contextWindow, signal: stop.signal,
-      permissions: Permissions.withConfig(async () => "allow"),
+      // Everything inside the test folder is allowed; anything that names a place outside it is refused. The
+      // first version allowed everything, and a model asked to sort "Downloads" listed the real one.
+      permissions: Permissions.withConfig(async (_tool, detail) => {
+        const elsewhere = (detail.match(/[A-Za-z]:[\\/][^"'|&<>]*/g) ?? []).some((found) => !found.replace(/[\\]+/g, "/").toLowerCase().startsWith(root.replace(/[\\]+/g, "/").toLowerCase()))
+        const home = /%USERPROFILE%|[$]env:USERPROFILE|[$]HOME|~[\\/]|%APPDATA%|%HOMEPATH%/i.test(detail)
+        if (elsewhere || home) { outside++; console.log(at() + "   REFUSED: it reached outside the test folder"); return "reject" }
+        return "once"
+      }),
       messages: [{ role: "system", content: systemPrompt("terminal") }, { role: "user", content: task.ask }],
     } as never)) {
       const e = event as { type: string; delta?: string; id?: string; name?: string; args?: string; result?: string; input?: number; output?: number; cached?: number; dollars?: number }
@@ -90,7 +98,7 @@ for (const name of wanted.length ? wanted : Object.keys(TASKS)) {
   if (mark) waiting += Date.now() - mark
   const total = (Date.now() - started) / 1000
   const ok = task.done(root)
-  const line = `${name.padEnd(7)} ${ok ? "DONE " : "NOT DONE"}  ${total.toFixed(0)}s, ${steps} model steps, ${calls} tool calls (${failedCalls} failed), model ${(waiting / 1000).toFixed(0)}s / tools ${(toolTime / 1000).toFixed(0)}s, $${dollars.toFixed(4)}  [${[...new Set(names)].join(", ")}]${stop.signal.aborted ? "  STOPPED AT 6 MINUTES" : ""}`
+  const line = `${name.padEnd(7)} ${ok ? "DONE " : "NOT DONE"}  ${total.toFixed(0)}s, ${steps} model steps, ${calls} tool calls (${failedCalls} failed), model ${(waiting / 1000).toFixed(0)}s / tools ${(toolTime / 1000).toFixed(0)}s, $${dollars.toFixed(4)}  [${[...new Set(names)].join(", ")}]${outside ? "  REACHED OUTSIDE THE FOLDER " + outside + " TIME(S)" : ""}${stop.signal.aborted ? "  STOPPED AT 6 MINUTES" : ""}`
   console.log(line + "\n   said: " + text.replace(/\s+/g, " ").slice(-160))
   summary.push(line)
 }

@@ -305,7 +305,8 @@ export const EXTRA_TOOLS: Tool[] = [
     run: async (args, root, signal, progress) => {
       const { startJob, runForeground } = await import("./jobs")
       if (args.background === true) return startJob(String(args.command ?? ""), root, { signal })
-      return runForeground(String(args.command ?? ""), root, { timeoutMs: shellWait(args.timeout_ms), signal, onOutput: progress })
+      const command = String(args.command ?? "")
+      return withShellHint(command, await runForeground(command, root, { timeoutMs: shellWait(args.timeout_ms), signal, onOutput: progress }))
     },
   },
   {
@@ -568,6 +569,34 @@ export function shellEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.P
 export const SHELL_WAIT_MS = 120_000
 export const SHELL_WAIT_MAX_MS = 600_000
 /** The wait for one command: the default when none or nonsense is given, never more than the cap. */
+/** cmd.exe's own names for what a model reaches for out of habit. */
+const CMD_INSTEAD: Record<string, string> = {
+  ls: "dir /b", cat: "type", mv: "move", cp: "copy (xcopy /e /i for a folder)", rm: "del (rd /s /q for a folder)", pwd: "cd", touch: "type nul > file",
+  grep: "the grep tool, or findstr", head: "the read_file tool", tail: "the read_file tool", sed: "the edit_file tool", which: "where", clear: "cls", mkdir: "mkdir",
+}
+
+/**
+ * A command that failed because it was written for another shell gets told so, once, in its result.
+ *
+ * The instructions say commands run in cmd.exe, and models still write PowerShell (Test-Path, Get-ChildItem,
+ * $x = ...) or bash (ls, mv, cat) into it out of habit. cmd.exe answers "is not recognized", which says
+ * nothing about why, and a real model then spent three or four steps guessing. One line naming the shell
+ * and the way to say the same thing ends that at the first failure.
+ */
+export function withShellHint(command: string, result: string, platform: string = process.platform): string {
+  if (platform !== "win32") return result
+  const missing = /'([^']+)' is not recognized as an internal or external command/.exec(result)?.[1]
+  if (!missing) return result
+  const name = missing.replace(/^[.][\\/]/, "")
+  const newline = String.fromCharCode(10)
+  if (/^[A-Z][a-z]+-[A-Z][A-Za-z]+$/.test(name) || name.startsWith("$") || /^(foreach|where|select)$/i.test(name) && /[|{]/.test(command)) {
+    return result + newline + `(This shell is cmd.exe, and ${name} is PowerShell. To run PowerShell: powershell -NoProfile -Command "<the command>" - with single quotes inside it.)`
+  }
+  const instead = CMD_INSTEAD[name.toLowerCase()]
+  if (instead) return result + newline + `(This shell is cmd.exe, which has no ${name}. Use ${instead}.)`
+  return result
+}
+
 export function shellWait(asked: unknown): number {
   const value = Number(asked)
   return Number.isFinite(value) && value > 0 ? Math.min(value, SHELL_WAIT_MAX_MS) : SHELL_WAIT_MS
