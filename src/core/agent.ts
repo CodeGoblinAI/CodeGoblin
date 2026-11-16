@@ -17,7 +17,7 @@ import { storedSecrets } from "./auth"
 import { checkpointEvery, spendLimitPerPrompt } from "./config"
 import { configuredInstructions } from "./instructions"
 import type { Permissions } from "./permission"
-import { shouldCompact, planCompaction, applyCompaction, boundSummaryInput, SUMMARY_PROMPT, estimateTokens, priceOf, costOf, formatSpend, readUsage } from "./context"
+import { shouldCompact, planCompaction, applyCompaction, boundSummaryInput, SUMMARY_PROMPT, estimateTokens, priceOf, costOf, formatSpend, readUsage, usageSince, type StreamUsage } from "./context"
 import { sessionFacts } from "./session-facts"
 import { parseTodos, type Todo } from "./todo"
 import type { History } from "./undo"
@@ -557,6 +557,8 @@ async function* runTurns(input: {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ""
+    // What has been counted of this one answer's usage so far (see usageSince).
+    let counted: StreamUsage | undefined
 
     for (;;) {
       const { done, value } = await reader.read()
@@ -581,7 +583,9 @@ async function* runTurns(input: {
         // stop. Throwing it away is why nothing could say what a session had
         // cost - the one number people want from a tool that spends their
         // money.
-        const spend = readUsage(chunk?.usage, input.provider.reportsCost)
+        const reported = readUsage(chunk?.usage, input.provider.reportsCost)
+        const spend = reported && usageSince(reported, counted)
+        if (reported) counted = reported
         if (spend) {
           if (priced) spentThisPrompt += costOf(spend, price) ?? 0
           yield { type: "spend", ...spend }

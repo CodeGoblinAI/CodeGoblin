@@ -82,6 +82,26 @@ export function readUsage(raw: unknown, reportsCost = false): { input: number; o
   return { input, output, ...(cached ? { cached } : {}), ...(cost !== undefined ? { dollars: cost } : {}) }
 }
 
+export type StreamUsage = { input: number; output: number; cached?: number; dollars?: number }
+
+/**
+ * What one usage report adds to what has already been counted of the same streamed answer.
+ *
+ * Most providers report usage once, on the last chunk. Some send it on every chunk as a running total - the
+ * prompt's tokens each time, the output's so far. Adding those up counted one answer's prompt once per chunk:
+ * a real turn on such a route showed $0.64 spent when the bill was a few cents, and stopped at the spending
+ * checkpoint for money that had not been spent. So within one answer a report replaces the one before it,
+ * and only the difference is counted. Returns nothing when a report adds nothing.
+ */
+export function usageSince(now: StreamUsage, before: StreamUsage | undefined): StreamUsage | undefined {
+  if (!before) return now
+  const more = (a: number | undefined, b: number | undefined) => Math.max(0, (a ?? 0) - (b ?? 0))
+  const input = more(now.input, before.input), output = more(now.output, before.output), cached = more(now.cached, before.cached)
+  const dollars = now.dollars === undefined ? undefined : more(now.dollars, before.dollars)
+  if (!input && !output && !cached && !dollars) return undefined
+  return { input, output, ...(cached ? { cached } : {}), ...(dollars !== undefined ? { dollars } : {}) }
+}
+
 /** What a reported turn cost: the provider's own figure when it gave one, else the price table's. */
 export function costOf(event: { input: number; output: number; cached?: number; dollars?: number }, price?: Price, now: Date = new Date()): number | undefined {
   return event.dollars ?? priceOf(event, price, now)

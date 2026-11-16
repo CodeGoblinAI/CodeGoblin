@@ -924,3 +924,27 @@ describe("read_file on a picture", () => {
     expect(JSON.stringify(sent)).not.toContain("base64")
   })
 })
+
+describe("usage reported on every chunk", () => {
+  test("a running total sent with each chunk is counted once, not once per chunk", async () => {
+    // What Refuseless's deepseek-v4.1-flash-abliterated route sent on 2026-11-16: the prompt's tokens on every
+    // chunk and the output's so far. Added up, 67 prompt tokens became 1,206 and a turn showed $0.64.
+    const chunks: unknown[] = []
+    for (let n = 0; n <= 17; n++) chunks.push({ choices: [{ delta: { content: n ? "word " : "" } }], usage: { prompt_tokens: 67, completion_tokens: Math.round(n * 4.6), prompt_tokens_details: { cached_tokens: 40 } } })
+    serve(() => stream(...chunks))
+    const events = await collect(1)
+    const spends = events.filter((event): event is Extract<AgentEvent, { type: "spend" }> => event.type === "spend")
+    const total = spends.reduce((sum, event) => ({ input: sum.input + event.input, output: sum.output + event.output, cached: sum.cached + (event.cached ?? 0) }), { input: 0, output: 0, cached: 0 })
+    expect(total).toEqual({ input: 67, output: 78, cached: 40 })
+  })
+
+  test("the usual single report on the last chunk still counts in full, and each answer starts from nothing", async () => {
+    const answer = () => stream({ choices: [{ delta: { content: "hi" } }] }, { choices: [], usage: { prompt_tokens: 100, completion_tokens: 20 } })
+    serve(answer)
+    const once = (await collect(1)).filter((event) => event.type === "spend")
+    expect(once).toEqual([{ type: "spend", input: 100, output: 20 }])
+    // A second answer of the same size is another 100 tokens, not "nothing new".
+    serve(answer)
+    expect((await collect(1)).filter((event) => event.type === "spend")).toEqual([{ type: "spend", input: 100, output: 20 }])
+  })
+})

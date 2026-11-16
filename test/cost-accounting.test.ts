@@ -127,3 +127,16 @@ describe("prices from the catalog", () => {
     }
   })
 })
+
+describe("several usage reports for one answer", () => {
+  test("only what a report adds to the one before it is counted", async () => {
+    const { usageSince } = await import("../src/core/context")
+    expect(usageSince({ input: 67, output: 0 }, undefined)).toEqual({ input: 67, output: 0 })
+    expect(usageSince({ input: 67, output: 5 }, { input: 67, output: 1 })).toEqual({ input: 0, output: 4 })
+    expect(usageSince({ input: 67, output: 5, cached: 40 }, { input: 67, output: 5, cached: 40 })).toBeUndefined()
+    // A provider that reports dollars: the bill so far, not a new bill each time.
+    expect(usageSince({ input: 67, output: 9, dollars: 0.003 }, { input: 67, output: 5, dollars: 0.002 })!.dollars).toBeCloseTo(0.001, 9)
+    // A total that went down is not a refund.
+    expect(usageSince({ input: 10, output: 1 }, { input: 67, output: 5 })).toBeUndefined()
+  })
+})
