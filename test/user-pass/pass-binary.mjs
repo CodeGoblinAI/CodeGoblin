@@ -30,6 +30,11 @@ const help = run("--help")
 check("--help lists every way in", ["codegoblin web", "codegoblin run", "codegoblin upgrade", "codegoblin <folder>"].every((line) => help.includes(line)), help)
 check("a helper copy starts by its own word and ends when its input does", (() => { try { execFileSync(bin, ["__cursor-worker"], { cwd: project, env, input: "", timeout: 30000 }); return true } catch (error) { return error.status !== null && !/Cannot find module|ENOENT/.test(String(error.stderr)) } })())
 
+// The speech helper answers what it is sent. Inside the built program it once started, did nothing and exited,
+// so voice never returned text; a request that is not a recording needs no engine or model to be refused.
+const spoken = (() => { try { return execFileSync(bin, ["__voice-worker"], { cwd: project, env, input: JSON.stringify({ id: 7, wav: Buffer.from("not a recording").toString("base64") }) + "\n", encoding: "utf8", timeout: 30000 }) } catch (error) { return String(error.stdout ?? "") + String(error.stderr ?? "") } })()
+check("the speech helper answers a request", /"id":7/.test(spoken) && /not a WAV recording/.test(spoken), spoken.slice(0, 200) || "(no answer)")
+
 const server = spawn(bin, ["web"], { cwd: project, env, windowsHide: true })
 let log = ""
 server.stdout.on("data", (chunk) => log += chunk); server.stderr.on("data", (chunk) => log += chunk)

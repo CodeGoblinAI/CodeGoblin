@@ -812,7 +812,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
   }
   if (url.pathname === "/api/voice/prepare" && request.method === "POST") {
     if (!voice.voiceRuntime()) return json({ message: voice.voiceProblem() }, 400)
-    if (!voice.voiceState().preparing && !voice.voiceState().model) void voice.prepareVoice().catch(() => {})
+    if (!voice.voiceState().preparing && !voice.voiceState().ready) void voice.prepareVoice().catch(() => {})
     return json(voice.voiceState())
   }
   if (url.pathname === "/api/voice/cancel" && request.method === "POST") {

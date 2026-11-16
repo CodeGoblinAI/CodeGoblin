@@ -4052,9 +4052,9 @@ function openVoiceSetup() {
   const rows: Dialogs.DialogRow[] = []
   const say = (label: string) => rows.push({ label, inert: true })
   if (!state.runtime) {
-    say("Voice input needs a speech engine that is not installed here.")
-    say("Run  bun install  in the CG-Next folder, then /voice again.")
-    say("(sherpa-onnx-node: Windows x64, macOS, Linux x64 and arm64)")
+    say("Voice input is not available on this computer.")
+    say("Its speech engine is made for Windows, Linux and macOS on Apple chips")
+    say("(x64 and arm64).")
   } else if (state.ready) {
     say("Voice input is set up. Speech is turned into text on this computer;")
     say("nothing you say is sent anywhere.")
@@ -4063,13 +4063,14 @@ function openVoiceSetup() {
     rows.push({ label: "Record now", hint: "enter or space finishes, esc discards", value: "record" })
     say("Model: " + state.dir)
   } else if (state.preparing) {
-    say("Downloading the speech model: " + Math.floor((state.preparing.received / state.preparing.total) * 100) + "%")
+    say("Downloading the " + state.preparing.label + ": " + Math.floor((state.preparing.received / state.preparing.total) * 100) + "%")
     rows.push({ label: "Stop the download", hint: "what is downloaded is kept", value: "cancel" })
   } else {
     say("Speak instead of typing. Speech is turned into text on this computer,")
     say("by a small model (SenseVoice); nothing you say is sent anywhere.")
     say("")
     say("Download   " + VOICE_NEEDS.download + ", once, from Hugging Face (checked against a fixed SHA-256)")
+    if (!state.engine) say("           and its engine, 10 MB, from the npm registry (fixed SHA-512)")
     say("Disk       " + VOICE_NEEDS.disk)
     say("Memory     " + VOICE_NEEDS.memory)
     say("Takes      " + VOICE_NEEDS.time)

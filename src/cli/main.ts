@@ -32,7 +32,7 @@ switch (asked.kind) {
     await import("./prompt")
     break
   case "worker":
-    if (asked.name === "voice") await import("../core/voice-worker")
+    if (asked.name === "voice") await (await import("../core/voice-worker")).serve()
     else await import("../core/cursor-worker")
     break
   case "tui":

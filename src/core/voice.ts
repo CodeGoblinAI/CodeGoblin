@@ -2,10 +2,10 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { createHash } from "node:crypto"
-import { createRequire } from "node:module"
 import { workerCommand } from "../platform/self"
 import { Global } from "../platform/paths"
 import { downloadModel, cancelDownload, type CatalogEntry, type Progress } from "./local-downloads"
+import { engineBytes, engineEntry, engineFetchable, installEngine } from "./voice-engine"
 
 /**
  * Voice input: speech turned into text on this machine, for the prompt box.
@@ -30,19 +30,20 @@ export const VOICE_BYTES = VOICE_ASSETS.reduce((sum, asset) => sum + asset.bytes
 /** Languages the model takes a hint for; "auto" lets it tell. */
 export const VOICE_LANGUAGES = ["auto", "en", "zh", "yue", "ja", "ko"] as const
 /** What to tell someone before they download, in plain numbers. */
-export const VOICE_NEEDS = { download: "229 MB", disk: "about 250 MB", memory: "about 1 GB while it is listening or has just been used", time: "a few minutes (about four on a typical connection)" }
+export const VOICE_NEEDS = {
+  /** The model, plus the engine when this copy has to fetch that too (the built program, the first time). */
+  get download() { return engineEntry() ? "229 MB" : "about 240 MB" },
+  disk: "about 250 MB", memory: "about 1 GB while it is listening or has just been used", time: "a few minutes (about four on a typical connection)" }
 
 /** Where the model is kept. CG_VOICE_MODEL_DIR points at an existing copy instead (it is not verified). */
 export const voiceDir = () => process.env.CG_VOICE_MODEL_DIR || path.join(Global.Path.data, "voice", "sensevoice")
 
-/** The speech engine is an optional package: present after a normal install on a supported machine. */
+/**
+ * Whether voice input can work on this computer at all: the speech engine is here, or there is one to fetch
+ * (see voice-engine.ts). False only on a system the engine is not made for.
+ */
 export function voiceRuntime(): boolean {
-  try {
-    createRequire(import.meta.url).resolve("sherpa-onnx-node")
-    return true
-  } catch {
-    return false
-  }
+  return Boolean(engineEntry()) || engineFetchable()
 }
 
 const present = (asset: CatalogEntry) => {
@@ -54,9 +55,12 @@ const present = (asset: CatalogEntry) => {
 }
 
 export type VoiceState = {
-  /** Ready to transcribe: the engine is installed and the model is on disk. */
+  /** Ready to transcribe: the engine and the model are both on disk. */
   ready: boolean
+  /** Voice can work on this computer: the engine is here or can be fetched. */
   runtime: boolean
+  /** The engine is on disk now. */
+  engine: boolean
   model: boolean
   dir: string
   /** A download in progress. */
@@ -69,16 +73,18 @@ let preparing: { label: string; received: number; total: number } | undefined
 let problem: string | undefined
 
 export function voiceState(): VoiceState {
-  const runtime = voiceRuntime()
+  const engine = Boolean(engineEntry())
+  const runtime = engine || engineFetchable()
   const model = VOICE_ASSETS.every(present)
-  return { ready: runtime && model, runtime, model, dir: voiceDir(), ...(preparing ? { preparing } : {}), ...(problem && !model ? { problem } : {}) }
+  return { ready: engine && model, runtime, engine, model, dir: voiceDir(), ...(preparing ? { preparing } : {}), ...(problem && !(engine && model) ? { problem } : {}) }
 }
 
 /** Why voice cannot be used yet, as a sentence, or nothing when it can. */
 export function voiceProblem(state = voiceState()): string | undefined {
-  if (!state.runtime) return "Voice input needs the sherpa-onnx-node package, which is not installed here (run bun install in CG-Next; it supports Windows x64, macOS and Linux x64/arm64)."
+  if (!state.runtime) return "Voice input is not available on this computer: its speech engine is made for Windows, Linux and macOS on Apple chips (x64 and arm64)."
   if (state.preparing) return "The speech model is still downloading."
   if (!state.model) return "Voice input is not set up yet: /voice downloads the speech model (" + VOICE_NEEDS.download + ")."
+  if (!state.engine) return "Voice input needs its speech engine: /voice downloads it (about 10 MB)."
   return undefined
 }
 
@@ -95,14 +101,28 @@ const elsewhere = (asset: CatalogEntry) => path.join(os.homedir(), ".dsh", "spee
  * Gets the model onto disk: verified, resumable, one file at a time. A matching copy already on this
  * machine is copied rather than downloaded again. Resolves when voice is ready; rejects with a sentence.
  */
-export async function prepareVoice(options: { onProgress?: (state: VoiceState) => void; signal?: AbortSignal; fetch?: (url: URL, init: RequestInit) => Promise<Response>; reuse?: boolean } = {}): Promise<void> {
-  if (process.env.CG_VOICE_MODEL_DIR) throw new Error("CG_VOICE_MODEL_DIR is set, so the model there is used as it is; nothing to download.")
+export async function prepareVoice(options: { onProgress?: (state: VoiceState) => void; signal?: AbortSignal; fetch?: (url: URL, init: RequestInit) => Promise<Response>; engineFetch?: typeof fetch; reuse?: boolean } = {}): Promise<void> {
   if (preparing) throw new Error("The speech model is already downloading.")
+  const needEngine = !engineEntry()
+  if (process.env.CG_VOICE_MODEL_DIR && !needEngine) throw new Error("CG_VOICE_MODEL_DIR is set, so the model there is used as it is; nothing to download.")
   problem = undefined
   const dir = voiceDir()
-  const total = VOICE_BYTES
+  const total = VOICE_BYTES + (needEngine ? engineBytes() : 0)
   let before = 0
   try {
+    // The engine first: it is small, and without it the large download that follows would be for nothing.
+    if (needEngine) {
+      if (!engineFetchable()) throw new Error(voiceProblem({ ...voiceState(), runtime: false }))
+      const label = "speech engine"
+      preparing = { label, received: 0, total }
+      options.onProgress?.(voiceState())
+      engineStop = new AbortController()
+      const signal = options.signal ? AbortSignal.any([options.signal, engineStop.signal]) : engineStop.signal
+      await installEngine({ signal, ...(options.engineFetch ? { fetch: options.engineFetch } : {}), onProgress: (received) => { preparing = { label, received, total }; options.onProgress?.(voiceState()) } })
+      engineStop = undefined
+      before = engineBytes()
+    }
+    if (process.env.CG_VOICE_MODEL_DIR) return
     fs.mkdirSync(dir, { recursive: true })
     for (const asset of VOICE_ASSETS) {
       preparing = { label: asset.label, received: before, total }
@@ -131,12 +151,19 @@ export async function prepareVoice(options: { onProgress?: (state: VoiceState) =
     throw new Error(problem)
   } finally {
     preparing = undefined
+    engineStop = undefined
     options.onProgress?.(voiceState())
   }
 }
 
-/** Stops a model download in progress. */
-export const cancelVoiceSetup = () => (preparing ? cancelDownload() : false)
+let engineStop: AbortController | undefined
+
+/** Stops a download in progress: the engine's, or the model's. */
+export function cancelVoiceSetup(): boolean {
+  if (!preparing) return false
+  if (engineStop) { engineStop.abort(); return true }
+  return cancelDownload()
+}
 
 // --- recognition, in its own process ---------------------------------------------------------------------
 
@@ -149,7 +176,7 @@ const IDLE_MS = 5 * 60_000
 function startWorker() {
   const proc = Bun.spawn(workerCommand("voice", new URL("./voice-worker.ts", import.meta.url)), {
     stdin: "pipe", stdout: "pipe", stderr: "ignore", windowsHide: true,
-    env: { ...process.env, CG_VOICE_DIR: voiceDir() },
+    env: { ...process.env, CG_VOICE_DIR: voiceDir(), CG_VOICE_ENGINE: engineEntry() ?? "" },
   })
   const pending = new Map<number, Pending>()
   const mine = { proc, pending } as NonNullable<typeof worker>

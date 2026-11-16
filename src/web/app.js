@@ -3988,7 +3988,7 @@ function openVoiceSetup(state) {
     const add = (tag, text, cls) => { const node = document.createElement(tag); if (cls) node.className = cls; node.textContent = text; dialog.appendChild(node); return node }
     add("h2", "Voice input")
     if (!now.runtime) {
-      add("p", "Voice input needs a speech engine that is not installed here. Run “bun install” in the CG-Next folder, then try again.")
+      add("p", "Voice input is not available on this computer. Its speech engine is made for Windows, Linux and macOS on Apple chips (x64 and arm64).")
       button(add("div", "", "row"), "Close", close)
       return
     }
@@ -4008,7 +4008,7 @@ function openVoiceSetup(state) {
       return
     }
     const list = document.createElement("dl")
-    for (const [name, value] of [["Download", now.needs.download + ", once"], ["Disk", now.needs.disk], ["Memory", now.needs.memory], ["Takes", now.needs.time], ["Languages", "English, Chinese, Cantonese, Japanese, Korean"]]) {
+    for (const [name, value] of [["Download", now.needs.download + ", once" + (now.engine ? "" : " (the speech model, and its 10 MB engine)")], ["Disk", now.needs.disk], ["Memory", now.needs.memory], ["Takes", now.needs.time], ["Languages", "English, Chinese, Cantonese, Japanese, Korean"]]) {
       const dt = document.createElement("dt"); dt.textContent = name
       const dd = document.createElement("dd"); dd.textContent = value
       list.append(dt, dd)

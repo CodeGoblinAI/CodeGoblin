@@ -25,7 +25,10 @@ let config: { featConfig: object; modelConfig: { senseVoice: { model: string; la
 
 function engine(language: string): Recognizer {
   if (!recognizer) {
-    const sherpa = createRequire(import.meta.url)("sherpa-onnx-node") as { OfflineRecognizer: new (config: unknown) => Recognizer }
+    // The engine's own file, handed over by voice.ts: the installed package from source, a fetched copy in the
+    // built program, which has no packages of its own to look in.
+    const entry = process.env.CG_VOICE_ENGINE
+    const sherpa = (entry ? createRequire(entry)(entry) : createRequire(import.meta.url)("sherpa-onnx-node")) as { OfflineRecognizer: new (config: unknown) => Recognizer }
     config = {
       featConfig: { sampleRate: RATE, featureDim: 80 },
       modelConfig: {
@@ -71,7 +74,12 @@ function recognise(wav: Uint8Array, language: string): string {
   return parts.filter(Boolean).join(" ")
 }
 
-if (import.meta.main) {
+/**
+ * Answers requests until its input ends. Called by name from the entry point as well as when this file is
+ * started on its own: in the built program this file is never "the main file", so a check for that alone
+ * left the worker starting, doing nothing and exiting.
+ */
+export async function serve() {
   let buffer = ""
   const decoder = new TextDecoder()
   for await (const chunk of Bun.stdin.stream()) {
@@ -92,3 +100,5 @@ if (import.meta.main) {
     }
   }
 }
+
+if (import.meta.main) await serve()
