@@ -28,10 +28,25 @@ function capped(text: string, max: number, tone?: DetailLine["tone"]): DetailLin
   while (all.length && !all.at(-1)!.trim()) all.pop()
   const shown = all.slice(0, max).map((line) => ({ text: line.replace(/\t/g, "  "), ...(tone ? { tone } : {}) }))
   const rest = all.length - shown.length
-  return rest > 0 ? [...shown, { text: `… ${rest} more line${rest === 1 ? "" : "s"}`, tone: "more" as const }] : shown
+  return rest > 0 ? [...shown, { text: `… +${rest} line${rest === 1 ? "" : "s"}`, tone: "more" as const }] : shown
 }
 
-export function toolDetail(name: string, argsText: string, result: string, max = 6): ToolDetail {
+/**
+ * The last `max` lines, under one saying how many came before. For a command that failed: what went wrong is
+ * at the end of what it printed, and the first lines of a failed build are the part nobody needs.
+ */
+function cappedEnd(text: string, max: number): DetailLine[] {
+  const all = text.replace(/\r\n?/g, NEWLINE).split(NEWLINE)
+  while (all.length && !all.at(-1)!.trim()) all.pop()
+  const shown = all.slice(-max).map((line) => ({ text: line.replace(/\t/g, "  ") }))
+  const rest = all.length - shown.length
+  return rest > 0 ? [{ text: `… +${rest} earlier line${rest === 1 ? "" : "s"}`, tone: "more" as const }, ...shown] : shown
+}
+
+/** Lines of a command's output shown while its row is folded: enough to see what it was, not a screenful. */
+export const FOLDED_OUTPUT = 4
+
+export function toolDetail(name: string, argsText: string, result: string, max = FOLDED_OUTPUT): ToolDetail {
   const args = parse(argsText)
   const first = (result.split(NEWLINE)[0] ?? "").trim()
   if (/^(error|stopped)/.test(result)) return { summary: "", lines: capped(result, 3) }
@@ -56,7 +71,8 @@ export function toolDetail(name: string, argsText: string, result: string, max =
     const code = /\nexit code (\S+)\s*$/.exec(result)?.[1]
     const output = code ? result.slice(0, result.lastIndexOf(NEWLINE + "exit code")) : result
     if (!output.trim() || output.trim() === "(no output)") return { summary: code ? "exit code " + code : "no output", lines: [] }
-    return { summary: code ? "exit code " + code : "", lines: capped(output, max) }
+    // A command that failed is folded to its end, where the error is; one that worked, to its start.
+    return { summary: code ? "exit code " + code : "", lines: code && code !== "0" ? cappedEnd(output, max) : capped(output, max) }
   }
 
   if (name === "write_file" && typeof args.content === "string") {

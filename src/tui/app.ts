@@ -20,6 +20,7 @@ import { createKeyReader } from "./keys"
 import { parseLaunch } from "./args"
 import { lastUsedModel, resolveStartupModel } from "../core/model-selection"
 import { isEmpty, paint, textOf, type Span } from "./screen-select"
+import { wheelStep, type Wheel } from "./wheel"
 import { carryOn, errorLine, errorText, farewell, logEntry, writeCrash } from "./crash"
 import { isLiveCommand } from "./live-commands"
 import { footerHeight } from "./layout"
@@ -244,6 +245,8 @@ let foldAnswers = false
 let showTimes = false
 /** /timeline: the entry to bring to the top of the screen on the next frame. */
 let jumpTo: Entry | undefined
+/** The wheel's last notch, for telling a spin from a single turn. */
+let wheel: Wheel | undefined
 /**
  * A row that has just been opened or folded, and the screen row its first line was on. The next frame puts
  * it back there. Without this the screen stayed pinned to the newest line, so opening a command's output
@@ -846,12 +849,12 @@ function drawEntry(entry: Entry, width: number): string[] {
     const liveLines: DetailLine[] = entry.state === "running" && entry.live?.trim()
       ? entry.live.replace(/\r\n?/g, String.fromCharCode(10)).split(String.fromCharCode(10)).map((line) => line.split("\r").at(-1)!).filter((line) => line.trim()).slice(-LIVE_LINES).map((line) => ({ text: line.replace(/\t/g, "  ") }))
       : []
-    const closedDetail = (entry.detail ?? []).map((line) => line.tone === "more" && entry.tool?.result !== undefined ? { ...line, text: line.text + " \u00b7 click to show" } : line)
+    const closedDetail = (entry.detail ?? []).map((line) => line.tone === "more" && entry.tool?.result !== undefined ? { ...line, text: line.text + " (click, or ctrl+o to expand)" } : line)
     for (const line of opened ? opened.lines : liveLines.length ? liveLines : closedDetail) {
       const colour = line.tone === "add" ? theme.goblin : line.tone === "remove" ? theme.error : dim
       out.push(theme.border + "    \u2502 " + ansi.reset + colour + truncateToWidth(line.text, Math.max(10, width - 6)) + ansi.reset)
     }
-    if (opened) out.push(dim + "    click to fold" + ansi.reset)
+    if (opened) out.push(dim + "    click to fold (ctrl+o folds everything)" + ansi.reset)
     out.push("")
     return out
   }
@@ -4722,8 +4725,15 @@ process.stdin.on("data", (chunk) => {
           dirty = true
         }
         break
-      case "wheelup": scroll += 3; dirty = true; break
-      case "wheeldown": scroll = Math.max(0, scroll - 3); dirty = true; break
+      case "wheelup":
+      case "wheeldown": {
+        // Three lines for an unhurried notch; a spin that keeps going covers ground (see wheel.ts).
+        const turned = wheelStep(wheel, pressed.type === "wheelup" ? 1 : -1, Date.now(), lastRoom)
+        wheel = turned.wheel
+        scroll = Math.max(0, scroll + (pressed.type === "wheelup" ? turned.lines : -turned.lines))
+        dirty = true
+        break
+      }
       case "shiftup": scroll += 1; dirty = true; break
       case "shiftdown": scroll = Math.max(0, scroll - 1); dirty = true; break
       // A page at a time, less two lines so the eye keeps its place.
@@ -4733,11 +4743,15 @@ process.stdin.on("data", (chunk) => {
         // Terminals that hand Ctrl+V to the app (rather than pasting text themselves): picture paste.
         if (pressed.value === "v") void attachClipboardImage(true)
         if (pressed.value === "o") {
-          // The keyboard's way to what a click does: reasoning in full, and the latest call opened.
+          // Everything folded, in full - reasoning and every command's output - and folded again, as ctrl+o
+          // does in Claude Code. It used to open only the last command, so reading an earlier one meant
+          // finding it with the mouse. The row at the top of the screen stays where it is.
           expandThinking = !expandThinking
-          const latest = transcript.filter((entry) => entry.kind === "tool" && entry.tool?.result !== undefined).at(-1)
-          if (latest) toggleRow(latest, expandThinking)
-          status = expandThinking ? "showing reasoning" + (latest ? " and the last command" : "") + " in full - ctrl+o folds" : "reasoning" + (latest ? " and the last command" : "") + " folded"
+          const calls = transcript.filter((entry) => entry.kind === "tool" && entry.tool?.result !== undefined)
+          const top = lineOwners[linesOverflow ? lastTop : 0]
+          for (const call of calls) call.open = expandThinking
+          if (top) holdRow = { entry: top, row: 1 }
+          status = expandThinking ? "showing everything in full - ctrl+o folds it again" : "folded - ctrl+o shows everything in full"
           dirty = true
         }
         if (pressed.value === "u") { applyComposer({ text: "", cursor: 0 }, true); dirty = true; refreshPalette() }

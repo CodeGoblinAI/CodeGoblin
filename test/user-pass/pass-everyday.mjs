@@ -20,6 +20,7 @@ const model = await fakeModel(async (sent) => {
   if (/all done plan/.test(said)) return { tool: "todo_write", args: { todos: [{ content: "read the code", status: "completed" }, { content: "write the fix", status: "completed" }] } }
   if (/open plan/.test(said)) return { tool: "todo_write", args: { todos: [{ content: "read the code", status: "completed" }, { content: "write the fix", status: "pending" }] } }
   if (/build it/.test(said)) return { tool: "shell", args: { command: SLOW } }
+  if (/long answer/.test(said)) return { text: Array.from({ length: 400 }, (_, n) => "row number " + (n + 1) + " of the long answer").join("\n") }
   return { text: "ok" }
 })
 const screenOf = (t) => plain(t.out.split("\x1b[2J").at(-1)).replace(/\r/g, "")
@@ -89,6 +90,20 @@ try {
   check("when the job ends by itself the model is told, without anyone asking", await waitFor(t, /Noted: the build finished/, 20000), screenOf(t).split("\n").slice(-12).join("\n"))
   check("what it was told names the job and how it ended", seen.some((each) => each.role === "user" && /background job1/.test(each.content) && /finished, exit code 0/.test(each.content)), JSON.stringify(seen.filter((each) => each.role === "user").at(-1)))
   check("the jobs button is gone again", !/\[Jobs: /.test(screenOf(t)))
+
+  // --- 5. the wheel ---
+  await type(t, "long answer please"); t.write("\r"); await waitFor(t, /row number 400 of/, 15000); await delay(800)
+  const wheelUp = () => t.write("\x1b[<64;40;10M")
+  for (let n = 0; n < 12; n++) { wheelUp(); await delay(260) }
+  await delay(400)
+  const slowTop = Number(/row number (\d+) of/.exec(screenOf(t))?.[1] ?? 0)
+  check("turned notch by notch, the wheel moves three lines at a time", slowTop > 400 - 12 * 3 - 45 && slowTop < 400 - 20, "top row " + slowTop)
+  for (let n = 0; n < 45; n++) { wheelUp(); await delay(12) }
+  await delay(600)
+  const afterSpin = [...screenOf(t).matchAll(/row number (\d+) of/g)].map((found) => Number(found[1]))
+  // Past the top of the answer altogether, or with its first rows on screen: either way 400 lines were covered.
+  check("spun, it covers the whole 400-line answer in one go", afterSpin.every((row) => row < 60), "rows on screen: " + (afterSpin.length ? Math.min(...afterSpin) + " to " + Math.max(...afterSpin) : "none - above the answer"))
+  t.write("\x1b[1;5F"); await delay(400)
 } catch (error) { check("pass", false, error.message + "\n" + screenOf(t).slice(-700)) } finally { t.kill(); if (keep) setClipboard(keep) }
 model.close()
 console.log(failed() ? `\n${failed()} failed` : "\nall passed")

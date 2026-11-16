@@ -8,7 +8,7 @@ describe("what shows under a finished tool call", () => {
     const output = Array.from({ length: 10 }, (_, index) => "line " + (index + 1)).join("\n")
     const shown = toolDetail("shell", args({ command: "ls" }), output)
     expect(shown.summary).toBe("")
-    expect(shown.lines.map((line) => line.text)).toEqual(["line 1", "line 2", "line 3", "line 4", "line 5", "line 6", "… 4 more lines"])
+    expect(shown.lines.map((line) => line.text)).toEqual(["line 1", "line 2", "line 3", "line 4", "… +6 lines"])
     expect(shown.lines.at(-1)!.tone).toBe("more")
     const failed = toolDetail("shell", args({ command: "false" }), "nope\nexit code 1")
     expect(failed).toEqual({ summary: "exit code 1", lines: [{ text: "nope" }] })
@@ -33,7 +33,7 @@ describe("what shows under a finished tool call", () => {
   })
 
   test("a failure shows its first lines under the row; reads and searches keep their first line", () => {
-    expect(toolDetail("read_file", args({ path: "x" }), "error: no such file\nmore\nmore\nmore")).toEqual({ summary: "", lines: [{ text: "error: no such file" }, { text: "more" }, { text: "more" }, { text: "… 1 more line", tone: "more" }] })
+    expect(toolDetail("read_file", args({ path: "x" }), "error: no such file\nmore\nmore\nmore")).toEqual({ summary: "", lines: [{ text: "error: no such file" }, { text: "more" }, { text: "more" }, { text: "… +1 line", tone: "more" }] })
     expect(toolDetail("glob", args({ pattern: "*.md" }), "README.md\nnotes.md")).toEqual({ summary: "README.md", lines: [] })
     expect(toolDetail("read_file", args({ path: "x" }), "x".repeat(100)).summary).toHaveLength(60)
     // Arguments that are not JSON do not break it.
@@ -59,7 +59,21 @@ describe("what shows under a finished tool call", () => {
     expect(toolDetail("shell", args({ command: "sleep 900" }), "(no output yet)\n" + trailer)).toEqual({ summary: "still running after 2m - carries on as job2 (/jobs)", lines: [] })
     // Opened by a click, the same call shows far more of its output.
     const long = Array.from({ length: 40 }, (_, n) => "line " + (n + 1)).join("\n")
-    expect(toolDetail("shell", args({ command: "x" }), long).lines.length).toBe(7)
+    expect(toolDetail("shell", args({ command: "x" }), long).lines.length).toBe(5)
     expect(toolDetail("shell", args({ command: "x" }), long, 300).lines.length).toBe(40)
+  })
+})
+
+describe("a command that failed", () => {
+  test("is folded to its end, where the error is, with a count of what came before", () => {
+    const output = Array.from({ length: 30 }, (_, index) => "compiling " + (index + 1)).join("\n") + "\nerror TS2322: wrong type\nbuild failed\nexit code 2"
+    const shown = toolDetail("shell", args({ command: "bun run build" }), output)
+    expect(shown.summary).toBe("exit code 2")
+    expect(shown.lines.map((line) => line.text)).toEqual(["… +28 earlier lines", "compiling 29", "compiling 30", "error TS2322: wrong type", "build failed"])
+    expect(shown.lines[0]!.tone).toBe("more")
+    // Opened, it is all there from the start.
+    expect(toolDetail("shell", args({ command: "bun run build" }), output, 300).lines[0]!.text).toBe("compiling 1")
+    // One that worked is folded to its start.
+    expect(toolDetail("shell", args({ command: "x" }), output.replace("exit code 2", "exit code 0")).lines[0]!.text).toBe("compiling 1")
   })
 })

@@ -43,17 +43,17 @@ try {
   check("it finishes and the answer comes", await waitFor(/done with that/, 15000))
 
   // --- 2. open and fold ---
-  check("finished, the row is cut short and says there is more", /✓ shell bun slow\.js --label=a-very-long-argument-that-goes-well-past\s*$/m.test(screen()) && /… 8 more lines · click to show/.test(screen()), screen().split("\n").filter((l) => /shell|more lines/.test(l)).join("\n"))
+  check("finished, the row is cut short and says there is more", /✓ shell bun slow\.js --label=a-very-long-argument-that-goes-well-past\s*$/m.test(screen()) && /… \+10 lines \(click, or ctrl\+o to expand\)/.test(screen()), screen().split("\n").filter((l) => /shell|lines/.test(l)).join("\n"))
   await click(find("✓ shell bun slow.js"))
   const opened = screen()
   check("a click opens it: the whole command", opened.includes(LONG), opened.split("\n").filter((l) => /shell/.test(l)).join("\n"))
   check("and all of its output", /step 14 of 14/.test(opened) && /step 1 of 14/.test(opened) && /click to fold/.test(opened))
   await click(find("✓ shell bun slow.js"))
-  check("another click folds it again", !/step 14 of 14/.test(screen()) && /… 8 more lines · click to show/.test(screen()))
+  check("another click folds it again", !/step 14 of 14/.test(screen()) && /… \+10 lines \(click, or ctrl\+o to expand\)/.test(screen()))
   t.write("\x0f"); await delay(500)
-  check("ctrl+o opens the last command without the mouse", screen().includes(LONG) && /step 14 of 14/.test(screen()), screen().split("\n").filter((l) => /shell|step|ctrl/.test(l)).join("\n"))
+  check("ctrl+o opens every command without the mouse", screen().includes(LONG) && /step 14 of 14/.test(screen()), screen().split("\n").filter((l) => /shell|step|ctrl/.test(l)).join("\n"))
   t.write("\x0f"); await delay(500)
-  check("and ctrl+o again folds it", !/step 14 of 14/.test(screen()) && /… 8 more lines · click to show/.test(screen()))
+  check("and ctrl+o again folds it", !/step 14 of 14/.test(screen()) && /… \+10 lines \(click, or ctrl\+o to expand\)/.test(screen()))
 
   // --- 3. a command that outlives its wait ---
   const before = model.seen.length
