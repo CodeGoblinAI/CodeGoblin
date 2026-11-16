@@ -244,6 +244,25 @@ let foldAnswers = false
 let showTimes = false
 /** /timeline: the entry to bring to the top of the screen on the next frame. */
 let jumpTo: Entry | undefined
+/**
+ * A row that has just been opened or folded, and the screen row its first line was on. The next frame puts
+ * it back there. Without this the screen stayed pinned to the newest line, so opening a command's output
+ * pushed the command itself off the top and folding one pulled the page out from under the mouse.
+ */
+let holdRow: { entry: Entry; row: number } | undefined
+/** Where an entry's first line is on screen now (1-based), if it is on screen. */
+function screenRowOf(entry: Entry): number | undefined {
+  const at = lineOwners.indexOf(entry)
+  if (at < 0) return undefined
+  const row = at - (linesOverflow ? lastTop : 0) + 1
+  return row >= 1 && row <= lastRoom ? row : undefined
+}
+/** Opens or folds a row and keeps it where it is on screen. */
+function toggleRow(entry: Entry, open: boolean) {
+  const row = screenRowOf(entry)
+  entry.open = open
+  if (row !== undefined) holdRow = { entry, row }
+}
 const FOLDED_LINES = 3
 /** Ctrl+O: finished thinking shown in full rather than folded to one line. A view, not a setting. */
 let expandThinking = false
@@ -913,6 +932,7 @@ function draw() {
   const owners: (Entry | undefined)[] = []
   /** Where /timeline's chosen message starts, when one was chosen. */
   let jumpLine: number | undefined
+  let heldLine: number | undefined
 
   // The empty conversation is drawn once the room above the composer is known.
   if (transcript.length > 0) {
@@ -925,6 +945,7 @@ function draw() {
     const starts: number[] = []
     for (const entry of drawn) {
       if (entry === jumpTo) jumpLine = lines.length
+      if (holdRow && entry === holdRow.entry) heldLine = lines.length
       if (entry.kind === "user") starts.push(lines.length)
       for (const line of entryLines(entry, width)) { owners[lines.length] = entry; lines.push(line) }
     }
@@ -1006,6 +1027,9 @@ function draw() {
   const maxScroll = Math.max(0, lines.length - room)
   // /timeline: the chosen message at the top of the screen, once.
   if (jumpLine !== undefined) { scroll = Math.max(0, lines.length - room - jumpLine); jumpTo = undefined }
+  // A row just opened or folded goes back on the screen row it was on.
+  if (holdRow && heldLine !== undefined) scroll = Math.max(0, lines.length - room - (heldLine - (holdRow.row - 1)))
+  holdRow = undefined
   scroll = Math.min(scroll, maxScroll)
   const cut = lines.length - room - scroll
   lastTop = Math.max(0, cut)
@@ -4327,7 +4351,7 @@ process.stdin.on("data", (chunk) => {
       // A finished call opens to its whole command and far more of its output, and folds again.
       const clicked = entryAtRow(pressed.row)
       if (clicked?.kind === "tool" && clicked.tool?.result !== undefined) {
-        clicked.open = !clicked.open
+        toggleRow(clicked, !clicked.open)
         status = clicked.open ? "opened - click it again to fold" : ""
         render(); continue
       }
@@ -4712,7 +4736,7 @@ process.stdin.on("data", (chunk) => {
           // The keyboard's way to what a click does: reasoning in full, and the latest call opened.
           expandThinking = !expandThinking
           const latest = transcript.filter((entry) => entry.kind === "tool" && entry.tool?.result !== undefined).at(-1)
-          if (latest) latest.open = expandThinking
+          if (latest) toggleRow(latest, expandThinking)
           status = expandThinking ? "showing reasoning" + (latest ? " and the last command" : "") + " in full - ctrl+o folds" : "reasoning" + (latest ? " and the last command" : "") + " folded"
           dirty = true
         }
