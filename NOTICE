@@ -1,0 +1,14 @@
+CodeGoblin
+Copyright (c) 2025-2026 Shawn Isikli and CodeGoblin contributors
+
+CodeGoblin 0.4 and later is a new codebase. Versions up to 0.3 were a fork of
+OpenCode (https://github.com/anomalyco/opencode, MIT License, Copyright (c)
+2025 opencode), and their source remains in this repository's history.
+
+0.4 reads the configuration and credential files of those versions
+(codegoblin.jsonc, auth.json) so that an existing setup keeps working, and
+its description of a model provider follows the shape used there. Where
+anything in this codebase is derived from OpenCode, it is used under the MIT
+License, with thanks.
+
+CodeGoblin is not affiliated with OpenCode, Anomaly, or their maintainers.
