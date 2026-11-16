@@ -76,6 +76,7 @@ import {
   insert as insertText,
   moveTo,
   selectAll,
+  selectedText,
   selection as composerSelection,
   wordEnd,
   wordStart,
@@ -130,7 +131,7 @@ import {
   formatContext,
   type Spend,
 } from "../core/context"
-import { marker, counts, type Todo } from "../core/todo"
+import { marker, counts, planDone, type Todo } from "../core/todo"
 import { Permissions, decisionsFor, MODES, nextMode, askedFor, toolLabel, refusalLabel, decisionHints, type Decision, type PermissionMode } from "../core/permission"
 import { McpManager, withoutServers } from "../core/mcp"
 import { browserStatus, switchBrowser } from "../core/browser"
@@ -140,7 +141,7 @@ import { listSkills, skillIndex } from "../core/skills"
 import { setAgents, setInvocations, setModelLists, setRecentCommands, isListedCommand } from "./palette"
 import { loadRecentCommands, noteCommandUse } from "../core/command-rank"
 import { agentMention } from "../core/subagents"
-import { ago, jobTail, listJobs, runningJobs, stopAllJobs, stopJob } from "../core/jobs"
+import { ago, endedUntold, foregroundCommands, jobTail, listJobs, onJobEnded, runningJobs, sendToBackground, stopAllJobs, stopJob } from "../core/jobs"
 import { redactSecrets } from "../core/tools"
 import { storedSecrets } from "../core/auth"
 import { FAVOURITES, RECENT, markRecent, pickerRows, toggleFavourite } from "../core/favourites"
@@ -1320,11 +1321,18 @@ function draw() {
     { label: "[+]", command: "attach" }, { label: "[Model]", command: "model" },
     { label: "[Settings]", command: "settings" }, { label: "[Sessions]", command: "sessions" },
     { label: "[Usage]", command: "usage" },
+    // What is running, where it can be clicked: the command this answer is waiting on (click, or ctrl+b, to
+    // stop waiting and let it carry on in the background) and the jobs already there (click to see each
+    // one's command, how long it has run and what it has printed).
+    ...(foregroundCommands(process.cwd()).length
+      ? [{ label: "[Waiting on a command " + ago(Date.now() - foregroundCommands(process.cwd())[0]!.startedAt) + " \u00b7 ctrl+b backgrounds it]", command: "background" }]
+      : []),
+    ...(runningJobs(process.cwd()) ? [{ label: "[Jobs: " + runningJobs(process.cwd()) + " running]", command: "jobs" }] : []),
   ]) {
     const from = displayWidth(toolbar) + 1
-    if (from + item.label.length > cols) break
+    if (from + displayWidth(item.label) > cols) break
     toolbar += item.label + " "
-    toolbarTargets.push({ from, to: from + item.label.length - 1, command: item.command })
+    toolbarTargets.push({ from, to: from + displayWidth(item.label) - 1, command: item.command })
   }
   body.push(theme.muted + toolbar + ansi.reset)
 
@@ -2733,6 +2741,9 @@ async function runIdleCompact() {
 
 async function send() {
   cancelIdleCompact()
+  // A message from the person starts the count of automatic follow-ups again.
+  if (!waking) wakes = 0
+  waking = false
   // The person's own answer to the model's question, not a new prompt.
   if (asking?.typing) {
     const typed = input.trim()
@@ -3598,9 +3609,13 @@ async function send() {
     session.spend = spend
     session.review = edits.reviewState(process.cwd())
     session.activity = normaliseActivity(session.activity, true)
+    // A finished plan stays for the answer that finished it, then goes.
+    if (planDone(plan)) { plan = []; if (session.activity) session.activity.plan = [] }
     void sessions.save(session).then(refreshSessionCache).catch(() => {})
     void refreshFileCache(true)
     scheduleIdleCompact()
+    // A job that ended while this answer was being written, and that the model was not told about.
+    setTimeout(wakeForEndedJobs, 600)
 
     boostOnce = false
 
@@ -3649,7 +3664,7 @@ async function restoreSession(loaded: sessions.Session) {
   edits.restoreReview(process.cwd(), loaded.review)
   void refreshRailChanges().then(() => render())
   session.activity = normaliseActivity(loaded.activity, true)
-  plan = session.activity.plan
+  plan = planDone(session.activity.plan) ? [] : session.activity.plan
   if (session.activity.items.length) {
     transcript.push({ kind: "tool", text: "Saved activity (latest 12 calls)" })
     transcript.push(...session.activity.items.slice(-12).map(item => ({ kind: "tool" as const, text: item.label + (item.state === "interrupted" ? " · not completed" : ""), state: item.state === "done" ? "done" as const : "failed" as const })))
@@ -4036,6 +4051,40 @@ function listeningLine(): string | undefined {
 }
 
 /** The commands left running, newest first: enter on one shows its last output, the row under it stops it. */
+/** Ctrl+B, or a click on the waiting command: it carries on as a job and the answer goes on without it. */
+function backgroundNow() {
+  const sent = sendToBackground(process.cwd())
+  status = sent
+    ? (sent === 1 ? "the command carries on in the background - the answer goes on without waiting" : sent + " commands carry on in the background")
+    : foregroundCommands(process.cwd()).length ? "8 background jobs are already running - stop one first (/jobs)" : "no command is being waited for"
+}
+
+/**
+ * A background job has finished and nothing is being answered: tell the model, so the work carries on.
+ *
+ * Without this a conversation that started a build and went quiet stayed quiet - the model only heard that a
+ * job had ended if it happened to be using a tool at the time. Only when the app is idle and nothing is typed
+ * or asked; a job that is stopped by hand is not news. Each wake is one ordinary turn, with the same
+ * checkpoints as any other, and at most MAX_WAKES in a row without a message from the person, so a job that
+ * starts a job that starts a job cannot run on by itself for ever.
+ */
+const MAX_WAKES = 4
+let wakes = 0
+/** Set for the one send that a finished job caused, so it is not taken for the person's own. */
+let waking = false
+onJobEnded(() => { setTimeout(wakeForEndedJobs, 400) })
+function wakeForEndedJobs() {
+  if (!started || ending || streaming || idleCompacting || dialog || pending || asking || secret || renaming || input.trim() || queued) return
+  if (wakes >= MAX_WAKES) { status = "a background job ended - say something to carry on (" + MAX_WAKES + " in a row were followed up automatically)"; render(); return }
+  const note = endedUntold(process.cwd(), true)
+  if (!note) return
+  wakes++
+  waking = true
+  queued = note + String.fromCharCode(10) + String.fromCharCode(10) + "The background job above has ended. Carry on with what you were doing, or say what this means if nothing is left to do."
+  status = "a background job ended - telling the model"
+  void sendQueued()
+}
+
 function openJobs() {
   const all = listJobs(process.cwd()).reverse()
   const rows: Dialogs.DialogRow[] = []
@@ -4192,6 +4241,11 @@ process.stdin.on("data", (chunk) => {
     // stuck behind a prompt nobody will answer. With nothing typed but a
     // prompt already queued, it fast-forwards that one instead of ignoring
     // the key.
+    // Ctrl+B: stop waiting for the command that is running and let it carry on in the background.
+    if (pressed.type === "ctrl" && pressed.value === "b" && !secret && !dialog) {
+      backgroundNow()
+      render(); continue
+    }
     if (pressed.type === "ctrl" && pressed.value === "s") {
       if (streaming && !secret && !dialog && (input.trim() || queued)) {
         if (input.trim()) {
@@ -4277,6 +4331,16 @@ process.stdin.on("data", (chunk) => {
         status = clicked.open ? "opened - click it again to fold" : ""
         render(); continue
       }
+      // Letting go after dragging over text in the prompt box copies it, exactly as letting go over the
+      // conversation does. It used to select only - Ctrl+C was needed - so the same gesture copied an answer
+      // and silently did not copy your own words. Wherever the mouse ends up, the selection is kept.
+      if (!secret && dragged && anchor !== undefined) {
+        const picked = selectedText(composerState())
+        dragged = false
+        if (picked) void copyText(picked).then(() => { status = "copied " + picked.length + " chars to clipboard"; render() }).catch(() => { status = "could not reach the clipboard"; render() })
+        refreshPalette()
+        render(); continue
+      }
       // A release in the composer ends the gesture: dragged keeps its
       // selection for backspace or copy, a clean click is a caret move.
       if (!secret) {
@@ -4301,6 +4365,8 @@ process.stdin.on("data", (chunk) => {
         else void openSessions().then(render)
       }
       if (target === "usage") openUsage()
+      if (target === "jobs") openJobs()
+      if (target === "background") backgroundNow()
       render(); continue
     }
     if (pressed.type === "fn" && pressed.n === 2 && !dialog && !secret) {
@@ -4541,7 +4607,9 @@ process.stdin.on("data", (chunk) => {
         // Escape drops a selection before it clears the line, so losing a
         // highlight does not also lose everything you had written.
         if (anchor !== undefined) { anchor = undefined; dragged = false; dirty = true; break }
-        if (input) { applyComposer({ text: "", cursor: 0 }, true); dirty = true }
+        // While an answer runs, Escape is about the answer, never the draft. It used to clear what was typed
+        // first: reaching for Esc to stop a turn that had gone wrong threw away the correction just written.
+        if (input && !streaming) { applyComposer({ text: "", cursor: 0 }, true); dirty = true }
         else if (streaming) {
           // Two presses: Esc closes and clears many things, and one stray
           // press used to end a long turn - and lose what it was doing.

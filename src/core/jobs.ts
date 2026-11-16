@@ -60,6 +60,42 @@ const jobs = new Map<string, Job>()
 let counter = 0
 let hooked = false
 
+/**
+ * Commands being waited for right now, each with the way to stop waiting for it.
+ *
+ * A person watching a build crawl should not have to choose between sitting through the wait and stopping
+ * the whole answer. Sending the command to the background ends the wait at once: it carries on as a job, and
+ * the model is told so and goes on with something else, exactly as if its own wait had run out.
+ */
+type Waited = { command: string; root: string; startedAt: number; background: (why: string) => boolean }
+const waited = new Set<Waited>()
+
+/** The commands an answer is waiting on in this folder (all folders when none is given). */
+export function foregroundCommands(root?: string): { command: string; startedAt: number }[] {
+  return [...waited].filter((each) => !root || sameRoot(each.root, root)).map(({ command, startedAt }) => ({ command, startedAt }))
+}
+
+/** Stops waiting for every command being waited on here; each carries on as a background job. Returns how many. */
+export function sendToBackground(root?: string): number {
+  let sent = 0
+  for (const each of [...waited]) if ((!root || sameRoot(each.root, root)) && each.background("sent to the background by the user")) sent++
+  return sent
+}
+
+/**
+ * Called when a background job ends by itself - not when it is stopped, and not when the app closes. This is
+ * how a conversation that has gone quiet hears that the build it was waiting for has finished.
+ */
+const endListeners = new Set<(job: JobInfo) => void>()
+export function onJobEnded(listener: (job: JobInfo) => void): () => void {
+  endListeners.add(listener)
+  return () => endListeners.delete(listener)
+}
+function announce(job: Job) {
+  if (job.stopped || !job.id) return
+  for (const listener of [...endListeners]) { try { listener(info(job)) } catch {} }
+}
+
 /** Nothing started here outlives the app. */
 function hookExit() {
   if (hooked) return
@@ -168,6 +204,7 @@ export async function startJob(command: string, root: string, options: { signal?
     job.exitCode = code
     wake(job)
     forget()
+    announce(job)
   }
   child.stdout?.on("data", take)
   child.stderr?.on("data", take)
@@ -230,6 +267,7 @@ export async function runForeground(
       waiting = false
       clearTimeout(timer)
       options.signal?.removeEventListener("abort", onStop)
+      waited.delete(entry)
       if (kill) killTree(child)
       resolve(bounded(text))
     }
@@ -252,17 +290,20 @@ export async function runForeground(
         job.endedAt = Date.now()
         job.exitCode = code
         wake(job)
-        if (job.id) forget()
+        if (job.id) { forget(); announce(job) }
       }
       finish((whole.trim() || "(no output)") + (code === 0 ? "" : NEWLINE + `exit code ${code ?? "unknown"}`))
     }
 
-    const onTime = () => {
-      if (settled) return
-      const waited = ago(options.timeoutMs)
+    /** Stops waiting and leaves it running as a job: when the wait runs out, or when the person says so. */
+    const carryOn = (why?: string): boolean => {
+      if (settled) return false
+      const waitedFor = ago(why ? Date.now() - job.startedAt : options.timeoutMs)
       if (runningJobs() >= MAX_RUNNING) {
-        finish(whole + NEWLINE + `... ended after ${waited}: it was still running, and ${MAX_RUNNING} background jobs are already running, so it could not be left to carry on (job_output lists them)`, true)
-        return
+        // Asked for by the person, with no room for another job: keep waiting rather than end it.
+        if (why) return false
+        finish(whole + NEWLINE + `... ended after ${waitedFor}: it was still running, and ${MAX_RUNNING} background jobs are already running, so it could not be left to carry on (job_output lists them)`, true)
+        return false
       }
       // It carries on, as a job. What it has printed so far is in this answer, so job_output starts after it.
       job.id = "job" + ++counter
@@ -271,11 +312,14 @@ export async function runForeground(
       hookExit()
       finish(
         (whole.trim() ? whole.trimEnd() + NEWLINE : "(no output yet)" + NEWLINE) +
-        `... still running after ${waited}. It was not stopped: it carries on in the background as ${job.id}.` + NEWLINE +
+        (why ? `... ${why} after ${waitedFor}. It was not stopped: it carries on in the background as ${job.id}.` : `... still running after ${waitedFor}. It was not stopped: it carries on in the background as ${job.id}.`) + NEWLINE +
         `(job_output with id "${job.id}" reads what it prints next - wait_ms waits for more, "until" for a particular line; job_stop ends it.)`,
       )
+      return true
     }
-    const timer = setTimeout(onTime, options.timeoutMs)
+    const entry: Waited = { command, root, startedAt: job.startedAt, background: (why) => carryOn(why) }
+    waited.add(entry)
+    const timer = setTimeout(() => { carryOn() }, options.timeoutMs)
     // Stopping the turn ends a command that is being waited for.
     const onStop = () => finish("stopped by the user" + (whole.trim() ? NEWLINE + whole.trim() : ""), true)
     options.signal?.addEventListener("abort", onStop, { once: true })
@@ -364,8 +408,9 @@ export function stopAllJobs(root?: string): number {
  * Jobs that ended without the model being told, as a note for its next tool result. A server that died while
  * the model was editing files is something it has to hear about without asking.
  */
-export function endedUntold(root: string): string {
-  const ended = [...jobs.values()].filter((job) => sameRoot(job.root, root) && !running(job) && !job.told)
+export function endedUntold(root: string, onlyByItself = false): string {
+  // `onlyByItself`: for waking an idle conversation, where a job the person stopped by hand is not news.
+  const ended = [...jobs.values()].filter((job) => sameRoot(job.root, root) && !running(job) && !job.told && !(onlyByItself && job.stopped))
   for (const job of ended) job.told = true
   return ended.map((job) => `(background ${job.id} - ${job.command} - ${state(job)}. job_output with id "${job.id}" shows its last output.)`).join(NEWLINE)
 }

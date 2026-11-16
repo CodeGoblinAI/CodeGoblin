@@ -1121,6 +1121,9 @@ function expirePermissions() {
 function setBusy(state) {
   busy = state
   if (!state) expirePermissions()
+  // A finished plan stays for the answer that finished it, then goes.
+  // (This runs once while the page loads, before the plan exists; reading it then throws, hence the try.)
+  try { if (!state && planItems.length && planItems.every((t) => t.status === "completed")) { planItems = []; renderActivity() } } catch {}
   // The send button becomes stop while a turn runs. A separate small button
   // was there before and was easy to miss, especially on fast models where
   // it appears for barely a second.
@@ -1277,6 +1280,7 @@ async function openSession(id) {
     activityReset()
     if (data.session.activity) {
       planItems = data.session.activity.plan || []
+      if (planItems.length && planItems.every((t) => t.status === "completed")) planItems = []
       feedItems = (data.session.activity.items || []).map(item => ({ label: item.label + (item.state === "interrupted" ? " · not completed" : ""), ok: item.state === "done" }))
       const diff = await fetch("/api/diff?sessionId=" + encodeURIComponent(id), { cache: "no-store" }).then(r => r.json()).catch(() => null)
       // The same ticket guards this second read: a newer click or New session

@@ -271,3 +271,42 @@ describe("the agent and its jobs", () => {
     expect(reader).not.toContain("job_stop")
   })
 })
+
+describe("sending a waited-for command to the background, and hearing when a job ends", () => {
+  const slow = process.platform === "win32" ? "ping -n 4 127.0.0.1 > nul & echo all done" : "sleep 3; echo all done"
+
+  test("the wait ends at once, the command carries on as a job, and its end is announced", async () => {
+    const { foregroundCommands, sendToBackground, onJobEnded, runForeground, listJobs } = await import("../src/core/jobs")
+    const ended: string[] = []
+    const off = onJobEnded((job) => ended.push(job.id + ":" + job.exitCode))
+    const started = Date.now()
+    const answer = runForeground(slow, process.cwd(), { timeoutMs: 60_000 })
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(foregroundCommands(process.cwd()).map((each) => each.command)).toEqual([slow])
+    expect(sendToBackground(process.cwd())).toBe(1)
+    const text = await answer
+    expect(Date.now() - started).toBeLessThan(2500)
+    expect(text).toContain("sent to the background by the user")
+    expect(text).toMatch(/carries on in the background as job\d+/)
+    expect(foregroundCommands(process.cwd())).toEqual([])
+    const id = /as (job\d+)/.exec(text)![1]!
+    expect(listJobs(process.cwd()).find((job) => job.id === id)?.running).toBe(true)
+    // Nothing to send when nothing is being waited for.
+    expect(sendToBackground(process.cwd())).toBe(0)
+    for (let waitedMs = 0; waitedMs < 8000 && !ended.length; waitedMs += 100) await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(ended).toEqual([id + ":0"])
+    off()
+  }, 20_000)
+
+  test("a job that is stopped is not announced as finished", async () => {
+    const { onJobEnded, startJob, stopJob } = await import("../src/core/jobs")
+    const ended: string[] = []
+    const off = onJobEnded((job) => ended.push(job.id))
+    const text = await startJob(slow, process.cwd(), { firstLookMs: 200 })
+    const id = /job\d+/.exec(text)![0]
+    await stopJob(id, process.cwd())
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(ended).toEqual([])
+    off()
+  }, 20_000)
+})

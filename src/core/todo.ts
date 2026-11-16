@@ -19,6 +19,12 @@ export type Todo = {
 
 const STATUSES: TodoStatus[] = ["pending", "in_progress", "completed"]
 
+/**
+ * A plan with every step done. It has said what it had to say: once the answer that finished it ends, it is
+ * taken off the screen rather than sitting above the prompt box for the rest of the conversation.
+ */
+export const planDone = (todos: Todo[]) => todos.length > 0 && todos.every((todo) => todo.status === "completed")
+
 export function parseTodos(input: unknown): Todo[] {
   if (!Array.isArray(input)) return []
   return input

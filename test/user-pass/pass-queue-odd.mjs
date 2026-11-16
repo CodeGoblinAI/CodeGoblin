@@ -27,8 +27,9 @@ try {
   await type(t, "third"); t.write("\r"); await delay(300)
   check("a second one waits behind it", /\+ 1 more after it/.test(screenOf(t)))
 
-  t.write(UP); await delay(300)
-  check("up, with nothing typed, takes the newest queued message back into the box", /\| third/.test(boxOf(t)) && !/\+ 1 more after it/.test(screenOf(t)), boxOf(t))
+  t.write(UP)
+  // Read by waiting: a frame caught half drawn has no box in it.
+  check("up, with nothing typed, takes the newest queued message back into the box", await waitFor(t, /\| third/, 2500) && !/\+ 1 more after it/.test(screenOf(t)), boxOf(t))
   t.write(CTRL_U); await delay(300)
   check("clearing it drops it: only the other one still waits", /ask the goblin|type to queue/.test(boxOf(t)) || !/third/.test(boxOf(t)), boxOf(t))
 
