@@ -585,11 +585,18 @@ async function* runTurns(input: {
         // money.
         const reported = readUsage(chunk?.usage, input.provider.reportsCost)
         const spend = reported && usageSince(reported, counted)
-        if (reported) counted = reported
-        if (spend) {
-          if (priced) spentThisPrompt += costOf(spend, price) ?? 0
-          yield { type: "spend", ...spend }
+        if (reported && spend) {
+          // Priced as the whole answer so far, less what was already counted - not as the new tokens alone.
+          // The cached part of a prompt can arrive in a later report than the prompt itself; priced piece by
+          // piece, the prompt was charged in full and the cache discount never came off (a real 19-step turn
+          // showed $0.058 where its own token counts came to $0.016).
+          const whole = costOf(reported, price)
+          const already = counted ? costOf(counted, price) : 0
+          const added = whole === undefined || already === undefined ? undefined : whole - already
+          if (priced && added !== undefined) spentThisPrompt += added
+          yield { type: "spend", ...spend, ...(counted && added !== undefined ? { dollars: added } : {}) }
         }
+        if (reported) counted = reported
 
         const delta = chunk?.choices?.[0]?.delta
         if (chunk?.choices?.[0]?.finish_reason === "length") outputLimited = true

@@ -15,7 +15,7 @@ test("on Windows the key store is readable by its owner and nobody else", async 
     const listing = Bun.spawnSync(["icacls", storePath()]).stdout.toString()
     const entries = listing.split("\n").map((line) => line.replace(storePath(), "").trim()).filter((line) => /:\(/.test(line))
     // One entry, not inherited: no groups, no sandboxes, no app containers that the folder happens to allow.
-    expect(entries.length).toBe(1)
+    expect(entries).toHaveLength(1)
     expect(entries[0]).toContain(":(F)")
     expect(entries[0]).not.toContain("(I)")
   } else {

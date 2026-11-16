@@ -948,3 +948,27 @@ describe("usage reported on every chunk", () => {
     expect((await collect(1)).filter((event) => event.type === "spend")).toEqual([{ type: "spend", input: 100, output: 20 }])
   })
 })
+
+describe("the cost of an answer reported in pieces", () => {
+  test("the cache discount is kept when the cached count arrives after the prompt's", async () => {
+    const { costOf, priceOf } = await import("../src/core/context")
+    const price = { input: 1, output: 4, cacheRead: 0.1 }
+    const priced: Provider = { ...provider, id: "priced", models: [{ id: "priced-model", label: "Priced", contextWindow: 128000, price }] }
+    // The prompt first, with nothing said about the cache; then the running total with 90% of it cached.
+    serve(() => stream(
+      { choices: [{ delta: { content: "a" } }], usage: { prompt_tokens: 100_000, completion_tokens: 0 } },
+      { choices: [{ delta: { content: "b" } }], usage: { prompt_tokens: 100_000, completion_tokens: 400, prompt_tokens_details: { cached_tokens: 90_000 } } },
+      { choices: [{ delta: { content: "c" } }], usage: { prompt_tokens: 100_000, completion_tokens: 1_000, prompt_tokens_details: { cached_tokens: 90_000 } } },
+    ))
+    let dollars = 0, input = 0, output = 0, cached = 0
+    for await (const event of runAgent({ provider: priced, modelId: "priced-model", apiKey: "not-a-real-key", messages: [{ role: "user", content: "go" }], root: process.cwd(), maxTurns: 1 })) {
+      if (event.type !== "spend") continue
+      dollars += costOf(event, price) ?? 0
+      input += event.input; output += event.output; cached += event.cached ?? 0
+    }
+    expect({ input, output, cached }).toEqual({ input: 100_000, output: 1_000, cached: 90_000 })
+    // What one report of the final numbers costs: 10,000 at $1, 90,000 at $0.10, 1,000 out at $4 = $0.023.
+    expect(dollars).toBeCloseTo(priceOf({ input: 100_000, output: 1_000, cached: 90_000 }, price)!, 9)
+    expect(dollars).toBeCloseTo(0.023, 9)
+  })
+})

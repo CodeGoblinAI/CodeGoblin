@@ -55,9 +55,11 @@ export function ownerOnly(target: string): boolean {
   try {
     const user = os.userInfo().username
     const domain = process.env.USERDOMAIN
-    const who = domain ? domain + "\\" + user : user
     const run = (...args: string[]) => Bun.spawnSync(["icacls", target, ...args], { stdout: "ignore", stderr: "ignore", timeout: 5000, windowsHide: true }).exitCode === 0
-    if (!run("/grant:r", who + ":(F)")) return false
+    // The plain name first: under a service or a remote session the "domain" in the environment is a
+    // workgroup name that no account belongs to, and the grant is refused (seen on a CI runner).
+    const names = [user, ...(domain ? [domain + "\\" + user] : [])]
+    if (!names.some((who) => run("/grant:r", who + ":(F)"))) return false
     return run("/inheritance:r")
   } catch {
     return false

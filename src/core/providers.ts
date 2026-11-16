@@ -466,8 +466,8 @@ export function refreshExperientialModels(fetcher?: typeof fetch): Promise<numbe
 PROVIDERS.refuseless!.models = cachedRefuselessModels()
 let refuselessRefresh: Promise<number> | undefined
 /** The current Refuseless models from its public catalog, once per run. A failure keeps the list already shown. */
-export function refreshRefuselessModels(fetcher?: typeof fetch): Promise<number> {
-  refuselessRefresh ??= fetchRefuselessModels(fetcher)
+export function refreshRefuselessModels(fetcher?: typeof fetch, key?: string): Promise<number> {
+  refuselessRefresh ??= fetchRefuselessModels(fetcher, key)
     .then((models) => { PROVIDERS.refuseless!.models = models; return models.length })
     .catch(() => PROVIDERS.refuseless!.models.length)
   return refuselessRefresh

@@ -83,9 +83,13 @@ export function cachedRefuselessModels(): Model[] {
   return REFUSELESS_BUILT_IN
 }
 
-/** The public catalog. No key is sent: it is public. */
-export async function fetchRefuselessModels(fetcher: typeof fetch = fetch): Promise<Model[]> {
-  const response = await fetcher(CATALOG, { signal: AbortSignal.timeout(15_000), redirect: "error" })
+/**
+ * The catalog, with its prices. It was public; on 2026-11-16 it answered 403 without a key, so every refresh
+ * failed quietly and the prices shown were the ones built in two days earlier. The key is sent when there is
+ * one - to this one address, and never along a redirect - and without one the built-in list stands.
+ */
+export async function fetchRefuselessModels(fetcher: typeof fetch = fetch, key?: string): Promise<Model[]> {
+  const response = await fetcher(CATALOG, { signal: AbortSignal.timeout(15_000), redirect: "error", ...(key ? { headers: { authorization: "Bearer " + key } } : {}) })
   if (!response.ok) throw new Error("Refuseless catalog returned HTTP " + response.status)
   const page = await response.json() as { object?: string; data?: unknown[] }
   if (page.object !== "list" || !Array.isArray(page.data)) throw new Error("Refuseless catalog returned an unexpected page")

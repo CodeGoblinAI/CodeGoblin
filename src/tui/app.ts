@@ -38,7 +38,7 @@ let ending = false
 
 // Model lists that change often are read live once, without holding up startup.
 void refreshExperientialModels()
-void refreshRefuselessModels()
+void refreshRefuselessModels(undefined, storedKey("refuseless"))
 void refreshLiveModels(storedKey)
 // models.dev: every provider for /connect, and the ones with a key in the picker.
 // Before the first draw there is nothing to refresh: startup reads the same lists itself when it gets there.
@@ -788,7 +788,7 @@ function entryLines(entry: Entry, width: number): string[] {
 function queuedLines(text: string, width: number): string[] {
   const room = Math.max(10, width - 6)
   const wrapped = text.split(String.fromCharCode(10)).flatMap((line) => wrapWords(line, Math.floor(room * 0.75))).slice(0, 6)
-  const label = "queued \u00b7 sends when this finishes"
+  const label = "queued \u00b7 ctrl+s sends now \u00b7 up takes it back"
   const block = wrapped.reduce((widest, line) => Math.max(widest, displayWidth(line)), Math.min(displayWidth(label), Math.floor(room * 0.75)))
   const indent = " ".repeat(Math.max(2, width - block - 4))
   return [
@@ -1282,7 +1282,7 @@ function draw() {
     : asking && !pending
     ? asking.typing ? "enter answers \u00b7 esc back to the choices" : compactHints ? "number or enter \u00b7 esc" : "up/down \u00b7 number or enter picks \u00b7 esc dismiss"
     : streaming
-    ? (queued ? (compactHints ? "esc esc stop" : "queued · esc twice stops") : compactHints ? "enter queue · esc esc stop" : "enter queue · ctrl+s now · esc twice stops")
+    ? (queued ? (compactHints ? "ctrl+s now · up edit" : "ctrl+s sends now · up takes it back · esc twice stops") : compactHints ? "enter queue · esc esc stop" : "enter queue · ctrl+s now · esc twice stops")
     : renaming
     ? "enter saves the name · esc cancels"
     : secret
@@ -4600,6 +4600,19 @@ process.stdin.on("data", (chunk) => {
         break
       case "up":
         if (pressed.ctrl) { jumpMessage(-1); dirty = true; break }
+        // With nothing typed and a message waiting, up takes the newest waiting message back into the box:
+        // to change it and queue it again, or to clear it and so drop it. Until this there was no way to
+        // take back a message once it was queued, short of stopping the turn.
+        if (queued !== undefined && !input) {
+          const back = queuedMore.length ? queuedMore.pop()! : queued
+          if (back === queued && !queuedMore.length) queued = undefined
+          input = back
+          cursor = input.length
+          historyIndex = -1
+          status = "taken back from the queue - enter queues it again, ctrl+u clears it"
+          dirty = true
+          break
+        }
         if (history.length) {
           historyIndex = historyIndex < 0 ? history.length - 1 : Math.max(0, historyIndex - 1)
           input = history[historyIndex] ?? ""

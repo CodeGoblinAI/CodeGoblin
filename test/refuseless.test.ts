@@ -79,3 +79,15 @@ test("the provider is in the catalogue and in /connect, and a refused refresh ke
   expect(provider.models.length).toBeGreaterThanOrEqual(8)
   expect(resolveSelection("refuseless/deepseek-v4.1-flash-fast")?.model.id).toBe("deepseek-v4.1-flash-fast")
 })
+
+test("the price list is asked for with the key when there is one, and without when there is not", async () => {
+  const seen: (string | null)[] = []
+  const list = (async (_url: string | URL | Request, init?: RequestInit) => {
+    seen.push(new Headers(init?.headers).get("authorization"))
+    expect(init?.redirect).toBe("error")
+    return Response.json({ object: "list", data: [{ id: "live-one", context_length: 1000, pricing: { currency: "USD", input_per_m: 1, output_per_m: 2 } }] })
+  }) as unknown as typeof fetch
+  await fetchRefuselessModels(list, "the-key")
+  await fetchRefuselessModels(list)
+  expect(seen).toEqual(["Bearer the-key", null])
+})

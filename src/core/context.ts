@@ -92,6 +92,10 @@ export type StreamUsage = { input: number; output: number; cached?: number; doll
  * a real turn on such a route showed $0.64 spent when the bill was a few cents, and stopped at the spending
  * checkpoint for money that had not been spent. So within one answer a report replaces the one before it,
  * and only the difference is counted. Returns nothing when a report adds nothing.
+ *
+ * These are token counts. What the difference costs is not the price of these tokens alone - a later report
+ * can move part of the prompt from "sent" to "served from cache", which makes the answer cheaper - so the
+ * caller prices the whole answer so far and takes the difference of that (see runAgent).
  */
 export function usageSince(now: StreamUsage, before: StreamUsage | undefined): StreamUsage | undefined {
   if (!before) return now
