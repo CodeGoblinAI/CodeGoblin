@@ -97,6 +97,32 @@ test("a model on this machine is never given up on: reading a long prompt on a C
   }
 })
 
+test("a message larger than the model can read is not sent, and does not jam the conversation", async () => {
+  // A provider that refuses a request over its window, as real ones do (about 4 characters a token).
+  const WINDOW = 20000
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    const body = String(init?.body)
+    if (body.length / 4 > WINDOW) return new Response('{"error":{"message":"This model\'s maximum context length is 20000 tokens."}}', { status: 400 })
+    return sse({ choices: [{ delta: { content: "fine" } }] })
+  }) as typeof fetch
+  const messages: Message[] = [{ role: "user", content: "hello" }, { role: "assistant", content: "hi" }, { role: "user", content: "log line\n".repeat(10000) }]
+  let error = ""
+  try { for await (const _ of runAgent({ provider, modelId: "m", apiKey: "k", messages, root, contextWindow: WINDOW, maxTurns: 2 })) {} } catch (caught) { error = String(caught instanceof Error ? caught.message : caught) }
+  expect(error).toContain("was not sent")
+  expect(error).toContain("@")
+  // The conversation is as it was before it, so the next message goes through.
+  expect(messages.map((message) => message.content)).toEqual(["hello", "hi"])
+  messages.push({ role: "user", content: "a short question" })
+  const text: string[] = []
+  for await (const event of runAgent({ provider, modelId: "m", apiKey: "k", messages, root, contextWindow: WINDOW, maxTurns: 2 })) if (event.type === "text") text.push(event.delta)
+  expect(text.join("")).toBe("fine")
+  // Text in a script that takes a token or more a character is measured as that, not as a quarter of one.
+  const wide: Message[] = [{ role: "user", content: "日本語".repeat(5000) }]
+  let wideError = ""
+  try { for await (const _ of runAgent({ provider, modelId: "m", apiKey: "k", messages: wide, root, contextWindow: WINDOW, maxTurns: 2 })) {} } catch (caught) { wideError = String(caught instanceof Error ? caught.message : caught) }
+  expect(wideError).toContain("was not sent")
+})
+
 test("an answer with nothing in it says so", async () => {
   const messages: Message[] = [{ role: "user", content: "go" }]
   const played = await play([() => sse({ choices: [{ delta: {} }] })], messages)

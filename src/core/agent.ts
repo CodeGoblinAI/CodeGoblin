@@ -340,7 +340,35 @@ function offeredTools(input: { modelId?: string; permissions?: Permissions; extr
  * A model CG-Next serves itself is leased for the whole run, compaction and
  * subagents included, so another conversation cannot swap it out mid-answer.
  */
+/**
+ * About how many tokens a text is, erring high: a quarter of a token for each ASCII character, as
+ * estimateTokens counts, and one for every other. Japanese, Chinese and the like take a token or more a
+ * character, and counted as a quarter they looked four times smaller than they were.
+ */
+function tokensAtLeast(text: string): number {
+  let wide = 0
+  for (let at = 0; at < text.length; at++) if (text.charCodeAt(at) > 127) wide++
+  return Math.ceil((text.length - wide) / 4) + wide
+}
+
 export async function* runAgent(input: AgentInput): AsyncGenerator<AgentEvent, void, unknown> {
+  // A message too large for the model to read at all - a pasted log, a whole dump - cannot be helped by
+  // compacting: the newest message is always kept. Sent, the provider refused it, and kept, it was refused
+  // with every message after it; the conversation could only be thrown away. It is taken back out, so the
+  // conversation is as it was, and the person is told how to give it to the model instead.
+  // Only where the window is known: a hosted model's, from the catalogue, or CG-Next's own llama-server's,
+  // which it started at that size. A server of the person's own is given 4096 unless they say otherwise,
+  // which is a guess, and it says for itself what it cannot take.
+  const newest = input.messages.at(-1)
+  const windowKnown = !input.provider.local || Boolean(input.provider.runtime)
+  if (windowKnown && input.contextWindow && newest?.role === "user" && typeof newest.content === "string") {
+    const size = tokensAtLeast(newest.content)
+    if (size > input.contextWindow * 0.6) {
+      input.messages.pop()
+      const count = (n: number) => n.toLocaleString("en-US")
+      throw new Error(`That message is about ${count(size)} tokens, and this model reads ${count(input.contextWindow)} in all, so it was not sent; the conversation is as it was before it. Save the text to a file in the project and mention it with @ (the model reads the parts it needs), or send a smaller part.`)
+    }
+  }
   if (!input.provider.runtime) return yield* runTurns(input)
   const started = Date.now()
   const loading = !localRuntime.serving(input.modelId)
