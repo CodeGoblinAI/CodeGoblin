@@ -18,7 +18,7 @@ const run = async (command: string) => (await runForeground(command, root, { tim
 const windows = process.platform === "win32"
 
 test("the shell is started in the form that leaves a command untouched", () => {
-  expect(shellCommand('dir "a b"', "win32")).toEqual({ argv: ["cmd.exe", "/d", "/s", "/c", '"dir "a b""'], options: { windowsVerbatimArguments: true } })
+  expect(shellCommand('dir "a b"', "win32")).toEqual({ argv: ["cmd.exe", "/d", "/s", "/c", '"chcp 65001>nul 2>&1 & dir "a b""'], options: { windowsVerbatimArguments: true } })
   expect(shellCommand("ls 'a b'", "linux")).toEqual({ argv: ["/bin/sh", "-c", "ls 'a b'"], options: {} })
 })
 

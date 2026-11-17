@@ -44,8 +44,12 @@ try {
 
   // --- pastes ---
   const big = Array.from({ length: 900 }, (_, n) => "pasted line " + (n + 1) + " with some ordinary words in it").join("\n")
-  t.write("\x1b[200~" + big + "\x1b[201~"); await delay(1500)
-  check("a 900-line paste is folded to one token, and the app stays quick", /\[Pasted ~900 lines\]/.test(boxOf(t)) && !broken(t), boxOf(t))
+  // Most of the wait is the terminal delivering 36,000 characters (about a second and a half through ConPTY).
+  const pastedAt = Date.now()
+  t.write("\x1b[200~" + big + "\x1b[201~")
+  let folded = false
+  for (let waited = 0; waited < 8000 && !folded; waited += 100) { await delay(100); folded = /\[Pasted ~900 lines\]/.test(boxOf(t)) }
+  check("a 900-line paste is folded to one token, and the app stays quick", folded && Date.now() - pastedAt < 5000 && !broken(t), `${Date.now() - pastedAt} ms: ${boxOf(t)}`)
   const before = Date.now()
   t.write("\r")
   check("sending it gives the model every line", await waitFor(t, /reply to: pasted line 1 with/, 15000) && seen.some((said) => said.includes("pasted line 900 with")), `${Date.now() - before} ms`)
@@ -53,6 +57,12 @@ try {
   t.write("\r"); await waitFor(t, /reply to: first line/, 8000)
   const crlf = seen.find((said) => said.startsWith("first line"))
   check("a paste with Windows line endings and a tab arrives as lines, without stray carriage returns", Boolean(crlf) && !crlf.includes("\r") && crlf.includes("second line") && /indented with a tab/.test(crlf), JSON.stringify(crlf))
+  // A big paste arrives in several chunks; a character split between two used to become two replacement marks.
+  const accented = Array.from({ length: 1500 }, (_, n) => n + " café 日本語 \u{1F389}").join("\n")
+  t.write("\x1b[200~" + accented + "\x1b[201~"); await delay(1500)
+  t.write("\r"); await waitFor(t, /reply to: 0 caf/, 15000)
+  const got = seen.find((said) => said.startsWith("0 caf")) ?? ""
+  check("a 24,000-character paste of accented, Japanese and emoji text reaches the model unchanged", got === accented, `${got.length} of ${accented.length} chars, ${[...got].filter((c) => c === "�").length} replacement marks`)
   t.write("\x1b[200~looks like keys: \x1b[A \x1b[2J \x03 \x1b[201~"); await delay(600)
   check("a paste with control codes in it is text, not commands: the app is still drawn and running", /looks like keys/.test(boxOf(t)) && !broken(t), boxOf(t))
   t.write("\x15"); await delay(300)

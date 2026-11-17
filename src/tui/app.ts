@@ -3800,6 +3800,10 @@ render()
 out.on("resize", render)
 
 process.stdin.setRawMode?.(true)
+// Read as text, whole characters only. A big paste arrives in several chunks, and each was decoded on its
+// own: a character that straddled two - é, 日, an emoji - became two replacement marks. A 26,000-character
+// paste of such text reached the model with forty of them, and nothing on screen said so.
+process.stdin.setEncoding("utf8")
 process.stdin.resume()
 // One reader for the whole session, so a paste split across chunks is still
 // one paste.

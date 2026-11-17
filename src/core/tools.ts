@@ -625,7 +625,10 @@ export function shellEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.P
   // not to ("\\303\\251t\\303\\251" for "été"). Nobody can read that, and a model copies it back wrong.
   // One more setting on top of whatever the person already passes this way.
   const count = Number(kept.GIT_CONFIG_COUNT) || 0
-  return { ...kept, GIT_CONFIG_COUNT: String(count + 1), ["GIT_CONFIG_KEY_" + count]: "core.quotepath", ["GIT_CONFIG_VALUE_" + count]: "off" }
+  // Python writes to a pipe in the machine's old code page, and stops with UnicodeEncodeError at the first
+  // name it cannot spell in it - an accented or Japanese file name was enough. Unless the person chose otherwise.
+  const python = kept.PYTHONIOENCODING ? {} : { PYTHONIOENCODING: "utf-8" }
+  return { ...kept, ...python, GIT_CONFIG_COUNT: String(count + 1), ["GIT_CONFIG_KEY_" + count]: "core.quotepath", ["GIT_CONFIG_VALUE_" + count]: "off" }
 }
 
 const ESCAPE = String.fromCharCode(27)

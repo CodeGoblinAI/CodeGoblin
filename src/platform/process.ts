@@ -23,10 +23,16 @@ export function spawn(command: string[], opts: SpawnOptions = {}) {
  * not be named at all. A real "move this folder" took a model five minutes and thirty-three steps, nine of
  * them failures, working round it with short 8.3 names. `/s /c "<command>"` with verbatim arguments is the
  * form cmd.exe documents: it drops the outer pair of quotes and runs the rest untouched.
+ *
+ * It runs in UTF-8 first. Most Windows machines write a command's output in an older code page (437 in the
+ * US, 932 in Japan), which turns "café.txt" into "caf‚.txt" and a Japanese name into question marks, and a
+ * model cannot then name the file it was asked to move. `chcp` changes only the hidden console this command
+ * was given (spawn hides windows, so it never shares the person's), and costs about ten milliseconds. `&` is
+ * cmd's loosest join, so `a && b || c` after it is grouped as it was.
  */
 export function shellCommand(command: string, platform: string = process.platform): { argv: string[]; options: SpawnOptions } {
   if (platform !== "win32") return { argv: ["/bin/sh", "-c", command], options: {} }
-  return { argv: ["cmd.exe", "/d", "/s", "/c", '"' + command + '"'], options: { windowsVerbatimArguments: true } }
+  return { argv: ["cmd.exe", "/d", "/s", "/c", '"chcp 65001>nul 2>&1 & ' + command + '"'], options: { windowsVerbatimArguments: true } }
 }
 
 /** Namespace form, matching how the domain code imports it. */

@@ -42,8 +42,9 @@ describe("a link inside the project that points outside it", () => {
 describe("a command the model runs", () => {
   test("does not get variables that hold keys, secrets, tokens or passwords", () => {
     const env = shellEnvironment({ PATH: "p", DEEPSEEK_API_KEY: "k", GITHUB_TOKEN: "t", AWS_SECRET_ACCESS_KEY: "s", DB_PASSWORD: "w", HOME: "h" })
-    // What is left: what was harmless, and the one git setting the app adds (print file names as they are).
-    expect(Object.keys(env).sort()).toEqual(["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "HOME", "PATH"])
+    // What is left: what was harmless, the one git setting the app adds (print file names as they are), and
+    // Python's output in UTF-8.
+    expect(Object.keys(env).sort()).toEqual(["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "HOME", "PATH", "PYTHONIOENCODING"])
     expect(Object.values(env).some((value) => ["k", "t", "s", "w"].includes(String(value)))).toBe(false)
   })
 

@@ -25,6 +25,22 @@ const FIRST_LOOK_MS = 1500
 const MAX_WAIT_MS = 120_000
 const NEWLINE = String.fromCharCode(10)
 
+/**
+ * A child's output as text, whole characters only.
+ *
+ * Each chunk used to be decoded on its own, so a character that straddled two chunks - é, 日, an emoji - came
+ * out as two replacement marks: 300,000 characters of accented output had sixteen. stdout and stderr each
+ * keep their own unfinished character, and what is left when a stream ends is handed on then.
+ */
+function readText(child: ReturnType<typeof spawn>, take: (text: string) => void) {
+  for (const stream of [child.stdout, child.stderr]) {
+    if (!stream) continue
+    const decoder = new TextDecoder()
+    stream.on("data", (chunk: Buffer) => { const text = decoder.decode(chunk, { stream: true }); if (text) take(text) })
+    stream.on("end", () => { const rest = decoder.decode(); if (rest) take(rest) })
+  }
+}
+
 type Job = {
   id: string
   command: string
@@ -191,8 +207,7 @@ export async function startJob(command: string, root: string, options: { signal?
   const job: Job = { id: "job" + ++counter, command, root, startedAt: Date.now(), output: "", total: 0, seen: 0, told: false, child, waiters: new Set() }
   jobs.set(job.id, job)
 
-  const take = (chunk: Buffer) => {
-    const text = chunk.toString()
+  const take = (text: string) => {
     job.total += text.length
     job.output += text
     if (job.output.length > KEEP * 1.5) job.output = job.output.slice(-KEEP)
@@ -206,9 +221,8 @@ export async function startJob(command: string, root: string, options: { signal?
     forget()
     announce(job)
   }
-  child.stdout?.on("data", take)
-  child.stderr?.on("data", take)
-  child.once("error", (error: Error) => { take(Buffer.from("error: " + error.message)); end(null) })
+  readText(child, take)
+  child.once("error", (error: Error) => { take("error: " + error.message); end(null) })
   child.once("close", (code: number | null) => end(code))
 
   // Until it ends or the look is over; output alone does not cut the look short, so a quick failure shows whole.
@@ -272,8 +286,7 @@ export async function runForeground(
       resolve(bounded(text))
     }
 
-    const take = (chunk: Buffer) => {
-      const text = chunk.toString()
+    const take = (text: string) => {
       job.total += text.length
       job.output += text
       if (job.output.length > KEEP * 1.5) job.output = job.output.slice(-KEEP)
@@ -324,8 +337,7 @@ export async function runForeground(
     const onStop = () => finish("stopped by the user" + (whole.trim() ? NEWLINE + whole.trim() : ""), true)
     options.signal?.addEventListener("abort", onStop, { once: true })
 
-    child.stdout?.on("data", take)
-    child.stderr?.on("data", take)
+    readText(child, take)
     child.once("error", (error: Error) => {
       if (running(job)) { job.endedAt = Date.now(); job.exitCode = null; wake(job) }
       finish("error: " + error.message)
