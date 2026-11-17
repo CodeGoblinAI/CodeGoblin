@@ -33,6 +33,7 @@ switch (asked.kind) {
     break
   case "worker":
     if (asked.name === "voice") await (await import("../core/voice-worker")).serve()
+    else if (asked.name === "reaper") (await import("../platform/reaper")).serve()
     else await import("../core/cursor-worker")
     break
   case "unknown":

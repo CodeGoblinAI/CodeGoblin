@@ -30,6 +30,7 @@ describe("what `codegoblin ...` starts", () => {
   test("the words the app uses to start a helper copy of itself", () => {
     expect(route([WORKER_FLAGS.voice])).toEqual({ kind: "worker", name: "voice" })
     expect(route([WORKER_FLAGS.cursor])).toEqual({ kind: "worker", name: "cursor" })
+    expect(route([WORKER_FLAGS.reaper])).toEqual({ kind: "worker", name: "reaper" })
   })
 
   test("help names the command it was started as, and every way in", () => {

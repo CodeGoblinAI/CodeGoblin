@@ -15,14 +15,15 @@ export type Route =
   /** An option nobody knows. Said, rather than ignored: `--modle zai` used to open the app on the default model with no word about it. */
   | { kind: "unknown"; option: string }
   /** The app starting a helper copy of itself; never typed by a person. */
-  | { kind: "worker"; name: "voice" | "cursor" }
+  | { kind: "worker"; name: "voice" | "cursor" | "reaper" }
 
-export const WORKER_FLAGS = { voice: "__voice-worker", cursor: "__cursor-worker" } as const
+export const WORKER_FLAGS = { voice: "__voice-worker", cursor: "__cursor-worker", reaper: "__reaper" } as const
 
 export function route(argv: string[]): Route {
   const [first, ...rest] = argv
   if (first === WORKER_FLAGS.voice) return { kind: "worker", name: "voice" }
   if (first === WORKER_FLAGS.cursor) return { kind: "worker", name: "cursor" }
+  if (first === WORKER_FLAGS.reaper) return { kind: "worker", name: "reaper" }
   if (first === "--version" || first === "-v" || first === "version") return { kind: "version" }
   if (first === "--help" || first === "-h" || first === "help") return { kind: "help" }
   if (first === "web") return { kind: "web", args: rest }

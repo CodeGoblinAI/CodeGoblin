@@ -1,6 +1,7 @@
 import path from "node:path"
 import { shellCommand, spawn } from "../platform/process"
 import { killTree, shellEnvironment } from "./tools"
+import { endWithApp, endedAlready } from "../platform/reaper"
 
 /**
  * Background jobs: commands that keep running while the agent carries on.
@@ -83,7 +84,7 @@ let hooked = false
  * the whole answer. Sending the command to the background ends the wait at once: it carries on as a job, and
  * the model is told so and goes on with something else, exactly as if its own wait had run out.
  */
-type Waited = { command: string; root: string; startedAt: number; background: (why: string) => boolean }
+type Waited = { command: string; root: string; startedAt: number; background: (why: string) => boolean; kill: () => void }
 const waited = new Set<Waited>()
 
 /** The commands an answer is waiting on in this folder (all folders when none is given). */
@@ -112,11 +113,32 @@ function announce(job: Job) {
   for (const listener of [...endListeners]) { try { listener(info(job)) } catch {} }
 }
 
-/** Nothing started here outlives the app. */
+/**
+ * Nothing started here outlives the app: background jobs, and commands still being waited for.
+ *
+ * Closing the terminal window ends the app by a signal (SIGHUP; on Windows the window's close event arrives
+ * as one), and an ending by signal runs no exit handlers. The commands it started have hidden consoles of
+ * their own on Windows, and process groups of their own elsewhere, so they never heard of it either: a dev
+ * server and a command still running were both found alive after the window closed, invisible, one of them
+ * holding its port. So those signals end everything first. Windows allows a few seconds for it.
+ */
 function hookExit() {
   if (hooked) return
   hooked = true
-  process.on("exit", () => stopAllJobs())
+  process.on("exit", () => stopEverything())
+  for (const signal of ["SIGHUP", "SIGBREAK"] as const) {
+    process.on(signal, () => {
+      stopEverything()
+      // Left to its default, the signal would have ended the app; an app that also listens for it ends itself.
+      if (process.listenerCount(signal) === 1) process.exit(128 + (signal === "SIGHUP" ? 1 : 21))
+    })
+  }
+}
+
+/** Ends every job and every command being waited for, in every folder. */
+export function stopEverything(): void {
+  for (const each of [...waited]) { try { each.kill() } catch {} }
+  stopAllJobs()
 }
 
 const sameRoot = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
@@ -204,6 +226,8 @@ export async function startJob(command: string, root: string, options: { signal?
   const isWindows = process.platform === "win32"
   const shell = shellCommand(command)
   const child = spawn(shell.argv, { cwd: root, stdio: ["ignore", "pipe", "pipe"], env: shellEnvironment(), detached: !isWindows, ...shell.options })
+  endWithApp(child.pid)
+  child.once("close", () => endedAlready(child.pid))
   const job: Job = { id: "job" + ++counter, command, root, startedAt: Date.now(), output: "", total: 0, seen: 0, told: false, child, waiters: new Set() }
   jobs.set(job.id, job)
 
@@ -267,6 +291,8 @@ export async function runForeground(
   const shell = shellCommand(command)
   // Its own process group off Windows, so ending it ends everything it started.
   const child = spawn(shell.argv, { cwd: root, stdio: ["ignore", "pipe", "pipe"], env: shellEnvironment(), detached: !isWindows, ...shell.options })
+  endWithApp(child.pid)
+  child.once("close", () => endedAlready(child.pid))
   // Not in the list of jobs unless it outlives the wait.
   const job: Job = { id: "", command, root, startedAt: Date.now(), output: "", total: 0, seen: 0, told: false, child, waiters: new Set() }
   let whole = ""
@@ -330,7 +356,8 @@ export async function runForeground(
       )
       return true
     }
-    const entry: Waited = { command, root, startedAt: job.startedAt, background: (why) => carryOn(why) }
+    const entry: Waited = { command, root, startedAt: job.startedAt, background: (why) => carryOn(why), kill: () => finish("stopped: CG-Next closed", true) }
+    hookExit()
     waited.add(entry)
     const timer = setTimeout(() => { carryOn() }, options.timeoutMs)
     // Stopping the turn ends a command that is being waited for.
