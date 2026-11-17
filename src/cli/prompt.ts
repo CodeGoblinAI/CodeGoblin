@@ -20,6 +20,7 @@ import { streamChat } from "../core/chat"
 import { isChatModel } from "../core/providers"
 import { resolveStartupModel } from "../core/model-selection"
 import { configuredInstructions } from "../core/instructions"
+import { visibleControls } from "../core/terminal-safe"
 
 const argv = process.argv.slice(2)
 
@@ -84,7 +85,9 @@ try {
     signal: stopping.signal,
   })) {
     answered = true
-    process.stdout.write(delta)
+    // On a terminal, an answer's control codes are shown rather than obeyed: one that repeated a web page
+    // could otherwise set the clipboard or the window title. Sent to a file or a pipe, it is left exact.
+    process.stdout.write(process.stdout.isTTY ? visibleControls(delta) : delta)
   }
   process.stdout.write("\n")
   if (!answered) console.error("(no text returned)")

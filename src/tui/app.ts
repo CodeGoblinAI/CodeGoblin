@@ -143,7 +143,8 @@ import { setAgents, setInvocations, setModelLists, setRecentCommands, isListedCo
 import { loadRecentCommands, noteCommandUse } from "../core/command-rank"
 import { agentMention } from "../core/subagents"
 import { ago, endedUntold, foregroundCommands, jobTail, listJobs, onJobEnded, runningJobs, sendToBackground, stopAllJobs, stopJob } from "../core/jobs"
-import { redactSecrets } from "../core/tools"
+import { redactSecrets, stripColour } from "../core/tools"
+import { frameSafe, visibleControls } from "../core/terminal-safe"
 import { storedSecrets } from "../core/auth"
 import { FAVOURITES, RECENT, markRecent, pickerRows, toggleFavourite } from "../core/favourites"
 import { formatterStatus } from "../core/formatter"
@@ -832,7 +833,9 @@ function drawEntry(entry: Entry, width: number): string[] {
     const opened = entry.open && entry.tool?.result !== undefined ? toolDetail(entry.tool.name, entry.tool.args, entry.tool.result, OPEN_LINES) : undefined
     // A command still running says for how long, once that is worth saying.
     const running = entry.state === "running" && entry.startedAt && Date.now() - entry.startedAt >= 3000 ? "  \u00b7 " + ago(Date.now() - entry.startedAt) : ""
-    const text = opened ? toolLabel(entry.tool!.name) + " " + askedFor(entry.tool!.name, entry.tool!.args) + (opened.summary ? "  ->  " + opened.summary : "") : entry.text + running
+    // Shown, never obeyed: a command, a path or a result can carry terminal codes, and what a call asks to
+    // run is exactly what must not be hidden.
+    const text = visibleControls(opened ? toolLabel(entry.tool!.name) + " " + askedFor(entry.tool!.name, entry.tool!.args) + (opened.summary ? "  ->  " + opened.summary : "") : entry.text + running)
     for (const line of text.split(String.fromCharCode(10))) {
       // Wrapped under its own indent rather than cut: command output such as
       // /local or /skills is mostly paths and sentences, and the end was lost.
@@ -847,12 +850,12 @@ function drawEntry(entry: Entry, width: number): string[] {
     // wrapped, so a long line costs one row, not five.
     // While it runs, the last lines of what it is printing: enough to see whether it is getting anywhere.
     const liveLines: DetailLine[] = entry.state === "running" && entry.live?.trim()
-      ? entry.live.replace(/\r\n?/g, String.fromCharCode(10)).split(String.fromCharCode(10)).map((line) => line.split("\r").at(-1)!).filter((line) => line.trim()).slice(-LIVE_LINES).map((line) => ({ text: line.replace(/\t/g, "  ") }))
+      ? entry.live.replace(/\r\n?/g, String.fromCharCode(10)).split(String.fromCharCode(10)).map((line) => line.split("\r").at(-1)!).filter((line) => line.trim()).slice(-LIVE_LINES).map((line) => ({ text: visibleControls(stripColour(line)).replace(/\t/g, "  ") }))
       : []
     const closedDetail = (entry.detail ?? []).map((line) => line.tone === "more" && entry.tool?.result !== undefined ? { ...line, text: line.text + " (click, or ctrl+o to expand)" } : line)
     for (const line of opened ? opened.lines : liveLines.length ? liveLines : closedDetail) {
       const colour = line.tone === "add" ? theme.goblin : line.tone === "remove" ? theme.error : dim
-      out.push(theme.border + "    \u2502 " + ansi.reset + colour + truncateToWidth(line.text, Math.max(10, width - 6)) + ansi.reset)
+      out.push(theme.border + "    \u2502 " + ansi.reset + colour + truncateToWidth(visibleControls(line.text), Math.max(10, width - 6)) + ansi.reset)
     }
     if (opened) out.push(dim + "    click to fold (ctrl+o folds everything)" + ansi.reset)
     out.push("")
@@ -879,7 +882,7 @@ function drawEntry(entry: Entry, width: number): string[] {
       return out
     }
     out.push(dim + "  thinking" + (done ? " · ctrl+o folds" : "...") + ansi.reset)
-    for (const line of entry.text.split(String.fromCharCode(10)).slice(done ? 0 : -6)) {
+    for (const line of visibleControls(entry.text).split(String.fromCharCode(10)).slice(done ? 0 : -6)) {
       out.push(dim + "  | " + line.slice(0, width) + ansi.reset)
     }
     out.push("")
@@ -890,7 +893,7 @@ function drawEntry(entry: Entry, width: number): string[] {
   if (isUser) {
     // Yours on the right, the goblin's on the left, as in a chat.
     const room = Math.max(10, width - 6)
-    const wrapped = entry.text.split(String.fromCharCode(10)).flatMap((line) => wrapWords(line, Math.floor(room * 0.75)))
+    const wrapped = visibleControls(entry.text).split(String.fromCharCode(10)).flatMap((line) => wrapWords(line, Math.floor(room * 0.75)))
     // A reduce, not Math.max(...spread): a huge pasted message has more lines
     // than a call can take arguments.
     const block = wrapped.reduce((widest, line) => Math.max(widest, displayWidth(line)), 3)
@@ -902,7 +905,7 @@ function drawEntry(entry: Entry, width: number): string[] {
     return out
   }
   out.push(accent + "  " + (entry.by ?? selection.provider.label.toLowerCase()) + (showTimes && entry.at ? dim + " · " + sessions.clockTime(entry.at) + ansi.reset : "") + ansi.reset)
-  const rendered = renderMarkdown(entry.text, width)
+  const rendered = renderMarkdown(visibleControls(entry.text), width)
   // /fold keeps the start of each answer; the rest is a line away.
   const shown = foldAnswers && rendered.length > FOLDED_LINES + 1 ? rendered.slice(0, FOLDED_LINES) : rendered
   for (const line of shown) out.push(accent + "  | " + ansi.reset + line)
@@ -1380,7 +1383,10 @@ function draw() {
   // keys are going, and a blinking caret there would say it was.
   // Added after the caret and the toolbar were placed, so neither has to know about it.
   const framed = home ? [...clamped, ...home.below] : clamped
-  const painted = dialog ? Dialogs.compose(framed, Dialogs.box(dialog, cols, rows), cols, rows) : framed
+  // The last guard before the terminal: whatever text got this far by a way not made safe where it came in -
+  // a dialog's list, a title, a provider's message - leaves with colour and style codes only. Nothing in a
+  // frame may set the clipboard or the window title, move the cursor or hide text.
+  const painted = (dialog ? Dialogs.compose(framed, Dialogs.box(dialog, cols, rows), cols, rows) : framed).map(frameSafe)
   const showCaret = caretAt && !dialog
   lastFrame = painted
   // A finished selection is dropped once the text under it is no longer what was copied.
@@ -2581,7 +2587,7 @@ async function chooseInDialog() {
     // The job's last output, in the conversation where it can be scrolled and copied. The model is not told.
     const job = listJobs(process.cwd()).find((each) => each.id === row.value)
     closeDialog()
-    if (job) transcript.push({ kind: "tool", text: job.id + " · " + job.command + String.fromCharCode(10) + (redactSecrets(jobTail(job.id, 40), storedSecrets()) || "(no output)") })
+    if (job) transcript.push({ kind: "tool", text: job.id + " · " + job.command + String.fromCharCode(10) + (redactSecrets(stripColour(jobTail(job.id, 40)), storedSecrets()) || "(no output)") })
     render(); return
   }
 
@@ -4610,7 +4616,9 @@ process.stdin.on("data", (chunk) => {
         // Newlines inside a paste are content. A paste that is only one
         // short line is just typing, and goes in as it is - unless it is a
         // file dropped from Explorer, which becomes a mention instead.
-        const pastedText = pressed.value.replace(/\r\n?/g, String.fromCharCode(10))
+        // Text, never keys: a paste copied out of a terminal can carry colour codes, and one that carried a
+        // screen clear or a cursor move used to be drawn as one. Colour goes; anything left is shown, not obeyed.
+        const pastedText = visibleControls(stripColour(pressed.value.replace(/\r\n?/g, String.fromCharCode(10))))
         const insertPaste = () => applyComposer(insertText(composerState(), droppedMentions(pastedText, process.cwd()) ?? foldPaste(pastedText)), true)
         // Pictures dropped from Explorer are attached as pictures, wherever they are on disk: a screenshot
         // is rarely inside the project, and as a bare path the model went off to open the file itself.
