@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { assertWritable, resolveInside } from "./tools"
-import { lineEndingOf, withLineEnding } from "./text-edit"
+import { decodeText, encodeText, lineEndingOf, withLineEnding, type TextEncoding } from "./text-edit"
 
 /**
  * apply_patch: the multi-file patch format GPT and Codex models are trained
@@ -103,14 +103,21 @@ function applyHunks(file: string, source: string, hunks: { context?: string; lin
   return withLineEnding(lines.join(NEWLINE) + (ending ? NEWLINE : ""), eol)
 }
 
-export type PatchPlan = { writes: { path: string; content: string | null }[]; summary: string[] }
+export type PatchPlan = { writes: { path: string; content: string | null; encoding?: TextEncoding }[]; summary: string[] }
 
 /** Works the whole patch out against the tree without writing anything. */
 export function planPatch(root: string, ops: PatchOp[]): PatchPlan {
   const state = new Map<string, string | null>()
+  // How each file read was stored, so it is written back the same way (UTF-16 stays UTF-16; see text-edit.ts).
+  const encodings = new Map<string, TextEncoding>()
   const read = (relative: string) => {
     if (state.has(relative)) return state.get(relative)!
-    try { return fs.readFileSync(resolveInside(root, relative), "utf8") } catch { return null }
+    let bytes: Buffer
+    try { bytes = fs.readFileSync(resolveInside(root, relative)) } catch { return null }
+    const decoded = decodeText(bytes)
+    if (!decoded) throw new Error(`${relative} is not a text file; a patch cannot change it`)
+    encodings.set(relative, decoded.encoding)
+    return decoded.text
   }
   const summary: string[] = []
   for (const op of ops) {
@@ -134,6 +141,8 @@ export function planPatch(root: string, ops: PatchOp[]): PatchPlan {
         if (read(op.moveTo) !== null) throw new Error(`${op.moveTo} already exists`)
         state.set(op.path, null)
         state.set(op.moveTo, updated)
+        const kept = encodings.get(op.path)
+        if (kept) encodings.set(op.moveTo, kept)
         summary.push(`moved ${op.path} to ${op.moveTo}`)
       } else {
         state.set(op.path, updated)
@@ -141,7 +150,7 @@ export function planPatch(root: string, ops: PatchOp[]): PatchPlan {
       }
     }
   }
-  return { writes: [...state.entries()].map(([file, content]) => ({ path: file, content })), summary }
+  return { writes: [...state.entries()].map(([file, content]) => ({ path: file, content, ...(encodings.get(file) ? { encoding: encodings.get(file) } : {}) })), summary }
 }
 
 /** Writes a worked-out patch. `before` is told each path first, so /undo can put it back. */
@@ -156,7 +165,7 @@ export async function writePatch(root: string, plan: PatchPlan, before?: (relati
     if (write.content === null) fs.rmSync(target, { force: true })
     else {
       fs.mkdirSync(path.dirname(target), { recursive: true })
-      fs.writeFileSync(target, write.content, "utf8")
+      fs.writeFileSync(target, encodeText(write.content, write.encoding))
     }
   }
   return plan.summary.join(NEWLINE)

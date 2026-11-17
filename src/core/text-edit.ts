@@ -27,6 +27,33 @@ export function withLineEnding(text: string, ending: string): string {
   return text.split(CRLF).join(LF).split(LF).join(ending)
 }
 
+/**
+ * How a text file is stored. Windows PowerShell 5's `>` writes UTF-16 with a byte order mark, and so do .reg
+ * exports and some logs; those were refused as binary (every other byte is zero), found by no search and
+ * changed by no edit. A UTF-8 byte order mark is kept off the text, where it was an invisible first character,
+ * and put back on writing. Whatever a file was, it is written back the same way.
+ */
+export type TextEncoding = "utf8" | "utf8-bom" | "utf16le" | "utf16be"
+
+/** A file's text and how it was stored; undefined when it is not text (zero bytes and no UTF-16 mark). */
+export function decodeText(bytes: Buffer): { text: string; encoding: TextEncoding } | undefined {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return { text: bytes.subarray(2).toString("utf16le"), encoding: "utf16le" }
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return { text: Buffer.from(bytes.subarray(2, 2 + ((bytes.length - 2) & ~1))).swap16().toString("utf16le"), encoding: "utf16be" }
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return { text: bytes.subarray(3).toString("utf8"), encoding: "utf8-bom" }
+  if (bytes.subarray(0, 8192).includes(0)) return undefined
+  return { text: bytes.toString("utf8"), encoding: "utf8" }
+}
+
+/** Text as bytes, stored the way `encoding` says. */
+export function encodeText(text: string, encoding: TextEncoding = "utf8"): Buffer {
+  if (encoding === "utf16le") return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, "utf16le")])
+  if (encoding === "utf16be") return Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, "utf16le").swap16()])
+  if (encoding === "utf8-bom") return Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text, "utf8")])
+  return Buffer.from(text, "utf8")
+}
+
+export const isTextEncoding = (value: unknown): value is TextEncoding => value === "utf8" || value === "utf8-bom" || value === "utf16le" || value === "utf16be"
+
 const count = (text: string, piece: string) => (piece ? text.split(piece).length - 1 : 0)
 const squeezed = (text: string) => text.split(/\s+/).filter(Boolean).join(" ")
 

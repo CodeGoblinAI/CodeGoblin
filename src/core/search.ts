@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { resolveInside, SKIP_DIRS } from "./tools"
 import { isSecretPath } from "./secret-files"
+import { decodeText } from "./text-edit"
 
 /**
  * Finding code.
@@ -231,14 +232,16 @@ export async function grepFiles(
 
     if (stat.size > SNIFF_ABOVE_BYTES && await looksBinary(absolute)) continue
 
+    // Skip binaries rather than filling the context with noise - but UTF-16 with its byte order mark is text
+    // (a Windows PowerShell log, a .reg export) and is searched as text.
     let content: string
     try {
-      content = await fs.readFile(absolute, "utf8")
+      const decoded = decodeText(await fs.readFile(absolute))
+      if (!decoded) continue
+      content = decoded.text
     } catch {
       continue
     }
-    // Skip binaries rather than filling the context with noise.
-    if (content.includes("\u0000")) continue
 
     const lines = content.split(String.fromCharCode(10))
     for (let index = 0; index < lines.length; index++) {
@@ -260,7 +263,7 @@ async function looksBinary(absolute: string): Promise<boolean> {
   try {
     handle = await fs.open(absolute, "r")
     const { bytesRead, buffer } = await handle.read(Buffer.alloc(4096), 0, 4096, 0)
-    return buffer.subarray(0, bytesRead).includes(0)
+    return decodeText(buffer.subarray(0, bytesRead)) === undefined
   } catch {
     return false
   } finally {

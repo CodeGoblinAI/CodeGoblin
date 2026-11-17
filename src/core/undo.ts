@@ -3,6 +3,7 @@ import path from "node:path"
 import crypto from "node:crypto"
 import { readFileSync, realpathSync } from "node:fs"
 import { resolveInside } from "./tools"
+import { decodeText, encodeText, isTextEncoding, type TextEncoding } from "./text-edit"
 
 const BACKSLASH = String.fromCharCode(92)
 
@@ -22,8 +23,14 @@ const BACKSLASH = String.fromCharCode(92)
  * overwrite work it never saw.
  */
 
-/** before is null when the file did not exist, so undo removes it again. */
-export type Snapshot = { path: string; before: string | null }
+/**
+ * before is null when the file did not exist, so undo removes it again. `encoding` is how the file was stored
+ * when it was not plain UTF-8: UTF-16 or a byte order mark (put back as they were), or "base64" for a file
+ * that was not text at all, whose bytes are kept exactly. Snapshots were all read as UTF-8, so undoing a
+ * change to a UTF-16 file rewrote it as something else, and a binary file came back damaged.
+ */
+export type SnapshotEncoding = TextEncoding | "base64"
+export type Snapshot = { path: string; before: string | null; encoding?: SnapshotEncoding }
 export type Checkpoint = {
   label: string
   files: Snapshot[]
@@ -70,21 +77,35 @@ async function missingAncestors(root: string, relative: string): Promise<string[
 
 const hashOf = (text: string | null) => (text === null ? null : crypto.createHash("sha256").update(text).digest("hex"))
 
-function readOrNullSync(root: string, relative: string): string | null {
+/** A file's contents as a snapshot keeps them: its text, and how it was stored when that was not plain UTF-8. */
+function snapshotOf(bytes: Buffer): { before: string; encoding?: SnapshotEncoding } {
+  const decoded = decodeText(bytes)
+  if (!decoded) return { before: bytes.toString("base64"), encoding: "base64" }
+  return decoded.encoding === "utf8" ? { before: decoded.text } : { before: decoded.text, encoding: decoded.encoding }
+}
+
+function readSnapshotSync(root: string, relative: string): { before: string | null; encoding?: SnapshotEncoding } {
   try {
-    return readFileSync(resolveInside(root, relative), "utf8")
+    return snapshotOf(readFileSync(resolveInside(root, relative)))
   } catch {
-    return null
+    return { before: null }
   }
 }
 
-async function readOrNull(root: string, relative: string): Promise<string | null> {
+async function readSnapshot(root: string, relative: string): Promise<{ before: string | null; encoding?: SnapshotEncoding }> {
   try {
-    return await fs.readFile(resolveInside(root, relative), "utf8")
+    return snapshotOf(await fs.readFile(resolveInside(root, relative)))
   } catch {
-    return null
+    return { before: null }
   }
 }
+
+const readOrNullSync = (root: string, relative: string) => readSnapshotSync(root, relative).before
+const readOrNull = async (root: string, relative: string) => (await readSnapshot(root, relative)).before
+
+/** The bytes a snapshot stands for. */
+const bytesOf = (snapshot: Snapshot): Buffer =>
+  snapshot.encoding === "base64" ? Buffer.from(snapshot.before ?? "", "base64") : encodeText(snapshot.before ?? "", snapshot.encoding)
 
 /** Put a checkpoint's files back, returning what was there so it can be replayed. */
 async function restore(root: string, checkpoint: Checkpoint): Promise<Checkpoint> {
@@ -100,14 +121,14 @@ async function restore(root: string, checkpoint: Checkpoint): Promise<Checkpoint
   }
   const inverse: Snapshot[] = []
   for (const snapshot of checkpoint.files) {
-    inverse.push({ path: snapshot.path, before: await readOrNull(root, snapshot.path) })
+    inverse.push({ path: snapshot.path, ...(await readSnapshot(root, snapshot.path)) })
     const target = resolveInside(root, snapshot.path)
     if (snapshot.before === null) {
       await fs.rm(target, { force: true })
       continue
     }
     await fs.mkdir(path.dirname(target), { recursive: true })
-    await fs.writeFile(target, snapshot.before, "utf8")
+    await fs.writeFile(target, bytesOf(snapshot))
   }
   // Deepest first, and rmdir only removes an empty directory - so a folder
   // that has since been given other contents is left alone.
@@ -136,7 +157,11 @@ function validCheckpoint(root: string, value: unknown): Checkpoint | undefined {
   }
   if (!raw.dirs.every(inside)) return undefined
   if (!raw.after.every((hash) => hash === null || (typeof hash === "string" && HASH.test(hash)))) return undefined
-  return { label: raw.label.slice(0, 60), files: raw.files.map((snapshot) => ({ path: snapshot.path, before: snapshot.before })), dirs: [...raw.dirs], after: [...raw.after] }
+  return {
+    label: raw.label.slice(0, 60),
+    files: raw.files.map((snapshot) => ({ path: snapshot.path, before: snapshot.before, ...(snapshot.encoding === "base64" || isTextEncoding(snapshot.encoding) ? { encoding: snapshot.encoding } : {}) })),
+    dirs: [...raw.dirs], after: [...raw.after],
+  }
 }
 
 export class History {
@@ -180,9 +205,10 @@ export class History {
     for (const dir of await missingAncestors(root, relative)) {
       if (!this.open.dirs.includes(dir)) this.open.dirs.push(dir)
     }
-    const before = await readOrNull(root, relative)
-    if (!this.origin.has(relative)) this.origin.set(relative, before)
-    this.open.files.push({ path: relative, before })
+    const snapshot = await readSnapshot(root, relative)
+    // The diff baseline is for reading: a file that was not text has nothing in it worth a diff.
+    if (!this.origin.has(relative)) this.origin.set(relative, snapshot.encoding === "base64" ? null : snapshot.before)
+    this.open.files.push({ path: relative, ...snapshot })
   }
 
   /** Every file this session has touched, and how it looked to begin with. */

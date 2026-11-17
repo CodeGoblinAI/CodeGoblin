@@ -5,7 +5,7 @@ import { Global } from "../platform/paths"
 import { inRepoCache } from "./repos"
 import fs from "node:fs/promises"
 import path from "node:path"
-import { lineEndingOf, replaceOnce, withLineEnding } from "./text-edit"
+import { decodeText, encodeText, lineEndingOf, replaceOnce, withLineEnding } from "./text-edit"
 import { isSecretPath } from "./secret-files"
 
 /**
@@ -213,7 +213,7 @@ export const TOOLS: Tool[] = [
   {
     name: "read_file",
     concurrent: true,
-    description: "Read a UTF-8 text file, relative to the working directory (or an absolute path inside a repository repo_clone fetched). An image (png, jpg, gif, webp) is shown to you as a picture if you can see images.",
+    description: "Read a text file (UTF-8 or UTF-16), relative to the working directory (or an absolute path inside a repository repo_clone fetched). An image (png, jpg, gif, webp) is shown to you as a picture if you can see images.",
     parameters: {
       type: "object",
       properties: {
@@ -228,10 +228,12 @@ export const TOOLS: Tool[] = [
       const bytes = await fs.readFile(target)
       // Not text: say what it is. Decoded as text, a program or an archive is a screen of noise that costs
       // thousands of tokens and tells the model nothing. (A picture is handled before this is reached.)
-      if (bytes.subarray(0, 8192).includes(0)) {
+      // UTF-16 with its byte order mark is text (text-edit.ts decodeText).
+      const decoded = decodeText(bytes)
+      if (!decoded) {
         return `error: ${args.path} is not a text file (${bytes.length.toLocaleString("en-US")} bytes of binary data). It cannot be read as text; use a command that understands this kind of file.`
       }
-      return lineWindow(bytes.toString("utf8"), args.offset, args.limit)
+      return lineWindow(decoded.text, args.offset, args.limit)
     },
   },
   {
@@ -256,7 +258,7 @@ export const TOOLS: Tool[] = [
   {
     name: "write_file",
     writes: true,
-    description: "Write a UTF-8 text file, creating parent directories as needed.",
+    description: "Write a text file, creating parent directories as needed. An existing file keeps its encoding and line endings.",
     parameters: {
       type: "object",
       properties: {
@@ -271,9 +273,11 @@ export const TOOLS: Tool[] = [
       await fs.mkdir(path.dirname(target), { recursive: true })
       // Rewriting a file keeps the line endings it had. A model writes plain newlines, and a file that ended
       // its lines the Windows way would otherwise come back with every line changed as far as git can tell.
-      const existing = await fs.readFile(target, "utf8").catch(() => undefined)
-      const content = existing !== undefined && lineEndingOf(existing) !== "\n" ? withLineEnding(String(args.content), lineEndingOf(existing)) : args.content
-      await fs.writeFile(target, content, "utf8")
+      // So does its encoding: a UTF-16 file stays UTF-16, a UTF-8 file with a byte order mark keeps it.
+      const was = await fs.readFile(target).then(decodeText, () => undefined)
+      const existing = was?.text
+      const content = existing !== undefined && lineEndingOf(existing) !== "\n" ? withLineEnding(String(args.content), lineEndingOf(existing)) : String(args.content)
+      await fs.writeFile(target, encodeText(content, was?.encoding))
       const lines = String(args.content).split("\n").length
       return `wrote ${path.relative(root, target)} (${lines} lines)`
     },
@@ -296,12 +300,14 @@ export const TOOLS: Tool[] = [
     run: async (args, root) => {
       const target = resolveInside(root, args.path)
       assertWritable(path.relative(root, target))
-      const before = await fs.readFile(target, "utf8")
+      const read = decodeText(await fs.readFile(target))
+      if (!read) return `error: ${args.path} is not a text file; it cannot be edited as text`
+      const before = read.text
       // Refuse rather than guess: a silent wrong edit is worse than an error. But find the text the way a
       // model writes it - with plain newlines - in a file that ends its lines the Windows way (text-edit.ts).
       const replaced = replaceOnce(before, String(args.old_string ?? ""), String(args.new_string ?? ""), String(args.path))
       if ("error" in replaced) return replaced.error
-      await fs.writeFile(target, replaced.text, "utf8")
+      await fs.writeFile(target, encodeText(replaced.text, read.encoding))
       return diff(before, replaced.text, path.relative(root, target)) + (replaced.note ? NEWLINE + replaced.note : "")
     },
   },
