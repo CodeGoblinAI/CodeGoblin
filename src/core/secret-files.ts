@@ -22,8 +22,21 @@ const FOLDERS = new Set([".ssh", ".aws", ".gnupg", ".azure"])
 /** Templates that hold no values, which projects commit on purpose. */
 const TEMPLATE = /\.(example|sample|template|dist|defaults?)$/i
 
+/**
+ * A path's parts as Windows reads them. `.env::$DATA` names the file's own contents (an NTFS stream), and
+ * `.env.` or `.env ` open `.env` itself in cmd.exe, which drops a name's trailing dots and spaces. Each was a
+ * way to read a secret file without its name matching.
+ */
+function partsOf(target: string): string[] {
+  return target.split(BACKSLASH).join("/").split("/").filter(Boolean).map((part, index) => {
+    const lower = part.toLowerCase()
+    if (index === 0 && /^[a-z]:$/.test(lower)) return lower
+    return lower.replace(/:.*$/, "").replace(/[. ]+$/, "")
+  }).filter(Boolean)
+}
+
 export function isSecretPath(target: string): boolean {
-  const parts = target.split(BACKSLASH).join("/").split("/").filter(Boolean).map((part) => part.toLowerCase())
+  const parts = partsOf(target)
   const name = parts.at(-1)
   if (!name) return false
   if (TEMPLATE.test(name)) return false

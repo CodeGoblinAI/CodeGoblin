@@ -6,6 +6,7 @@ import { inRepoCache } from "./repos"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { lineEndingOf, replaceOnce, withLineEnding } from "./text-edit"
+import { isSecretPath } from "./secret-files"
 
 /**
  * Tools the model can call.
@@ -56,11 +57,45 @@ export function resolveReadable(root: string, target: string): string {
   return resolveInside(root, target)
 }
 
+/**
+ * A file that holds secrets, reached by another spelling of its name.
+ *
+ * Secret files are asked about by name, in every mode. Windows gives most files a second, short name -
+ * `.env` is also `ENV~1`, `auth.json` is `AUTH~1.JSO` - and no check that goes by names can know them. So a
+ * name with a `~` in it that exists is looked up, and when its real name is a secret one it is refused, with
+ * the real name to use instead; asked for by that, it is asked about like any other.
+ */
+export function secretAlias(root: string, target: string): string | undefined {
+  if (process.platform !== "win32" || !target.includes("~") || isSecretPath(target)) return undefined
+  try {
+    const real = realpathSync.native(path.resolve(root, target))
+    return isSecretPath(real) ? real : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The first word of a command that is another name for a secret file. */
+export function secretAliasIn(root: string, command: string): { said: string; real: string } | undefined {
+  if (process.platform !== "win32" || !command.includes("~")) return undefined
+  for (const word of command.split(/[\s"'`|&;<>()=,]+/)) {
+    const real = word.includes("~") ? secretAlias(root, word) : undefined
+    if (real) return { said: word, real }
+  }
+  return undefined
+}
+
+function aliasRefusal(said: string, real: string): string {
+  return `error: "${said}" is another name for ${path.basename(real)}, which holds secrets. Nothing was run. Ask for it by its real name, ${path.basename(real)}, and the user will be asked.`
+}
+
 export function resolveInside(root: string, target: string): string {
   const absolute = path.resolve(root, target)
   if (escapes(root, absolute)) {
     throw new Error(`path escapes the working directory: ${target}`)
   }
+  const alias = secretAlias(root, target)
+  if (alias) throw new Error(aliasRefusal(target, alias).slice("error: ".length))
   // A link inside the project can point anywhere. Seen with a real model: a
   // junction named "linked" let read_file return a file from outside the
   // project, because the check above only looks at the name. So where the
@@ -109,6 +144,16 @@ export function assertWritable(relative: string) {
   const name = segments[segments.length - 1] ?? ""
   if (PROTECTED_FILES.has(name)) {
     throw new Error(`refusing to write to a lockfile: ${relative}`)
+  }
+  // Windows keeps some names for devices in every folder. Written through the long-path form the file tools
+  // use, `nul` or `CON` became a real file that Explorer, del and most programs then cannot open or remove;
+  // a name ending in a dot or a space is the same trap.
+  if (process.platform === "win32") {
+    const reserved = segments.find((segment) => /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)(\..*)?$/i.test(segment) || (/[. ]$/.test(segment) && segment !== "." && segment !== ".."))
+    if (reserved) throw new Error(`refusing to write "${reserved}": Windows keeps that name for a device (or drops its trailing dot or space), and a file made with it cannot be opened or deleted normally. Choose another name.`)
+    // `notes.txt:payload` is a hidden stream inside notes.txt: written, it shows in no folder listing and no size.
+    const stream = segments.find((segment) => segment.includes(":"))
+    if (stream) throw new Error(`refusing to write "${stream}": a colon in a name writes a hidden stream inside another file on Windows. Choose another name.`)
   }
 }
 
@@ -314,8 +359,10 @@ export const EXTRA_TOOLS: Tool[] = [
     },
     run: async (args, root, signal, progress) => {
       const { startJob, runForeground } = await import("./jobs")
-      if (args.background === true) return startJob(String(args.command ?? ""), root, { signal })
       const command = String(args.command ?? "")
+      const alias = secretAliasIn(root, command)
+      if (alias) return aliasRefusal(alias.said, alias.real)
+      if (args.background === true) return startJob(command, root, { signal })
       return withShellHint(command, plainOutput(await runForeground(command, root, { timeoutMs: shellWait(args.timeout_ms), signal, onOutput: progress ? (text) => progress(stripColour(text)) : undefined })))
     },
   },
