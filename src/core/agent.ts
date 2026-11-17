@@ -11,6 +11,7 @@ import { imageTypeOf, readImageFile } from "./mention"
 const RETRY_WAITS = [1000, 3000, 8000]
 /** Answers that mean "not now" rather than "no": too many requests, and the server-side failures. */
 const RETRY_STATUS = new Set([408, 429, 500, 502, 503, 504, 529])
+import { patiently, Stalled } from "./stall"
 
 /** How many identical results in a turn before the model is told it is repeating itself. */
 const REPEAT_NUDGES = [3, 5, 8]
@@ -109,6 +110,8 @@ export type AgentEvent =
   | { type: "compacted"; before: number; after: number }
   /** The provider was busy or unreachable; the request is being sent again after `waitMs`. */
   | { type: "retry"; attempt: number; of: number; waitMs: number; reason: string }
+  /** The provider has sent nothing for `ms`: said so a surface can tell a silent provider from a thinking model. */
+  | { type: "quiet"; ms: number; /** A model on this machine: never given up on. */ endless?: boolean }
   | { type: "plan"; todos: Todo[] }
   /** `cached` is the part of `input` the provider read from its prompt cache, when it says. */
   | { type: "spend"; input: number; output: number; cached?: number; /** What the provider says the request cost, when it says. */ dollars?: number }
@@ -503,7 +506,7 @@ async function* runTurns(input: {
     } else {
     // Worked out once, outside the retry: a model with nowhere to send a message is an error, not a busy signal.
     const endpoint = chatEndpoint(input.provider, input.modelId)
-    const send = () => fetch(endpoint, {
+    const send = (signal?: AbortSignal) => fetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders(input.provider, input.apiKey) },
       body: JSON.stringify({
@@ -525,7 +528,7 @@ async function* runTurns(input: {
         ...(input.provider.local || input.provider.usageOnStream ? { stream_options: { include_usage: true } } : {}),
         ...(input.effort ? { reasoning_effort: input.effort } : {}),
       }),
-      signal: input.signal,
+      signal,
     }).catch((error: unknown) => {
       if (!input.provider.local || input.signal?.aborted) throw error
       if (input.provider.runtime) throw new Error(localRuntime.status().lastError ?? `CG-Next's local model server stopped answering; /local shows its state.`, { cause: error })
@@ -540,7 +543,10 @@ async function* runTurns(input: {
     for (let attempt = 0; ; attempt++) {
       let failure: unknown
       let got: Response | undefined
-      try { got = await send() } catch (error) { failure = error }
+      // Its own way to end it, for a provider that never answers; a stop still ends it too.
+      const silent = new AbortController()
+      const signal = input.signal ? AbortSignal.any([input.signal, silent.signal]) : silent.signal
+      try { got = yield* patiently(send(signal), () => silent.abort(), input.provider.label, { endless: Boolean(input.provider.local) }) } catch (error) { failure = error }
       const again = !input.provider.local && !input.signal?.aborted && attempt < waits.length && (got ? RETRY_STATUS.has(got.status) : true)
       if (!again) {
         if (!got) throw failure
@@ -550,7 +556,7 @@ async function* runTurns(input: {
       const asked = got ? Number(got.headers.get("retry-after")) : NaN
       const waitMs = Math.min(30_000, Number.isFinite(asked) && asked > 0 ? asked * 1000 : waits[attempt]!)
       await got?.body?.cancel().catch(() => {})
-      yield { type: "retry", attempt: attempt + 1, of: waits.length, waitMs, reason: got ? "HTTP " + got.status : "no connection" }
+      yield { type: "retry", attempt: attempt + 1, of: waits.length, waitMs, reason: got ? "HTTP " + got.status : failure instanceof Stalled ? "no reply" : "no connection" }
       await new Promise<void>((resolve) => {
         const timer = setTimeout(done, waitMs)
         function done() { clearTimeout(timer); input.signal?.removeEventListener("abort", done); resolve() }
@@ -571,7 +577,7 @@ async function* runTurns(input: {
     let counted: StreamUsage | undefined
 
     for (;;) {
-      const { done, value } = await reader.read()
+      const { done, value } = yield* patiently(reader.read(), () => { void reader.cancel().catch(() => {}) }, input.provider.label, { endless: Boolean(input.provider.local) })
       if (done) break
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split("\n")

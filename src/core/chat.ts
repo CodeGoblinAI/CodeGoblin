@@ -4,6 +4,7 @@ import { verifyLocalModel } from "./local-provider"
 import { localRuntime } from "./local-runtime"
 import { claudeChat } from "./claude-cli"
 import { cliCompletion } from "./cli-completion"
+import { within } from "./stall"
 
 export type Role = "user" | "assistant" | "system"
 export type Message = { role: Role; content: string }
@@ -42,7 +43,10 @@ export async function* streamChat(input: {
     throw new Error(`${input.provider.label} generates media, not conversation - pick a text model with /model`)
   }
   await verifyLocalModel(input.provider, input.modelId, input.signal)
-  const response = await fetch(input.provider.baseUrl, {
+  // A provider that goes silent is given up on (see stall.ts), as in the agent loop.
+  const silent = new AbortController()
+  const signal = input.signal ? AbortSignal.any([input.signal, silent.signal]) : silent.signal
+  const response = await within(fetch(input.provider.baseUrl, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -54,8 +58,8 @@ export async function* streamChat(input: {
       messages: input.messages,
       stream: true,
     }),
-    signal: input.signal,
-  })
+    signal,
+  }), () => silent.abort(), input.provider.label, { endless: Boolean(input.provider.local) })
 
   if (!response.ok || !response.body) {
     const detail = await response.text().catch(() => "")
@@ -67,7 +71,7 @@ export async function* streamChat(input: {
   let buffer = ""
 
   while (true) {
-    const { done, value } = await reader.read()
+    const { done, value } = await within(reader.read(), () => { void reader.cancel().catch(() => {}) }, input.provider.label, { endless: Boolean(input.provider.local) })
     if (done) break
     buffer += decoder.decode(value, { stream: true })
 

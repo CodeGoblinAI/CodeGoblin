@@ -2814,6 +2814,8 @@ async function submit() {
   let buffer = ""
   let finished = false
   let interrupted = false
+  /** A note about the provider (busy, or silent) is showing. */
+  let providerNote = false
 
   try {
     for (;;) {
@@ -2835,6 +2837,16 @@ async function submit() {
           if (event.model && event.model !== currentModel) setModel(event.model)
         }
         if (event.type === "stopped") stopRequested = true
+        // Silence from the provider, said as that: a spinner alone looks the same whether a model is thinking
+        // or the provider has stopped answering. Anything that arrives takes the note away.
+        if (event.type === "quiet") {
+          if (hint) hint.textContent = event.endless
+            ? "no output from the local model for " + Math.round(event.ms / 1000) + "s - reading a long prompt on the CPU can take minutes. Stop ends it"
+            : "no reply from the provider for " + Math.round(event.ms / 1000) + "s - it may be busy, or thinking without showing it. Stop ends it; it is given up on after 5 minutes"
+          providerNote = true
+          continue
+        }
+        if (providerNote && event.type !== "retry") { if (hint) hint.textContent = ""; providerNote = false }
         if (event.type === "thinking") {
           const stick = atBottom()
           if (!thinking && body && stepThinking) thinking = stepThinking
@@ -2964,7 +2976,8 @@ async function submit() {
         }
         if (event.type === "retry") {
           const hintEl = document.getElementById("hint")
-          if (hintEl) hintEl.textContent = (event.reason === "no connection" ? "the provider could not be reached" : "the provider is busy (" + event.reason + ")") + " - trying again in " + Math.round(event.waitMs / 1000) + "s (" + event.attempt + " of " + event.of + ")"
+          if (hintEl) hintEl.textContent = (event.reason === "no connection" ? "the provider could not be reached" : event.reason === "no reply" ? "the provider never answered" : "the provider is busy (" + event.reason + ")") + " - trying again in " + Math.round(event.waitMs / 1000) + "s (" + event.attempt + " of " + event.of + ")"
+          providerNote = true
           continue
         }
         if (event.type === "compacted") {

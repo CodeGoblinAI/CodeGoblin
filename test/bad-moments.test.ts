@@ -34,6 +34,69 @@ test("an error sent inside the stream is an error, not an answer that ends with 
   expect((await play([() => sse({ choices: [{ delta: { content: "half an ans" } }] }, { error: "connection reset" })])).error).toContain("connection reset")
 })
 
+/** A stream that sends what it is given and then nothing more, ever, without closing. */
+const silentAfter = (...chunks: unknown[]) => () => new Response(new ReadableStream({
+  start(controller) { for (const chunk of chunks) controller.enqueue(new TextEncoder().encode("data: " + JSON.stringify(chunk) + NL + NL)) },
+}))
+
+test("a provider that goes silent part way through is given up on, saying so, and said to be quiet first", async () => {
+  process.env.CG_STALL_MS = "1200"
+  try {
+    const started = Date.now()
+    const played = await play([silentAfter({ choices: [{ delta: { content: "half an ans" } }] })])
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(played.error).toContain("Test sent nothing for 1 second, so CG-Next stopped waiting for it")
+    expect(played.text).toBe("half an ans")
+    // Before giving up, the surfaces were told how long it had been silent.
+    const quiet = played.events.filter((event) => event.type === "quiet").map((event) => (event as { ms: number }).ms)
+    expect(quiet.length).toBeGreaterThan(1)
+    expect(quiet).toEqual([...quiet].sort((a, b) => a - b))
+  } finally {
+    delete process.env.CG_STALL_MS
+  }
+})
+
+test("a provider that never answers at all is asked again, then given up on", async () => {
+  process.env.CG_STALL_MS = "600"
+  try {
+    let asked = 0
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      asked++
+      // Never answers, but does end when it is told to.
+      return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))))
+    }) as typeof fetch
+    const events: AgentEvent[] = []
+    let error = ""
+    try { for await (const event of runAgent({ provider, modelId: "m", apiKey: "k", messages: [{ role: "user", content: "go" }], root, maxTurns: 2, retryWaits: [10] })) events.push(event) } catch (caught) { error = String(caught instanceof Error ? caught.message : caught) }
+    expect(asked).toBe(2)
+    expect(events.some((event) => event.type === "retry" && (event as { reason: string }).reason === "no reply")).toBe(true)
+    expect(error).toContain("sent nothing for")
+  } finally {
+    delete process.env.CG_STALL_MS
+  }
+})
+
+test("a model on this machine is never given up on: reading a long prompt on a CPU sends nothing for minutes", async () => {
+  process.env.CG_STALL_MS = "300"
+  try {
+    const local: Provider = { ...provider, id: "llama", local: true }
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      // The server is asked which models it has first.
+      if (!init?.method || init.method === "GET") return Response.json({ data: [{ id: "m" }] })
+      await Bun.sleep(1200)
+      return sse({ choices: [{ delta: { content: "read it all" } }] })
+    }) as typeof fetch
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({ provider: local, modelId: "m", apiKey: "k", messages: [{ role: "user", content: "go" }], root, maxTurns: 2 })) events.push(event)
+    expect(events.filter((event) => event.type === "text").map((event) => (event as { delta: string }).delta).join("")).toBe("read it all")
+    const quiet = events.filter((event) => event.type === "quiet") as { ms: number; endless?: boolean }[]
+    expect(quiet.length).toBeGreaterThan(0)
+    expect(quiet.every((event) => event.endless === true)).toBe(true)
+  } finally {
+    delete process.env.CG_STALL_MS
+  }
+})
+
 test("an answer with nothing in it says so", async () => {
   const messages: Message[] = [{ role: "user", content: "go" }]
   const played = await play([() => sse({ choices: [{ delta: {} }] })], messages)

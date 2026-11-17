@@ -3498,6 +3498,8 @@ async function send() {
     }
     await mcp.settled(10_000)
     if (starting.length) status = ""
+    /** A note about the provider (busy, or silent) is on the status line; anything that arrives takes it off. */
+    let providerNote = false
     for await (const event of runAgent({
       provider: selection.provider,
       modelId: selection.model.id,
@@ -3525,6 +3527,17 @@ async function send() {
     })) {
       session.activity ??= normaliseActivity(undefined)
       recordActivity(session.activity, event)
+      // Silence from the provider, said as that: a spinner alone looks the same whether a model is thinking
+      // or the provider has stopped answering.
+      if (event.type === "quiet") {
+        status = selection.provider.local
+          ? "no output from the local model for " + ago(event.ms) + " - reading a long prompt on the CPU can take minutes. Esc twice stops"
+          : "no reply from " + selection.provider.label + " for " + ago(event.ms) + " - it may be busy, or thinking without showing it. Esc twice stops; it is given up on after 5m"
+        providerNote = true
+        render()
+        continue
+      }
+      if (providerNote && event.type !== "retry") { status = ""; providerNote = false }
       if (event.type === "thinking") {
         if (!stepThinking) {
           stepThinking = { kind: "thinking", text: "", started: Date.now() }
@@ -3565,7 +3578,8 @@ async function send() {
         plan = event.todos
       }
       if (event.type === "retry") {
-        status = selection.provider.label + " " + (event.reason === "no connection" ? "could not be reached" : "is busy (" + event.reason + ")") + " - trying again in " + Math.round(event.waitMs / 1000) + "s (" + event.attempt + " of " + event.of + ")"
+        status = selection.provider.label + " " + (event.reason === "no connection" ? "could not be reached" : event.reason === "no reply" ? "never answered" : "is busy (" + event.reason + ")") + " - trying again in " + Math.round(event.waitMs / 1000) + "s (" + event.attempt + " of " + event.of + ")"
+        providerNote = true
         render()
         continue
       }
