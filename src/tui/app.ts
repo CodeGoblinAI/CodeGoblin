@@ -535,7 +535,19 @@ function cancelPending() {
   waitingAsks.length = 0
   pendingChoice = 0
   for (const ask of asks) ask.resolve("reject")
+  draftBack()
   render()
+}
+
+/** When the newest approval question appeared: Enter just after it is taken for typing, not for an answer. */
+let pendingSince = 0
+const PENDING_GRACE_MS = 700
+/** A draft put aside for an approval question, given back once no question is waiting. */
+let draftAside: { text: string; cursor: number } | undefined
+function draftBack() {
+  if (pending || !draftAside) return
+  if (!input) { input = draftAside.text; cursor = Math.min(draftAside.cursor, input.length) }
+  draftAside = undefined
 }
 
 /**
@@ -597,6 +609,17 @@ const permissions = Permissions.withConfig(
       else {
         pending = ask
         pendingChoice = 0
+        pendingSince = Date.now()
+        // A question that arrived while a follow-up was being typed was never drawn: the box only shows over an
+        // empty prompt, so the turn waited, invisibly, until the prompt happened to be emptied. The draft is put
+        // aside - kept, and given back once this is answered - and the question takes its place.
+        if (input && !secret && !renaming) {
+          draftAside = { text: input, cursor }
+          input = ""
+          cursor = 0
+          anchor = undefined
+          palette = undefined
+        }
       }
       render()
     })
@@ -1331,6 +1354,9 @@ function draw() {
     ? compactHints ? "enter · esc close" : "up/down · enter choose · esc close"
     : pending && !input
     ? compactHints ? "enter confirm · esc reject" : "up/down · enter confirm · esc reject"
+    // A question waits behind what is being typed (a / command, say): said, so the turn is not left waiting unseen.
+    : pending
+    ? compactHints ? "a question waits · empty the box" : "a question about a tool call waits - empty the box to answer it"
     : asking && !pending
     ? asking.typing ? "enter answers \u00b7 esc back to the choices" : compactHints ? "number or enter \u00b7 esc" : "up/down \u00b7 number or enter picks \u00b7 esc dismiss"
     : streaming
@@ -3911,6 +3937,7 @@ function changePermissionMode(mode: PermissionMode) {
     else if (!pending) pending = ask
     else waitingAsks.push(ask)
   }
+  draftBack()
 }
 
 /**
@@ -4591,8 +4618,17 @@ process.stdin.on("data", (chunk) => {
         const ask = pending!
         pending = waitingAsks.shift()
         pendingChoice = 0
+        if (pending) pendingSince = Date.now()
         ask.resolve(decision)
+        draftBack()
         render()
+      }
+      // When it took the place of a draft, the keys just after it appears are still that typing: nobody has
+      // read the command yet, and the Enter that ends a sentence must not allow it. Letters go on the draft.
+      // Over an empty prompt it answers at once, as it always did.
+      if (draftAside && Date.now() - pendingSince < PENDING_GRACE_MS) {
+        if (pressed.type === "char") { draftAside.text += pressed.value; draftAside.cursor = draftAside.text.length }
+        continue
       }
       if (pressed.type === "up") { pendingChoice = Math.max(0, pendingChoice - 1); render(); continue }
       const choices = decisionsFor(pending.tool)

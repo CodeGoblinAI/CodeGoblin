@@ -22,10 +22,11 @@ try {
   // --- several queued, one dropped, one changed, one sent now ---
   await type(t, "slow first"); t.write("\r")
   await waitFor(t, /esc twice stops|enter queue/, 5000)
-  await type(t, "second"); t.write("\r"); await delay(300)
-  check("a queued message says how to send it now and how to take it back", /queued · ctrl\+s sends now · up takes it back/.test(screenOf(t)), screenOf(t).split("\n").filter((l) => /queued|ctrl\+s/.test(l)).join("\n"))
-  await type(t, "third"); t.write("\r"); await delay(300)
-  check("a second one waits behind it", /\+ 1 more after it/.test(screenOf(t)))
+  // Each read waits for the frame: one caught half drawn has no box in it, and fixed waits made these flaky.
+  await type(t, "second"); t.write("\r")
+  check("a queued message says how to send it now and how to take it back", await waitFor(t, /queued · ctrl\+s sends now · up takes it back/, 2500), screenOf(t).split("\n").filter((l) => /queued|ctrl\+s/.test(l)).join("\n"))
+  await type(t, "third"); t.write("\r")
+  check("a second one waits behind it", await waitFor(t, /\+ 1 more after it/, 2500))
 
   t.write(UP)
   // Read by waiting: a frame caught half drawn has no box in it.
@@ -35,8 +36,8 @@ try {
 
   t.write(UP); await delay(300)
   check("up again takes the remaining one back, and nothing is left waiting", /\| second/.test(boxOf(t)) && !/queued · ctrl\+s/.test(screenOf(t)), boxOf(t))
-  await type(t, " edited"); t.write("\r"); await delay(300)
-  check("changed and queued again", /second edited/.test(screenOf(t)) && /queued · ctrl\+s/.test(screenOf(t)))
+  await type(t, " edited"); t.write("\r")
+  check("changed and queued again", await waitFor(t, /second edited[\s\S]*queued · ctrl\+s|queued · ctrl\+s[\s\S]*second edited/, 2500))
 
   await type(t, "urgent"); t.write(CTRL_S)
   check("ctrl+s stops the answer and sends what is typed now", await waitFor(t, /answer to: urgent/, 12000), screenOf(t).split("\n").filter((l) => /urgent|interrupt/.test(l)).slice(-3).join("\n"))
