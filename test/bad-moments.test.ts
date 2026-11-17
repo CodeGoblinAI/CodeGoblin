@@ -123,6 +123,18 @@ test("a message larger than the model can read is not sent, and does not jam the
   expect(wideError).toContain("was not sent")
 })
 
+test("a project folder moved away while the app runs is said to be gone, and is not made again", async () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "cg-gone-"))
+  const project = path.join(parent, "project")
+  fs.mkdirSync(project)
+  fs.renameSync(project, path.join(parent, "project-renamed"))
+  // A command used to fail with "ENOENT ... uv_spawn 'cmd.exe'", as if the shell were missing.
+  expect(await runTool("shell", { command: "echo hi" }, project)).toContain("is not there any more")
+  // And a write made the folder again, empty, away from the real project.
+  expect(await runTool("write_file", { path: "b.txt", content: "y" }, project)).toContain("Nothing was run")
+  expect(fs.existsSync(project)).toBe(false)
+})
+
 test("an answer with nothing in it says so", async () => {
   const messages: Message[] = [{ role: "user", content: "go" }]
   const played = await play([() => sse({ choices: [{ delta: {} }] })], messages)

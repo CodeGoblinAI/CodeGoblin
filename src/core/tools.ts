@@ -740,6 +740,12 @@ export async function runTool(
 ): Promise<string> {
   const tool = ALL_TOOLS.find((candidate) => candidate.name === name)
   if (!tool) return `unknown tool: ${name}`
+  // The project folder moved, renamed or deleted while the app runs. A command then failed with
+  // "ENOENT ... uv_spawn 'cmd.exe'", which reads as if the shell were missing, and the first write made the
+  // folder again, empty, so the model carried on in a new folder while the real project sat elsewhere.
+  let isFolder = false
+  try { isFolder = fsSync.statSync(root).isDirectory() } catch {}
+  if (!isFolder) return `error: the project folder ${root} is not there any more - it was moved, renamed or deleted while CG-Next was open. Nothing was run. Stop here and tell the user; they can open CG-Next again in the folder's new place.`
   // What the tool says it needs, checked before it runs. Without this a missing or mistyped argument came
   // back as an error from deep inside ("The paths[1] property must be of type string"), which names nothing
   // the model sent.
