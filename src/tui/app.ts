@@ -3988,7 +3988,10 @@ function openEditor() {
   const editor = process.env.VISUAL || process.env.EDITOR || (process.platform === "win32" ? "notepad.exe" : "vi")
   out.write(ansi.pasteOff + "\x1b[?1002l\x1b[?1006l" + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
   process.stdin.setRawMode?.(false)
-  const result = spawnSync(editor, [file], { stdio: "inherit", shell: process.platform === "win32" && !/\.exe$/i.test(editor) })
+  // Through the shell on Windows (EDITOR is often "code --wait", a .cmd), the draft's path in quotes: given as
+  // an argument it was joined on unquoted, and a temp folder under "C:\Users\John Smith" opened two wrong files.
+  const viaShell = process.platform === "win32" && !/\.exe$/i.test(editor)
+  const result = viaShell ? spawnSync(editor + ' "' + file + '"', { stdio: "inherit", shell: true }) : spawnSync(editor, [file], { stdio: "inherit" })
   process.stdin.setRawMode?.(true)
   out.write(ansi.altScreen + ansi.ownMouse + ansi.pasteOn)
   applyMouse()

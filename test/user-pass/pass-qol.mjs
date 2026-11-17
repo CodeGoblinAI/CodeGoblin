@@ -39,6 +39,20 @@ try {
   check("TUI: ctrl+x e hands the draft to the editor and puts the result back unsent", /written in the editor/.test(back) && /enter sends it/.test(back), back.split("\n").filter((l) => /editor|draft/.test(l)).slice(-3).join("\n"))
 } catch (error) { check("TUI pass", false, error.message) } finally { t.kill() }
 
+// /editor where the temp folder's path has a space (and an &) in it, as under "C:\Users\John Smith": the
+// draft's path was given to the editor unquoted, and it opened the wrong files.
+{
+  const spaced = path.join(tempDir("cg-qol-temp-"), "John Smith & Co")
+  ;(await import("node:fs")).mkdirSync(spaced)
+  const u = await tui({ model, cwd: project, extraEnv: { VISUAL: `"${process.execPath}" "${path.join(here, "fake-editor.mjs")}"`, TEMP: spaced, TMP: spaced, TMPDIR: spaced } })
+  try {
+    await delay(1200)
+    u.write("draft in a spaced folder"); await delay(200)
+    u.write("\x18"); await delay(150); u.write("e"); await delay(2500)
+    check("TUI: /editor works when the temp folder's path has a space and an & in it", /written in the editor/.test(u.screen()) && /enter sends it/.test(u.screen()), u.screen().split("\n").filter((l) => /editor|draft/.test(l)).slice(-3).join("\n"))
+  } catch (error) { check("TUI spaced temp", false, error.message) } finally { u.kill() }
+}
+
 // --- Web ---
 const w = await web({ model, cwd: project })
 try {
