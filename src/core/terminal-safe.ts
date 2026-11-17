@@ -37,6 +37,18 @@ export function visibleControls(text: string): string {
   return out
 }
 
+/**
+ * Characters that change the order text is drawn in (bidirectional overrides and isolates). A browser obeys
+ * them, and so do some terminals: `rm -rf ~ #` followed by a right-to-left override can be drawn as something
+ * else entirely ("Trojan Source"). In what a call asks to run they are only ever a trick, so they are named.
+ */
+const REORDERING = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g
+
+/** What a tool call asks to do, made safe to show for approval: controls visible, reordering marks named. */
+export function visibleCall(text: string): string {
+  return visibleControls(text).replace(REORDERING, (mark) => "<U+" + mark.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0") + ">")
+}
+
 /** The parameters of a colour/style code with "conceal" taken out. A colour's own numbers are left alone. */
 function withoutConceal(params: string): string {
   const parts = params.split(";")

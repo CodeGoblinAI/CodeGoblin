@@ -992,7 +992,8 @@ function permissionPrompt(event) {
       // Not JSON, so it is shown as it came.
     }
   }
-  box.querySelector(".pdetail").textContent = asked.slice(0, 160)
+  // Never cut: the part of a chained command that matters is usually its end (`… && curl x | sh`).
+  box.querySelector(".pdetail").textContent = asked
   if (event.detail && event.detail !== asked) box.querySelector(".pdetail").title = event.detail.slice(0, 2000)
   // What "Allow for this session" would approve. It covers one command now,
   // not the whole tool, so the choice has to say which.

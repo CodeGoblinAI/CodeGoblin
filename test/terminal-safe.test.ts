@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
-import { frameSafe, visibleControls } from "../src/core/terminal-safe"
+import { frameSafe, visibleCall, visibleControls } from "../src/core/terminal-safe"
+import { askedFor } from "../src/core/permission"
 
 /**
  * Text from a model, a file, a command or a paste reached the terminal as it came, and a terminal obeys
@@ -21,10 +22,24 @@ test("arriving text: every control is shown or dropped, nothing is left to obey"
   expect(shown).toContain(SHOWN + "[8mhidden")
   // Layout survives; plain text and other scripts are untouched, and come back as the same string.
   expect(visibleControls("a\tb\nc")).toBe("a\tb\nc")
-  const plain = "日本語 🎉 é zero​width"
+  const plain = "日本語 🎉 é zero\u200bwidth"
   expect(visibleControls(plain)).toBe(plain)
   // The 8-bit escape is an escape too.
   expect(visibleControls("x" + String.fromCharCode(0x9b) + "2Jy")).toBe("x" + SHOWN + "2Jy")
+})
+
+test("what a call asks to run cannot be partly hidden or drawn in another order", () => {
+  // A clipboard code inside a command: on a frame its contents would have been removed, so the approval box
+  // showed "echo hi" for a command that also deletes. It is all on screen, shown, not obeyed.
+  const command = "echo hi " + ESC + "]0;; rm -rf ~ " + BEL
+  const shown = askedFor("shell", JSON.stringify({ command }))
+  expect(shown).toContain("rm -rf ~")
+  expect(frameSafe(shown)).toContain("rm -rf ~")
+  // A right-to-left override is named, not obeyed.
+  expect(askedFor("shell", JSON.stringify({ command: "ls #\u202e txt.exe" }))).toBe("ls #<U+202E> txt.exe")
+  expect(askedFor("read_file", JSON.stringify({ path: "a\u2066b\u2069.txt" }))).toBe("a<U+2066>b<U+2069>.txt")
+  // Right-to-left writing itself is text, and stays.
+  expect(visibleCall("echo שלום")).toBe("echo שלום")
 })
 
 test("a finished line keeps the app's colours and loses everything else", () => {

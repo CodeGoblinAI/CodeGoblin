@@ -11,7 +11,7 @@ const model = await fakeModel(async (sent) => {
   seen.push(said)
   if (/slow stream/.test(said)) return { stream: Array.from({ length: 60 }, (_, n) => ({ text: "streamed line " + (n + 1) + " of sixty, with enough words in it to wrap when the window is narrow.\n" })), gap: 60 }
   if (/one word/.test(said)) return { text: "start " + "x".repeat(3000) + " end-of-the-long-word-answer" }
-  if (/wide/.test(said)) return { text: "日本語のテキストが続きます。".repeat(8) + "\n\nemoji: 🎉🚀👩‍💻🇯🇵 done\n\ncombining: é ä ô zero​width\n\n| 列 | 値 |\n| --- | --- |\n| 名前 | 太郎 🎌 |\n\nwide-answer-finished" }
+  if (/wide/.test(said)) return { text: "日本語のテキストが続きます。".repeat(8) + "\n\nemoji: 🎉🚀👩‍💻🇯🇵 done\n\ncombining: é ä ô zero\u200bwidth\n\n| 列 | 値 |\n| --- | --- |\n| 名前 | 太郎 🎌 |\n\nwide-answer-finished" }
   if (/big table/.test(said)) return { text: "| " + Array.from({ length: 14 }, (_, n) => "column " + n).join(" | ") + " |\n| " + Array.from({ length: 14 }, () => "---").join(" | ") + " |\n| " + Array.from({ length: 14 }, (_, n) => "a fairly long cell value " + n).join(" | ") + " |\n\ntable-finished" }
   return { text: "reply to: " + said.slice(0, 50).replace(/\s+/g, " ") }
 })

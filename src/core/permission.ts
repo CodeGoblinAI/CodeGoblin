@@ -5,6 +5,7 @@ import { loadConfig, type RuleAction } from "./config"
 import { mostSpecific } from "./wildcard"
 import { isSecretPath, pathArgument, secretPathsIn } from "./secret-files"
 import { patchPaths } from "./patch"
+import { visibleCall } from "./terminal-safe"
 
 function patchOnlyEdits(detail: string): boolean {
   try {
@@ -134,7 +135,16 @@ export function toolLabel(name: string): string {
   return mcp ? mcp[1] + ": " + mcp[2] : name
 }
 
+/**
+ * Shown to a person deciding whether to allow it, so nothing in it may be hidden or reordered: a command
+ * with a terminal code in it, or a right-to-left override, could otherwise look like a different command
+ * in the very box that asks about it.
+ */
 export function askedFor(tool: string, detail: string): string {
+  return visibleCall(describeCall(tool, detail))
+}
+
+function describeCall(tool: string, detail: string): string {
   let args: Record<string, unknown> | undefined
   try {
     const parsed: unknown = JSON.parse(detail)
