@@ -1,4 +1,5 @@
 import fs from "node:fs/promises"
+import { replaceFile, writeFileWhole } from "../platform/replace-file"
 import path from "node:path"
 import { Global } from "../platform/paths"
 import type { Message } from "./agent"
@@ -165,7 +166,7 @@ export async function save(session: Session): Promise<void> {
   const target = file(session.id)
   const temporary = target + "." + newSessionId() + ".tmp"
   await fs.writeFile(temporary, JSON.stringify(session, null, 2), { encoding: "utf8", mode: 0o600 })
-  await fs.rename(temporary, target)
+  await replaceFile(temporary, target)
 }
 
 export async function load(id: string): Promise<Session | undefined> {
@@ -282,7 +283,7 @@ export async function rename(id: string, title: string): Promise<boolean> {
   const session = await load(id)
   if (!session) return false
   session.title = title.slice(0, 80)
-  await fs.writeFile(file(id), JSON.stringify(session, null, 2), "utf8")
+  await writeFileWhole(file(id), JSON.stringify(session, null, 2), 0o600)
   return true
 }
 
@@ -292,7 +293,7 @@ export async function pin(id: string, pinned: boolean): Promise<boolean> {
   if (!session) return false
   if (pinned) session.pinned = true
   else delete session.pinned
-  await fs.writeFile(file(id), JSON.stringify(session, null, 2), "utf8")
+  await writeFileWhole(file(id), JSON.stringify(session, null, 2), 0o600)
   return true
 }
 

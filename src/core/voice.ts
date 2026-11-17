@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import { replaceFileSync } from "../platform/replace-file"
 import os from "node:os"
 import path from "node:path"
 import { createHash } from "node:crypto"
@@ -133,7 +134,7 @@ export async function prepareVoice(options: { onProgress?: (state: VoiceState) =
         if (options.reuse !== false && fs.existsSync(other) && fs.statSync(other).size === asset.bytes && (await sha256Of(other)) === asset.sha256) {
           const part = path.join(dir, asset.file + ".copy")
           await fs.promises.copyFile(other, part)
-          fs.renameSync(part, path.join(dir, asset.file))
+          replaceFileSync(part, path.join(dir, asset.file), { keep: true })
           copied = true
         }
         if (!copied) {

@@ -1,4 +1,5 @@
 import os from "node:os"
+import { replaceFile } from "../platform/replace-file"
 import fs from "node:fs"
 import fsp from "node:fs/promises"
 import path from "node:path"
@@ -74,7 +75,7 @@ async function writeStore(store: Record<string, StoredAuth>): Promise<void> {
   const temporary = file + ".tmp"
   await fsp.writeFile(temporary, JSON.stringify(store, null, 2), { encoding: "utf8", mode: SECRET_MODE })
   ownerOnly(temporary)
-  await fsp.rename(temporary, file)
+  await replaceFile(temporary, file)
   await fsp.chmod(file, SECRET_MODE).catch(() => {})
 }
 

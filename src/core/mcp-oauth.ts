@@ -1,4 +1,5 @@
 import crypto from "node:crypto"
+import { replaceFile } from "../platform/replace-file"
 import dns from "node:dns/promises"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -111,7 +112,7 @@ async function saveCredential(value: Credential) {
   await fs.mkdir(path.dirname(file), { recursive: true })
   const temporary = file + "." + crypto.randomUUID() + ".tmp"
   await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
-  await fs.rename(temporary, file)
+  await replaceFile(temporary, file)
 }
 
 function tokenCredential(value: Record<string, unknown>, info: McpOAuthInfo, clientId: string, previous?: Credential): Credential {

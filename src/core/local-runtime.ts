@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import { replaceFileSync } from "../platform/replace-file"
 import net from "node:net"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
@@ -140,7 +141,7 @@ export function savePrefs(id: string, patch: ModelPrefs) {
   fs.mkdirSync(stateDir(), { recursive: true })
   const temp = prefsPath() + "." + process.pid + ".tmp"
   fs.writeFileSync(temp, JSON.stringify(all, null, 2))
-  fs.renameSync(temp, prefsPath())
+  replaceFileSync(temp, prefsPath())
 }
 
 /** Large enough to be worth offering tools to: under this, small models mostly misuse them. */

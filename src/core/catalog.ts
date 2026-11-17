@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import { writeFileWholeSync } from "../platform/replace-file"
 import path from "node:path"
 import { Global } from "../platform/paths"
 import type { Model, Provider } from "./providers"
@@ -218,7 +219,7 @@ function readAddresses(): Record<string, string> {
 function writeAddresses(all: Record<string, string>) {
   try {
     fs.mkdirSync(path.dirname(addressFile()), { recursive: true })
-    fs.writeFileSync(addressFile(), JSON.stringify(all, null, 2))
+    writeFileWholeSync(addressFile(), JSON.stringify(all, null, 2))
   } catch {
     // Not being able to remember is not a reason to stop working; the next run asks the same question.
   }

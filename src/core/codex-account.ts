@@ -1,4 +1,5 @@
 import fs from "node:fs/promises"
+import { replaceFile } from "../platform/replace-file"
 import path from "node:path"
 import { Global } from "../platform/paths"
 import { CodexRpc, object } from "./codex-rpc"
@@ -49,7 +50,7 @@ export async function codexAccount(start = () => CodexRpc.start()): Promise<Code
       await fs.mkdir(path.dirname(cache), { recursive: true })
       const temporary = cache + "." + crypto.randomUUID() + ".tmp"
       await fs.writeFile(temporary, JSON.stringify(snapshot), { mode: 0o600 })
-      await fs.rename(temporary, cache)
+      await replaceFile(temporary, cache)
     })().catch(() => {})
     return snapshot
   } catch {

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises"
+import { writeFileWhole } from "../platform/replace-file"
 import path from "node:path"
 import { Global } from "../platform/paths"
 import type { MediaKind } from "./media"
@@ -488,7 +489,7 @@ export async function loadMedia(): Promise<MediaSettings> {
 export async function saveMedia(settings: MediaSettings): Promise<void> {
   try {
     await fs.mkdir(path.dirname(file), { recursive: true })
-    await fs.writeFile(file, JSON.stringify(settings, null, 2), "utf8")
+    await writeFileWhole(file, JSON.stringify(settings, null, 2))
   } catch {
     // A preference that cannot be written is not worth interrupting anyone.
   }

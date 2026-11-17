@@ -1,4 +1,5 @@
 import fs from "node:fs/promises"
+import { replaceFile } from "../platform/replace-file"
 import path from "node:path"
 import { claudeExecutable } from "./claude-cli"
 import { Global } from "../platform/paths"
@@ -83,7 +84,7 @@ export async function subscriptionAccount(source: SubscriptionSource, command?: 
     await fs.mkdir(Global.Path.state, {recursive:true})
     const temporary = cache(source) + "." + crypto.randomUUID() + ".tmp"
     await fs.writeFile(temporary, JSON.stringify(snapshot), {mode:0o600})
-    await fs.rename(temporary, cache(source))
+    await replaceFile(temporary, cache(source))
   })().catch(()=>{})
   return snapshot
 }

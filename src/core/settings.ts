@@ -1,4 +1,5 @@
 import fs from "node:fs/promises"
+import { writeFileWhole } from "../platform/replace-file"
 import path from "node:path"
 import { Global } from "../platform/paths"
 import { APPEARANCES, DEFAULT_THEME, isTheme, type Appearance } from "./theme"
@@ -171,7 +172,7 @@ export async function saveModelLists(lists: { favourites?: string[]; recents?: s
 async function write(settings: Settings): Promise<void> {
   try {
     await fs.mkdir(path.dirname(file), { recursive: true })
-    await fs.writeFile(file, JSON.stringify(settings, null, 2), "utf8")
+    await writeFileWhole(file, JSON.stringify(settings, null, 2))
   } catch {
     // A preference that cannot be written is not worth interrupting anyone.
   }

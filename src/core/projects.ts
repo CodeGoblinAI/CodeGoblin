@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import { writeFileWholeSync } from "../platform/replace-file"
 import path from "node:path"
 import { Global } from "../platform/paths"
 
@@ -42,7 +43,7 @@ export function rememberProject(folder: string, now = Date.now()): Project[] {
   const next = [{ path: resolved, name: path.basename(resolved) || resolved, opened: now }, ...read().filter((project) => !same(project.path, resolved))].slice(0, KEPT)
   try {
     fs.mkdirSync(path.dirname(file()), { recursive: true })
-    fs.writeFileSync(file(), JSON.stringify(next, null, 2))
+    writeFileWholeSync(file(), JSON.stringify(next, null, 2))
   } catch {
     // A list that cannot be saved is not worth interrupting anyone over.
   }

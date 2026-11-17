@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import { replaceFileSync } from "../platform/replace-file"
 import path from "node:path"
 import { createHash } from "node:crypto"
 import { installedModels, ownedModelsDir } from "./local-runtime"
@@ -173,7 +174,7 @@ async function run(entry: CatalogEntry, progress: Progress, options: DownloadOpt
       fs.rmSync(part, { force: true })
       throw new Error(`${entry.label} did not match its pinned SHA-256 and was discarded (got ${sha.slice(0, 12)}…, expected ${entry.sha256.slice(0, 12)}…).`)
     }
-    fs.renameSync(part, final)
+    replaceFileSync(part, final, { keep: true })
     installedModels({ fresh: true })
     return final
   }

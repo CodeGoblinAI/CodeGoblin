@@ -1,4 +1,5 @@
 import fs from "node:fs/promises"
+import { writeFileWhole } from "../platform/replace-file"
 import path from "node:path"
 import { Global } from "../platform/paths"
 import { scanMemoryContent } from "../domain/memory-guard"
@@ -91,7 +92,7 @@ function isEntry(value: unknown): value is MemoryEntry {
 
 async function writeAll(entries: MemoryEntry[]): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true })
-  await fs.writeFile(file, JSON.stringify(entries, null, 2), "utf8")
+  await writeFileWhole(file, JSON.stringify(entries, null, 2))
 }
 
 export type AddInput = {
