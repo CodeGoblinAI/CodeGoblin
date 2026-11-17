@@ -1,3 +1,4 @@
+import { providerError } from "./provider-error"
 import { authHeaders, kindOf, type Provider } from "./providers"
 import { isLocalChat, verifyLocalModel } from "./local-provider"
 import { localRuntime, type Lease } from "./local-runtime"
@@ -271,6 +272,15 @@ const STOPPED_BEFORE_ANSWER = "stopped by the user before this finished - it may
  * conversation like that - so the message after a stop failed too.
  */
 export function closeOpenCalls(messages: Message[]) {
+  // A result with no call before it - a conversation cut in the wrong place - is rejected just the same, and
+  // every message after it would fail. It answers nothing, so it goes.
+  for (let at = messages.length - 1; at >= 0; at--) {
+    if (messages[at]!.role !== "tool") continue
+    let from = at
+    while (from > 0 && messages[from - 1]!.role === "tool") from--
+    const asked = from > 0 && messages[from - 1]!.role === "assistant" ? (messages[from - 1]!.tool_calls ?? []).map((call) => call.id) : []
+    if (!asked.includes(String(messages[at]!.tool_call_id))) messages.splice(at, 1)
+  }
   for (let at = 0; at < messages.length; at++) {
     const calls = messages[at]!.role === "assistant" ? (messages[at]!.tool_calls ?? []) : []
     if (!calls.length) continue
@@ -551,7 +561,7 @@ async function* runTurns(input: {
 
     if (!response.ok || !response.body) {
       const detail = await response.text().catch(() => "")
-      throw new Error(`${input.provider.label} returned ${response.status}. ${detail.slice(0, 300)}`)
+      throw new Error(providerError(input.provider, response.status, detail))
     }
 
     const reader = response.body.getReader()
@@ -583,6 +593,12 @@ async function* runTurns(input: {
         // stop. Throwing it away is why nothing could say what a session had
         // cost - the one number people want from a tool that spends their
         // money.
+        // Some providers answer 200 and then put the failure in the stream. Read as an ordinary chunk it
+        // has no text and no tool call, so the answer simply ended with nothing shown and nothing said.
+        if (chunk?.error) {
+          const said = typeof chunk.error === "string" ? chunk.error : typeof chunk.error?.message === "string" ? chunk.error.message : JSON.stringify(chunk.error)
+          throw new Error(`${input.provider.label} stopped part way through its answer: ${String(said).slice(0, 300)}`)
+        }
         const reported = readUsage(chunk?.usage, input.provider.reportsCost)
         const spend = reported && usageSince(reported, counted)
         if (reported && spend) {
@@ -638,6 +654,11 @@ async function* runTurns(input: {
     }
 
     if (calls.size === 0) {
+      // Nothing said and nothing asked for. Shown as nothing, it looks as if the app had ignored the prompt.
+      if (!text.trim() && !input.signal?.aborted) {
+        text = "(The model returned an empty answer. Ask again, or say \"continue\".)"
+        yield { type: "text", delta: text }
+      }
       input.messages.push({ role: "assistant", content: text })
       partial = ""
       // Subagents still working, or finished with results the model never
@@ -674,6 +695,8 @@ async function* runTurns(input: {
       args: unknown
       allowed: boolean
       refusal?: { reason: string; by: "rule" | "plan" | "user"; rule?: string }
+      /** Set when the call cannot be run as sent: this is its result. */
+      invalid?: string
     }[] = []
     for (const call of pending) {
       if (input.signal?.aborted) return
@@ -681,7 +704,10 @@ async function* runTurns(input: {
       try {
         args = JSON.parse(call.args || "{}")
       } catch {
-        // Leave args empty; the tool reports the failure itself.
+        // Not run with nothing in place of its arguments: the tool then complained that a path was missing,
+        // which sent the model looking for the wrong mistake. It is told what was actually wrong.
+        decided.push({ call, args: {}, allowed: true, invalid: `error: the arguments for ${call.name} were not valid JSON - cut off, or malformed: ${call.args.replace(/\s+/g, " ").slice(0, 120)}${call.args.length > 120 ? "…" : ""}. Nothing was run. Send the call again with complete JSON.` })
+        continue
       }
       // Consent happens here rather than inside the tool, so every surface
       // gets the same prompt and the model still receives a normal tool
@@ -701,8 +727,10 @@ async function* runTurns(input: {
 
     // An MCP tool is not concurrent - nothing says what it touches - and it is
     // outside undo, because what it changes is not a file this loop can see.
-    const run = (entry: { call: ToolCall; args: unknown }) =>
-      !usable(entry.call.name)
+    const run = (entry: { call: ToolCall; args: unknown; invalid?: string }) =>
+      entry.invalid
+        ? Promise.resolve(entry.invalid)
+        : !usable(entry.call.name)
         ? Promise.resolve(`error: ${entry.call.name} is not available to this agent`)
         : (entry.call.name === "task" || entry.call.name === "task_result") && !input.subagents
           ? Promise.resolve(SUBAGENTS_OFF)

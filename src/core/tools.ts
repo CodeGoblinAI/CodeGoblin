@@ -690,6 +690,20 @@ export async function runTool(
 ): Promise<string> {
   const tool = ALL_TOOLS.find((candidate) => candidate.name === name)
   if (!tool) return `unknown tool: ${name}`
+  // What the tool says it needs, checked before it runs. Without this a missing or mistyped argument came
+  // back as an error from deep inside ("The paths[1] property must be of type string"), which names nothing
+  // the model sent.
+  const given = args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {}
+  const schema = tool.parameters as { required?: string[]; properties?: Record<string, { type?: string }> }
+  for (const key of schema.required ?? []) {
+    if (given[key] === undefined || given[key] === null) return `error: ${name} needs "${key}"${schema.properties?.[key]?.type ? " (a " + schema.properties[key]!.type + ")" : ""}, and it was not given`
+  }
+  for (const [key, value] of Object.entries(given)) {
+    const wanted = schema.properties?.[key]?.type
+    if (value === undefined || value === null || !wanted || wanted === "array" || wanted === "object") continue
+    const got = typeof value
+    if ((wanted === "integer" ? "number" : wanted) !== got) return `error: ${name} takes "${key}" as a ${wanted}, and was given a ${got}`
+  }
   if (name === "apply_patch") {
     try {
       const { parsePatch, planPatch, writePatch } = await import("./patch")

@@ -1,3 +1,4 @@
+import { providerError } from "./provider-error"
 import { authHeaders, type Provider } from "./providers"
 import { verifyLocalModel } from "./local-provider"
 import { localRuntime } from "./local-runtime"
@@ -58,7 +59,7 @@ export async function* streamChat(input: {
 
   if (!response.ok || !response.body) {
     const detail = await response.text().catch(() => "")
-    throw new Error(`${input.provider.label} returned ${response.status}. ${detail.slice(0, 300)}`)
+    throw new Error(providerError(input.provider, response.status, detail))
   }
 
   const reader = response.body.getReader()
