@@ -3544,6 +3544,29 @@ async function send() {
   // Everything this turn writes is captured under one checkpoint, so /undo
   // takes back the whole answer rather than its last file.
   edits.begin(text)
+  /**
+   * The turn so far, on disk. A conversation used to be saved only when a turn ended, so a terminal closed,
+   * a crash or a power cut part way through a long turn lost the prompt and every step - while the files it
+   * had changed stayed changed, with no record of what was done or why. Saved as the prompt is sent, then
+   * after each finished step, no oftener than every two seconds.
+   */
+  let settle!: () => void
+  turnSettled = new Promise<void>((resolve) => { settle = resolve })
+  let progressSavedAt = 0
+  let progressLater: ReturnType<typeof setTimeout> | undefined
+  const saveProgress = (force = false) => {
+    const wait = 2000 - (Date.now() - progressSavedAt)
+    // Too soon after the last: saved when the two seconds are up, not dropped - the step that just finished
+    // may be the last thing to happen before the window is closed.
+    if (!force && wait > 0) { progressLater ??= setTimeout(() => { progressLater = undefined; if (streaming) saveProgress(true) }, wait); return }
+    clearTimeout(progressLater)
+    progressLater = undefined
+    progressSavedAt = Date.now()
+    session.messages = messages
+    session.spend = spend
+    void saveSession()
+  }
+  saveProgress(true)
   try {
     // Servers still starting get a moment, so a first message can use their tools.
     const starting = mcp.connecting()
@@ -3689,6 +3712,7 @@ async function send() {
         }
       }
       if (event.type === "tool_end") {
+        saveProgress()
         // The side panel's changed-files list follows what the tools do.
         void refreshRailChanges().then(() => render())
         const row = rowFor(event.id)
@@ -3734,7 +3758,10 @@ async function send() {
     session.activity = normaliseActivity(session.activity, true)
     // A finished plan stays for the answer that finished it, then goes.
     if (planDone(plan)) { plan = []; if (session.activity) session.activity.plan = [] }
-    void saveSession().then(refreshSessionCache)
+    const finalSave = saveSession()
+    void finalSave.then(refreshSessionCache)
+    // Quitting waits for this: it used to exit while the stopped turn was still being saved.
+    void finalSave.finally(settle)
     void refreshFileCache(true)
     scheduleIdleCompact()
     // A job that ended while this answer was being written, and that the model was not told about.
@@ -3766,9 +3793,12 @@ function shutdown() {
   subagents.stopAll()
   out.write("[0m" + ansi.pasteOff + "\x1b[?1002l\x1b[?1006l" + ansi.releaseMouse + ansi.showCursor + ansi.mainScreen)
   // MCP servers started as child processes go with the app, but one that will
-  // not close is not allowed to keep the terminal waiting.
-  void Promise.race([Promise.all([mcp.close(), codexLogin?.cancel(), cursorLogin?.cancel()]), new Promise((done) => setTimeout(done, 3500))]).finally(() => process.exit(0))
+  // not close is not allowed to keep the terminal waiting. A turn stopped by quitting is saved first, with
+  // what it had written so far: the app used to exit while that save was still under way.
+  void Promise.race([Promise.all([mcp.close(), codexLogin?.cancel(), cursorLogin?.cancel(), turnSettled]), new Promise((done) => setTimeout(done, 3500))]).finally(() => process.exit(0))
 }
+/** Settles once the running turn has wound down and been saved. */
+let turnSettled: Promise<void> | undefined
 
 async function restoreSession(loaded: sessions.Session) {
   const requested = loaded.model ? loaded.provider + "/" + loaded.model : loaded.provider
