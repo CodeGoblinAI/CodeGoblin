@@ -61,8 +61,13 @@ test("when the app is killed outright, the commands it was running end with it",
     else process.kill(host.pid, "SIGKILL")
 
     let left = running(mark)
-    for (let waited = 0; waited < 10_000 && which(left, mark).length > 1; waited += 500) { await Bun.sleep(500); left = running(mark) }
-    expect(which(left, mark)).toEqual(["letgo"])
+    const stillRunning = () => which(left, mark).filter((name) => name !== "letgo")
+    for (let waited = 0; waited < 10_000 && stillRunning().length; waited += 500) { await Bun.sleep(500); left = running(mark) }
+    expect(stillRunning()).toEqual([])
+    // What was let go is left alone. On Windows that is only so where a process may leave the job its parent is
+    // in: a CI runner puts every step in a job that may not be left, and Windows then ends all of it with the
+    // app whatever CG-Next does. On a desktop it survives.
+    if (!windows) expect(which(left, mark)).toEqual(["letgo"])
   } finally {
     end(running(mark))
     try { host.kill() } catch {}
