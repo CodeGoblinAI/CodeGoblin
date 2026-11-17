@@ -80,3 +80,42 @@ describe("formatting after a write", () => {
     expect(fs.readFileSync(path.join(root, "x.ts"), "utf8")).toBe("const a=1\n")
   })
 })
+
+describe.if(process.platform === "win32")("a .cmd formatter on Windows (a project's prettier or biome)", () => {
+  /** A stand-in that records the path it was given, as node_modules/.bin/prettier.cmd would format it. */
+  const setup = () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cg-fmt-cmd-"))
+    const bin = path.join(root, "node_modules", ".bin")
+    fs.mkdirSync(bin, { recursive: true })
+    const script = path.join(bin, "fakefmt.cmd")
+    // As npm's shims do: %* passes the arguments on with their quotes.
+    fs.writeFileSync(script, "@echo %*>> \"%~dp0given.txt\"\r\n")
+    const config = { enabled: true, entries: { fakefmt: { command: [script, "$FILE"], extensions: [".js"] } } }
+    return { root, given: () => fs.readFileSync(path.join(bin, "given.txt"), "utf8").trim().replace(/^"(.*)"$/, "$1"), config: config as never }
+  }
+
+  test("a file name with & in it is a name, not a second command", async () => {
+    const { root, config, given } = setup()
+    const file = path.join(root, "a&mkdir INJECTED&.js")
+    fs.writeFileSync(file, "x")
+    await formatAfterWrite(root, file, { config })
+    expect(fs.existsSync(path.join(root, "INJECTED"))).toBe(false)
+    expect(given()).toBe(file)
+  })
+
+  test("a path with a space in it reaches the formatter as one path", async () => {
+    const { root, config, given } = setup()
+    fs.mkdirSync(path.join(root, "John Smith"))
+    const file = path.join(root, "John Smith", "app.js")
+    fs.writeFileSync(file, "x")
+    expect(await formatAfterWrite(root, file, { config })).toBe("")
+    expect(given()).toBe(file)
+  })
+
+  test("a name with % in it is left as written, since cmd.exe expands it even in quotes", async () => {
+    const { root, config } = setup()
+    const file = path.join(root, "%PATH%.js")
+    fs.writeFileSync(file, "x")
+    expect(await formatAfterWrite(root, file, { config })).toContain("was not run")
+  })
+})

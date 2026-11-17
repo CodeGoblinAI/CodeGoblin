@@ -144,11 +144,21 @@ export async function formatAfterWrite(root: string, absolute: string, options: 
   let before: string
   try { before = fs.readFileSync(absolute, "utf8") } catch { return "" }
   const [program, ...args] = formatter.command.map((part) => part.split("$FILE").join(absolute))
+  // A project's prettier or biome is a .cmd on Windows, which only cmd.exe can run. It used to be handed the
+  // file's path through Node's shell option, unquoted: a path with a space in it ("C:\Users\John Smith\...")
+  // was two arguments, and a file named `a&mkdir x&.js` ran `mkdir x` - a model whose edits are approved
+  // without asking could run a command that way. It goes to cmd.exe as the shell tool's commands do, every
+  // part in quotes, where & | < > are text. % and ! are expanded even in quotes, so a name with them is left.
+  const script = process.platform === "win32" && /\.(cmd|bat)$/i.test(program!)
+  if (script && [program!, ...args].some((part) => /["%!]/.test(part))) return `(${formatter.name} was not run: the file's path has % or ! in it, which cmd.exe would read as a variable; the file is as written)`
+  const [exe, argv, extra]: [string, string[], { windowsVerbatimArguments?: boolean }] = script
+    ? ["cmd.exe", ["/d", "/s", "/c", '"' + [program!, ...args].map((part) => '"' + part + '"').join(" ") + '"'], { windowsVerbatimArguments: true }]
+    : [program!, args, {}]
   const outcome = await new Promise<{ code: number | null; output: string }>((resolve) => {
     let output = ""
     let child
     try {
-      child = spawn(program!, args, { cwd: root, windowsHide: true, shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(program!), signal: options.signal })
+      child = spawn(exe, argv, { cwd: root, windowsHide: true, signal: options.signal, ...extra })
     } catch (error) {
       resolve({ code: -1, output: error instanceof Error ? error.message : String(error) })
       return
