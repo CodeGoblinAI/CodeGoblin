@@ -1707,6 +1707,29 @@ function openMcp(selectedValue?: string) {
   ]) : [{ label: "No servers; add mcp entries in " + configPath(), inert: true }], { footer: "enter turns a server on or off, or opens sign-in · esc closes", size: "large", ...(selectedValue ? { selectedValue } : {}) })
 }
 
+/**
+ * Saves this conversation. A save that fails says so - once, in the conversation, and again when saving
+ * works again. Every save used to drop its failure: with the disk full or the folder not writable the
+ * conversation simply stopped being saved, and that was found out only after closing the app.
+ * Never rejects, so a caller can fire and forget.
+ */
+let saveTrouble: string | undefined
+function saveSession(): Promise<void> {
+  const saving = session
+  return sessions.save(saving).then(() => {
+    if (!saveTrouble) return
+    saveTrouble = undefined
+    transcript.push({ kind: "tool", state: "done", text: "this conversation is being saved again" })
+    render()
+  }, (error: unknown) => {
+    const reason = error instanceof Error ? error.message : String(error)
+    status = "this conversation could not be saved: " + reason
+    if (saveTrouble === undefined) transcript.push({ kind: "tool", state: "failed", text: "This conversation could not be saved (" + reason + "). It is still here, and saving is tried again after each message - but it is not on disk until a save works. Check the disk has room and " + Global.Path.state + " can be written." })
+    saveTrouble = reason
+    render()
+  })
+}
+
 /** Switches a server off or on for this conversation only; saved with it. */
 function setMcpForSession(server: string, on: boolean) {
   const off = new Set(session.mcpOff ?? [])
@@ -1714,7 +1737,7 @@ function setMcpForSession(server: string, on: boolean) {
   else off.add(server)
   session.mcpOff = [...off]
   status = (on ? "turned on " : "turned off ") + server + " for this conversation"
-  if (messages.some((message) => message.role === "user")) void sessions.save(session).catch(() => {})
+  if (messages.some((message) => message.role === "user")) void saveSession()
 }
 
 function openMcpLogin(name: string) {
@@ -2784,7 +2807,7 @@ async function runIdleCompact() {
     session.messages = messages
     session.spend = spend
     transcript.push({ kind: "tool", text: idleNote(due.saving) })
-    void sessions.save(session).catch(() => {})
+    void saveSession()
     render()
   } catch {
     // Unattended, so nothing is said and nothing is changed; the next turn simply costs what it costs.
@@ -2814,7 +2837,7 @@ async function send() {
     input = ""
     cursor = 0
     if (!title) { status = "not renamed"; await openSessions(id); render(); return }
-    if (id === session.id) { session.title = title; await sessions.save(session).catch(() => {}) }
+    if (id === session.id) { session.title = title; await saveSession() }
     else await sessions.rename(id, title)
     await openSessions(id)
     status = "renamed to " + title
@@ -2892,7 +2915,7 @@ async function send() {
     if (run.message) {
       messages.push(run.message)
       session.messages = messages
-      void sessions.save(session).then(refreshSessionCache).catch(() => {})
+      void saveSession().then(refreshSessionCache)
       void refreshFileCache(true)
     }
     status = run.refused ? "not run: a deny rule in codegoblin.jsonc blocks it" : "ran " + typed.slice(0, 60) + " - the output is in the conversation for your next prompt"
@@ -2981,7 +3004,7 @@ async function send() {
     }
     if (result.kind === "rename") {
       session.title = result.title.slice(0, 80)
-      void sessions.save(session).then(refreshSessionCache).catch(() => {})
+      void saveSession().then(refreshSessionCache)
       status = "renamed to " + session.title
       transcript.push({ kind: "tool", text: "renamed this conversation to " + session.title })
     }
@@ -3275,7 +3298,7 @@ async function send() {
       if (messages.filter((message) => message.role !== "system").length === 0) { status = "nothing to fork yet - say something first"; render(); return }
       session.messages = messages
       session.spend = spend
-      await sessions.save(session).catch(() => {})
+      await saveSession()
       try {
         const copy = await sessions.fork(session)
         session = copy
@@ -3312,7 +3335,7 @@ async function send() {
         // Saved straight away, so a restart does not undo the same turn twice.
         if (checkpoint && messages.some((message) => message.role === "user")) {
           session.review = edits.reviewState(process.cwd())
-          void sessions.save(session).catch(() => {})
+          void saveSession()
         }
       } catch (error) {
         status = "undo failed: " + (error instanceof Error ? error.message.slice(0, 90) : "unknown")
@@ -3357,7 +3380,7 @@ async function send() {
           historyArchived = true
           session.messages = messages
           session.spend = spend
-          void sessions.save(session).catch(() => {})
+          void saveSession()
           status = "compacted to " + messages.length + " messages"
         } catch (error) {
           status = "could not compact: " + (error instanceof Error ? error.message : "unknown") + " - history unchanged"
@@ -3679,7 +3702,7 @@ async function send() {
     session.activity = normaliseActivity(session.activity, true)
     // A finished plan stays for the answer that finished it, then goes.
     if (planDone(plan)) { plan = []; if (session.activity) session.activity.plan = [] }
-    void sessions.save(session).then(refreshSessionCache).catch(() => {})
+    void saveSession().then(refreshSessionCache)
     void refreshFileCache(true)
     scheduleIdleCompact()
     // A job that ended while this answer was being written, and that the model was not told about.
