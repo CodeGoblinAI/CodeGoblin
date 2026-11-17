@@ -1716,7 +1716,13 @@ function openMcp(selectedValue?: string) {
 let saveTrouble: string | undefined
 function saveSession(): Promise<void> {
   const saving = session
-  return sessions.save(saving).then(() => {
+  return sessions.save(saving).then((saved) => {
+    // The same conversation was carried on in another window too: both are kept, and this one is now a copy.
+    if (saved.copiedFrom) {
+      transcript.push({ kind: "tool", state: "done", text: "This conversation was also carried on in another window since it was opened here. Both are kept: what is here is saved as \"" + saving.title + "\", and the other window's stays as it was (/resume lists both)." })
+      void refreshSessionCache()
+      render()
+    }
     if (!saveTrouble) return
     saveTrouble = undefined
     transcript.push({ kind: "tool", state: "done", text: "this conversation is being saved again" })

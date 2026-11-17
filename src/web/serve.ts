@@ -245,10 +245,10 @@ async function runIdleCompact(id: string, provider: Provider, model: Model, key:
   }
 }
 
-async function saveReviewSession(session: sessions.Session) {
+async function saveReviewSession(session: sessions.Session): Promise<{ copiedFrom?: string }> {
   session.review = editsFor(session.id, session.review).reviewState(root)
   session.activity = normaliseActivity(session.activity, true)
-  await sessions.save(session)
+  return sessions.save(session)
 }
 
 /**
@@ -1377,10 +1377,11 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
           // Committed before saving, so the turn's undo checkpoint is saved with it.
           edits.commit(root)
           sessions.stampNew(session.messages, turnFrom)
-          await saveReviewSession(session)
+          // Carried on in another window as well while this turn ran: both are kept, and this one is a copy now.
+          const saved = await saveReviewSession(session)
           if (session.messages.at(-1)?.stopped) send({ type: "stopped" })
           else scheduleIdleCompact(session, provider, model, key)
-          send({ type: "saved", id: session.id, title: session.title })
+          send({ type: "saved", id: session.id, title: session.title, ...(saved.copiedFrom ? { copiedFrom: saved.copiedFrom } : {}) })
         } catch (error) {
           // Stopping mid-stream throws out of the loop. The TUI keeps the
           // conversation when that happens; here it used to vanish - the
@@ -1396,7 +1397,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
         } finally {
           edits.commit(root)
           clearInterval(heartbeat)
-          if (activeTurns.get(session.id)?.controller === turn) activeTurns.delete(session.id)
+          // By the id it was held under: a save that made a copy has changed session.id.
+          if (activeTurns.get(lockedId ?? session.id)?.controller === turn) activeTurns.delete(lockedId ?? session.id)
           finishTurn()
           try { controller.close() } catch {}
         }

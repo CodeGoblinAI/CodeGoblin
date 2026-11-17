@@ -159,22 +159,73 @@ export function titleFrom(messages: Message[]): string {
   return line.length > 48 ? line.slice(0, 48) + "…" : line || "New session"
 }
 
-export async function save(session: Session): Promise<void> {
+/**
+ * The same conversation open in two windows - the terminal and the web, or two terminals.
+ *
+ * Each saved its own whole copy, so whichever saved last wiped out what the other had added: a turn taken
+ * in the web window was gone after the next message in the terminal. So each copy in memory remembers when
+ * its file was last read or written for it (the file's modification time) - by the copy, not by the id,
+ * since one process can hold two copies of one conversation - and a save that finds the file written since
+ * by someone else looks before it writes. If the other version has nothing this one lacks - it was
+ * only renamed or pinned, or it is behind - the save goes ahead, keeping its name and pin. If both added
+ * to it, both are kept: this window's goes to a copy, and the caller is told so it can say so.
+ */
+const seenAt = new WeakMap<Session, string>()
+/** The file's time and size. Windows moves file times on only every few milliseconds, so two saves close
+ * together can share a time; they almost never share a size as well. */
+const stampOf = async (id: string): Promise<string | undefined> => {
+  try { const stat = await fs.stat(file(id)); return stat.mtimeMs + ":" + stat.size } catch { return undefined }
+}
+const sameMessage = (a: Message, b: Message | undefined) => b !== undefined && JSON.stringify(a) === JSON.stringify(b)
+
+export async function save(session: Session): Promise<{ copiedFrom?: string }> {
   await fs.mkdir(dir, { recursive: true })
+  let copiedFrom: string | undefined
+  const known = seenAt.get(session)
+  const stamp = known === undefined ? undefined : await stampOf(session.id)
+  if (known !== undefined && stamp !== undefined && stamp !== known) {
+    const theirs = await read(session.id)
+    if (theirs) {
+      const behind = theirs.messages.length <= session.messages.length && theirs.messages.every((message, at) => sameMessage(message, session.messages[at]))
+      if (behind) {
+        session.title = theirs.title
+        if (theirs.pinned) session.pinned = true
+        else delete session.pinned
+      } else {
+        copiedFrom = session.id
+        session.id = newSessionId()
+        session.title = (session.title.replace(/ \(this window\)$/, "") + " (this window)").slice(0, 120)
+        delete session.pinned
+        if (await hasArchive(copiedFrom)) await fs.copyFile(archiveFile(copiedFrom), archiveFile(session.id)).catch(() => {})
+      }
+    }
+  }
   session.updated = Date.now()
   session.title = session.title === "New session" ? titleFrom(session.messages) : session.title
   const target = file(session.id)
   const temporary = target + "." + newSessionId() + ".tmp"
   await fs.writeFile(temporary, JSON.stringify(session, null, 2), { encoding: "utf8", mode: 0o600 })
   await replaceFile(temporary, target)
+  const written = await stampOf(session.id)
+  if (written !== undefined) seenAt.set(session, written)
+  return copiedFrom ? { copiedFrom } : {}
 }
 
-export async function load(id: string): Promise<Session | undefined> {
+async function read(id: string): Promise<Session | undefined> {
   try {
     return JSON.parse(await fs.readFile(file(id), "utf8")) as Session
   } catch {
     return undefined
   }
+}
+
+export async function load(id: string): Promise<Session | undefined> {
+  // The time before the text: a write landing between the two is then seen as newer at the next save,
+  // which looks and finds nothing lost - never the other way round.
+  const stamp = await stampOf(id).catch(() => undefined)
+  const session = await read(id)
+  if (session && stamp !== undefined) seenAt.set(session, stamp)
+  return session
 }
 
 /** "14:05", or "Oct 30 14:05" for another day - when a message was written. */

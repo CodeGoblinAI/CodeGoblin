@@ -3012,6 +3012,12 @@ async function submit() {
         if (event.type === "error") { finished = true; turn("agent", "**Error:** " + event.message) }
         if (event.type === "saved") {
           finished = true
+          // The conversation was carried on in another window too, so what is here was saved as a copy: the
+          // next message goes to the copy, not to the other window's version.
+          if (event.copiedFrom && event.id) {
+            sessionId = event.id
+            note("This conversation was also carried on in another window. Both are kept: what is here is saved as \"" + (event.title || "a copy") + "\", and the other window's stays as it was.")
+          }
           workedLine(Date.now() - turnStarted)
           refreshSessions()
           void refreshFiles(true)
