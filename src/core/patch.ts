@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { assertWritable, resolveInside } from "./tools"
+import { lineEndingOf, withLineEnding } from "./text-edit"
 
 /**
  * apply_patch: the multi-file patch format GPT and Codex models are trained
@@ -77,7 +78,12 @@ function find(haystack: string[], needle: string[], from: number): number {
   return -1
 }
 
-function applyHunks(file: string, original: string, hunks: { context?: string; lines: string[] }[]): string {
+function applyHunks(file: string, source: string, hunks: { context?: string; lines: string[] }[]): string {
+  // Worked on with plain newlines and written back with the file's own line endings. Lines used to be split
+  // on the newline alone, so in a file that ends its lines the Windows way every changed line came back
+  // without its carriage return and the file was left a mixture of the two.
+  const eol = lineEndingOf(source)
+  const original = withLineEnding(source, NEWLINE)
   const ending = original.endsWith(NEWLINE)
   const lines = (ending ? original.slice(0, -1) : original).split(NEWLINE)
   let cursor = 0
@@ -94,7 +100,7 @@ function applyHunks(file: string, original: string, hunks: { context?: string; l
     lines.splice(at, before.length, ...after)
     cursor = at + after.length
   }
-  return lines.join(NEWLINE) + (ending ? NEWLINE : "")
+  return withLineEnding(lines.join(NEWLINE) + (ending ? NEWLINE : ""), eol)
 }
 
 export type PatchPlan = { writes: { path: string; content: string | null }[]; summary: string[] }

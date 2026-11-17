@@ -3,10 +3,11 @@
 // tidy that - and where a model that reaches for the wrong tool, or the wrong shell's syntax, burns minutes.
 //
 // Costs a cent or two a task. The key is read into this process only and never printed.
-//   bun test/user-pass/real-everyday-tasks.ts [provider/model] [task ...]     tasks: move rename sort delete find
+//   bun test/user-pass/real-everyday-tasks.ts [provider/model] [task ...]     tasks: move rename sort delete find | fix across commit ask version run
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { CODE_TASKS, codeProject } from "./coding-fixture"
 
 const target = process.argv[2] ?? "refuseless/deepseek-v4.1-flash-abliterated"
 const wanted = process.argv.slice(3)
@@ -49,11 +50,15 @@ const TASKS: Record<string, { ask: string; done: (root: string) => boolean }> = 
   find: { ask: "Which is the largest file in this folder, and how big is it?", done: () => true },
 }
 
+// Coding jobs run in a small real project instead (coding-fixture.ts).
+const ALL: Record<string, { ask: string; done: (root: string) => boolean; setup?: (root: string) => void; code?: boolean }> = { ...TASKS, ...Object.fromEntries(Object.entries(CODE_TASKS).map(([name, task]) => [name, { ...task, code: true }])) }
+
 const summary: string[] = []
-for (const name of wanted.length ? wanted : Object.keys(TASKS)) {
-  const task = TASKS[name]
+for (const name of wanted.length ? wanted : Object.keys(ALL)) {
+  const task = ALL[name]
   if (!task) { console.log("no such task: " + name); continue }
-  const root = project()
+  const root = task.code ? codeProject() : project()
+  task.setup?.(root)
   console.log(`\n=== ${name}: "${task.ask}"`)
   const started = Date.now()
   const at = () => ((Date.now() - started) / 1000).toFixed(1).padStart(6) + "s  "

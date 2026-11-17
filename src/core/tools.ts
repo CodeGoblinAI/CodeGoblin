@@ -5,6 +5,7 @@ import { Global } from "../platform/paths"
 import { inRepoCache } from "./repos"
 import fs from "node:fs/promises"
 import path from "node:path"
+import { lineEndingOf, replaceOnce, withLineEnding } from "./text-edit"
 
 /**
  * Tools the model can call.
@@ -177,7 +178,16 @@ export const TOOLS: Tool[] = [
       },
       required: ["path"],
     },
-    run: async (args, root) => lineWindow(await fs.readFile(resolveReadable(root, args.path), "utf8"), args.offset, args.limit),
+    run: async (args, root) => {
+      const target = resolveReadable(root, args.path)
+      const bytes = await fs.readFile(target)
+      // Not text: say what it is. Decoded as text, a program or an archive is a screen of noise that costs
+      // thousands of tokens and tells the model nothing. (A picture is handled before this is reached.)
+      if (bytes.subarray(0, 8192).includes(0)) {
+        return `error: ${args.path} is not a text file (${bytes.length.toLocaleString("en-US")} bytes of binary data). It cannot be read as text; use a command that understands this kind of file.`
+      }
+      return lineWindow(bytes.toString("utf8"), args.offset, args.limit)
+    },
   },
   {
     name: "list_files",
@@ -214,7 +224,11 @@ export const TOOLS: Tool[] = [
       const target = resolveInside(root, args.path)
       assertWritable(path.relative(root, target))
       await fs.mkdir(path.dirname(target), { recursive: true })
-      await fs.writeFile(target, args.content, "utf8")
+      // Rewriting a file keeps the line endings it had. A model writes plain newlines, and a file that ended
+      // its lines the Windows way would otherwise come back with every line changed as far as git can tell.
+      const existing = await fs.readFile(target, "utf8").catch(() => undefined)
+      const content = existing !== undefined && lineEndingOf(existing) !== "\n" ? withLineEnding(String(args.content), lineEndingOf(existing)) : args.content
+      await fs.writeFile(target, content, "utf8")
       const lines = String(args.content).split("\n").length
       return `wrote ${path.relative(root, target)} (${lines} lines)`
     },
@@ -238,17 +252,12 @@ export const TOOLS: Tool[] = [
       const target = resolveInside(root, args.path)
       assertWritable(path.relative(root, target))
       const before = await fs.readFile(target, "utf8")
-      const occurrences = before.split(args.old_string).length - 1
-
-      // Refuse rather than guess. A silent wrong edit is worse than an error.
-      if (occurrences === 0) return "error: old_string not found in " + args.path
-      if (occurrences > 1) {
-        return "error: old_string appears " + occurrences + " times in " + args.path + "; include more context to make it unique"
-      }
-
-      const after = before.replace(args.old_string, args.new_string)
-      await fs.writeFile(target, after, "utf8")
-      return diff(before, after, path.relative(root, target))
+      // Refuse rather than guess: a silent wrong edit is worse than an error. But find the text the way a
+      // model writes it - with plain newlines - in a file that ends its lines the Windows way (text-edit.ts).
+      const replaced = replaceOnce(before, String(args.old_string ?? ""), String(args.new_string ?? ""), String(args.path))
+      if ("error" in replaced) return replaced.error
+      await fs.writeFile(target, replaced.text, "utf8")
+      return diff(before, replaced.text, path.relative(root, target)) + (replaced.note ? NEWLINE + replaced.note : "")
     },
   },
 ]
@@ -259,8 +268,9 @@ export const TOOLS: Tool[] = [
  * edit needs.
  */
 function diff(before: string, after: string, label: string): string {
-  const a = before.split(String.fromCharCode(10))
-  const b = after.split(String.fromCharCode(10))
+  // Shown without the carriage returns of a Windows file: they are not part of what changed.
+  const a = withLineEnding(before, String.fromCharCode(10)).split(String.fromCharCode(10))
+  const b = withLineEnding(after, String.fromCharCode(10)).split(String.fromCharCode(10))
 
   let head = 0
   while (head < a.length && head < b.length && a[head] === b[head]) head++
@@ -306,7 +316,7 @@ export const EXTRA_TOOLS: Tool[] = [
       const { startJob, runForeground } = await import("./jobs")
       if (args.background === true) return startJob(String(args.command ?? ""), root, { signal })
       const command = String(args.command ?? "")
-      return withShellHint(command, await runForeground(command, root, { timeoutMs: shellWait(args.timeout_ms), signal, onOutput: progress }))
+      return withShellHint(command, plainOutput(await runForeground(command, root, { timeoutMs: shellWait(args.timeout_ms), signal, onOutput: progress ? (text) => progress(stripColour(text)) : undefined })))
     },
   },
   {
@@ -562,7 +572,34 @@ const NEWLINE = String.fromCharCode(10)
 const SECRET_NAME = /KEY|SECRET|TOKEN|PASSWORD/i
 
 export function shellEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !SECRET_NAME.test(name)))
+  // git's own way of passing settings names its variables GIT_CONFIG_KEY_n; they are settings, not keys.
+  const kept = Object.fromEntries(Object.entries(env).filter(([name]) => /^GIT_CONFIG_(KEY|VALUE)_[0-9]+$/.test(name) || !SECRET_NAME.test(name)))
+  // git prints a file name with an accent or any non-English letter as a string of octal escapes unless told
+  // not to ("\\303\\251t\\303\\251" for "été"). Nobody can read that, and a model copies it back wrong.
+  // One more setting on top of whatever the person already passes this way.
+  const count = Number(kept.GIT_CONFIG_COUNT) || 0
+  return { ...kept, GIT_CONFIG_COUNT: String(count + 1), ["GIT_CONFIG_KEY_" + count]: "core.quotepath", ["GIT_CONFIG_VALUE_" + count]: "off" }
+}
+
+const ESCAPE = String.fromCharCode(27)
+/** Colour and cursor codes out: they are for a terminal, and what reads this is a model or a list of lines. */
+export function stripColour(text: string): string {
+  if (!text.includes(ESCAPE)) return text
+  return text.replace(new RegExp(ESCAPE + "\\][^" + String.fromCharCode(7) + ESCAPE + "]*(?:" + String.fromCharCode(7) + "|" + ESCAPE + "\\\\)", "g"), "").replace(new RegExp(ESCAPE + "\\[[0-9;?]*[ -/]*[@-~]", "g"), "").replace(new RegExp(ESCAPE + "[@-Z\\\\-_]", "g"), "")
+}
+
+/**
+ * A command's output as text to read: no colour codes, and a line that was redrawn in place (a progress
+ * bar writes a carriage return and starts again) kept as it last looked, not as every state it went through.
+ */
+export function plainOutput(text: string): string {
+  const cr = String.fromCharCode(13), newline = String.fromCharCode(10)
+  const clean = stripColour(text)
+  if (!clean.includes(cr)) return clean
+  return clean.split(newline).map((line) => {
+    const body = line.endsWith(cr) ? line.slice(0, -1) : line
+    return body.includes(cr) ? body.split(cr).filter((part) => part.length).at(-1) ?? "" : body
+  }).join(newline)
 }
 
 /** How long the shell tool waits for a command when the model does not say, and the most it may ask for. */
