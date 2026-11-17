@@ -27,6 +27,34 @@ const saved = fs.existsSync(store) ? fs.readdirSync(store).filter((f) => f.endsW
 const messages = saved[0]?.messages ?? []
 check("closed part way through a turn, the prompt is on disk", messages.some((m) => m.role === "user" && /make the file/.test(m.content)), JSON.stringify(messages.map((m) => m.role)))
 check("and so is the step it finished: the call and what it did", messages.some((m) => m.role === "assistant" && m.tool_calls?.some((c) => c.function.name === "write_file")) && messages.some((m) => m.role === "tool" && /made-by-step-one/.test(m.content)), JSON.stringify(messages.map((m) => m.role + (m.tool_calls ? "(calls)" : ""))))
+
+// --- the same with the web server ended outright part way through ---
+{
+  const { web } = await import("./harness.mjs")
+  const webProfile = tempDir("cg-killed-web-profile-")
+  const webProject = tempDir("cg-killed-web-project-")
+  const w = await web({ model, cwd: webProject, profile: webProfile })
+  try {
+    await w.send("/model local/fixture")
+    await w.page.evaluate(() => { const mode = document.querySelector("#mode"); if (mode) mode.value = "full" })
+    await w.send("make the file, then think for a long time", 200)
+    for (let waited = 0; waited < 15000 && !fs.existsSync(path.join(webProject, "made-by-step-one.txt")); waited += 200) {
+      // The web asks before a write unless told otherwise; allow it once.
+      const allow = w.page.getByRole("button", { name: "Allow once" })
+      if (await allow.count()) await allow.first().click().catch(() => {})
+      await delay(200)
+    }
+    await delay(2500)
+  } finally {
+    w.server.kill("SIGKILL")
+    await w.close()
+  }
+  await delay(500)
+  const webStore = path.join(webProfile, "state", "sessions")
+  const webSaved = fs.existsSync(webStore) ? fs.readdirSync(webStore).filter((f) => f.endsWith(".json")).map((f) => JSON.parse(fs.readFileSync(path.join(webStore, f), "utf8"))) : []
+  const webMessages = webSaved.find((s) => s.messages.some((m) => m.role === "user" && /make the file/.test(m.content)))?.messages ?? []
+  check("web: the server ended part way through a turn, the prompt and the finished step are on disk", webMessages.some((m) => m.role === "tool" && /made-by-step-one/.test(m.content)), JSON.stringify(webMessages.map((m) => m.role + (m.tool_calls ? "(calls)" : ""))))
+}
 model.close()
 console.log(failed() ? `\n${failed()} failed` : "\nall passed")
 if (process.platform === "win32") process.kill(process.pid)

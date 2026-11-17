@@ -1329,6 +1329,23 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
           for (const [id, text] of printed) send({ type: "tool_output", id, text: redactSecrets(text, outputSecrets).slice(-8000) })
           printed.clear()
         }
+        // The turn so far, on disk, as the terminal does it: saved as the prompt is sent and after each finished
+        // step, no oftener than every two seconds (a step inside the two seconds is saved when they are up).
+        // The server closed part way through a turn used to lose the prompt and every step, while the files the
+        // steps had changed stayed changed. A save that made this conversation a copy is remembered for the end.
+        let progressSavedAt = 0
+        let progressLater: ReturnType<typeof setTimeout> | undefined
+        let turnOver = false
+        let copiedMidTurn: string | undefined
+        const saveProgress = (force = false) => {
+          const wait = 2000 - (Date.now() - progressSavedAt)
+          if (!force && wait > 0) { progressLater ??= setTimeout(() => { progressLater = undefined; if (!turnOver) saveProgress(true) }, wait); return }
+          clearTimeout(progressLater)
+          progressLater = undefined
+          progressSavedAt = Date.now()
+          void sessions.save(session).then((saved) => { copiedMidTurn ??= saved.copiedFrom }, () => {})
+        }
+        saveProgress(true)
         try {
           for await (const event of runAgent({
             onToolOutput: (id, text) => { printed.set(id, (printed.get(id) ?? "") + text); printedTimer ??= setTimeout(sendPrinted, 120) },
@@ -1357,6 +1374,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
           })) {
             recordActivity(session.activity!, event)
             if (event.type === "tool_end" && printed.size) { clearTimeout(printedTimer); sendPrinted() }
+            if (event.type === "tool_end") saveProgress()
             // A refused call carries who refused it; the label is composed here
             // so the browser and the terminal say the same words about it.
             if (event.type === "spend") {
@@ -1378,10 +1396,13 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
           edits.commit(root)
           sessions.stampNew(session.messages, turnFrom)
           // Carried on in another window as well while this turn ran: both are kept, and this one is a copy now.
+          turnOver = true
+          clearTimeout(progressLater)
           const saved = await saveReviewSession(session)
+          const copiedFrom = saved.copiedFrom ?? copiedMidTurn
           if (session.messages.at(-1)?.stopped) send({ type: "stopped" })
           else scheduleIdleCompact(session, provider, model, key)
-          send({ type: "saved", id: session.id, title: session.title, ...(saved.copiedFrom ? { copiedFrom: saved.copiedFrom } : {}) })
+          send({ type: "saved", id: session.id, title: session.title, ...(copiedFrom ? { copiedFrom } : {}) })
         } catch (error) {
           // Stopping mid-stream throws out of the loop. The TUI keeps the
           // conversation when that happens; here it used to vanish - the
@@ -1395,6 +1416,8 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
           if (turn.signal.aborted) send({ type: "stopped" })
           else send({ type: "error", message: error instanceof Error ? error.message : "request failed" })
         } finally {
+          turnOver = true
+          clearTimeout(progressLater)
           edits.commit(root)
           clearInterval(heartbeat)
           // By the id it was held under: a save that made a copy has changed session.id.

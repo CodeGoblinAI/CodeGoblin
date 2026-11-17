@@ -138,6 +138,8 @@ export async function web({ model, cwd, profile = tempDir("cg-pass-web-"), extra
     },
     async note() { return ((await page.locator(".tool.note").allInnerTexts()).at(-1) ?? "").replace(/\s+/g, " ").trim() },
     async thread() { return (await page.locator("#thread").first().innerText().catch(async () => await page.locator("main").first().innerText())).replace(/\s+/g, " ") },
+    /** The `codegoblin web` process itself, for a pass that ends it outright. */
+    server,
     async close() { await browser.close().catch(() => {}); server.kill() },
   }
 }
