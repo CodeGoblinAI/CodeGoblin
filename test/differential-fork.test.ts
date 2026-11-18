@@ -50,54 +50,56 @@ describe("differential migration and surface parity checks", () => {
 
     const expectedBySession = new Map<string, { role: "user" | "assistant"; content: string }[]>()
 
-    for (let s = 0; s < 50; s++) {
-      const sid = `ses_diffcheck${String(s).padStart(4, "0")}abcd`
-      const isSubagent = s % 11 === 0
-      const isArchived = s % 13 === 0
-      const isOtherDir = s % 7 === 0
-      const dirSpelling = process.platform === "win32" && s % 2 === 1 ? projectRoot.toUpperCase() : projectRoot
-      insertSession.run(
-        sid,
-        isSubagent ? "ses_parent0000abcd" : null,
-        `Session ${s}`,
-        isOtherDir ? path.join(dir, "other") : dirSpelling,
-        1_700_000_000_000 + s * 1000,
-        isArchived ? 1_700_000_500_000 : null,
-      )
+    db.transaction(() => {
+      for (let s = 0; s < 50; s++) {
+        const sid = `ses_diffcheck${String(s).padStart(4, "0")}abcd`
+        const isSubagent = s % 11 === 0
+        const isArchived = s % 13 === 0
+        const isOtherDir = s % 7 === 0
+        const dirSpelling = process.platform === "win32" && s % 2 === 1 ? projectRoot.toUpperCase() : projectRoot
+        insertSession.run(
+          sid,
+          isSubagent ? "ses_parent0000abcd" : null,
+          `Session ${s}`,
+          isOtherDir ? path.join(dir, "other") : dirSpelling,
+          1_700_000_000_000 + s * 1000,
+          isArchived ? 1_700_000_500_000 : null,
+        )
 
-      // Reference oracle: what a person actually saw in 0.3 (non-synthetic, non-ignored text parts merged across consecutive same-role steps).
-      const oracle: { role: "user" | "assistant"; content: string }[] = []
-      const stepCount = int(rng, 2, 12)
-      for (let m = 0; m < stepCount; m++) {
-        const mid = `msg_${s}_${String(m).padStart(3, "0")}`
-        const role = pick(rng, ["user", "assistant", "assistant"] as const)
-        insertMessage.run(mid, sid, 1_700_000_000_000 + m * 10, JSON.stringify({ role }))
+        // Reference oracle: what a person actually saw in 0.3 (non-synthetic, non-ignored text parts merged across consecutive same-role steps).
+        const oracle: { role: "user" | "assistant"; content: string }[] = []
+        const stepCount = int(rng, 2, 12)
+        for (let m = 0; m < stepCount; m++) {
+          const mid = `msg_${s}_${String(m).padStart(3, "0")}`
+          const role = pick(rng, ["user", "assistant", "assistant"] as const)
+          insertMessage.run(mid, sid, 1_700_000_000_000 + m * 10, JSON.stringify({ role }))
 
-        const partCount = int(rng, 0, 4)
-        for (let p = 0; p < partCount; p++) {
-          const pid = `prt_${s}_${m}_${p}`
-          const kind = pick(rng, ["text", "text", "tool", "reasoning", "synthetic", "ignored", "blank"] as const)
-          let partObj: Record<string, unknown>
-          if (kind === "text") {
-            const words = `turn-${s}-${m}-${p}`
-            partObj = { type: "text", text: `  ${words}  ` }
-            const prev = oracle.at(-1)
-            if (prev && prev.role === role) prev.content += "\n\n" + words
-            else oracle.push({ role, content: words })
-          } else if (kind === "synthetic") {
-            partObj = { type: "text", text: "app reminder", synthetic: true }
-          } else if (kind === "ignored") {
-            partObj = { type: "text", text: "dropped draft", ignored: true }
-          } else if (kind === "blank") {
-            partObj = { type: "text", text: "   \n  " }
-          } else {
-            partObj = { type: kind, text: "internal" }
+          const partCount = int(rng, 0, 4)
+          for (let p = 0; p < partCount; p++) {
+            const pid = `prt_${s}_${m}_${p}`
+            const kind = pick(rng, ["text", "text", "tool", "reasoning", "synthetic", "ignored", "blank"] as const)
+            let partObj: Record<string, unknown>
+            if (kind === "text") {
+              const words = `turn-${s}-${m}-${p}`
+              partObj = { type: "text", text: `  ${words}  ` }
+              const prev = oracle.at(-1)
+              if (prev && prev.role === role) prev.content += "\n\n" + words
+              else oracle.push({ role, content: words })
+            } else if (kind === "synthetic") {
+              partObj = { type: "text", text: "app reminder", synthetic: true }
+            } else if (kind === "ignored") {
+              partObj = { type: "text", text: "dropped draft", ignored: true }
+            } else if (kind === "blank") {
+              partObj = { type: "text", text: "   \n  " }
+            } else {
+              partObj = { type: kind, text: "internal" }
+            }
+            insertPart.run(pid, mid, JSON.stringify(partObj))
           }
-          insertPart.run(pid, mid, JSON.stringify(partObj))
         }
+        if (!isSubagent && !isArchived && !isOtherDir) expectedBySession.set(sid, oracle)
       }
-      if (!isSubagent && !isArchived && !isOtherDir) expectedBySession.set(sid, oracle)
-    }
+    })()
 
     const prevEnv = process.env.CG_FORK_DB
     process.env.CG_FORK_DB = dbPath
