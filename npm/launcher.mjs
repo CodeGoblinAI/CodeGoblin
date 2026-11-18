@@ -151,7 +151,9 @@ function start(program, args) {
 async function main() {
   const self = fs.realpathSync(fileURLToPath(import.meta.url))
   const args = process.argv.slice(2)
-  if (args[0] === "upgrade" || args[0] === "update") process.exit(await upgrade(args.slice(1), self))
+  // Set exitCode rather than calling process.exit() right after fetch(): on Node 24 Windows, tearing down
+  // an active Undici/AbortSignal handle inside process.exit() trips libuv's UV_HANDLE_CLOSING assertion.
+  if (args[0] === "upgrade" || args[0] === "update") { process.exitCode = await upgrade(args.slice(1), self); return }
   const name = platformPackage()
   const program = process.env.CODEGOBLIN_BIN_PATH || (name && findProgram(path.dirname(self), name))
   if (!program) {
