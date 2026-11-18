@@ -23,8 +23,8 @@ import { isEmpty, paint, textOf, type Span } from "./screen-select"
 import { wheelStep, type Wheel } from "./wheel"
 import { carryOn, errorLine, errorText, farewell, logEntry, writeCrash } from "./crash"
 import { isLiveCommand } from "./live-commands"
-import { footerHeight } from "./layout"
-import { copyText, ctrlCAction, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
+import { footerHeight, formatStatusBar } from "./layout"
+import { copyText, ctrlCAction, dialogEscAt, dialogRowAt, insideDialog, readClipboardImage } from "./interaction"
 import { activateCatalog, addressNotices, refreshCatalog, refreshExperientialModels, refreshLiveModels, refreshRefuselessModels, selectionsByKind, selectionsOfKind } from "../core/providers"
 import { apiKey as storedKey } from "../core/auth"
 
@@ -70,20 +70,26 @@ import { VOICE_LANGUAGES, VOICE_NEEDS, cancelVoiceSetup, prepareVoice, stopVoice
 import { canRecord, record, stopRecorder, warmRecorder, type Recording } from "../core/voice-record"
 import { changesIn, summarise, countsOf, statusLetter, type Changes } from "../core/changes"
 import {
+  caretInComposer,
   charAfter,
   charBefore,
   ComposerHistory,
   deleteRange,
   insert as insertText,
+  layoutComposer,
+  lineEdge,
+  moveLine,
   moveTo,
+  offsetInComposerLine,
   selectAll,
   selectedText,
   selection as composerSelection,
   wordEnd,
   wordStart,
   type Composer,
+  type ComposerLine,
 } from "./composer"
-import { displayWidth, truncateMiddle, truncateToWidth, padToWidth, padStartToWidth, wrapToWidth as wrapWords } from "./width"
+import { displayWidth, sliceFromWidth, truncateMiddle, truncateToWidth, padToWidth, padStartToWidth, wrapToWidth as wrapWords } from "./width"
 import { renderMarkdown } from "./markdown"
 import {
   paletteFor,
@@ -253,7 +259,7 @@ let wheel: Wheel | undefined
  * it back there. Without this the screen stayed pinned to the newest line, so opening a command's output
  * pushed the command itself off the top and folding one pulled the page out from under the mouse.
  */
-let holdRow: { entry: Entry; row: number } | undefined
+let holdRow: { entry: Entry; row: number; open?: boolean } | undefined
 /** Where an entry's first line is on screen now (1-based), if it is on screen. */
 function screenRowOf(entry: Entry): number | undefined {
   const at = lineOwners.indexOf(entry)
@@ -265,7 +271,7 @@ function screenRowOf(entry: Entry): number | undefined {
 function toggleRow(entry: Entry, open: boolean) {
   const row = screenRowOf(entry)
   entry.open = open
-  if (row !== undefined) holdRow = { entry, row }
+  if (row !== undefined) holdRow = { entry, row, open }
 }
 const FOLDED_LINES = 3
 /** Ctrl+O: finished thinking shown in full rather than folded to one line. A view, not a setting. */
@@ -402,6 +408,8 @@ let newBelow = false
 let stopArmedUntil = 0
 const history: string[] = []
 let historyIndex = -1
+let historyDraft = ""
+let startupModeNotice = false
 let streaming = false
 
 /**
@@ -646,9 +654,9 @@ let caretAt: { row: number; col: number } | undefined
 /**
  * The composer's visible rows on screen, for mapping mouse coordinates to
  * text. Content starts after the "  | " gutter, so screen column 5 is offset
- * zero; columns are clamped into the row, wide characters approximately.
+ * zero; columns are mapped by display width across wrapped lines.
  */
-let composerMap: { first: number; rows: string[]; before: number } | undefined
+let composerMap: { first: number; rows: ComposerLine[] } | undefined
 /** Whether the mouse has dragged since the press: a clean release is a caret move. */
 let dragged = false
 /** The frame as last drawn, so a drag can be turned into the text under it. */
@@ -665,15 +673,10 @@ function composerOffset(col: number, row: number): number | undefined {
   if (!map || !input) return undefined
   const index = row - map.first
   if (index < 0 || index >= map.rows.length) return undefined
-  const line = map.rows[index]!
-  const into = Math.max(0, Math.min(col - 5, line.length))
-  let at = map.before
-  for (let i = 0; i < index; i++) at += map.rows[i]!.length
-  return Math.max(0, Math.min(at + into, input.length))
+  return offsetInComposerLine(map.rows[index]!, col - 5)
 }
 
 const size = () => ({ cols: out.columns ?? 80, rows: out.rows ?? 24 })
-const charWidthOf = (char: string) => displayWidth(char)
 /**
  * "~\\proj:main" for the home screen: the folder, with the home folder as ~,
  * and its git branch once that has been read. Reading it runs git, so it is
@@ -776,37 +779,6 @@ function refreshPalette() {
  * should rather than at twice the width.
  */
 const COMPOSER_MAX_LINES = 6
-
-function wrapToWidth(text: string, width: number): string[] {
-  if (width <= 0) return [text]
-  const rows: string[] = []
-  let row = ""
-  let used = 0
-  for (const char of text) {
-    const w = charWidthOf(char)
-    if (used + w > width) {
-      rows.push(row)
-      row = ""
-      used = 0
-    }
-    row += char
-    used += w
-  }
-  rows.push(row)
-  return rows
-}
-
-/** Which wrapped line the caret sits on, and how far along it. */
-function caretIn(rows: string[], cursor: number): { line: number; column: number } {
-  let seen = 0
-  for (const [index, row] of rows.entries()) {
-    const length = [...row].length
-    if (cursor <= seen + length) return { line: index, column: displayWidth([...row].slice(0, cursor - seen).join("")) }
-    seen += length
-  }
-  const last = rows.length - 1
-  return { line: last, column: displayWidth(rows[last] ?? "") }
-}
 /** How wide the side panel is, when a wide terminal shows one. */
 const RAIL_WIDTH = 34
 /** The narrowest terminal that shows it; below this every column is the transcript. */
@@ -820,8 +792,8 @@ const RAIL_MIN_COLS = 150
 const drawnRows = new WeakMap<Entry, { key: string; rows: string[] }>()
 function entryLines(entry: Entry, width: number): string[] {
   const key = [width, settings.theme, settings.thinking, entry.kind, entry.state ?? "", entry.by ?? selection.provider.label, entry.text.length,
-    // Thinking folds once it is finished, and Ctrl+O flips every fold.
-    entry.kind === "thinking" ? String(expandThinking) + (entry === transcript.at(-1) && streaming) : "",
+    // Thinking folds once it is finished, and a click or Ctrl+O flips it.
+    entry.kind === "thinking" ? String(entry.open ?? expandThinking) + (entry === transcript.at(-1) && streaming) : "",
     entry.kind === "agent" ? String(foldAnswers) : "", showTimes && entry.at ? sessions.clockTime(entry.at) : "", entry.detail?.length ?? 0,
     entry.open ? "open" : "", entry.live?.length ?? 0, entry.state === "running" && entry.startedAt ? Math.floor((Date.now() - entry.startedAt) / 1000) : ""].join("|")
   const cached = drawnRows.get(entry)
@@ -926,15 +898,17 @@ function drawEntry(entry: Entry, width: number): string[] {
     // answer is what matters, and a page of "the user said hi" pushed it off
     // screen. Live reasoning still shows its latest lines, so progress is visible.
     const done = entry !== transcript.at(-1) || !streaming
-    if (done && !expandThinking) {
+    const open = entry.open ?? expandThinking
+    if (done && !open) {
       const seconds = entry.started && entry.last ? Math.max(0.1, (entry.last - entry.started) / 1000) : undefined
-      out.push(dim + "  ◆ thought" + (seconds ? " for " + seconds.toFixed(1) + "s" : "") + " · ctrl+o expands" + ansi.reset)
+      out.push(dim + "  ◆ thought" + (seconds ? " for " + seconds.toFixed(1) + "s" : "") + " · click or ctrl+o expands" + ansi.reset)
       out.push("")
       return out
     }
-    out.push(dim + "  thinking" + (done ? " · ctrl+o folds" : "...") + ansi.reset)
-    for (const line of visibleControls(entry.text).split(String.fromCharCode(10)).slice(done ? 0 : -6)) {
-      out.push(dim + "  | " + line.slice(0, width) + ansi.reset)
+    out.push(dim + "  thinking" + (done ? " · click or ctrl+o folds" : "...") + ansi.reset)
+    const wrappedThinking = visibleControls(entry.text).split(String.fromCharCode(10)).flatMap((line) => wrapWords(line, Math.max(10, width - 4)))
+    for (const piece of done ? wrappedThinking : wrappedThinking.slice(-6)) {
+      out.push(dim + "  | " + piece + ansi.reset)
     }
     out.push("")
     return out
@@ -957,10 +931,10 @@ function drawEntry(entry: Entry, width: number): string[] {
   }
   out.push(accent + "  " + (entry.by ?? selection.provider.label.toLowerCase()) + (showTimes && entry.at ? dim + " · " + sessions.clockTime(entry.at) + ansi.reset : "") + ansi.reset)
   const rendered = renderMarkdown(visibleControls(entry.text), width)
-  // /fold keeps the start of each answer; the rest is a line away.
-  const shown = foldAnswers && rendered.length > FOLDED_LINES + 1 ? rendered.slice(0, FOLDED_LINES) : rendered
+  // /fold keeps the start of each answer; clicking one opens just that answer, /fold opens them all.
+  const shown = foldAnswers && !entry.open && rendered.length > FOLDED_LINES + 1 ? rendered.slice(0, FOLDED_LINES) : rendered
   for (const line of shown) out.push(accent + "  | " + ansi.reset + line)
-  if (shown !== rendered) out.push(accent + "  | " + ansi.reset + dim + "… " + (rendered.length - FOLDED_LINES) + " more lines - /fold unfolds" + ansi.reset)
+  if (shown !== rendered) out.push(accent + "  | " + ansi.reset + dim + "… " + (rendered.length - FOLDED_LINES) + " more lines - click or /fold unfolds" + ansi.reset)
   out.push("")
   return out
 }
@@ -969,6 +943,10 @@ let toolbarRow = 0
 let toolbarTargets: { from: number; to: number; command: string }[] = []
 /** The floating back-to-latest pill, when one is drawn: its screen row and span. */
 let latestPill: { row: number; from: number; to: number } | undefined
+/** Clickable rows inside the slash/@ palette, approval box and question box. */
+let paletteHit: { firstRow: number; colFrom: number; colTo: number; start: number; count: number } | undefined
+let pendingHit: { firstRow: number; colFrom: number; colTo: number; count: number } | undefined
+let askingHit: { firstRow: number; colFrom: number; colTo: number; count: number } | undefined
 /** Draws the screen. An error in the drawing itself ends the app (see crash.ts): the next redraw would only throw it again. */
 function render() {
   if (!started) return
@@ -990,13 +968,14 @@ function draw() {
   /** Where /timeline's chosen message starts, when one was chosen. */
   let jumpLine: number | undefined
   let heldLine: number | undefined
+  let heldSpan = 0
 
   // The empty conversation is drawn once the room above the composer is known.
   if (transcript.length > 0) {
     const drawn = transcript.length > TRANSCRIPT_WINDOW ? transcript.slice(-TRANSCRIPT_WINDOW) : transcript
     const leftOut = hiddenEarlier + transcript.length - drawn.length
     if (leftOut || historyArchived) {
-      lines.push(dim + "  " + earlierNotice(leftOut, historyArchived).slice(0, width) + ansi.reset)
+      lines.push(dim + "  " + truncateToWidth(earlierNotice(leftOut, historyArchived), width) + ansi.reset)
       lines.push("")
     }
     const starts: number[] = []
@@ -1004,7 +983,9 @@ function draw() {
       if (entry === jumpTo) jumpLine = lines.length
       if (holdRow && entry === holdRow.entry) heldLine = lines.length
       if (entry.kind === "user") starts.push(lines.length)
-      for (const line of entryLines(entry, width)) { owners[lines.length] = entry; lines.push(line) }
+      const built = entryLines(entry, width)
+      if (holdRow && entry === holdRow.entry) heldSpan = built.length
+      for (const line of built) { owners[lines.length] = entry; lines.push(line) }
     }
     userStarts = starts
     // What was typed while it worked is your next message, so it is drawn as
@@ -1032,8 +1013,11 @@ function draw() {
     planLines.push("")
   }
 
+  const inner = Math.max(10, cols - 4)
+  const visibleInput = Math.max(10, inner - 4)
+  const fullComposer = input && !secret ? layoutComposer(input, visibleInput) : []
   const promptHeight = input && !secret
-    ? Math.min(COMPOSER_MAX_LINES, wrapToWidth(input, Math.max(10, cols - 8)).length)
+    ? Math.min(COMPOSER_MAX_LINES, fullComposer.length)
     : 1
   /**
    * Everything drawn below the conversation, counted before the conversation
@@ -1073,8 +1057,12 @@ function draw() {
   const room = Math.max(1, rows - composerHeight - 1)
 
   // Reading further up while it writes: the view stays on what was being read,
-  // instead of the text sliding away under the eye as each line arrives.
-  if (scroll > 0 && drawnLines > 0 && lines.length > drawnLines) { scroll += lines.length - drawnLines; newBelow = true }
+  // instead of the text sliding away under the eye as each line arrives (or when
+  // a running command's live output folds back to one summary line below).
+  if (scroll > 0 && drawnLines > 0 && lines.length !== drawnLines) {
+    if (lines.length > drawnLines) newBelow = true
+    scroll = Math.max(0, scroll + (lines.length - drawnLines))
+  }
   // The same when the space for it changes - the working line going, a popup
   // opening: the top line stays the top line.
   if (scroll > 0 && drawnLines > 0 && room !== lastRoom) scroll = Math.max(0, scroll - (room - lastRoom))
@@ -1084,8 +1072,13 @@ function draw() {
   const maxScroll = Math.max(0, lines.length - room)
   // /timeline: the chosen message at the top of the screen, once.
   if (jumpLine !== undefined) { scroll = Math.max(0, lines.length - room - jumpLine); jumpTo = undefined }
-  // A row just opened or folded goes back on the screen row it was on.
-  if (holdRow && heldLine !== undefined) scroll = Math.max(0, lines.length - room - (heldLine - (holdRow.row - 1)))
+  // A row just folded stays on the screen row it was on; one opened near the bottom lifts up so its body is visible.
+  if (holdRow && heldLine !== undefined) {
+    const targetRow = holdRow.open && holdRow.row + heldSpan - 1 > room
+      ? Math.min(holdRow.row, Math.max(2, room - heldSpan + 1))
+      : holdRow.row
+    scroll = Math.max(0, lines.length - room - (heldLine - (targetRow - 1)))
+  }
   holdRow = undefined
   scroll = Math.min(scroll, maxScroll)
   const cut = lines.length - room - scroll
@@ -1100,13 +1093,18 @@ function draw() {
   if (!home) while (body.length < room) body.push("")
   // Scrolled up: a way back down, on the last line of the conversation, as
   // Claude Code has it - shown from the first line up, and saying when there
-  // is new output it has not seen.
+  // is new output it has not seen. Text either side of the pill stays visible.
   latestPill = undefined
   if (!home && scroll > 0 && body.length) {
     const label = newBelow ? " New output \u00b7 jump to bottom (ctrl+end) \u2193 " : " Jump to bottom (ctrl+end) \u2193 "
-    const from = Math.max(0, Math.floor((main - displayWidth(label)) / 2))
-    body[body.length - 1] = " ".repeat(from) + theme.text + invert + label + noInvert + ansi.reset
-    latestPill = { row: body.length, from: from + 1, to: from + displayWidth(label) }
+    const pillWidth = displayWidth(label)
+    const from = Math.max(0, Math.floor((main - pillWidth) / 2))
+    const under = padToWidth(Dialogs.plain(body[body.length - 1] ?? ""), main)
+    const leftSide = from > 1 ? dim + padToWidth(truncateToWidth(under, from - 1), from - 1) + " " + ansi.reset : " ".repeat(from)
+    const rightStart = from + pillWidth
+    const rightSide = rightStart + 1 < main ? dim + " " + truncateToWidth(sliceFromWidth(under, rightStart + 1), main - rightStart - 1) + ansi.reset : ""
+    body[body.length - 1] = leftSide + theme.text + invert + label + noInvert + ansi.reset + rightSide
+    latestPill = { row: body.length, from: from + 1, to: from + pillWidth }
   }
 
   // A side panel on wide terminals: session, spend and servers at a glance,
@@ -1123,6 +1121,19 @@ function draw() {
   }
 
   for (const line of planLines) body.push(line)
+  paletteHit = undefined
+  if (palette && paletteLines.length) {
+    const visibleRows = Math.max(1, Math.min(9, Math.floor(paletteBudget) - 3))
+    const start = palette.length <= visibleRows ? 0 : Math.max(0, Math.min(paletteIndex - Math.floor(visibleRows / 2), palette.length - visibleRows))
+    const count = Math.min(visibleRows, palette.length - start)
+    paletteHit = {
+      firstRow: body.length + 2,
+      colFrom: 3,
+      colTo: displayWidth(Dialogs.plain(paletteLines[0] ?? "")),
+      start,
+      count,
+    }
+  }
   for (const line of paletteLines) body.push(line)
 
   if (overlay) {
@@ -1133,11 +1144,12 @@ function draw() {
     )
     // Wide enough for the title too: a heading longer than the widest row
     // used to run straight through the right-hand border.
-    const inner = Math.max(labelWidth + valueWidth + 4, displayWidth(overlay.title) + 4)
-    body.push(theme.border + "  ╭" + "─".repeat(inner) + "╮" + ansi.reset)
+    const overlayInner = Math.max(labelWidth + valueWidth + 4, displayWidth(overlay.title) + 8)
+    body.push(theme.border + "  ╭" + "─".repeat(overlayInner) + "╮" + ansi.reset)
     body.push(
       theme.border + "  │" + ansi.reset +
-        theme.gold + padToWidth("  " + overlay.title, inner) + ansi.reset +
+        theme.gold + padToWidth("  " + overlay.title, overlayInner - 4) + ansi.reset +
+        dim + "esc " + ansi.reset +
         theme.border + "│" + ansi.reset,
     )
     for (const [label, value] of overlayRows) {
@@ -1145,14 +1157,15 @@ function draw() {
         "  " + theme.muted + padToWidth(label, labelWidth) + ansi.reset +
         theme.text + truncateToWidth(value, valueWidth) + ansi.reset
       body.push(
-        theme.border + "  │" + ansi.reset + padToWidth(row, inner) + theme.border + "│" + ansi.reset,
+        theme.border + "  │" + ansi.reset + padToWidth(row, overlayInner) + theme.border + "│" + ansi.reset,
       )
     }
-    body.push(theme.border + "  ╰" + "─".repeat(inner) + "╯" + ansi.reset)
+    body.push(theme.border + "  ╰" + "─".repeat(overlayInner) + "╯" + ansi.reset)
   }
 
   // Consent is a list you move through, not a letter you have to know. It
   // sits where the palette does, so the answer is next to the question.
+  askingHit = undefined
   if (!pending && asking && !asking.typing) {
     const entry = asking
     const options = entry.question.options
@@ -1168,65 +1181,64 @@ function draw() {
     const keys = entry.question.multiple ? "1-" + options.length + " or space picks · enter sends · esc dismisses" : "1-" + count + " or enter picks · esc dismisses"
     const labelWidth = Math.max(...rows.map((row) => displayWidth(row.label))) + 2
     const wanted = Math.max(3 + labelWidth + Math.max(0, ...rows.map((row) => displayWidth(row.hint))), displayWidth(title), displayWidth(keys) + 2) + 1
-    const inner = Math.max(24, Math.min(wanted, cols - 6))
-    body.push(theme.border + "  ╭" + "─".repeat(inner) + "╮" + ansi.reset)
+    const boxInner = Math.max(24, Math.min(wanted, cols - 6))
+    body.push(theme.border + "  ╭" + "─".repeat(boxInner) + "╮" + ansi.reset)
     // A question longer than the window wraps: in a 44-column terminal it used to be cut mid-word.
-    for (const [index, piece] of wrapWords(entry.question.question, inner - 1).entries())
-      body.push(theme.border + "  │" + ansi.reset + theme.gold + padToWidth(" " + piece, inner) + ansi.reset + theme.border + "│" + ansi.reset)
+    for (const piece of wrapWords(entry.question.question, boxInner - 1))
+      body.push(theme.border + "  │" + ansi.reset + theme.gold + padToWidth(" " + piece, boxInner) + ansi.reset + theme.border + "│" + ansi.reset)
+    askingHit = { firstRow: body.length + 1, colFrom: 3, colTo: boxInner + 4, count: rows.length }
     for (const [index, row] of rows.entries()) {
       const active = index === askingChoice
       const marker = active ? theme.goblin + " ❯ " + ansi.reset : "   "
       const label = (active ? theme.text : theme.muted) + padToWidth(row.label, labelWidth) + ansi.reset
-      const hint = truncateToWidth(row.hint, Math.max(0, inner - 3 - labelWidth))
-      body.push(theme.border + "  │" + ansi.reset + padToWidth(marker + label + dim + hint + ansi.reset, inner) + theme.border + "│" + ansi.reset)
+      const hint = truncateToWidth(row.hint, Math.max(0, boxInner - 3 - labelWidth))
+      body.push(theme.border + "  │" + ansi.reset + padToWidth(marker + label + dim + hint + ansi.reset, boxInner) + theme.border + "│" + ansi.reset)
     }
-    body.push(theme.border + "  │" + ansi.reset + dim + padToWidth("   " + keys, inner) + ansi.reset + theme.border + "│" + ansi.reset)
-    body.push(theme.border + "  ╰" + "─".repeat(inner) + "╯" + ansi.reset)
+    body.push(theme.border + "  │" + ansi.reset + dim + padToWidth("   " + keys, boxInner) + ansi.reset + theme.border + "│" + ansi.reset)
+    body.push(theme.border + "  ╰" + "─".repeat(boxInner) + "╯" + ansi.reset)
   }
 
+  pendingHit = undefined
   if (pending && !input) {
     // The box names what is being asked and what "for this session" would
     // cover. It used to say only "allow this?", with the command down in the
     // input line, and the session hint said "calls like this" - which told you
     // nothing once an approval covered one command rather than the whole tool.
-    const { title, choices, hints, labelWidth, inner, askedRows } = approvalBox(pending, cols, rows)
+    const { title, choices, hints, labelWidth, inner: boxInner, askedRows } = approvalBox(pending, cols, rows)
 
-    body.push(theme.border + "  " + "╭" + "─".repeat(inner) + "╮" + ansi.reset)
+    body.push(theme.border + "  " + "╭" + "─".repeat(boxInner) + "╮" + ansi.reset)
     body.push(
       theme.border + "  │" + ansi.reset +
-        theme.gold + padToWidth(truncateToWidth(title, inner), inner) + ansi.reset +
+        theme.gold + padToWidth(truncateToWidth(title, boxInner), boxInner) + ansi.reset +
         theme.border + "│" + ansi.reset,
     )
     for (const line of askedRows) {
-      body.push(theme.border + "  │" + ansi.reset + theme.text + padToWidth("   " + line, inner) + ansi.reset + theme.border + "│" + ansi.reset)
+      body.push(theme.border + "  │" + ansi.reset + theme.text + padToWidth("   " + line, boxInner) + ansi.reset + theme.border + "│" + ansi.reset)
     }
+    pendingHit = { firstRow: body.length + 1, colFrom: 3, colTo: boxInner + 4, count: choices.length }
     for (const [index, choice] of choices.entries()) {
       const active = index === pendingChoice
       const marker = active ? theme.goblin + " ❯ " + ansi.reset : "   "
       const label = (active ? theme.text : theme.muted) + padToWidth(choice.label, labelWidth) + ansi.reset
-      const hint = truncateToWidth(hints[index]!, Math.max(0, inner - 3 - labelWidth))
+      const hint = truncateToWidth(hints[index]!, Math.max(0, boxInner - 3 - labelWidth))
       const row = marker + label + dim + hint + ansi.reset
       body.push(
-        theme.border + "  │" + ansi.reset + padToWidth(row, inner) + theme.border + "│" + ansi.reset,
+        theme.border + "  │" + ansi.reset + padToWidth(row, boxInner) + theme.border + "│" + ansi.reset,
       )
     }
-    body.push(theme.border + "  " + "╰" + "─".repeat(inner) + "╯" + ansi.reset)
+    body.push(theme.border + "  " + "╰" + "─".repeat(boxInner) + "╯" + ansi.reset)
   }
 
-  const inner = Math.max(10, cols - 4)
-  const visibleInput = Math.max(10, inner - 4)
   /** Columns from the start of the composer content to the caret. */
   let caretOffset: number | undefined
   /** The prompt as it will be drawn, one entry per visible line. */
-  let composerRows: string[] = []
-  /** Characters of prompt scrolled off above the first drawn row. */
-  let rowsBefore = 0
+  let composerRows: ComposerLine[] = []
   let caretLine = 0
   let shown: string
   if (pending && !input) {
     shown =
       theme.gold + pending.tool + ansi.reset + " " +
-      dim + askedFor(pending.tool, pending.detail).replace(/\s+/g, " ").slice(0, Math.max(10, visibleInput - 24)) + ansi.reset
+      dim + truncateToWidth(askedFor(pending.tool, pending.detail).replace(/\s+/g, " "), Math.max(10, visibleInput - displayWidth(pending.tool) - 2)) + ansi.reset
   } else if (asking && !pending && !input) {
     caretOffset = 0
     shown = dim + (asking.typing ? "type your answer..." : "pick an answer above") + ansi.reset
@@ -1235,39 +1247,24 @@ function draw() {
     shown = dim + (cols < 60 ? "type to queue a message" : "type to queue a message for when this finishes") + ansi.reset
   } else if (secret) {
     // Dots, and one per character rather than a fixed run, so backspace is
-    // visible without the key ever being.
-    caretOffset = displayWidth(secret.provider) + 7 + input.length
+    // visible without the key ever being. Clamped so a long pasted key never
+    // sends the terminal cursor past the end of the line.
+    const dots = Math.min(input.length, Math.max(4, visibleInput - 24))
+    caretOffset = displayWidth(secret.provider) + 7 + dots
     shown =
       theme.gold + secret.provider + " key: " + ansi.reset +
-      theme.text + "\u00b7".repeat(Math.min(input.length, Math.max(4, visibleInput - 24))) + ansi.reset
+      theme.text + "\u00b7".repeat(dots) + ansi.reset
   } else if (!input) {
     caretOffset = 0
     shown = dim + "ask the goblin anything..." + ansi.reset
   } else {
-    const span = composerSelection(composerState())
-    const rows = wrapToWidth(input, visibleInput)
-    const spot = caretIn(rows, cursor)
+    const spot = caretInComposer(fullComposer, cursor)
     // Keep the caret's line on screen when the prompt outgrows the box.
-    const first = Math.max(0, Math.min(spot.line - COMPOSER_MAX_LINES + 1, rows.length - COMPOSER_MAX_LINES))
-    composerRows = rows.slice(first, first + COMPOSER_MAX_LINES)
-    rowsBefore = rows.slice(0, first).join("").length
+    const first = Math.max(0, Math.min(spot.line - COMPOSER_MAX_LINES + 1, fullComposer.length - COMPOSER_MAX_LINES))
+    composerRows = fullComposer.slice(first, first + COMPOSER_MAX_LINES)
     caretLine = spot.line - first
     caretOffset = spot.column
-    // A selection is drawn in reverse video, which is what every terminal
-    // editor does and what makes it read as selected rather than as text
-    // that happens to be a different colour.
-    const before = rows.slice(0, first).join("").length
-    const line = composerRows[0] ?? ""
-    if (span && composerRows.length === 1) {
-      const from = Math.max(0, Math.min(span.from - before, line.length))
-      const to = Math.max(0, Math.min(span.to - before, line.length))
-      shown =
-        theme.text + line.slice(0, from) +
-        invert + line.slice(from, to) + noInvert +
-        line.slice(to) + ansi.reset
-    } else {
-      shown = theme.text + line + ansi.reset
-    }
+    shown = ""
   }
 
   // Working: said where the eye is, in colour, with how long it has been and
@@ -1290,9 +1287,6 @@ function draw() {
   // fork's does: plain when it asks, gold, red at full access, orange while planning.
   const ruleColour = permissions.planning ? theme.warning : permissions.mode === "full" ? theme.error : permissions.mode === "approve" ? theme.gold : theme.border
   body.push(ruleColour + "  " + "\u2500".repeat(inner) + ansi.reset)
-  // A queued prompt stays on screen in dimmer text, Claude-style: clearing
-  // the composer without showing what is waiting reads as the prompt being
-  // eaten, and Ctrl+S with an empty composer then looks broken.
 
   // Clipboard pictures waiting to ride along. Named on screen so nothing
   // reaches the model unseen; a new conversation lets them go.
@@ -1300,24 +1294,20 @@ function draw() {
     const how = cols >= 70 ? "  ·  backspace at the start removes " + (pendingImages.length > 1 ? "the last" : "it") : ""
     body.push(dim + "  images: " + truncateToWidth(pendingImages.map((image) => image.name).join(", "), Math.max(0, cols - 14 - how.length)) + how + ansi.reset)
   }
-  if (composerRows.length > 1) {
-    let seen = rowsBefore
+  if (composerRows.length) {
+    const span = composerSelection(composerState())
     for (const row of composerRows) {
-      const start = seen
-      const end = seen + row.length
-      seen = end
-      const span = composerSelection(composerState())
-      if (!span || span.to <= start || span.from >= end) {
-        body.push(theme.goblin + "  | " + ansi.reset + theme.text + row + ansi.reset)
+      if (!span || span.to <= row.start || span.from >= row.end) {
+        body.push(theme.goblin + "  | " + ansi.reset + theme.text + row.text + ansi.reset)
         continue
       }
-      const from = Math.max(0, span.from - start)
-      const to = Math.min(row.length, span.to - start)
+      const from = Math.max(0, Math.min(span.from - row.start, row.text.length))
+      const to = Math.max(0, Math.min(span.to - row.start, row.text.length))
       body.push(
         theme.goblin + "  | " + ansi.reset +
-          theme.text + row.slice(0, from) +
-          invert + row.slice(from, to) + noInvert +
-          row.slice(to) + ansi.reset,
+          theme.text + row.text.slice(0, from) +
+          invert + row.text.slice(from, to) + noInvert +
+          row.text.slice(to) + ansi.reset,
       )
     }
   } else {
@@ -1328,7 +1318,7 @@ function draw() {
   // a text offset. Recorded per frame because wrapping and scroll move them.
   composerMap =
     input && composerRows.length
-      ? { first: body.length - composerRows.length + 1, rows: [...composerRows], before: rowsBefore }
+      ? { first: body.length - composerRows.length + 1, rows: [...composerRows] }
       : undefined
   body.push(ruleColour + "  " + "\u2500".repeat(inner) + ansi.reset)
 
@@ -1337,19 +1327,17 @@ function draw() {
   // much it is trusted with: it changes what the next prompt can do.
   const modeLabel = permissions.mode === "ask" ? "ask" : permissions.mode === "approve" ? "approve for me" : "full access"
   const modeColour = permissions.mode === "ask" ? theme.muted : permissions.mode === "approve" ? theme.gold : theme.error
-  const modeTag =
-    (permissions.planning ? "  [planning]" : "") +
-    (boost || boostOnce ? "  [boost]" : "") +
-    (subagents.running().length ? "  [" + subagents.running().length + " subagent" + (subagents.running().length === 1 ? "" : "s") + " running]" : "") +
-    (runningJobs(process.cwd()) ? "  [" + runningJobs(process.cwd()) + " job" + (runningJobs(process.cwd()) === 1 ? "" : "s") + " running]" : "")
+  const subCount = subagents.running().length
+  const jobCount = runningJobs(process.cwd())
+  const statusTags: { full: string; short: string }[] = [
+    ...(permissions.planning ? [{ full: "[planning]", short: "[plan]" }] : []),
+    ...(boost || boostOnce ? [{ full: "[boost]", short: "[boost]" }] : []),
+    ...(subCount ? [{ full: `[${subCount} subagent${subCount === 1 ? "" : "s"} running]`, short: `[${subCount} agent${subCount === 1 ? "" : "s"}]` }] : []),
+    ...(jobCount ? [{ full: `[${jobCount} job${jobCount === 1 ? "" : "s"} running]`, short: `[${jobCount} job${jobCount === 1 ? "" : "s"}]` }] : []),
+  ]
   // Nothing spent on a model that costs nothing is not worth a column.
-  const spendTag = spend.input + spend.output > 0 && !(spend.dollars === 0 && !spend.unpriced) ? "  " + formatSpend(spend) : ""
-  // Usage stays on the bar even while a status is showing: a transient
-  // message used to replace the model, context and spend readout entirely,
-  // so "no key" also hid what you were connected to.
-  const usageTail = (context.limit > 0 ? "  ~" + context.percent + "% ctx" : "  ctx window unknown") + spendTag
-  const fullName = selection.provider.label + " " + selection.model.label
-  let left = fullName + usageTail + modeTag
+  const spendText = spend.input + spend.output > 0 && !(spend.dollars === 0 && !spend.unpriced) ? formatSpend(spend) : ""
+  const contextText = context.limit > 0 ? "~" + context.percent + "% ctx" : "ctx window unknown"
   const rightFor = (compactHints: boolean) => dialog
     ? compactHints ? "enter · esc close" : "up/down · enter choose · esc close"
     : pending && !input
@@ -1362,35 +1350,32 @@ function draw() {
     : streaming
     ? (queued ? (compactHints ? "ctrl+s now · up edit" : "ctrl+s sends now · up takes it back · esc twice stops") : compactHints ? "enter queue · esc esc stop" : "enter queue · ctrl+s now · esc twice stops")
     : renaming
-    ? "enter saves the name · esc cancels"
+    ? compactHints ? "enter save · esc" : "enter saves the name · esc cancels"
     : secret
-    ? "enter saves · esc cancels · nothing is echoed"
+    ? compactHints ? "enter save · esc" : "enter saves · esc cancels · nothing is echoed"
     : overlay
-    ? "any key closes"
+    ? compactHints ? "any key closes" : "any key or click closes"
     : scroll > 0
       ? compactHints ? "ctrl+end bottom" : "pgup/pgdn page \u00b7 ctrl+\u2191\u2193 your messages \u00b7 ctrl+end bottom"
       : palette
         ? compactHints ? "tab completes" : "tab complete · up/down pick"
         : compactHints ? "ctrl+g actions" : "shift+tab mode \u00b7 ctrl+g actions \u00b7 ctrl+c copy/quit"
-  // The model, context and cost matter more than key hints: when the long hints would cut the readout
-  // short ("$0.0…" on a 120-column window with a long model name), the short hints are used instead.
-  const roomBeside = (hints: string) => cols - displayWidth(hints) - 4 - displayWidth(modeLabel) - 3
-  const fullHints = rightFor(cols < 75)
-  const right = displayWidth(left) > roomBeside(fullHints) - 2 ? rightFor(true) : fullHints
-  // A long status gives way to the key hints rather than pushing them off the
-  // edge: "mode: Full access - never ask - only the rules..." ran into them.
-  const statusRoom = Math.max(10, cols - displayWidth(right) - 4 - displayWidth(modeLabel) - 3)
-  // A name too long for the bar loses its provider first, then its middle - never its end, which is where
-  // "Fast" and "(free route)" are. The context and cost readout stays whole while there is room for it.
-  if (displayWidth(left) > statusRoom - 2) {
-    const nameRoom = statusRoom - 2 - displayWidth(usageTail + modeTag)
-    const name = displayWidth(selection.model.label) <= nameRoom ? selection.model.label : truncateMiddle(selection.model.label, Math.max(12, nameRoom))
-    left = name + usageTail + modeTag
-  }
-  const plain = (displayWidth(left) > statusRoom - 2 ? truncateToWidth(left, statusRoom - 3) + "\u2026" : left)
-  const lead = "  " + modeLabel + " \u00b7 "
-  const gap = Math.max(1, cols - displayWidth(right) - 2 - displayWidth(lead) - displayWidth(plain))
-  body.push("  " + modeColour + modeLabel + ansi.reset + dim + " \u00b7 " + plain + ansi.reset + " ".repeat(gap) + theme.muted + right + ansi.reset)
+  const bar = formatStatusBar({
+    cols,
+    modeLabel,
+    providerLabel: selection.provider.label,
+    modelLabel: selection.model.label,
+    contextText,
+    spendText,
+    tags: statusTags,
+    rightFull: rightFor(false),
+    rightCompact: rightFor(true),
+  })
+  body.push(
+    "  " + modeColour + bar.mode + ansi.reset +
+      (bar.plain ? dim + " \u00b7 " + bar.plain + ansi.reset : "") +
+      (bar.right ? " ".repeat(bar.gap) + theme.muted + bar.right + ansi.reset : ""),
+  )
   toolbarRow = body.length + 1
   toolbarTargets = []
   let toolbar = "  "
@@ -2560,10 +2545,23 @@ async function chooseInDialog() {
     return
   }
 
-  // /help and /skills: the chosen command goes into the prompt, ready for its
-  // argument, rather than running with none.
+  // /help and /skills: zero-argument commands run or open their picker straight away;
+  // skills and commands expecting an argument go into the prompt ready for typing.
   if (dialog.kind === "invoke") {
     closeDialog()
+    const direct = new Set([
+      "/status", "/usage", "/diff", "/clear", "/approvals", "/mode", "/settings",
+      "/resume", "/jobs", "/timeline", "/fold", "/timestamps", "/thinking",
+      "/undo", "/redo", "/version", "/upgrade", "/skills", "/editor", "/fork",
+    ])
+    if (row.value === "/model" || row.value === "/connect") {
+      if (row.value === "/model") openModelPicker(); else openConnect()
+      render(); return
+    }
+    if (direct.has(row.value)) {
+      await runQuick(row.value)
+      return
+    }
     input = row.value + " "
     cursor = input.length
     refreshPalette()
@@ -2981,14 +2979,16 @@ async function send() {
       setHomeTip(pickTip())
     }
     // /help is a picker too. Printed, it was twenty-five lines that stayed in
-    // the conversation for good.
-    if (result.kind === "message" && text.trim() === "/help") {
+    // the conversation for good; "/help <words>" opens it already narrowed.
+    if (result.kind === "message" && /^\/help(?:\s|$)/.test(text.trim())) {
+      const query = text.trim().slice(5).trim()
       dialog = Dialogs.open(
         "invoke",
         "Commands",
         COMMANDS.map((command) => ({ label: command.name, hint: command.description, value: command.name })),
-        { footer: "enter puts it in the prompt · wheel or pgup/pgdn scroll · esc closes", size: "large" },
+        { footer: "type to search · enter runs or puts in prompt · esc closes", size: "large", filterable: true },
       )
+      if (query) dialog = Dialogs.filter(dialog, query)
       render()
       return
     }
@@ -3160,7 +3160,7 @@ async function send() {
                 value: "/" + skill.name,
               })),
           ],
-          { footer: "enter puts it in the prompt · wheel or pgup/pgdn scroll · esc closes", size: "large" },
+          { footer: "type to search · enter puts it in the prompt · esc closes", size: "large", filterable: true },
         )
       }
     }
@@ -3881,11 +3881,14 @@ async function loadSettings() {
   media = await loadMedia()
   applyTheme(settings.theme)
   applyMouse()
-  // Open in the approval mode it was left in. Anything looser than "ask" is said out loud, once, so that
-  // full access is never something the app is quietly in.
+  // Open in the approval mode it was left in. Anything looser than "ask" is said once (without repeating
+  // HOME_TIP's shift+tab hint right above it) and cleared as soon as typing begins.
   if (settings.approvalMode !== permissions.mode) {
     permissions.mode = settings.approvalMode
-    if (!status) status = "approvals: " + MODES.find((entry) => entry.id === settings.approvalMode)!.label.toLowerCase() + ", as you left it - shift+tab changes it"
+    if (!status) {
+      status = "approvals: " + MODES.find((entry) => entry.id === settings.approvalMode)!.label.toLowerCase() + ", as you left it"
+      startupModeNotice = true
+    }
   }
   // The recorder takes about a second to come up; started now, the first hold of the space bar is instant.
   if (settings.voiceHold && voiceUsable()) warmRecorder()
@@ -4381,8 +4384,62 @@ process.stdin.on("data", (chunk) => {
       }
       if (armed) { status = ""; render(); continue }
     }
+    const answerPending = (decision: Decision) => {
+      if (!pending) return
+      const ask = pending
+      pending = waitingAsks.shift()
+      pendingChoice = 0
+      if (pending) pendingSince = Date.now()
+      ask.resolve(decision)
+      draftBack()
+      render()
+    }
+    const pickPalette = (atIndex: number): "sent" | "handled" => {
+      const selected = palette?.[atIndex]
+      if (!selected) { palette = undefined; render(); return "handled" }
+      const chosen = selected.value
+      if (chosen.startsWith("@")) {
+        completeWith(chosen)
+        refreshPalette()
+        render()
+        return "handled"
+      }
+      if (chosen.startsWith("/") && !input.startsWith("/")) {
+        completeWith(chosen)
+        refreshPalette()
+        render()
+        return "handled"
+      }
+      const isBareCommand = !chosen.includes(" ")
+      if (chosen === "/model" || chosen === "/connect") {
+        input = ""; cursor = 0; palette = undefined
+        if (chosen === "/model") openModelPicker(); else openConnect()
+        render()
+        return "handled"
+      }
+      const expanded = isBareCommand ? paletteFor(chosen + " ") : undefined
+      if (expanded) {
+        input = chosen + " "
+        cursor = input.length
+        refreshPalette()
+        render()
+        return "handled"
+      }
+      input = chosen
+      cursor = input.length
+      palette = undefined
+      void send()
+      return "sent"
+    }
+    const clearStartupNotice = () => {
+      if (!startupModeNotice) return
+      startupModeNotice = false
+      if (status.startsWith("approvals:")) status = ""
+    }
+
     if (pressed.type === "ctrl" && pressed.value === "g" && !secret) {
-      openActions()
+      if (dialog?.kind === "actions") closeDialog()
+      else { overlay = undefined; openActions() }
       render(); continue
     }
     if (pressed.type === "ctrl" && pressed.value === "c") {
@@ -4396,12 +4453,6 @@ process.stdin.on("data", (chunk) => {
       if (action === "quit") return shutdown()
       render(); continue
     }
-    // Ctrl+S sends the draft now instead of queueing it: the running turn is
-    // stopped and the turn-end below picks the draft up as soon as the abort
-    // lands. A waiting permission question is refused so the abort is never
-    // stuck behind a prompt nobody will answer. With nothing typed but a
-    // prompt already queued, it fast-forwards that one instead of ignoring
-    // the key.
     // Ctrl+B: stop waiting for the command that is running and let it carry on in the background.
     if (pressed.type === "ctrl" && pressed.value === "b" && !secret && !dialog) {
       backgroundNow()
@@ -4472,29 +4523,93 @@ process.stdin.on("data", (chunk) => {
         const height = Dialogs.dialogHeight(dialog, screen.rows)
         const width = Dialogs.dialogWidth(dialog, screen.cols)
         const boxHeight = Dialogs.box(dialog, screen.cols, screen.rows).length
-        const index = dialogRowAt({ ...pressed, ...screen, width, height, boxHeight, first: Dialogs.firstVisible(dialog, height) })
-        // A click outside the box goes back to the conversation: a popup you
-        // can only leave through its own rows traps the mouse. A click on the
-        // box itself - title, border, a heading - leaves it open.
-        if (index !== undefined && !dialog.rows[index]?.inert) { dialog.index = index; void chooseInDialog() }
-        else if (!insideDialog({ ...pressed, ...screen, width, boxHeight })) closeDialog()
-        render(); continue
+        const geometry = { ...pressed, ...screen, width, boxHeight }
+        const index = dialogRowAt({
+          ...geometry,
+          height,
+          first: Dialogs.firstVisible(dialog, height),
+          filterable: dialog.filterable,
+          rowCount: dialog.rows.length,
+        })
+        if (dialogEscAt(geometry)) { closeDialog(); render(); continue }
+        if (index !== undefined && !dialog.rows[index]?.inert) { dialog.index = index; void chooseInDialog(); render(); continue }
+        if (insideDialog(geometry)) { render(); continue }
+        const openKind = dialog.kind
+        closeDialog()
+        // A click directly on another toolbar button switches popups in one click instead of two.
+        const toolbarTarget = !secret && pressed.row === toolbarRow
+          ? toolbarTargets.find((item) => pressed.col >= item.from && pressed.col <= item.to)?.command
+          : undefined
+        const sameToolbar =
+          (toolbarTarget === "model" && openKind === "model-picker") ||
+          (toolbarTarget === "usage" && openKind === "usage") ||
+          toolbarTarget === openKind
+        if (!toolbarTarget || sameToolbar) { render(); continue }
+      } else if (overlay) {
+        const wasUsage = overlay.title.startsWith("Usage")
+        overlay = undefined
+        const toolbarTarget = !secret && pressed.row === toolbarRow
+          ? toolbarTargets.find((item) => pressed.col >= item.from && pressed.col <= item.to)?.command
+          : undefined
+        if (!toolbarTarget || (toolbarTarget === "usage" && wasUsage)) { render(); continue }
+      }
+      // Clicking a row in the slash/@ palette picks it.
+      if (palette && paletteHit && pressed.col >= paletteHit.colFrom && pressed.col <= paletteHit.colTo) {
+        const offset = pressed.row - paletteHit.firstRow
+        if (offset >= 0 && offset < paletteHit.count) {
+          paletteIndex = paletteHit.start + offset
+          if (pickPalette(paletteIndex) === "sent") return
+          continue
+        }
+      }
+      // Clicking a choice in an approval or question box answers it.
+      if (pending && !input && pendingHit && pressed.col >= pendingHit.colFrom && pressed.col <= pendingHit.colTo) {
+        const offset = pressed.row - pendingHit.firstRow
+        const choices = decisionsFor(pending.tool)
+        if (offset >= 0 && offset < choices.length) {
+          pendingChoice = offset
+          answerPending(choices[offset]!.id)
+          continue
+        }
+      }
+      if (!pending && asking && !asking.typing && askingHit && pressed.col >= askingHit.colFrom && pressed.col <= askingHit.colTo) {
+        const offset = pressed.row - askingHit.firstRow
+        const options = asking.question.options
+        const own = options.length
+        if (offset >= 0 && offset <= own) {
+          askingChoice = offset
+          if (offset === own) { asking.typing = true; status = ""; render(); continue }
+          if (asking.question.multiple) {
+            if (asking.picked.has(offset)) asking.picked.delete(offset)
+            else asking.picked.add(offset)
+            render(); continue
+          }
+          settleQuestion(asking, [options[offset]!.label])
+          continue
+        }
       }
       // The floating pill goes back to the latest output.
       if (latestPill && pressed.row === latestPill.row && pressed.col >= latestPill.from && pressed.col <= latestPill.to) {
         scroll = 0
         render(); continue
       }
-      // A finished call opens to its whole command and far more of its output, and folds again.
+      // A finished call, reasoning block or folded answer opens and folds in place.
       const clicked = entryAtRow(pressed.row)
       if (clicked?.kind === "tool" && clicked.tool?.result !== undefined) {
         toggleRow(clicked, !clicked.open)
         status = clicked.open ? "opened - click it again to fold" : ""
         render(); continue
       }
+      if (clicked?.kind === "thinking" && (clicked !== transcript.at(-1) || !streaming)) {
+        toggleRow(clicked, !(clicked.open ?? expandThinking))
+        render(); continue
+      }
+      if (clicked?.kind === "agent" && foldAnswers) {
+        toggleRow(clicked, !clicked.open)
+        render(); continue
+      }
       // Letting go after dragging over text in the prompt box copies it, exactly as letting go over the
-      // conversation does. It used to select only - Ctrl+C was needed - so the same gesture copied an answer
-      // and silently did not copy your own words. Wherever the mouse ends up, the selection is kept.
+      // conversation does.
       if (!secret && dragged && anchor !== undefined) {
         const picked = selectedText(composerState())
         dragged = false
@@ -4518,6 +4633,7 @@ process.stdin.on("data", (chunk) => {
       dragged = false
       if (pressed.row !== toolbarRow || secret) { render(); continue }
       const target = toolbarTargets.find((item) => pressed.col >= item.from && pressed.col <= item.to)?.command
+      if (target) overlay = undefined
       if (target === "attach") dialog = Dialogs.open("attach", "Add to the prompt", [{ label: "Mention a project file", value: "file" }, { label: "Paste image from clipboard", value: "image" }, { label: "Run a slash command", value: "command" }])
       if (target === "model") openModelPicker()
       if (target === "settings") openSettings()
@@ -4535,7 +4651,7 @@ process.stdin.on("data", (chunk) => {
       render()
       continue
     }
-    if (pressed.type === "shifttab") {
+    if (pressed.type === "shifttab" && !secret) {
       changePermissionMode(nextMode(permissions.mode))
       render()
       continue
@@ -4561,37 +4677,32 @@ process.stdin.on("data", (chunk) => {
       // In a list you can search, typing narrows it and backspace widens it again.
       if (dialog.filterable && pressed.type === "char") { dialog = Dialogs.filter(dialog, (dialog.query ?? "") + pressed.value); render(); continue }
       if (dialog.filterable && pressed.type === "backspace") { dialog = Dialogs.filter(dialog, (dialog.query ?? "").slice(0, -1)); render(); continue }
+      if (dialog.filterable && pressed.type === "ctrl" && pressed.value === "u") { dialog = Dialogs.filter(dialog, ""); render(); continue }
       // ctrl+f stars the highlighted model, as in the fork's model dialog.
       if (dialog.kind === "model-picker" && pressed.type === "ctrl" && pressed.value === "f") {
         const value = Dialogs.selected(dialog)?.value
         if (value) void starModel(value).then(() => { if (dialog?.kind === "model-picker") openModelPicker(value); render() })
         continue
       }
-      // q closes the diff viewer, the way the original binds it - reviewing
-      // is a mode you leave, and reaching for escape every time is a tell
-      // that nobody who reads diffs was asked.
+      // q closes the diff viewer, the way the original binds it.
       if (dialog.kind === "diff" && pressed.type === "char" && pressed.value === "q") {
         closeDialog()
         render()
         continue
       }
-      // n and p jump between files in the diff, which is the only way to get
-      // past a long one without holding the down arrow.
+      // n and p jump between files in the diff.
       if (dialog.kind === "diff" && pressed.type === "char" && (pressed.value === "n" || pressed.value === "p")) {
         dialog = toFile(dialog, pressed.value === "n" ? 1 : -1)
         render()
         continue
       }
-      // Anything else is swallowed rather than typed into the composer
-      // behind: a key pressed at a dialog was meant for the dialog.
+      // Anything else is swallowed rather than typed into the composer behind.
       continue
     }
     if (overlay) {
       // Anything at all closes it: it is a panel to read, not one to operate.
       overlay = undefined
       if (pressed.type === "escape" || pressed.type === "enter") { render(); continue }
-      // A keystroke meant for the composer still lands there, so dismissing
-      // it does not cost the character someone was already typing.
     }
 
     // A question from the model owns the keys while its choices are up. While
@@ -4607,8 +4718,6 @@ process.stdin.on("data", (chunk) => {
         if (pressed.type === "up") { askingChoice = Math.max(0, askingChoice - 1); render(); continue }
         if (pressed.type === "down") { askingChoice = Math.min(own, askingChoice + 1); render(); continue }
         if (pressed.type === "escape") { settleQuestion(entry, undefined); continue }
-        // A number picks that choice: on a single choice it answers at once,
-        // on several it ticks or unticks it, and the last number is typing your own.
         let picked = false
         if (pressed.type === "char" && /^[1-9]$/.test(pressed.value) && Number(pressed.value) <= own + 1) {
           const index = Number(pressed.value) - 1
@@ -4628,7 +4737,6 @@ process.stdin.on("data", (chunk) => {
         if (pressed.type === "enter" || picked) {
           if (askingChoice === own) {
             entry.typing = true
-            // The box and the key hints say what to do now; a third copy in the status only pushed the model name off the line.
             status = ""
             render(); continue
           }
@@ -4638,24 +4746,11 @@ process.stdin.on("data", (chunk) => {
           settleQuestion(entry, chosen)
           continue
         }
-        // A stray key must not answer for the person.
         continue
       }
     }
 
     if (pending && !input && !palette && !(pressed.type === "char" && pressed.value === "/")) {
-      const answer = (decision: Decision) => {
-        const ask = pending!
-        pending = waitingAsks.shift()
-        pendingChoice = 0
-        if (pending) pendingSince = Date.now()
-        ask.resolve(decision)
-        draftBack()
-        render()
-      }
-      // When it took the place of a draft, the keys just after it appears are still that typing: nobody has
-      // read the command yet, and the Enter that ends a sentence must not allow it. Letters go on the draft.
-      // Over an empty prompt it answers at once, as it always did.
       if (draftAside && Date.now() - pendingSince < PENDING_GRACE_MS) {
         if (pressed.type === "char") { draftAside.text += pressed.value; draftAside.cursor = draftAside.text.length }
         continue
@@ -4663,77 +4758,23 @@ process.stdin.on("data", (chunk) => {
       if (pressed.type === "up") { pendingChoice = Math.max(0, pendingChoice - 1); render(); continue }
       const choices = decisionsFor(pending.tool)
       if (pressed.type === "down") { pendingChoice = Math.min(choices.length - 1, pendingChoice + 1); render(); continue }
-      if (pressed.type === "enter") { answer(choices[pendingChoice]!.id); continue }
-      if (pressed.type === "escape") { answer("reject"); continue }
-      // Anything else is ignored: a stray key must not answer for the user.
+      if (pressed.type === "enter") { answerPending(choices[pendingChoice]!.id); continue }
+      if (pressed.type === "escape") { answerPending("reject"); continue }
       continue
     }
-
 
     // While the palette is open it owns up, down, tab and escape.
     if (palette) {
       if (pressed.type === "up") { paletteIndex = Math.max(0, paletteIndex - 1); dirty = true; continue }
       if (pressed.type === "down") { paletteIndex = Math.min(palette.length - 1, paletteIndex + 1); dirty = true; continue }
       if (pressed.type === "escape") { palette = undefined; render(); continue }
-      // The wheel moves through the list. It used to fall through and scroll
-      // the conversation behind the menu, which looked like the menu was stuck.
       if (pressed.type === "wheelup") { paletteIndex = Math.max(0, paletteIndex - 1); dirty = true; continue }
       if (pressed.type === "wheeldown") { paletteIndex = Math.min(palette.length - 1, paletteIndex + 1); dirty = true; continue }
       if (pressed.type === "pageup") { paletteIndex = Math.max(0, paletteIndex - 8); dirty = true; continue }
       if (pressed.type === "pagedown") { paletteIndex = Math.min(palette.length - 1, paletteIndex + 8); dirty = true; continue }
       if (pressed.type === "enter") {
-        // The list can change between keystrokes; never trust the index.
-        const selected = palette[paletteIndex]
-        if (!selected) { palette = undefined; render(); continue }
-        const chosen = selected.value
-
-        // A file mention is part of a question, not the whole of one. Picking
-        // it drops the path in and leaves the composer open to ask about it.
-        if (chosen.startsWith("@")) {
-          completeWith(chosen)
-          refreshPalette()
-          render()
-          continue
-        }
-
-        // A command picked mid-prompt is text being written, not a command
-        // being run: it completes its own word and the sentence stays.
-        if (chosen.startsWith("/") && !input.startsWith("/")) {
-          completeWith(chosen)
-          refreshPalette()
-          render()
-          continue
-        }
-
-        // A bare command that takes an argument expands rather than runs:
-        // typing /model and pressing enter should offer the models, not print
-        // help. An item containing a space is already a complete choice, so it
-        // must not expand again - that was why picking a model did nothing.
-        const isBareCommand = !chosen.includes(" ")
-        // /model and /connect are pop-ups, like /theme and /effort: favourites and recent models are there,
-        // and a name is never cut short. Typing "/model " still lists matches under the prompt.
-        if (chosen === "/model" || chosen === "/connect") {
-          input = ""; cursor = 0; palette = undefined
-          if (chosen === "/model") openModelPicker(); else openConnect()
-          render()
-          continue
-        }
-        const expanded = isBareCommand ? paletteFor(chosen + " ") : undefined
-        if (expanded) {
-          input = chosen + " "
-          cursor = input.length
-          refreshPalette()
-          render()
-          continue
-        }
-
-        // Anything else is a complete choice - picking it from a list is the
-        // confirmation, so run it rather than asking again.
-        input = chosen
-        cursor = input.length
-        palette = undefined
-        void send()
-        return
+        if (pickPalette(paletteIndex) === "sent") return
+        continue
       }
       if (pressed.type === "ctrl" && pressed.value === "i") {
         const selected = palette[paletteIndex]
@@ -4745,20 +4786,13 @@ process.stdin.on("data", (chunk) => {
       }
     }
 
+    const composerWidth = Math.max(10, Math.max(10, size().cols - 4) - 4)
     switch (pressed.type) {
-      // Escape clears the line; it never exits. Quitting is ctrl+c.
       case "paste": {
-        // An empty paste is Windows Terminal's Ctrl+V with only a picture on the clipboard.
+        clearStartupNotice()
         if (!pressed.value.trim()) { void attachClipboardImage(true); break }
-        // Newlines inside a paste are content. A paste that is only one
-        // short line is just typing, and goes in as it is - unless it is a
-        // file dropped from Explorer, which becomes a mention instead.
-        // Text, never keys: a paste copied out of a terminal can carry colour codes, and one that carried a
-        // screen clear or a cursor move used to be drawn as one. Colour goes; anything left is shown, not obeyed.
         const pastedText = visibleControls(stripColour(pressed.value.replace(/\r\n?/g, String.fromCharCode(10))))
         const insertPaste = () => applyComposer(insertText(composerState(), droppedMentions(pastedText, process.cwd()) ?? foldPaste(pastedText)), true)
-        // Pictures dropped from Explorer are attached as pictures, wherever they are on disk: a screenshot
-        // is rarely inside the project, and as a bare path the model went off to open the file itself.
         if (!pastedText.trim().includes(String.fromCharCode(10)) && imageTypeOf(pastedText.trim().replace(/"$/, ""))) {
           void droppedImages(pastedText, process.cwd()).then((pictures) => {
             if (pictures) {
@@ -4776,15 +4810,9 @@ process.stdin.on("data", (chunk) => {
       case "escape":
         if (secret) { secret = undefined; input = ""; cursor = 0; anchor = undefined; status = "cancelled"; dirty = true; break }
         if (renaming) { renaming = undefined; input = ""; cursor = 0; anchor = undefined; status = "not renamed"; dirty = true; break }
-        // Escape drops a selection before it clears the line, so losing a
-        // highlight does not also lose everything you had written.
         if (anchor !== undefined) { anchor = undefined; dragged = false; dirty = true; break }
-        // While an answer runs, Escape is about the answer, never the draft. It used to clear what was typed
-        // first: reaching for Esc to stop a turn that had gone wrong threw away the correction just written.
-        if (input && !streaming) { applyComposer({ text: "", cursor: 0 }, true); dirty = true }
+        if (input && !streaming) { historyIndex = -1; historyDraft = ""; applyComposer({ text: "", cursor: 0 }, true); dirty = true }
         else if (streaming) {
-          // Two presses: Esc closes and clears many things, and one stray
-          // press used to end a long turn - and lose what it was doing.
           if (Date.now() < stopArmedUntil) {
             stopArmedUntil = 0
             turn?.abort()
@@ -4794,9 +4822,15 @@ process.stdin.on("data", (chunk) => {
           dirty = true
         }
         break
+      case "newline":
+        if (secret || renaming) break
+        clearStartupNotice()
+        applyComposer(insertText(composerState(), "\n"), true)
+        dirty = true
+        refreshPalette()
+        break
       case "enter": void send(); return
       case "backspace":
-        // At the very start of the prompt there is nothing to delete but what is attached: the last picture.
         if (cursor === 0 && !composerSelection(composerState()) && pendingImages.length && !secret) {
           const gone = pendingImages.pop()!
           status = "removed " + gone.name + (pendingImages.length ? " - " + pendingImages.length + " still attached" : "")
@@ -4826,53 +4860,76 @@ process.stdin.on("data", (chunk) => {
         dirty = true
         break
       }
-      case "home":
-        // Ctrl+Home with nothing typed goes to the start of the conversation.
+      case "home": {
         if (pressed.ctrl && !input) { scroll = Number.MAX_SAFE_INTEGER; dirty = true; break }
-        applyComposer(moveTo(composerState(), { to: 0, select: Boolean(pressed.shift) }))
+        const to = !secret && input && !pressed.ctrl ? lineEdge(layoutComposer(input, composerWidth), cursor, "start") : 0
+        applyComposer(moveTo(composerState(), { to, select: Boolean(pressed.shift) }))
         dirty = true
         break
-      case "end":
-        // Ctrl+End - or End with nothing typed - goes back to the latest output.
+      }
+      case "end": {
         if (scroll > 0 && (pressed.ctrl || !input)) { scroll = 0; dirty = true; break }
-        applyComposer(moveTo(composerState(), { to: input.length, select: Boolean(pressed.shift) }))
+        const to = !secret && input && !pressed.ctrl ? lineEdge(layoutComposer(input, composerWidth), cursor, "end") : input.length
+        applyComposer(moveTo(composerState(), { to, select: Boolean(pressed.shift) }))
         dirty = true
         break
-      case "up":
+      }
+      case "up": {
         if (pressed.ctrl) { jumpMessage(-1); dirty = true; break }
-        // With nothing typed and a message waiting, up takes the newest waiting message back into the box:
-        // to change it and queue it again, or to clear it and so drop it. Until this there was no way to
-        // take back a message once it was queued, short of stopping the turn.
+        if (!secret && historyIndex < 0 && input) {
+          const moved = moveLine(composerState(), composerWidth, -1, Boolean(pressed.shift))
+          if (moved) { applyComposer(moved); dirty = true; break }
+        }
         if (queued !== undefined && !input) {
           const back = queuedMore.length ? queuedMore.pop()! : queued
           if (back === queued && !queuedMore.length) queued = undefined
           input = back
           cursor = input.length
+          anchor = undefined
           historyIndex = -1
+          historyDraft = ""
           status = "taken back from the queue - enter queues it again, ctrl+u clears it"
           dirty = true
           break
         }
-        if (history.length) {
-          historyIndex = historyIndex < 0 ? history.length - 1 : Math.max(0, historyIndex - 1)
+        if (history.length && !secret) {
+          if (historyIndex < 0) {
+            historyDraft = input
+            if (input) composerHistory.remember(composerState())
+            historyIndex = history.length - 1
+          } else {
+            historyIndex = Math.max(0, historyIndex - 1)
+          }
           input = history[historyIndex] ?? ""
           cursor = input.length
+          anchor = undefined
           dirty = true
         }
         break
-      case "down":
+      }
+      case "down": {
         if (pressed.ctrl) { jumpMessage(1); dirty = true; break }
+        if (!secret && historyIndex < 0 && input) {
+          const moved = moveLine(composerState(), composerWidth, 1, Boolean(pressed.shift))
+          if (moved) { applyComposer(moved); dirty = true; break }
+        }
         if (historyIndex >= 0) {
           historyIndex++
-          if (historyIndex >= history.length) { historyIndex = -1; input = "" }
-          else input = history[historyIndex] ?? ""
+          if (historyIndex >= history.length) {
+            historyIndex = -1
+            input = historyDraft
+            historyDraft = ""
+          } else {
+            input = history[historyIndex] ?? ""
+          }
           cursor = input.length
+          anchor = undefined
           dirty = true
         }
         break
+      }
       case "wheelup":
       case "wheeldown": {
-        // Three lines for an unhurried notch; a spin that keeps going covers ground (see wheel.ts).
         const turned = wheelStep(wheel, pressed.type === "wheelup" ? 1 : -1, Date.now(), lastRoom)
         wheel = turned.wheel
         scroll = Math.max(0, scroll + (pressed.type === "wheelup" ? turned.lines : -turned.lines))
@@ -4881,25 +4938,23 @@ process.stdin.on("data", (chunk) => {
       }
       case "shiftup": scroll += 1; dirty = true; break
       case "shiftdown": scroll = Math.max(0, scroll - 1); dirty = true; break
-      // A page at a time, less two lines so the eye keeps its place.
       case "pageup": scroll += Math.max(3, lastRoom - 2); dirty = true; break
       case "pagedown": scroll = Math.max(0, scroll - Math.max(3, lastRoom - 2)); dirty = true; break
       case "ctrl":
-        // Terminals that hand Ctrl+V to the app (rather than pasting text themselves): picture paste.
         if (pressed.value === "v") void attachClipboardImage(true)
         if (pressed.value === "o") {
-          // Everything folded, in full - reasoning and every command's output - and folded again, as ctrl+o
-          // does in Claude Code. It used to open only the last command, so reading an earlier one meant
-          // finding it with the mouse. The row at the top of the screen stays where it is.
           expandThinking = !expandThinking
-          const calls = transcript.filter((entry) => entry.kind === "tool" && entry.tool?.result !== undefined)
           const top = lineOwners[linesOverflow ? lastTop : 0]
-          for (const call of calls) call.open = expandThinking
+          for (const entry of transcript) {
+            if ((entry.kind === "tool" && entry.tool?.result !== undefined) || entry.kind === "thinking") {
+              entry.open = expandThinking
+            }
+          }
           if (top) holdRow = { entry: top, row: 1 }
           status = expandThinking ? "showing everything in full - ctrl+o folds it again" : "folded - ctrl+o shows everything in full"
           dirty = true
         }
-        if (pressed.value === "u") { applyComposer({ text: "", cursor: 0 }, true); dirty = true; refreshPalette() }
+        if (pressed.value === "u") { historyIndex = -1; historyDraft = ""; applyComposer({ text: "", cursor: 0 }, true); dirty = true; refreshPalette() }
         if (pressed.value === "k") { applyComposer(deleteRange(composerState(), "toEnd"), true); dirty = true; refreshPalette() }
         if (pressed.value === "z") {
           const back = composerHistory.undo(composerState())
@@ -4911,8 +4966,6 @@ process.stdin.on("data", (chunk) => {
         }
         if (pressed.value === "l") { applyComposer(selectAll(composerState())); dirty = true }
         if (pressed.value === "w") {
-          // Delete the word before the caret. ctrl+u wiping the whole line
-          // was the only option, which is a lot to lose to fix one word.
           const before = input.slice(0, cursor)
           const trimmed = before.replace(/\s*\S+\s*$/, "")
           input = trimmed + input.slice(cursor)
@@ -4924,6 +4977,8 @@ process.stdin.on("data", (chunk) => {
         if (pressed.value === "e") { applyComposer(moveTo(composerState(), { to: input.length, select: false })); dirty = true }
         break
       case "char":
+        clearStartupNotice()
+        if (historyIndex >= 0) { historyIndex = -1; historyDraft = "" }
         applyComposer(insertText(composerState(), pressed.value), true)
         dirty = true
         refreshPalette()

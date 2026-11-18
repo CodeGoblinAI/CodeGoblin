@@ -48,9 +48,15 @@ Check **only** the items whose **Trigger** matches files or concepts touched in 
    - *Trigger:* `src/core/webfetch.ts`, `src/web/serve.ts`, `src/core/providers.ts`, `src/core/catalog.ts`
    - *Check:* `webfetch` pins its socket connection to the exact DNS-resolved IP it checked (`pinnedFetch`, closing the DNS-rebinding window), checks every redirect hop, blocks IPv4/IPv6 private/loopback/NAT64/6to4/Teredo/multicast addresses, and caps both wire and decompressed bytes. Web `/api/*` enforces loopback + `Origin` + `Sec-Fetch-Site`, and `/api/file` stays confined to `codegoblin-output/`.
 
-7. **TUI and Web parity**
+7. **TUI and Web parity & UX layout invariants**
    - *Trigger:* `src/tui/**`, `src/web/**`, `src/core/commands.ts`, `src/core/command-rank.ts`, `src/core/prompt-commands.ts`
-   - *Check:* If a command, setting, approval flow, or progress-save behavior changed on one surface, does the other surface match? Remember: in `src/web/app.js`, startup code must never read `let` bindings declared lower down in the file; in `src/tui/width.ts`, `wrapToWidth` must terminate on 2-column glyphs even at `max = 1`.
+   - *Check:*
+     - Every command in `COMMANDS`, `COMMAND_ALIASES`, and `PENDING_COMMANDS` has a working handler in both TUI and Web UI (verified by `pass-ux-chaos.mjs`).
+     - Composer word-wrapping (`layoutComposer`) never splits a word across lines when it fits `width`, maps UTF-16 surrogate pairs and 2-cell glyphs accurately for cursor/mouse clicks, and navigates wrapped/multi-line rows on `Up`/`Down` before recalling history (preserving unsent multi-line drafts).
+     - Spend & context readouts (`formatStatusBar` in TUI, `#usage-readout` in Web UI) never clip dollar/cent digits (`$0.0…`) or overlap long model names / session titles at narrow widths.
+     - TUI `dialogRowAt` accounts for `filterable: true`'s `⌕ type to search` row (`header = 4` vs `3`), and `holdRow` lifts unfolded answers/tools near the bottom of the viewport into view while keeping folded rows under the cursor.
+     - Web UI live-stream append helpers (`turn("agent")`, `thinkingBlock`, `toolChip`, `workedLine`) capture `const stick = atBottom()` *before* mutating `#thread` so scrolled-up readers are never yanked down, and `makeDialog` closes on the first `Escape` even when `<input type="search">` has text.
+     - In `src/web/app.js`, startup code must never read `let` bindings declared lower down in the file; in `src/tui/width.ts`, `wrapToWidth` must terminate on 2-column glyphs even at `max = 1`.
 
 8. **Compiled Bun binary (`codegoblin.exe`)**
    - *Trigger:* `script/build.ts`, `src/cli/main.ts`, `src/platform/self.ts`, `src/core/voice-engine.ts`, worker files

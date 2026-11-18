@@ -3,6 +3,7 @@ import { THEMES, isTheme } from "./theme"
 import { isEffort, type Effort } from "./settings"
 import { MEDIA_KINDS, type MediaKind } from "./media"
 import { importSource, type ImportSource } from "./conversation-import"
+import { InstallationVersion } from "../platform/version"
 
 export const IMPORT_USAGE = "Use /import codex, claude, antigravity, cursor or codegoblin (0.3) [session-id]; imports are new text-only conversations"
 
@@ -109,6 +110,8 @@ export const COMMANDS = [
   { name: "/agents", description: "choose a named agent profile; /agents default resets" },
   { name: "/settings", description: "open settings, or /settings <model setting> <value>; omit value to reset" },
   { name: "/diff", description: "what this session changed, file by file" },
+  { name: "/version", description: "show the installed CodeGoblin version" },
+  { name: "/upgrade", description: "how to update CodeGoblin to the latest release" },
   { name: "/quit", description: "exit" },
 ]
 
@@ -128,15 +131,14 @@ export const COMMAND_ALIASES: Record<string, string> = {
   "/jump": "/timeline", "/toggle-fold": "/fold", "/toggle-timestamps": "/timestamps",
   "/credits": "/balance", "/job": "/jobs", "/background": "/jobs", "/bg": "/jobs",
   "/market": "/plugins", "/mcp-market": "/plugins", "/skills-market": "/plugins",
-  "/upgrade": "/update", "/version": "/update", "/orgs": "/org", "/switch-org": "/org",
+  "/update": "/upgrade", "/orgs": "/org", "/switch-org": "/org",
 }
 export const PENDING_COMMANDS: Record<string, string> = {
   "/variants": "Model-specific variants are not wired yet; /effort controls supported reasoning models.",
   "/plugins": "The plugin marketplace is not wired yet; /mcp and /skills show configured integrations.",
-  "/update": "CG-Next's installer/updater is not wired yet. This is the source checkout, not the original cg installation.",
   "/warp": "Prompt warp is not wired yet.",
-  "/widget": "The native status widget is not wired into CG-Next yet.",
-  "/widget-settings": "Native widget settings are not wired yet.",
+  "/widget": "The native desktop status widget is not included in 0.4 yet.",
+  "/widget-settings": "Native desktop widget settings are not included in 0.4 yet.",
   "/org": "Organization switching is not wired yet; account access belongs to the selected provider.",
 }
 COMMANDS.push(...Object.keys(PENDING_COMMANDS).map((name) => ({ name, description: "not wired yet — " + PENDING_COMMANDS[name] })))
@@ -177,6 +179,10 @@ export function runCommand(text: string): CommandResult {
           String.fromCharCode(10),
         ),
       }
+    case "/version":
+      return { kind: "message", text: "CodeGoblin " + InstallationVersion }
+    case "/upgrade":
+      return { kind: "message", text: "CodeGoblin " + InstallationVersion + " — run `codegoblin upgrade` in your terminal to update (or `codegoblin upgrade next` for previews)." }
     case "/clear":
     case "/new":
       return { kind: "clear" }

@@ -11,6 +11,7 @@
 export type Key =
   | { type: "char"; value: string }
   | { type: "enter" }
+  | { type: "newline" }
   | { type: "backspace" }
   | { type: "delete" }
   | { type: "up"; shift?: boolean; ctrl?: boolean }
@@ -121,6 +122,11 @@ export function parseKeys(input: string): Key[] {
       }
 
       const next = input[i + 1]
+      if (next === "\r" || next === "\n") {
+        keys.push({ type: "newline" })
+        i += next === "\r" && input[i + 2] === "\n" ? 3 : 2
+        continue
+      }
       if (next !== "[" && next !== "O") {
         keys.push({ type: "escape" })
         i += 1
@@ -155,6 +161,12 @@ export function parseKeys(input: string): Key[] {
         continue
       }
 
+      // Shift+Enter / Ctrl+Enter in terminals using CSI u or modifyOtherKeys.
+      if ((final === "u" && /^13;[2-9]\d*$/.test(params)) || (final === "~" && /^27;[2-9]\d*;13$/.test(params))) {
+        keys.push({ type: "newline" })
+        i = j + 1
+        continue
+      }
       // F2 arrives as ESC O Q, ESC [ 12 ~, or with a modifier as ESC [ 1 ; 2 Q and ESC [ 12 ; 2 ~.
       const f2 = final === "Q" ? params.split(";")[1] ?? "1" : final === "~" && params.split(";")[0] === "12" ? params.split(";")[1] ?? "1" : undefined
       if (f2 !== undefined) {

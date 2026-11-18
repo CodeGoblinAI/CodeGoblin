@@ -1,5 +1,5 @@
 import { theme, dim, bold, ansi } from "./ansi"
-import { displayWidth, truncateToWidth, padToWidth } from "./width"
+import { charWidth, displayWidth, truncateToWidth, padToWidth, wrapToWidth } from "./width"
 
 /**
  * Markdown for a terminal.
@@ -21,13 +21,15 @@ export function renderMarkdown(text: string, width: number): string[] {
     if (fence) {
       if (!inCode) {
         inCode = true
-        codeLang = raw.trim().slice(3).trim()
+        codeLang = truncateToWidth(raw.trim().slice(3).trim(), Math.max(4, width - 8))
         // The top edge runs as far as the bottom one, so the block reads as a box and not a stray corner.
+        const ruleWidth = Math.max(2, Math.min(Math.max(2, width - 3), 40))
         const label = "─ " + (codeLang || "code") + " "
-        out.push(theme.border + "  ┌─ " + theme.muted + (codeLang || "code") + theme.border + " " + "─".repeat(Math.max(0, Math.max(2, Math.min(width, 40)) - label.length)) + ansi.reset)
+        out.push(theme.border + "  ┌─ " + theme.muted + (codeLang || "code") + theme.border + " " + "─".repeat(Math.max(0, ruleWidth - displayWidth(label))) + ansi.reset)
       } else {
         inCode = false
-        out.push(theme.border + "  └" + "─".repeat(Math.max(2, Math.min(width, 40))) + ansi.reset)
+        const ruleWidth = Math.max(2, Math.min(Math.max(2, width - 3), 40))
+        out.push(theme.border + "  └" + "─".repeat(ruleWidth) + ansi.reset)
       }
       continue
     }
@@ -105,11 +107,11 @@ function cellsOf(line: string): string[] {
  * grid stops being readable at a glance, which was the only reason to draw it.
  */
 function renderTable(lines: string[], width: number): string[] {
-  const header = cellsOf(lines[0]!)
+  const header = cellsOf(lines[0]!).map((c) => c.replace(/`([^`]+)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1"))
   const alignments = cellsOf(lines[1]!).map((spec) =>
     spec.startsWith(":") && spec.endsWith(":") ? "centre" : spec.endsWith(":") ? "right" : "left",
   )
-  const body = lines.slice(2).map(cellsOf)
+  const body = lines.slice(2).map((row) => cellsOf(row).map(inline))
   const columns = Math.max(header.length, ...body.map((row) => row.length), 1)
 
   const cell = (row: string[], column: number) => row[column] ?? ""
@@ -130,7 +132,7 @@ function renderTable(lines: string[], width: number): string[] {
     // An ellipsis where a cell was cut, so a value that ends mid-word reads as
     // shortened rather than as what the table actually holds.
     const clipped =
-      displayWidth(text) > room ? truncateToWidth(text, Math.max(0, room - 1)) + "…" : text
+      displayWidth(text) > room ? truncateToWidth(text, Math.max(0, room - 1)) + ansi.reset + theme.text + "…" : text
     const slack = room - displayWidth(clipped)
     if (alignments[column] === "right") return " ".repeat(slack) + clipped
     if (alignments[column] === "centre") {
@@ -169,19 +171,25 @@ function inline(text: string): string {
 
 function wrapWords(text: string, width: number): string[] {
   if (width < 8) return [text]
-  const lines: string[] = []
-  let line = ""
-  for (const word of text.split(" ")) {
-    if (line && displayWidth(line + " " + word) > width) { lines.push(line); line = word }
-    else line = line ? line + " " + word : word
-  }
-  if (line) lines.push(line)
-  return lines.length ? lines : [""]
+  return wrapToWidth(text, width)
 }
 
 function hardWrap(text: string, width: number): string[] {
-  if (width < 8 || text.length <= width) return [text]
+  if (width < 8 || displayWidth(text) <= width) return [text]
   const lines: string[] = []
-  for (let i = 0; i < text.length; i += width) lines.push(text.slice(i, i + width))
-  return lines
+  let line = ""
+  let used = 0
+  for (const ch of [...text]) {
+    const w = charWidth(ch)
+    if (line && used + w > width) {
+      lines.push(line)
+      line = ch
+      used = w
+    } else {
+      line += ch
+      used += w
+    }
+  }
+  if (line) lines.push(line)
+  return lines.length ? lines : [""]
 }

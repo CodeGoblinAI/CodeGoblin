@@ -24,12 +24,32 @@ export async function copyText(text: string) {
   })
 }
 
-export function dialogRowAt(input: { col: number; row: number; cols: number; rows: number; width: number; height: number; boxHeight: number; first: number }) {
+export function dialogRowAt(input: {
+  col: number
+  row: number
+  cols: number
+  rows: number
+  width: number
+  height: number
+  boxHeight: number
+  first: number
+  filterable?: boolean
+  rowCount?: number
+}) {
   const left = Math.max(0, Math.floor((input.cols - input.width) / 2))
   const top = Math.max(0, Math.min(Math.floor(input.rows / 4), Math.max(0, input.rows - input.boxHeight - 6)))
-  const offset = input.row - 1 - top - 3
-  if (input.col <= left || input.col > left + input.width || offset < 0 || offset >= input.height) return undefined
+  const headerRows = input.filterable ? 4 : 3
+  const offset = input.row - 1 - top - headerRows
+  const visible = input.rowCount !== undefined ? Math.max(0, Math.min(input.height, input.rowCount - input.first)) : input.height
+  if (input.col <= left || input.col > left + input.width || offset < 0 || offset >= visible) return undefined
   return input.first + offset
+}
+
+/** Whether a click landed on the " esc " badge in the top-right corner of the dialog's title bar. */
+export function dialogEscAt(input: { col: number; row: number; cols: number; rows: number; width: number; boxHeight: number }) {
+  const left = Math.max(0, Math.floor((input.cols - input.width) / 2))
+  const top = Math.max(0, Math.min(Math.floor(input.rows / 4), Math.max(0, input.rows - input.boxHeight - 6)))
+  return input.row === top + 2 && input.col >= left + input.width - 5 && input.col <= left + input.width - 1
 }
 
 /**

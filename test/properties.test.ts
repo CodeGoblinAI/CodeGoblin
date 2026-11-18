@@ -5,7 +5,11 @@ import path from "node:path"
 import { decodeText, encodeText, type TextEncoding } from "../src/core/text-edit"
 import { History } from "../src/core/undo"
 import { frameSafe, visibleCall, visibleControls } from "../src/core/terminal-safe"
-import { displayWidth, padToWidth, truncateMiddle, truncateToWidth, wrapToWidth } from "../src/tui/width"
+import { displayWidth, padToWidth, sliceFromWidth, truncateMiddle, truncateToWidth, wrapToWidth } from "../src/tui/width"
+import { caretInComposer, layoutComposer, lineEdge, moveLine, offsetInComposerLine } from "../src/tui/composer"
+import { formatStatusBar } from "../src/tui/layout"
+import * as Dialogs from "../src/tui/dialog"
+import { renderMarkdown } from "../src/tui/markdown"
 import { secretPathsIn } from "../src/core/secret-files"
 import { isReadOnlyCommand } from "../src/core/permission"
 import { globToRegExp } from "../src/core/search"
@@ -249,5 +253,127 @@ describe(`property invariants (seed=${SEED})`, () => {
       expect(isPrivateAddress(`2002:${hi}:${lo}::1`)).toBe(expected)
       expect(isPrivateAddress(`2001:0:4136:e378:8000:63bf:${xhi}:${xlo}`)).toBe(expected)
     }
+  })
+
+  test("composer word-wrap never splits words that fit, honours \\n, and maps every UTF-16 cursor & click column cleanly", () => {
+    const shawnSentence =
+      "Another thing I learned, and I'm putting it over here, is that the text doesn't seem to wrap properly at there of some words, and you can see it right here."
+    // Across every realistic composer width, no word in Shawn's sentence may ever be split across two lines.
+    const words = shawnSentence.split(" ")
+    for (let width = 20; width <= 140; width++) {
+      const rows = layoutComposer(shawnSentence, width)
+      for (const row of rows) expect(displayWidth(row.text)).toBeLessThanOrEqual(width)
+      const joinedBySpace = rows.map((row) => row.text.trim()).filter(Boolean).join(" ")
+      expect(joinedBySpace).toBe(shawnSentence)
+      for (const word of words) {
+        expect(rows.some((row) => row.text.includes(word))).toBe(true)
+      }
+    }
+
+    const rng = mulberry32(SEED ^ 7)
+    const vocab = ["Another", "of", "the", "goblin", "🧌", "日本語", "café", "e\u0301", "https://example.com/a/very/long/path/segment/here", " ", "  ", "\n"]
+    for (let i = 0; i < 250; i++) {
+      let text = ""
+      const count = int(rng, 1, 18)
+      for (let k = 0; k < count; k++) {
+        const piece = pick(rng, vocab)
+        text += k > 0 && piece !== " " && piece !== "  " && piece !== "\n" && !text.endsWith(" ") && !text.endsWith("\n") ? " " + piece : piece
+      }
+      const width = int(rng, 6, 48)
+      const rows = layoutComposer(text, width)
+      expect(rows.length).toBeGreaterThanOrEqual(1)
+      for (const row of rows) {
+        expect(text.slice(row.start, row.end)).toBe(row.text)
+        expect(row.text.includes("\n")).toBe(false)
+        expect(displayWidth(row.text)).toBeLessThanOrEqual(width)
+      }
+      // Every valid codepoint boundary maps monotonically to (line, column), and clicking that column stays on the same line.
+      let prevLine = 0
+      let prevCol = -1
+      let pos = 0
+      for (const ch of [...text, ""]) {
+        const spot = caretInComposer(rows, pos)
+        expect(spot.line).toBeGreaterThanOrEqual(prevLine)
+        if (spot.line === prevLine) expect(spot.column).toBeGreaterThanOrEqual(prevCol)
+        prevLine = spot.line
+        prevCol = spot.column
+        const clicked = offsetInComposerLine(rows[spot.line]!, spot.column)
+        expect(caretInComposer(rows, clicked).line).toBe(spot.line)
+        pos += ch.length
+      }
+    }
+  })
+
+  test("status bar never clips cost cents or overflows terminal width at any column count", () => {
+    const rng = mulberry32(SEED ^ 8)
+    const modes = ["ask", "approve for me", "full access"]
+    const models = [
+      ["Refuseless", "DeepSeek V4.1 Flash 1017 Abliterated Fast"],
+      ["Experiential Labs", "GLM 5.3 Flash (reasoning)"],
+      ["Local server", "fixture"],
+      ["OpenAI", "GPT-5.4 Pro Max"],
+    ]
+    const spends = ["", "$0.04", "<$0.01", "$12.89", "$0.07 + unpriced"]
+    const contexts = ["~0% ctx", "~42% ctx", "~99% ctx", "ctx window unknown"]
+    for (let i = 0; i < 300; i++) {
+      const cols = int(rng, 38, 180)
+      const [providerLabel, modelLabel] = pick(rng, models)
+      const spendText = pick(rng, spends)
+      const contextText = pick(rng, contexts)
+      const modeLabel = pick(rng, modes)
+      const tags = [
+        ...(rng() < 0.5 ? [{ full: "[planning]", short: "[plan]" }] : []),
+        ...(rng() < 0.5 ? [{ full: "[boost]", short: "[boost]" }] : []),
+        ...(rng() < 0.5 ? [{ full: "[2 subagents running]", short: "[2 agents]" }] : []),
+        ...(rng() < 0.5 ? [{ full: "[1 job running]", short: "[1 job]" }] : []),
+      ]
+      const bar = formatStatusBar({
+        cols,
+        modeLabel,
+        providerLabel: providerLabel!,
+        modelLabel: modelLabel!,
+        contextText,
+        spendText,
+        tags,
+        rightFull: "shift+tab mode · ctrl+g actions · ctrl+c copy/quit",
+        rightCompact: "ctrl+g actions",
+      })
+      const rendered = "  " + bar.mode + (bar.plain ? " · " + bar.plain : "") + (bar.right ? " ".repeat(bar.gap) + bar.right : "")
+      expect(displayWidth(rendered)).toBeLessThanOrEqual(cols)
+      if (spendText && cols >= 44) {
+        expect(bar.plain.includes(spendText)).toBe(true)
+      }
+    }
+  })
+
+  test("dialog filter queries, wide-char backdrop compositing and markdown code/URL wrapping never overflow columns", () => {
+    const dialog = Dialogs.filter(
+      Dialogs.open("model-picker", "Choose model", [{ label: "GLM 5.3", value: "zai/glm" }], { filterable: true }),
+      "a-very-long-search-query-with-日本語-and-🧌-that-exceeds-the-box-width-by-far",
+    )
+    for (const cols of [44, 60, 80, 120]) {
+      const box = Dialogs.box(dialog, cols, 24)
+      const widths = new Set(box.map((line) => displayWidth(Dialogs.plain(line))))
+      expect(widths.size).toBe(1)
+      expect([...widths][0]!).toBeLessThanOrEqual(cols)
+      const backdrop = Array.from({ length: 24 }, () => "日本語の長い背景テキスト🧌🚀".repeat(8))
+      for (const line of Dialogs.compose(backdrop, box, cols, 24)) {
+        expect(displayWidth(Dialogs.plain(line))).toBeLessThanOrEqual(cols)
+      }
+    }
+    for (const width of [24, 40, 80]) {
+      const md = [
+        "Visit https://example.com/" + "segment-".repeat(20) + "end now.",
+        "```ts",
+        "const msg = '日本語のコメントと絵文字🧌🚀が並んでいます'.repeat(4)",
+        "```",
+      ].join("\n")
+      for (const line of renderMarkdown(md, width)) {
+        expect(displayWidth(Dialogs.plain(line))).toBeLessThanOrEqual(width)
+        expect(line.includes("\ufffd")).toBe(false)
+      }
+    }
+    expect(displayWidth(sliceFromWidth("あいう", 1))).toBe(5)
+    expect(sliceFromWidth("あいう", 1)).toBe(" いう")
   })
 })

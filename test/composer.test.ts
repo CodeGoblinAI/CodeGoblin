@@ -10,6 +10,11 @@ import {
   deleteRange,
   selectAll,
   ComposerHistory,
+  layoutComposer,
+  caretInComposer,
+  offsetInComposerLine,
+  moveLine,
+  lineEdge,
   type Composer,
 } from "../src/tui/composer"
 
@@ -165,5 +170,40 @@ describe("undoing the prompt itself", () => {
     const undone = history.undo(at("two", 3))!
     history.remember(undone)
     expect(history.redo(undone)).toBeUndefined()
+  })
+})
+
+describe("word-wrapping and multi-line movement in the composer", () => {
+  test("never splits a word across two lines when the word fits the box", () => {
+    const text =
+      "Another thing I learned, and I'm putting it over here, is that the text doesn't seem to wrap properly at there of some words, and you can see it right here."
+    const rows = layoutComposer(text, 112)
+    expect(rows.map((r) => r.text)).toEqual([
+      "Another thing I learned, and I'm putting it over here, is that the text doesn't seem to wrap properly at there ",
+      "of some words, and you can see it right here.",
+    ])
+  })
+
+  test("up and down move between wrapped lines before touching prompt history", () => {
+    const text = "first line of words that wraps onto a second visual row cleanly"
+    const start: Composer = { text, cursor: text.length }
+    const up = moveLine(start, 28, -1)!
+    expect(up).toBeDefined()
+    expect(caretInComposer(layoutComposer(text, 28), up.cursor).line).toBe(
+      caretInComposer(layoutComposer(text, 28), text.length).line - 1,
+    )
+    // At the top visual row, moveLine returns undefined so Up can recall prompt history.
+    expect(moveLine({ text, cursor: 2 }, 28, -1)).toBeUndefined()
+  })
+
+  test("explicit newlines, emoji carets and mouse column clicks stay exact", () => {
+    const text = "hi 🧌 there\nsecond line"
+    const rows = layoutComposer(text, 40)
+    expect(rows.map((r) => r.text)).toEqual(["hi 🧌 there", "second line"])
+    // "hi " is 3 cols, "🧌" is 2 cols (UTF-16 length 2, indices 3..5), space at index 5 -> column 5.
+    expect(caretInComposer(rows, 5)).toEqual({ line: 0, column: 5 })
+    expect(offsetInComposerLine(rows[0]!, 5)).toBe(5)
+    expect(lineEdge(rows, text.length, "start")).toBe(12)
+    expect(lineEdge(rows, 12, "start")).toBe(0)
   })
 })

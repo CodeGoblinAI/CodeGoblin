@@ -109,3 +109,11 @@ test("F2 and shift+F2 are read in each form a terminal sends them", () => {
   expect(parseKeys(E + "[3~")).toEqual([{ type: "delete" }])
   expect(parseKeys(E + "[A")).toEqual([{ type: "up" }])
 })
+
+test("Alt+Enter and CSI-u Shift+Enter insert a newline instead of Escape or Submit", () => {
+  const E = String.fromCharCode(27)
+  expect(parseKeys(E + "\r")).toEqual([{ type: "newline" }])
+  expect(parseKeys(E + "\n")).toEqual([{ type: "newline" }])
+  expect(parseKeys(E + "[13;2u")).toEqual([{ type: "newline" }])
+  expect(parseKeys(E + "[27;2;13~")).toEqual([{ type: "newline" }])
+})

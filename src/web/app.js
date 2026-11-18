@@ -351,8 +351,10 @@ function planPrompt() {
     button.onclick = choice.act
     actions.appendChild(button)
   }
+  const stick = atBottom()
   thread.appendChild(box)
-  scrollDown()
+  if (stick) scrollDown()
+  else updateJump()
 }
 
 /** Sends text as though it had been typed. */
@@ -540,15 +542,25 @@ function updateSessionNavigation() {
 let sessionUsage = null
 function showUsage(value) {
   sessionUsage = value
+  const el = document.getElementById("usage-readout")
   const used = value?.spend
   const context = value?.context
   const contextLabel = context ? context.limit > 0 ? " · ~" + context.percent + "% context" : " · context window unavailable" : ""
-  document.getElementById("usage-readout").textContent = !value
+  const full = !value
     ? "Usage unavailable until a response"
     : !used
     ? "Tokens/cost unavailable (not zero)" + contextLabel
     : `${used.input.toLocaleString()}${used.cached ? " (" + used.cached.toLocaleString() + " cached)" : ""} in / ${used.output.toLocaleString()} out · ${used.dollars === undefined ? "cost unknown / subscription" : "$" + used.dollars.toFixed(4) + (used.unpriced ? " + unpriced usage" : " estimated")}${contextLabel}`
+  const compactCtx = context && context.limit > 0 ? " · ~" + context.percent + "% ctx" : ""
+  const compact = !value
+    ? "—"
+    : !used
+    ? "usage unknown" + compactCtx
+    : `${used.dollars === undefined ? "sub" : "$" + used.dollars.toFixed(4) + (used.unpriced ? "+" : "")}${compactCtx}`
+  el.title = full
+  el.textContent = window.innerWidth < 720 ? compact : full
 }
+window.addEventListener("resize", () => { if (sessionUsage) showUsage(sessionUsage) })
 let busy = false
 // What was asked for while a turn was running, in the order it was asked. Each runs once the turn before it
 // has finished - a second message used to replace the first.
@@ -713,11 +725,16 @@ const atBottom = () => thread.scrollHeight - thread.scrollTop - thread.clientHei
 const jumpButton = document.getElementById("jump-bottom")
 let freshBelow = false
 function updateJump() {
-  const away = !atBottom() && Boolean(thread.querySelector(".turn"))
+  const away = !atBottom() && Boolean(thread.querySelector(".turn, .tool, .permission"))
   if (!away) freshBelow = false
   jumpButton.hidden = !away
-  jumpButton.classList.toggle("fresh", freshBelow)
-  jumpButton.firstChild.textContent = freshBelow ? "New output · jump to bottom " : "Jump to bottom "
+  const waiting = away && Boolean(thread.querySelector('.permission[data-permission-state="pending"]'))
+  jumpButton.classList.toggle("fresh", freshBelow || waiting)
+  jumpButton.firstChild.textContent = waiting
+    ? "Action waiting · jump to bottom "
+    : freshBelow
+      ? "New output · jump to bottom "
+      : "Jump to bottom "
 }
 function jumpToBottom() {
   freshBelow = false
@@ -726,7 +743,7 @@ function jumpToBottom() {
 }
 jumpButton.onclick = jumpToBottom
 thread.addEventListener("scroll", updateJump, { passive: true })
-new MutationObserver(() => { if (!atBottom()) freshBelow = Boolean(thread.querySelector(".turn")); updateJump() })
+new MutationObserver(() => { if (!atBottom()) freshBelow = Boolean(thread.querySelector(".turn, .tool, .permission")); updateJump() })
   .observe(thread, { childList: true, subtree: true, characterData: true })
 const scrollDown = () => { thread.scrollTop = thread.scrollHeight }
 
@@ -749,6 +766,7 @@ function clockTime(ms) {
 }
 
 function turn(kind, text, images, at = Date.now()) {
+  const stick = kind === "user" || atBottom()
   if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
   const wrap = document.createElement("div")
   wrap.className = "turn " + (kind === "user" ? "user" : "agent")
@@ -781,25 +799,45 @@ function turn(kind, text, images, at = Date.now()) {
     body.appendChild(row)
   }
   thread.appendChild(wrap)
-  scrollDown()
+  if (stick) scrollDown()
   return body
 }
 
 /**
  * The model thinking out loud.
  *
- * The stream has always carried this and the browser dropped it, so the TUI
- * showed its reasoning and this did not. Kept visually quiet - it is context
- * for what follows, not the answer.
+ * Kept visually quiet - it is context for what follows, not the answer.
+ * Clicking its label folds or unfolds it; Ctrl+O expands or folds everything.
  */
 function thinkingBlock() {
+  const stick = atBottom()
   if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
   const wrap = document.createElement("div")
   wrap.className = "thinking"
-  wrap.innerHTML = '<div class="tlabel">thinking</div><div class="tbody"></div>'
+  wrap.dataset.started = String(Date.now())
+  wrap.innerHTML = '<div class="tlabel" role="button" tabindex="0" title="Click to fold or expand reasoning">thinking...</div><div class="tbody"></div>'
+  const label = wrap.querySelector(".tlabel")
+  const toggle = () => {
+    const folded = wrap.classList.toggle("folded")
+    wrap.classList.toggle("open", !folded)
+    label.textContent = folded ? (wrap.dataset.thoughtLabel || "◆ thought · click to expand") : "thinking · click to fold"
+  }
+  label.onclick = toggle
+  label.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle() } }
   thread.appendChild(wrap)
-  scrollDown()
+  if (stick) scrollDown()
   return wrap.querySelector(".tbody")
+}
+function foldThinking(tbody) {
+  const wrap = tbody?.parentElement
+  if (!wrap || webExpandedAll || wrap.classList.contains("open")) return
+  const started = Number(wrap.dataset.started || 0)
+  const last = Number(wrap.dataset.last || 0)
+  const secs = started && last && last > started ? " for " + Math.max(0.1, (last - started) / 1000).toFixed(1) + "s" : ""
+  wrap.dataset.thoughtLabel = "◆ thought" + secs + " · click to expand"
+  wrap.classList.add("folded")
+  const label = wrap.querySelector(".tlabel")
+  if (label) label.textContent = wrap.dataset.thoughtLabel
 }
 
 /**
@@ -840,6 +878,7 @@ function typedRow(display, done, existing) {
 }
 
 function toolChip(name, args, id) {
+  const stick = atBottom()
   if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
   const chip = document.createElement("div")
   chip.className = "tool running"
@@ -853,7 +892,7 @@ function toolChip(name, args, id) {
   chip.dataset.started = String(Date.now())
   chip.dataset.tool = name
   thread.appendChild(chip)
-  scrollDown()
+  if (stick) scrollDown()
   return chip
 }
 
@@ -952,6 +991,22 @@ thread.addEventListener("click", (event) => {
 thread.addEventListener("keydown", (event) => {
   if ((event.key === "Enter" || event.key === " ") && event.target.matches?.(".tool.openable")) { event.preventDefault(); toggleToolRow(event.target) }
 })
+let webExpandedAll = false
+document.addEventListener("keydown", (event) => {
+  if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "o" && !document.querySelector("dialog[open]")) {
+    event.preventDefault()
+    webExpandedAll = !webExpandedAll
+    for (const chip of thread.querySelectorAll(".tool.openable")) {
+      if (chip.classList.contains("open") !== webExpandedAll) toggleToolRow(chip)
+    }
+    for (const block of thread.querySelectorAll(".thinking")) {
+      block.classList.toggle("folded", !webExpandedAll)
+      block.classList.toggle("open", webExpandedAll)
+      const label = block.querySelector(".tlabel")
+      if (label) label.textContent = webExpandedAll ? "thinking · click to fold" : "◆ thought · click to expand"
+    }
+  }
+})
 
 // Mirrors decisionHints() in core/permission.ts: at an autonomy checkpoint,
 // allowing once runs on to the next checkpoint and rejecting stops the turn.
@@ -1038,8 +1093,10 @@ function permissionPrompt(event) {
     actions.appendChild(button)
   }
 
+  const stick = atBottom()
   thread.appendChild(box)
-  scrollDown()
+  if (stick) scrollDown()
+  else updateJump()
 }
 
 /**
@@ -1105,9 +1162,12 @@ function questionPrompt(event) {
     if (typed) void send([typed])
   }
   box.querySelector(".qdismiss").onclick = () => void send(null)
+  const stick = atBottom()
   thread.appendChild(box)
-  scrollDown()
-  ;(box.querySelector(".qoptions button") || box.querySelector(".qown input")).focus()
+  if (stick) {
+    scrollDown()
+    ;(box.querySelector(".qoptions button") || box.querySelector(".qown input")).focus()
+  } else updateJump()
 }
 
 function resolvePermission(box, label) {
@@ -1380,8 +1440,20 @@ function makeDialog(title) {
   document.querySelector("dialog")?.close()
   const modal = document.createElement("dialog")
   modal.setAttribute("aria-label", title)
-  const heading = document.createElement("h2"); heading.textContent = title; modal.appendChild(heading)
-  const close = document.createElement("button"); close.textContent = "Close"; close.onclick = () => modal.close(); modal.appendChild(close)
+  const head = document.createElement("div"); head.className = "dialog-head"
+  const heading = document.createElement("h2"); heading.textContent = title
+  const close = document.createElement("button"); close.type = "button"; close.className = "dialog-close"; close.textContent = "esc"; close.setAttribute("aria-label", "Close"); close.onclick = () => modal.close()
+  head.append(heading, close)
+  modal.appendChild(head)
+  // Native <input type="search"> consumes the first Escape to clear its query; close the modal directly instead.
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); modal.close() }
+  }, true)
+  modal.addEventListener("click", (event) => {
+    if (event.target !== modal) return
+    const r = modal.getBoundingClientRect()
+    if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) modal.close()
+  })
   modal.addEventListener("close", () => { modal.remove(); input.focus() }, { once: true })
   document.body.appendChild(modal); modal.showModal()
   return modal
@@ -1594,7 +1666,14 @@ function openHelpDialog(initial = "") {
       const hint = document.createElement("span"); hint.textContent = command.hint; row.appendChild(hint)
       row.onclick = () => {
         modal.close()
-        input.value = (command.alias ? paletteData.aliases[command.value] : command.value) + " "
+        const target = command.alias ? paletteData.aliases[command.value] : command.value
+        const direct = new Set([
+          "/status", "/usage", "/diff", "/clear", "/approvals", "/mode", "/settings",
+          "/jobs", "/timeline", "/fold", "/timestamps", "/thinking", "/undo", "/redo",
+          "/version", "/upgrade", "/skills", "/terminal", "/open", "/fork",
+        ])
+        if (direct.has(target)) { void runCommand(target); return }
+        input.value = target + " "
         input.focus()
         refreshPalette()
       }
@@ -1694,6 +1773,72 @@ function openTimeline() {
     }
     modal.append(button)
   }
+}
+
+/** /search: search both your messages and the answers, showing snippets around each match. */
+function openSearchDialog(initial = "") {
+  const turns = [...thread.querySelectorAll(".turn.user, .turn.agent")].reverse()
+  if (!turns.length) { note("Nothing to search yet."); return }
+  const modal = makeDialog("Search this conversation")
+  const search = document.createElement("input")
+  search.type = "search"
+  search.placeholder = "type words to search messages and answers"
+  search.setAttribute("aria-label", "Search conversation")
+  search.className = "quick-open"
+  search.value = initial
+  const list = document.createElement("div")
+  list.className = "command-list"
+  modal.append(search, list)
+  let shown = []
+  let active = 0
+  const jumpTo = (wrap) => {
+    modal.close()
+    thread.style.scrollBehavior = "auto"
+    wrap.scrollIntoView({ block: "start" })
+    thread.style.scrollBehavior = ""
+    wrap.classList.add("flash")
+    setTimeout(() => wrap.classList.remove("flash"), 1200)
+  }
+  const draw = () => {
+    const q = search.value.trim().toLowerCase()
+    const textOfBody = (wrap) => {
+      const b = wrap.querySelector(".body")
+      return (b?.innerText || b?.textContent || "").replace(/\s+/g, " ").trim()
+    }
+    shown = turns.filter((wrap) => !q || textOfBody(wrap).toLowerCase().includes(q))
+    active = Math.min(active, Math.max(0, shown.length - 1))
+    list.replaceChildren()
+    shown.forEach((wrap, index) => {
+      const button = document.createElement("button")
+      button.className = "dialog-action" + (index === active ? " active" : "")
+      const flat = textOfBody(wrap)
+      let snippet = flat.slice(0, 90)
+      if (q) {
+        const where = flat.toLowerCase().indexOf(q)
+        if (where >= 0) {
+          const from = Math.max(0, where - 24)
+          snippet = (from > 0 ? "\u2026" : "") + flat.slice(from, from + 90)
+        }
+      }
+      const who = wrap.classList.contains("user") ? "you" : "goblin"
+      const time = wrap.dataset.at ? " · " + clockTime(Number(wrap.dataset.at)) : ""
+      button.textContent = who + time + " — " + snippet
+      button.onclick = () => jumpTo(wrap)
+      list.appendChild(button)
+    })
+    if (!shown.length) {
+      const empty = document.createElement("p")
+      empty.textContent = "Nothing matches."
+      list.appendChild(empty)
+    }
+  }
+  search.oninput = () => { active = 0; draw() }
+  search.onkeydown = (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); active = Math.max(0, Math.min(shown.length - 1, active + (event.key === "ArrowDown" ? 1 : -1))); draw() }
+    if (event.key === "Enter" && shown[active]) { event.preventDefault(); jumpTo(shown[active]) }
+  }
+  draw()
+  search.focus()
 }
 
 async function openAgentsDialog() {
@@ -2183,6 +2328,8 @@ async function runCommand(text) {
     return true
   }
   if (paletteData.pending?.[name]) { note(paletteData.pending[name]); return true }
+  if (name === "/version") { note("CodeGoblin " + (paletteData.version || "0.4.0")); return true }
+  if (name === "/upgrade") { note("CodeGoblin " + (paletteData.version || "0.4.0") + " — run `codegoblin upgrade` in your terminal to update (or `codegoblin upgrade next` for previews)."); return true }
   if (name === "/quit") { note("Close this browser tab to exit the Web UI; the local server keeps running."); return true }
   if (name === "/mouse") { note("The browser supports mouse selection and Ctrl+C natively."); return true }
 
@@ -2212,9 +2359,20 @@ async function runCommand(text) {
   }
 
   if (name === "/voice") {
-    // /voice records (or opens setup when the model is not here yet); /voice setup always shows the page.
-    if (argument === "setup") void fetch("/api/voice").then((r) => r.json()).then(openVoiceSetup).catch(() => note("voice input is not available right now"))
-    else if (voiceRec) void finishVoice()
+    // /voice records (or opens setup when the model is not here yet); /voice setup, hold, cancel match the terminal.
+    const verb = argument.toLowerCase()
+    if (verb === "setup" || verb === "settings") {
+      void fetch("/api/voice").then((r) => r.json()).then(openVoiceSetup).catch(() => note("voice input is not available right now"))
+    } else if (verb === "cancel") {
+      if (voiceRec) cancelVoice()
+      else void fetch("/api/voice/cancel", { method: "POST" }).then(() => note("Stopped voice download (if one was running).")).catch(() => {})
+    } else if (verb === "hold") {
+      void saveSettings({ voiceHold: webSettings.voiceHold === false }).then((r) => {
+        if (r) note(r.settings.voiceHold ? "Hold Space to talk: on" : "Hold Space to talk: off - click the microphone or /voice to record")
+      })
+    } else if (verb) {
+      note("Use /voice to record, or /voice setup, /voice hold, /voice cancel.")
+    } else if (voiceRec) void finishVoice()
     else void startVoice(false)
     return true
   }
@@ -2230,6 +2388,7 @@ async function runCommand(text) {
     return true
   }
   if (name === "/timeline") { openTimeline(); return true }
+  if (name === "/search") { openSearchDialog(argument); return true }
   if (name === "/jobs") { void openJobsDialog(); return true }
   if (name === "/open") { if (argument) void viewFile(argument.replace(/^@/, "")); else openQuickOpen(); return true }
   // The browser's composer is already a full editor.
@@ -2586,6 +2745,7 @@ async function runCommand(text) {
 /** A short system line in the thread, styled like a tool row. */
 /** The fork's line under a finished answer: how long it worked, and on what. Mirrors sessions.workedFor. */
 function workedLine(ms) {
+  const stick = atBottom()
   const seconds = Math.round(ms / 1000)
   const took = ms < 10000 ? (Math.max(0, ms) / 1000).toFixed(1) + "s"
     : seconds < 60 ? seconds + "s"
@@ -2596,10 +2756,11 @@ function workedLine(ms) {
   row.className = "worked"
   row.textContent = "▣ worked for " + took + (model ? " · " + model.label.replace(/ \(reasoning\)$/, "") : "")
   thread.appendChild(row)
-  scrollDown()
+  if (stick) scrollDown()
 }
 
 function note(text) {
+  const stick = !busy || atBottom()
   if (thread.querySelector(".empty-hint")) thread.innerHTML = ""
   const row = document.createElement("div")
   row.className = "tool done note"
@@ -2610,7 +2771,7 @@ function note(text) {
   body.textContent = text
   row.appendChild(body)
   thread.appendChild(row)
-  scrollDown()
+  if (stick) scrollDown()
 }
 
 /** Only an explicit abort is a user stop; losing the server is not cancellation. */
@@ -2676,7 +2837,7 @@ async function submit() {
     paletteItems = []
     renderPalette()
     // Looking at things runs at once; whatever changes the conversation waits its turn.
-    if (/^\/(?:approvals|mode|help|status|usage|balance|account|settings|theme|thinking|effort|jobs|timeline|fold|timestamps)(?:\s|$)/.test(text)) {
+    if (/^\/(?:approvals|mode|help|status|usage|balance|account|settings|theme|thinking|effort|jobs|timeline|search|fold|timestamps|version|upgrade|update)(?:\s|$)/.test(text)) {
       await runCommand(text)
       return
     }
@@ -2858,6 +3019,7 @@ async function submit() {
             if (answer) thread.insertBefore(thinking.parentElement, answer)
           }
           stepThinking = thinking
+          if (thinking.parentElement) thinking.parentElement.dataset.last = String(Date.now())
           thinkingRaw += event.delta
           thinking.textContent = thinkingRaw
           if (stick) scrollDown()
@@ -2916,8 +3078,9 @@ async function submit() {
           renderActivity()
         }
         // The model carries on with what its subagents found, as a new answer.
-        if (event.type === "subagents_collected") { body = null; thinking = null; stepThinking = null }
+        if (event.type === "subagents_collected") { foldThinking(stepThinking); body = null; thinking = null; stepThinking = null }
         if (event.type === "tool_start") {
+          foldThinking(stepThinking)
           body = null
           thinking = null
           stepThinking = null
@@ -2981,16 +3144,18 @@ async function submit() {
           continue
         }
         if (event.type === "compacted") {
-          const note = document.createElement("div")
-          note.className = "tool done"
-          note.innerHTML = "<span class=\"spin\">✓</span><span class=\"tname\">compacted</span>"
-          note.append(" " + event.before + " → " + event.after + " messages")
-          thread.appendChild(note)
-          scrollDown()
+          const stick = atBottom()
+          const noteEl = document.createElement("div")
+          noteEl.className = "tool done"
+          noteEl.innerHTML = "<span class=\"spin\">✓</span><span class=\"tname\">compacted</span>"
+          noteEl.append(" " + event.before + " → " + event.after + " messages")
+          thread.appendChild(noteEl)
+          if (stick) scrollDown()
         }
         // CG-Next's own llama-server loading the picked model: a row that spins
         // while it loads and ticks when it is ready, so a cold start is not silence.
         if (event.type === "runtime") {
+          const stick = atBottom()
           let row = thread.querySelector(".tool.runtime-load.running")
           if (!row) {
             row = toolChip("local model", "")
@@ -3000,7 +3165,7 @@ async function submit() {
             ? "loading " + event.model + " into llama.cpp…"
             : event.model + " loaded in " + ((event.ms || 0) / 1000).toFixed(1) + " s " + (event.gpu ? "on the GPU" : "on the CPU")
           if (event.state === "ready") { row.classList.remove("running"); row.classList.add("done"); row.querySelector(".spin").textContent = "✓" }
-          scrollDown()
+          if (stick) scrollDown()
         }
         // The loop ran out of turns with the model still working, so the
         // answer above is unfinished. Saying so beats letting it read as done.
@@ -3046,6 +3211,7 @@ async function submit() {
     setTimeout(refreshSessions, 1000)
   }
 
+  foldThinking(stepThinking)
   stopRequested = false
   setBusy(false)
   controller = null

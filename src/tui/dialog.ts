@@ -1,5 +1,5 @@
 import { theme, dim, ansi } from "./ansi"
-import { displayWidth, truncateToWidth, truncateMiddle, padToWidth } from "./width"
+import { displayWidth, truncateToWidth, truncateMiddle, padToWidth, sliceFromWidth } from "./width"
 import { commandScore } from "../core/command-rank"
 
 /**
@@ -227,9 +227,22 @@ export function box(dialog: Dialog, cols: number, rows: number): string[] {
   // The search line: what has been typed, or that typing searches.
   if (dialog.filterable) {
     const typed = dialog.query ?? ""
-    const text = typed ? theme.text + " \u2315 " + typed + ansi.reset + theme.goblin + "\u2588" + ansi.reset : dim + " \u2315 type to search" + ansi.reset
+    let shownQuery = typed
+    const maxQuery = Math.max(1, inner - 5)
+    if (displayWidth(shownQuery) > maxQuery) {
+      const budget = Math.max(1, maxQuery - 1)
+      let tail = ""
+      for (const ch of [...shownQuery].reverse()) {
+        if (displayWidth(ch + tail) > budget) break
+        tail = ch + tail
+      }
+      shownQuery = "\u2026" + tail
+    }
+    const text = typed
+      ? theme.text + " \u2315 " + shownQuery + ansi.reset + theme.goblin + "\u2588" + ansi.reset
+      : dim + truncateToWidth(" \u2315 type to search", inner) + ansi.reset
     lines.push(theme.borderStrong + "\u2502" + ansi.reset + padToWidth(text, inner) + theme.borderStrong + "\u2502" + ansi.reset)
-    if (!dialog.rows.length) lines.push(theme.borderStrong + "\u2502" + ansi.reset + dim + padToWidth("   nothing matches", inner) + ansi.reset + theme.borderStrong + "\u2502" + ansi.reset)
+    if (!dialog.rows.length) lines.push(theme.borderStrong + "\u2502" + ansi.reset + dim + padToWidth(truncateToWidth("   nothing matches", inner), inner) + ansi.reset + theme.borderStrong + "\u2502" + ansi.reset)
   }
 
   for (const [offset, row] of shown.entries()) {
@@ -319,7 +332,7 @@ export function compose(base: string[], boxLines: string[], cols: number, rows: 
     const sliver = left < 8
     const before = sliver ? "" : truncateToWidth(under, left)
     const afterStart = left + width
-    const after = sliver ? "" : [...under].slice(afterStart).join("")
+    const after = sliver || afterStart >= cols ? "" : truncateToWidth(sliceFromWidth(under, afterStart), cols - afterStart)
     out[row] =
       dim + padToWidth(before, left) + ansi.reset +
       boxLine +
@@ -330,7 +343,7 @@ export function compose(base: string[], boxLines: string[], cols: number, rows: 
   // at full brightness and the eye goes straight to it.
   for (let row = 0; row < out.length; row++) {
     if (row >= top && row < top + boxLines.length) continue
-    out[row] = dim + plain(out[row] ?? "") + ansi.reset
+    out[row] = dim + truncateToWidth(plain(out[row] ?? ""), cols) + ansi.reset
   }
 
   return out

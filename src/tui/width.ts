@@ -143,3 +143,33 @@ export function truncateMiddle(text: string, max: number): string {
   for (let index = chars.length - 1; index >= 0 && displayWidth(chars[index]! + tail) <= tailRoom; index--) tail = chars[index]! + tail
   return truncateToWidth(text, max - 1 - displayWidth(tail)) + "…" + tail
 }
+
+/**
+ * Plain text from display column `startCol` onward. If a two-column character straddles `startCol`,
+ * its right-hand cell becomes a space so the remainder still begins on `startCol`.
+ */
+export function sliceFromWidth(text: string, startCol: number): string {
+  if (startCol <= 0) return text
+  let col = 0
+  const chars = [...text]
+  let index = 0
+  let lead = ""
+  while (index < chars.length) {
+    const w = charWidth(chars[index]!)
+    if (w === 0) {
+      if (col > startCol) break
+      index++
+      continue
+    }
+    if (col >= startCol) break
+    if (col + w > startCol) {
+      lead = " ".repeat(col + w - startCol)
+      col += w
+      index++
+      break
+    }
+    col += w
+    index++
+  }
+  return lead + chars.slice(index).join("")
+}

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { ctrlCAction, dialogRowAt, insideDialog } from "../src/tui/interaction"
+import { ctrlCAction, dialogEscAt, dialogRowAt, insideDialog } from "../src/tui/interaction"
 import { parseKeys } from "../src/tui/keys"
 import { runCommand, normalizeCommand, PENDING_COMMANDS } from "../src/core/commands"
 import { addSpend, formatSpend } from "../src/core/context"
@@ -21,11 +21,18 @@ test("SGR press, drag and release parse; right clicks do not", () => {
   expect(parseKeys("\x1b[<32;5;10M")).toEqual([{ type: "drag", col: 5, row: 10 }])
   expect(parseKeys("\x1b[<2;3;23m")).toEqual([])
 })
-test("dialog hit testing matches visible rows including scroll offset", () => {
+test("dialog hit testing matches visible rows including scroll offset and filterable search bar", () => {
   const frame = { cols: 100, rows: 40, width: 60, height: 10, boxHeight: 15, first: 6, col: 25, row: 14 }
   expect(dialogRowAt(frame)).toBe(6)
   expect(dialogRowAt({ ...frame, row: 13 })).toBeUndefined()
   expect(dialogRowAt({ ...frame, col: 1 })).toBeUndefined()
+  // Filterable dialogs draw a "⌕ type to search" row under the divider, shifting row 0 down by 1.
+  expect(dialogRowAt({ ...frame, filterable: true, row: 14 })).toBeUndefined()
+  expect(dialogRowAt({ ...frame, filterable: true, row: 15 })).toBe(6)
+  expect(dialogRowAt({ ...frame, filterable: true, row: 15, rowCount: 0 })).toBeUndefined()
+  // Clicking " esc " in the top-right of the title bar closes the dialog.
+  expect(dialogEscAt({ cols: 100, rows: 40, width: 60, boxHeight: 15, col: 78, row: 12 })).toBe(true)
+  expect(dialogEscAt({ cols: 100, rows: 40, width: 60, boxHeight: 15, col: 30, row: 12 })).toBe(false)
 })
 test("a click on the dialog box itself is not a click outside it", () => {
   const frame = { cols: 100, rows: 40, width: 60, boxHeight: 15, col: 25, row: 13 }

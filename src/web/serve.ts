@@ -91,6 +91,7 @@ import {
 import * as memory from "../core/memory"
 import { runCommand, COMMANDS, COMMAND_ALIASES, PENDING_COMMANDS } from "../core/commands"
 import { resolveInside } from "../core/tools"
+import { InstallationVersion } from "../platform/version"
 
 // The page and its files, as paths that hold from source and inside the built program (see assets.ts).
 const page = ASSETS.page
@@ -525,6 +526,7 @@ async function handle(request: Request, server?: Bun.Server<TerminalSocket["data
     }))
     const saved = await sessions.list(20, root)
     return json({
+      version: InstallationVersion,
       project: path.basename(root),
       commands: [
         ...COMMANDS.filter((c) => !["/quit"].includes(c.name)).map((c) => ({ value: c.name, hint: c.description, expands: ["/model", "/favourite", "/resume", "/connect", "/disconnect", "/theme", "/effort"].includes(c.name) })),

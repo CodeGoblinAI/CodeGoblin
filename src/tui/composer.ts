@@ -1,3 +1,5 @@
+import { charWidth, displayWidth } from "./width"
+
 /**
  * The prompt as a small editor.
  *
@@ -179,4 +181,158 @@ export class ComposerHistory {
     this.past = []
     this.future = []
   }
+}
+
+export type ComposerLine = {
+  /** Drawn text for this visual row (never contains \n). */
+  text: string
+  /** UTF-16 start index in Composer.text. */
+  start: number
+  /** UTF-16 end index in Composer.text (exclusive; text.slice(start, end) === row.text). */
+  end: number
+  /** True when the next row continues the same paragraph without a consumed break character. */
+  soft: boolean
+}
+
+function layoutParagraph(para: string, paraStart: number, limit: number): ComposerLine[] {
+  if (!para.length) return [{ text: "", start: paraStart, end: paraStart, soft: false }]
+  const rows: ComposerLine[] = []
+  let rowText = ""
+  let rowStart = paraStart
+  let rowEnd = paraStart
+  let rowWidth = 0
+
+  for (const match of para.matchAll(/\s+|\S+/gu)) {
+    const token = match[0]
+    if (/^\s+$/u.test(token)) {
+      for (const ch of [...token]) {
+        const w = charWidth(ch)
+        if (rowText.length > 0 && rowWidth + w > limit) {
+          // A space right at the margin breaks the line cleanly so the next line does not start indented.
+          if (rowWidth === limit && rowText.trim().length > 0) {
+            rows.push({ text: rowText, start: rowStart, end: rowEnd, soft: false })
+            rowStart = rowEnd + ch.length
+            rowEnd = rowStart
+            rowText = ""
+            rowWidth = 0
+          } else {
+            rows.push({ text: rowText, start: rowStart, end: rowEnd, soft: true })
+            rowStart = rowEnd
+            rowText = ch
+            rowEnd += ch.length
+            rowWidth = w
+          }
+        } else {
+          rowText += ch
+          rowEnd += ch.length
+          rowWidth += w
+        }
+      }
+      continue
+    }
+
+    const wordWidth = displayWidth(token)
+    if (rowWidth + wordWidth <= limit) {
+      rowText += token
+      rowEnd += token.length
+      rowWidth += wordWidth
+      continue
+    }
+    if (wordWidth <= limit) {
+      rows.push({ text: rowText, start: rowStart, end: rowEnd, soft: true })
+      rowStart = rowEnd
+      rowText = token
+      rowEnd = rowStart + token.length
+      rowWidth = wordWidth
+      continue
+    }
+    if (rowText.length > 0) {
+      rows.push({ text: rowText, start: rowStart, end: rowEnd, soft: true })
+      rowStart = rowEnd
+      rowText = ""
+      rowWidth = 0
+    }
+    for (const ch of [...token]) {
+      const w = charWidth(ch)
+      if (rowText.length > 0 && rowWidth + w > limit) {
+        rows.push({ text: rowText, start: rowStart, end: rowEnd, soft: true })
+        rowStart = rowEnd
+        rowText = ch
+        rowEnd += ch.length
+        rowWidth = w
+      } else {
+        rowText += ch
+        rowEnd += ch.length
+        rowWidth += w
+      }
+    }
+  }
+
+  rows.push({ text: rowText, start: rowStart, end: rowEnd, soft: false })
+  return rows
+}
+
+/**
+ * Word-wraps the composer text into visual rows of at most `width` display columns,
+ * honouring explicit `\n` line breaks and keeping exact UTF-16 offsets into `text`.
+ */
+export function layoutComposer(text: string, width: number): ComposerLine[] {
+  const limit = Math.max(1, width)
+  if (!text.length) return [{ text: "", start: 0, end: 0, soft: false }]
+  const rows: ComposerLine[] = []
+  let offset = 0
+  const parts = text.split("\n")
+  for (const part of parts) {
+    rows.push(...layoutParagraph(part, offset, limit))
+    offset += part.length + 1
+  }
+  return rows
+}
+
+/** Which wrapped visual row `cursor` sits on, and its display column from the left edge of that row. */
+export function caretInComposer(rows: ComposerLine[], cursor: number): { line: number; column: number } {
+  const clamped = Math.max(0, cursor)
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index]!
+    const inside = row.soft ? clamped < row.end : clamped <= row.end
+    if (inside || index === rows.length - 1) {
+      const sliceEnd = Math.max(0, Math.min(clamped - row.start, row.text.length))
+      return { line: index, column: displayWidth(row.text.slice(0, sliceEnd)) }
+    }
+  }
+  return { line: 0, column: 0 }
+}
+
+/** UTF-16 offset in `Composer.text` corresponding to 0-based `targetColumn` on `row`. */
+export function offsetInComposerLine(row: ComposerLine, targetColumn: number): number {
+  if (targetColumn <= 0 || !row.text.length) return row.start
+  let utf16 = 0
+  let col = 0
+  for (const ch of [...row.text]) {
+    const w = charWidth(ch)
+    if (w > 0 && targetColumn < col + w) return row.start + utf16
+    utf16 += ch.length
+    col += w
+  }
+  // A soft-wrapped row's `end` is the start of the next row; stay before its last character so the caret stays on this row.
+  return row.soft ? row.start + charBefore(row.text, row.text.length) : row.end
+}
+
+/** Move up or down one visual line inside a multi-line/wrapped composer, or undefined at the top/bottom edge. */
+export function moveLine(state: Composer, width: number, direction: -1 | 1, select = false): Composer | undefined {
+  const rows = layoutComposer(state.text, width)
+  if (rows.length <= 1) return undefined
+  const spot = caretInComposer(rows, state.cursor)
+  const target = spot.line + direction
+  if (target < 0 || target >= rows.length) return undefined
+  return moveTo(state, { to: offsetInComposerLine(rows[target]!, spot.column), select })
+}
+
+/** Home/End within a wrapped composer: moves to the current visual line's edge first, then the whole prompt's edge. */
+export function lineEdge(rows: ComposerLine[], cursor: number, edge: "start" | "end"): number {
+  const spot = caretInComposer(rows, cursor)
+  const row = rows[spot.line]!
+  if (edge === "start") return cursor !== row.start ? row.start : 0
+  const end = row.soft && row.text.length > 0 ? row.start + charBefore(row.text, row.text.length) : row.end
+  return cursor !== end ? end : (rows.at(-1)?.end ?? cursor)
 }

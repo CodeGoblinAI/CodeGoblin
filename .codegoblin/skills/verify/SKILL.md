@@ -25,7 +25,7 @@ bun audit
 
 ## 2. Targeted End-to-End Surface Verification
 
-Run the user passes in `test/user-pass/` **one at a time** (parallel PTY/Chromium load causes false timing flakes) for every area touched:
+Run the user passes in `test/user-pass/` **one at a time** (parallel PTY/Chromium load causes false timing flakes) for every area touched. Note: on Windows, `pass-*.mjs` scripts that call `process.kill(process.pid)` to drop open `node-pty` handles exit with code `1` even on success — check stdout for `all passed` and zero `^FAIL ` lines.
 
 - **CLI / Packaging / Compiled Binary** (`src/cli/`, `script/build.ts`, `npm/`, workers):
   ```powershell
@@ -33,16 +33,19 @@ Run the user passes in `test/user-pass/` **one at a time** (parallel PTY/Chromiu
   node test/user-pass/pass-binary.mjs
   node test/user-pass/pass-install.mjs
   ```
-- **TUI Rendering, Approvals, Scrolling, Selection** (`src/tui/`, `terminal-safe.ts`, `permission.ts`):
+- **TUI Rendering, Word-Wrap, Dialogs, Approvals, Scrolling, Selection** (`src/tui/`, `terminal-safe.ts`, `permission.ts`, `commands.ts`):
   ```powershell
+  node test/user-pass/pass-ux-chaos.mjs
   node test/user-pass/pass-small.mjs
+  node test/user-pass/pass-scroll.mjs
   node test/user-pass/pass-approval-shown.mjs
   node test/user-pass/pass-approval-typing.mjs
   node test/user-pass/pass-warm-start.mjs
   ```
-  For visual TUI changes, also drive a real Windows Terminal window via `node test/user-pass/tui-window.mjs` + `powershell.exe -File test/user-pass/real-terminal.ps1`.
-- **Web App & Loopback Server** (`src/web/`, `sessions.ts`, `jobs.ts`):
+  For visual TUI changes, also drive a real Windows Terminal window via `node test/user-pass/tui-window.mjs` + `powershell.exe -File test/user-pass/real-terminal.ps1` and inspect the captured PNGs directly.
+- **Web App & Loopback Server** (`src/web/`, `sessions.ts`, `jobs.ts`, `commands.ts`):
   ```powershell
+  node test/user-pass/pass-ux-chaos.mjs
   node test/user-pass/pass-web-inputs.mjs
   node test/user-pass/pass-two-windows.mjs
   node test/user-pass/pass-background-web.mjs

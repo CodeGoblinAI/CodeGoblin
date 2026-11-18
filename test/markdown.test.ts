@@ -79,6 +79,12 @@ describe("markdown tables", () => {
     expect(lines[0]).toContain("Before.")
     expect(lines[lines.length - 1]).toContain("After.")
   })
+
+  test("inline code and bold inside table cells render without raw backticks or asterisks", () => {
+    const lines = plain(["| **File** | Cost |", "|---|---|", "| `src/app.ts` | **$0.04** |"].join("\n"))
+    expect(lines.some((line) => line.includes("File") && !line.includes("**"))).toBe(true)
+    expect(lines.some((line) => line.includes("src/app.ts") && line.includes("$0.04") && !line.includes("`"))).toBe(true)
+  })
 })
 
 describe("markdown, the parts that already worked", () => {
