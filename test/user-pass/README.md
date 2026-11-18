@@ -31,6 +31,9 @@ never print it, and use a throwaway profile.
     bun test/user-pass/real-turn-profile.ts [provider/model] [effort]   # where one simple task's time goes, step by step
     bun test/user-pass/real-effort-time.ts [provider/model] [efforts]   # the same tiny task at each reasoning effort
     bun test/user-pass/real-cache-check.ts              # prompt-cache reads
+    bun test/user-pass/real-cost-check.ts [model ...]   # compares app spend readout vs provider balance to 6 decimals
+    bun test/user-pass/real-everyday-tasks.ts           # everyday file/folder tasks in a sandboxed temp tree
+    bun test/user-pass/real-rollback.ts                 # 0.3 <-> 0.4 shared-profile coexistence and rollback
     node test/user-pass/pass-real.mjs                   # a whole terminal turn on a real model
 
 ## A real window
@@ -73,3 +76,11 @@ recording made with Windows' own voice, so no microphone is needed. They look fo
 `CG_VOICE_MODEL_DIR`, CG-Next's own data folder, then DeepSeek Harness's (`~/.dsh`), and skip when
 there is none. `CG_VOICE_FAKE_WAV` makes the terminal's recorder return that file instead of
 recording. To try the real microphone, run `tui-window.mjs` with `CG_VOICE_MODEL_DIR` set.
+
+## Verification layers
+
+Alongside these E2E passes, `bun run test` runs seeded property-based tests (`test/properties.test.ts`,
+override seed with `CG_PROP_SEED=<n>`) and migration/surface differential tests
+(`test/differential-fork.test.ts`). See `REVIEW.md` at the repo root for diff-triggered reliability
+rules and `.claude/skills/verify/SKILL.md` (also `.codegoblin/skills/verify/SKILL.md`) for the full
+`/verify` checklist.

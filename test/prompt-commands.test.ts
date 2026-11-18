@@ -7,19 +7,27 @@ import { runCommand } from "../src/core/commands"
 
 const project = () => fs.mkdtempSync(path.join(process.env.CODEGOBLIN_TEST_SANDBOX!, "prompt-commands-"))
 
-test("the five shipped prompts are commands, expanded with what was typed", () => {
+test("the six shipped prompts are commands, expanded with what was typed", () => {
   const cwd = project()
-  // All five are commands. A file of the same name replaces one (another test file leaves a /review in the
+  // All six are commands. A file of the same name replaces one (another test file leaves a /review in the
   // shared profile, and which file runs first differs by system), so only the names are fixed, not who owns them.
   const commands = customCommands(cwd)
-  expect(PROMPT_COMMANDS.map((command) => command.name).sort()).toEqual(["goal", "grill", "init", "review", "teach"])
-  for (const name of ["goal", "grill", "init", "review", "teach"]) expect(commands.map((command) => command.name)).toContain(name)
-  for (const command of commands.filter((each) => each.scope === "built-in")) expect(["goal", "grill", "init", "review", "teach"]).toContain(command.name)
+  const shipped = ["goal", "grill", "init", "review", "teach", "verify"]
+  expect(PROMPT_COMMANDS.map((command) => command.name).sort()).toEqual(shipped)
+  for (const name of shipped) expect(commands.map((command) => command.name)).toContain(name)
+  for (const command of commands.filter((each) => each.scope === "built-in")) expect(shipped).toContain(command.name)
   const goal = resolveInvocation("/goal make the tests pass on Windows", cwd)!
   expect(goal.kind).toBe("command")
   expect(goal.content).toContain("You are in GOAL mode")
   expect(goal.content).toContain("make the tests pass on Windows")
-  expect(resolveInvocation("/review 3f6b5d3", cwd)!.content).toContain("What to review: 3f6b5d3")
+  const review = resolveInvocation("/review 3f6b5d3", cwd)!
+  expect(review.content).toContain("What to review: 3f6b5d3")
+  expect(review.content).toContain("[Important]")
+  expect(review.content).toContain("[Pre-existing]")
+  expect(review.content).toContain("REVIEW.md")
+  const verify = resolveInvocation("/verify encodings and undo", cwd)!
+  expect(verify.content).toContain("encodings and undo")
+  expect(verify.content).toContain("3 repair attempts")
   // Nothing typed still leaves a usable prompt: /review reviews uncommitted work.
   expect(resolveInvocation("/review", cwd)!.content).toContain("Nothing given: the uncommitted changes")
 })

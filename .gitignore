@@ -25,3 +25,4 @@ _RECOVERED_LOCAL_*.txt
 # Profiles hold auth.json once a key is connected, so they must never be staged.
 /output/
 .playwright-cli/
+.claude/launch.json

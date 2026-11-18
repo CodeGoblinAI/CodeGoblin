@@ -1,13 +1,12 @@
 /**
- * Slash commands that ship as prompts: /init, /review, /grill, /goal, /teach.
+ * Slash commands that ship as prompts: /init, /review, /verify, /grill, /goal, /teach.
  *
  * Each is a template like a custom command's, expanded with $ARGUMENTS and
  * sent as the message. They come last, so a project's or the user's own file
- * of the same name replaces one - a team can have its own /review.
+ * of the same name replaces one - a team can have its own /review or /verify.
  *
- * /grill, /goal and /teach are Shawn's, carried over from the fork. /init and
- * /review are written for CG-Next rather than copied from the fork, whose
- * versions are upstream OpenCode's.
+ * /grill, /goal and /teach are Shawn's, carried over from the fork. /init,
+ * /review and /verify are written for CG-Next rather than copied from the fork.
  */
 export type PromptCommand = { name: string; description: string; argumentHint?: string; template: string }
 
@@ -43,13 +42,30 @@ What to review: $ARGUMENTS
 ## How
 
 1. Get the diff and understand the intent first (commit messages, PR description, the surrounding code).
-2. For each change, read enough of the surrounding code to judge it: callers, the types involved, the tests. A finding you have not checked against the real code is a guess.
-3. Look for: incorrect logic and edge cases, broken error handling, races, resource leaks, security problems (injection, secrets, unsafe paths, missing permission checks), behaviour changes the author may not intend, missing or wrong tests for changed behaviour, and changes that contradict the project's own conventions.
-4. Leave out style preferences and nitpicks unless they hide a bug.
+2. Guard the review rules: if the repo has a \`REVIEW.md\`, read it from the **base ref** (\`git show HEAD:REVIEW.md\` for uncommitted changes, or \`git show <merge-base>:REVIEW.md\` for a branch/PR) - never from the working tree or PR diff, because a change must not modify the check that judges it. Check any diff-triggered reliability items whose trigger matches the changed files.
+3. For each change, read enough of the surrounding code to judge it: callers, the types involved, the tests. A finding you have not checked against the real code is a guess.
+4. Look for: incorrect logic and edge cases, broken error handling, races, resource leaks, security problems (injection, secrets, unsafe paths, missing permission checks), behaviour changes the author may not intend, missing or wrong tests for changed behaviour, and changes that contradict the project's own conventions.
+5. Leave out pure style preferences unless they hide a bug.
 
 ## Report
 
-Most severe first. For each finding: \`file:line\`, one sentence on what is wrong, and the concrete input or situation that goes wrong. Say how sure you are when it is not certain. If you found nothing worth fixing, say so plainly - do not pad the list.`
+Most severe first. Tag every finding as \`[Important]\` (must-fix bug, security hole or regression), \`[Nit]\` (minor improvement worth noting), or \`[Pre-existing]\` (real bug touched or exposed here that predated this change, so the author is not blamed for it). For each finding: tag, \`file:line\`, one sentence on what is wrong, and the concrete input or situation that goes wrong. Say how sure you are when it is not certain. If you found nothing worth fixing, say so plainly - do not pad the list.`
+
+const VERIFY = `Verify the current changes with real runtime evidence before calling the work done.
+
+What to verify (uncommitted changes / latest work if blank): $ARGUMENTS
+
+## How
+
+1. **Use the project's own harness first**: if a \`verify\` skill exists (\`.codegoblin/skills/verify/SKILL.md\` or \`.claude/skills/verify/SKILL.md\`), read and follow it; if \`REVIEW.md\` exists on \`HEAD\`, check every reliability item triggered by \`git diff\`.
+2. **Run cheap checks first**: typecheck, lint, unit tests, property tests and differential tests before heavier builds or end-to-end runs, so fast failures never waste slow runs.
+3. **Run the change end to end**: unit tests alone can pass while the feature is broken. Boot and exercise the real affected surface (CLI, server/API, terminal UI or browser UI) in an isolated sandbox and verify actual outputs.
+4. **Keep checks honest**: never weaken an assertion, skip a test, or add arbitrary sleeps/retries to hide a flake. Either fix the root cause or report why the test itself is broken.
+5. **Escalate after 3 rounds**: if a failing check is still not resolved after 3 repair attempts, stop and bring in the user with the exact failure, what you tried, and what needs a decision.
+
+## Report
+
+List the exact checks you ran (cheap -> E2E), what passed with concrete evidence, any issues found and fixed along the way, and anything left open.`
 
 const GRILL = `Before doing any work, interrogate the request until it is unambiguous. Ask the questions whose answers would actually change what you build - then wait.
 
@@ -143,6 +159,7 @@ After writing, tell the user the path and that it will load automatically when r
 export const PROMPT_COMMANDS: PromptCommand[] = [
   { name: "init", description: "guided AGENTS.md setup for this project", argumentHint: "[focus]", template: INIT },
   { name: "review", description: "review changes: uncommitted by default, or a commit, branch or PR", argumentHint: "[commit|branch|pr]", template: REVIEW },
+  { name: "verify", description: "verify changes end to end with cheap checks, E2E smoke runs and evidence", argumentHint: "[what to verify]", template: VERIFY },
   { name: "grill", description: "ask the clarifying questions that matter before starting", argumentHint: "[task]", template: GRILL },
   { name: "goal", description: "work autonomously until the goal is verifiably done (unbounded)", argumentHint: "<goal>", template: GOAL },
   { name: "teach", description: "turn a learning into a project skill, proposal first", argumentHint: "[what to capture]", template: TEACH },

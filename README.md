@@ -30,8 +30,8 @@ On first start, type `/connect`, pick a provider and paste its key. `/model` swi
 
 ## What it can do
 
-- **Work on code.** Read, search, edit and patch files; run shell commands and watch their output as it comes; leave a dev server or a watcher running in the background (`/jobs`). `/undo` puts back what a turn changed, and `/diff` shows what the session changed.
-- **Ask first.** Three modes, switched with shift+tab or `/approvals`: ask before acting, approve edits for me, or full access. Files outside the project and secret files are asked about separately. A turn that runs long or spends past a limit pauses and asks to continue.
+- **Work on code.** Read, search, edit and patch files; run shell commands and watch their output as it comes; leave a dev server or a watcher running in the background (`/jobs`). `/undo` puts back what a turn changed, `/diff` shows what the session changed, `/review` reviews diffs against `REVIEW.md`, and `/verify` runs end-to-end checks.
+- **Ask first.** Three modes, switched with shift+tab or `/approvals`: ask before acting, approve edits for me, or full access. Secret files always ask first in every mode, and approvals for commands outside the project stay scoped to that folder. A turn that runs long or spends past a limit pauses and asks to continue.
 - **Use the model you have.** API keys for the providers in the [models.dev](https://models.dev) catalogue; official sign-in for ChatGPT (Codex), Claude and Cursor subscriptions (`/login`); and local GGUF models through llama.cpp (`/local`, see [docs/local-models.md](docs/local-models.md)).
 - **More than text.** Image, audio and 3D generation with the providers you connect, saved into your project. Voice input (`/voice`). A Chrome it can drive (`/browser`).
 - **Extend it.** MCP servers (`/mcp`), skills and custom commands (`/skills`), named agent profiles (`/agents`), project instructions in `AGENTS.md`, and subagents when you ask for them (`/boost`).
