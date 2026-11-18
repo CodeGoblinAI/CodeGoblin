@@ -48,12 +48,35 @@ export function isSecretPath(target: string): boolean {
 }
 
 /**
+ * Strip unquoted cmd.exe caret escapes (`type .e^nv` -> `type .env`).
+ * Inside double quotes cmd.exe keeps `^` literal; outside them `^x` is `x`.
+ */
+export function unescapeCmdCarets(command: string): string {
+  if (!command.includes("^")) return command
+  let out = ""
+  let inDouble = false
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!
+    if (ch === '"') {
+      inDouble = !inDouble
+      out += ch
+    } else if (!inDouble && ch === "^" && i + 1 < command.length) {
+      out += command[++i]!
+    } else {
+      out += ch
+    }
+  }
+  return out
+}
+
+/**
  * The secret files a shell command names. Words are split on spaces, quotes,
  * redirects and separators, so `type "C:\x\auth.json"`, `cat .env|more` and
- * `copy .env x` are all caught.
+ * `copy .env x` are all caught - along with `cmd.exe` caret escapes (`type .e^nv`) on Windows.
  */
-export function secretPathsIn(command: string): string[] {
-  const words = command.split(/[\s"'`|&;<>()=,]+/).filter(Boolean)
+export function secretPathsIn(command: string, platform: string = process.platform): string[] {
+  const candidates = platform === "win32" && command.includes("^") ? [command, unescapeCmdCarets(command)] : [command]
+  const words = candidates.flatMap((text) => text.split(/[\s"'`|&;<>()=,]+/).filter(Boolean))
   return [...new Set(words.filter((word) => !/^[a-z]+:\/\//i.test(word) && isSecretPath(word)))]
 }
 

@@ -130,3 +130,43 @@ describe("an interpreter given flags before its script is approved exactly", () 
     expect(coverOf("shell", shell("node build.js --watch"))).toBe('"node build.js"')
   })
 })
+
+describe("Full access mode and Windows caret escapes", () => {
+  test("Full access runs commands outside the project without asking, and still asks on secret files", async () => {
+    const asked: string[] = []
+    const permissions = new Permissions(async (_tool, detail) => {
+      asked.push(detail)
+      return "reject"
+    })
+    permissions.mode = "full"
+    // Outside-folder commands do not prompt in Full access.
+    expect(await permissions.check("shell", shell("type C:\\Windows\\win.ini"))).toBe(true)
+    expect(await permissions.check("shell", shell('mkdir "%TEMP%\\cg-out"'))).toBe(true)
+    expect(asked).toHaveLength(0)
+
+    // Secret files still prompt in Full access, whether inside or outside the project.
+    expect(await permissions.check("shell", shell("type %USERPROFILE%\\.local\\share\\codegoblin\\auth.json"))).toBe(false)
+    expect(await permissions.check("shell", shell("cat ~/.ssh/id_rsa"))).toBe(false)
+    expect(asked).toHaveLength(2)
+  })
+
+  test("cmd.exe caret escapes cannot disguise unsafe read-only flags or secret file names", async () => {
+    expect(isReadOnlyCommand("r^g --p^re=evil.bat foo", "win32")).toBe(false)
+    expect(isReadOnlyCommand("g^it -^C C:\\other log", "win32")).toBe(false)
+    expect(isReadOnlyCommand("g^it -^c core.pager=evil log", "win32")).toBe(false)
+
+    if (process.platform === "win32") {
+      let asked = 0
+      const permissions = new Permissions(async () => {
+        asked++
+        return "reject"
+      })
+      permissions.mode = "full"
+      expect(await permissions.check("shell", shell("type .e^nv"))).toBe(false)
+      expect(await permissions.check("shell", shell("type auth^.json"))).toBe(false)
+      expect(asked).toBe(2)
+
+      expect(coverOf("shell", shell('p^owershell -Command "Write-Host 1"'))).toBe("this exact powershell command")
+    }
+  })
+})

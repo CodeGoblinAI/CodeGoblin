@@ -3,7 +3,7 @@ import { statSync } from "node:fs"
 import path from "node:path"
 import { loadConfig, type RuleAction } from "./config"
 import { mostSpecific } from "./wildcard"
-import { isSecretPath, pathArgument, secretPathsIn } from "./secret-files"
+import { isSecretPath, pathArgument, secretPathsIn, unescapeCmdCarets } from "./secret-files"
 import { patchPaths } from "./patch"
 import { visibleCall } from "./terminal-safe"
 
@@ -229,13 +229,14 @@ export function segmentsOf(command: string): string[] {
   return segments
 }
 
-/** Words of one command, with quotes taken off and quoted spaces kept. */
-function tokensOf(segment: string): string[] {
+/** Words of one command, with quotes taken off, quoted spaces kept, and Windows cmd.exe carets unescaped. */
+function tokensOf(segment: string, platform: string = process.platform): string[] {
+  const source = platform === "win32" ? unescapeCmdCarets(segment) : segment
   const tokens: string[] = []
   let current = ""
   let quote: string | undefined
   let started = false
-  for (const char of segment) {
+  for (const char of source) {
     if (quote) {
       if (char === quote) quote = undefined
       else current += char
@@ -554,7 +555,7 @@ function folderOf(token: string): string {
 
 const READ_ONLY_GIT = new Set(["status", "log", "diff", "show", "rev-parse", "ls-files", "blame"])
 
-export function isReadOnlyCommand(command: string): boolean {
+export function isReadOnlyCommand(command: string, platform: string = process.platform): boolean {
   // Joining one output stream to another (2>&1) or throwing output away
   // (>nul, 2>/dev/null) writes no file, so neither disqualifies the line. A
   // real model reached for git log ... 2>&1 while planning and was refused.
@@ -567,7 +568,7 @@ export function isReadOnlyCommand(command: string): boolean {
   const segments = segmentsOf(command)
   if (!segments.length) return false
   return segments.every((segment) => {
-    const tokens = tokensOf(segment)
+    const tokens = tokensOf(segment, platform)
     if (!tokens.length || runsInlineCode(tokens)) return false
     const program = programName(tokens[0]!)
     // A read-only command still reads, and outside the project that can be

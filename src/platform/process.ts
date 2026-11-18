@@ -30,9 +30,38 @@ export function spawn(command: string[], opts: SpawnOptions = {}) {
  * was given (spawn hides windows, so it never shares the person's), and costs about ten milliseconds. `&` is
  * cmd's loosest join, so `a && b || c` after it is grouped as it was.
  */
+/** Whether a command contains a newline inside single or double quotes, which cmd.exe /c silently cuts off. */
+export function hasQuotedNewline(command: string): boolean {
+  let quote: string | undefined
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!
+    if (quote) {
+      if (ch === "\n" || ch === "\r") return true
+      if (ch === quote) quote = undefined
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+    }
+  }
+  return false
+}
+
+function flattenCmdLines(command: string): string {
+  if (!command.includes("\n") && !command.includes("\r")) return command
+  if (hasQuotedNewline(command)) return command
+  // cmd.exe /c stops reading at the first newline and silently drops the rest with exit code 0.
+  // Joining unquoted lines with & runs each line in order, as /bin/sh -c does.
+  const joined = command
+    .replace(/\^\r?\n/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("::") && !/^rem(?:\s|$)/i.test(line))
+    .join(" & ")
+  return joined || "rem"
+}
+
 export function shellCommand(command: string, platform: string = process.platform): { argv: string[]; options: SpawnOptions } {
   if (platform !== "win32") return { argv: ["/bin/sh", "-c", command], options: {} }
-  return { argv: ["cmd.exe", "/d", "/s", "/c", '"chcp 65001>nul 2>&1 & ' + command + '"'], options: { windowsVerbatimArguments: true } }
+  return { argv: ["cmd.exe", "/d", "/s", "/c", '"chcp 65001>nul 2>&1 & ' + flattenCmdLines(command) + '"'], options: { windowsVerbatimArguments: true } }
 }
 
 /** Namespace form, matching how the domain code imports it. */

@@ -6,7 +6,8 @@ import { inRepoCache } from "./repos"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { decodeText, encodeText, lineEndingOf, replaceOnce, withLineEnding } from "./text-edit"
-import { isSecretPath } from "./secret-files"
+import { isSecretPath, unescapeCmdCarets } from "./secret-files"
+import { hasQuotedNewline } from "../platform/process"
 
 /**
  * Tools the model can call.
@@ -78,9 +79,12 @@ export function secretAlias(root: string, target: string): string | undefined {
 /** The first word of a command that is another name for a secret file. */
 export function secretAliasIn(root: string, command: string): { said: string; real: string } | undefined {
   if (process.platform !== "win32" || !command.includes("~")) return undefined
-  for (const word of command.split(/[\s"'`|&;<>()=,]+/)) {
-    const real = word.includes("~") ? secretAlias(root, word) : undefined
-    if (real) return { said: word, real }
+  const candidates = command.includes("^") ? [command, unescapeCmdCarets(command)] : [command]
+  for (const text of candidates) {
+    for (const word of text.split(/[\s"'`|&;<>()=,]+/)) {
+      const real = word.includes("~") ? secretAlias(root, word) : undefined
+      if (real) return { said: word, real }
+    }
   }
   return undefined
 }
@@ -368,6 +372,9 @@ export const EXTRA_TOOLS: Tool[] = [
       const command = String(args.command ?? "")
       const alias = secretAliasIn(root, command)
       if (alias) return aliasRefusal(alias.said, alias.real)
+      if (process.platform === "win32" && hasQuotedNewline(command)) {
+        return "error: cmd.exe cuts off commands at a line break inside quotes, so only the first line would run. Put a multi-line script or commit message in a file (or pass multiple -m flags to git commit), or join separate commands with &&."
+      }
       if (args.background === true) return startJob(command, root, { signal })
       return withShellHint(command, plainOutput(await runForeground(command, root, { timeoutMs: shellWait(args.timeout_ms), signal, onOutput: progress ? (text) => progress(stripColour(text)) : undefined })))
     },
@@ -631,9 +638,12 @@ export function shellEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.P
   // not to ("\\303\\251t\\303\\251" for "été"). Nobody can read that, and a model copies it back wrong.
   // One more setting on top of whatever the person already passes this way.
   const count = Number(kept.GIT_CONFIG_COUNT) || 0
-  // Python writes to a pipe in the machine's old code page, and stops with UnicodeEncodeError at the first
-  // name it cannot spell in it - an accented or Japanese file name was enough. Unless the person chose otherwise.
-  const python = kept.PYTHONIOENCODING ? {} : { PYTHONIOENCODING: "utf-8" }
+  // Python writes to a pipe and opens files in the machine's old code page (cp1252/cp437 on ordinary Windows),
+  // stopping with UnicodeEncodeError/UnicodeDecodeError on the first non-ASCII name or character unless told otherwise.
+  const python = {
+    ...(kept.PYTHONIOENCODING ? {} : { PYTHONIOENCODING: "utf-8" }),
+    ...(kept.PYTHONUTF8 ? {} : { PYTHONUTF8: "1" }),
+  }
   return { ...kept, ...python, GIT_CONFIG_COUNT: String(count + 1), ["GIT_CONFIG_KEY_" + count]: "core.quotepath", ["GIT_CONFIG_VALUE_" + count]: "off" }
 }
 

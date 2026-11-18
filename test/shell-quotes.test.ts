@@ -3,6 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { runForeground, startJob, stopAllJobs } from "../src/core/jobs"
+import { runTool } from "../src/core/tools"
 import { shellCommand } from "../src/platform/process"
 
 /**
@@ -54,4 +55,19 @@ test("a background job is started the same way", async () => {
   expect(text).toContain(windows ? '"from a job"' : "from a job")
   expect(text).toContain("Summer Photos")
   stopAllJobs(root)
+}, 30_000)
+
+test("multi-line commands run every unquoted line, and refuse quoted newlines on Windows instead of silently dropping lines", async () => {
+  const out = await run("echo first\necho second")
+  expect(out.split("\n").map((s) => s.trim())).toEqual(["first", "second"])
+
+  if (windows) {
+    // Previously this ran only `import math` and exited 0, making a failing assertion appear to pass!
+    const refused = await runTool("shell", { command: 'python -c "import math\nassert math.sqrt(4) == 999"' }, root)
+    expect(refused).toStartWith("error: cmd.exe cuts off commands at a line break inside quotes")
+
+    // Simulate a legacy CP437 hidden console and verify chcp 65001 + PYTHONUTF8=1 keep cmd, PowerShell and Python UTF-8.
+    const cpOut = await run('chcp 437 >nul & chcp 65001 >nul 2>&1 & python -c "import pathlib, sys; p = pathlib.Path(\'utf8_check.txt\'); p.write_text(\'café — 日本語\'); print(sys.flags.utf8_mode, p.read_text())"')
+    expect(cpOut).toBe("1 café — 日本語")
+  }
 }, 30_000)
