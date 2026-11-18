@@ -51,11 +51,15 @@ test("a finished line keeps the app's colours and loses everything else", () => 
   expect(frameSafe("a" + ESC + "]52;c;abc")).toBe("a")
   // Cursor moves, screen clears, private modes and two-byte escapes go.
   expect(frameSafe("a" + ESC + "[2J" + ESC + "[10;5H" + ESC + "[?1049l" + ESC + "cb")).toBe("ab")
-  // Conceal is taken out of a style code, and an extended colour's own 8 is left alone.
+  // Conceal is taken out of a style code (leading zeros included), and an extended colour's own 8 is left alone.
   expect(frameSafe(ESC + "[1;8mx")).toBe(ESC + "[1mx")
+  expect(frameSafe(ESC + "[1;08mx")).toBe(ESC + "[1mx")
   expect(frameSafe("a" + ESC + "[8mx")).toBe("ax")
+  expect(frameSafe("a" + ESC + "[08mx")).toBe("ax")
+  expect(frameSafe("a" + ESC + "[008mx")).toBe("ax")
   expect(frameSafe(ESC + "[mx")).toBe(ESC + "[mx")
   expect(frameSafe(ESC + "[38;5;8;8mx")).toBe(ESC + "[38;5;8mx")
+  expect(frameSafe(ESC + "[038;05;08;08mx")).toBe(ESC + "[038;05;08mx")
   expect(frameSafe(ESC + "[38;2;8;8;8mx")).toBe(ESC + "[38;2;8;8;8mx")
   // Other control characters go; text is never changed.
   expect(frameSafe("a" + BEL + "b" + String.fromCharCode(8) + "c")).toBe("abc")

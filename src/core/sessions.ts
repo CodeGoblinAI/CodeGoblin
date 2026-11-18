@@ -264,12 +264,13 @@ export function pasteToken(text: string, waiting: Paste[]): string | undefined {
 /** The real text back in place of each token, for the model rather than the screen. Junk tokens are ignored. */
 export function unfoldPastes(text: string, pastes: unknown): string {
   if (!Array.isArray(pastes)) return text
-  let out = text
+  const map = new Map<string, string>()
   for (const paste of pastes.slice(0, 20)) {
     if (!paste || typeof paste.token !== "string" || typeof paste.text !== "string" || !PASTE_TOKEN.test(paste.token) || paste.text.length > 2_000_000) continue
-    out = out.split(paste.token).join(paste.text)
+    map.set(paste.token, paste.text)
   }
-  return out
+  if (!map.size) return text
+  return text.replace(/\[Pasted ~\d+ lines(?: #\d+)?\]/g, (token) => map.get(token) ?? token)
 }
 
 /**

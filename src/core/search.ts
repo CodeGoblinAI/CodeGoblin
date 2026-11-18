@@ -50,9 +50,13 @@ function globBody(pattern: string): string {
     const char = pattern[i]!
     if (char === "*") {
       if (pattern[i + 1] === "*") {
-        out += ".*"
         i += 2
-        if (pattern[i] === "/") i++
+        if (pattern[i] === "/") {
+          out += "(?:.*/)?"
+          i++
+        } else {
+          out += ".*"
+        }
         continue
       }
       out += "[^/]*"
@@ -257,13 +261,36 @@ export async function grepFiles(
   return { matches, truncated: total > matches.length, skipped, secret, total, end }
 }
 
-/** Whether a file's first bytes hold a NUL - the cheap way to tell a large binary without reading it. */
+/** Trim a multi-byte character cut in half at the end of a fixed-size sniff window. */
+function trimSniffWindow(slice: Buffer, capped: boolean): Buffer {
+  if (!capped || slice.length < 4) return slice
+  if (slice[0] === 0xff && slice[1] === 0xfe) {
+    const even = slice.subarray(0, slice.length & ~1)
+    const last = even.readUInt16LE(even.length - 2)
+    return last >= 0xd800 && last <= 0xdbff ? even.subarray(0, even.length - 2) : even
+  }
+  if (slice[0] === 0xfe && slice[1] === 0xff) {
+    const even = slice.subarray(0, slice.length & ~1)
+    const last = even.readUInt16BE(even.length - 2)
+    return last >= 0xd800 && last <= 0xdbff ? even.subarray(0, even.length - 2) : even
+  }
+  let end = slice.length
+  while (end > 0 && slice.length - end < 3 && (slice[end - 1]! & 0xc0) === 0x80) end--
+  if (end > 0 && slice[end - 1]! >= 0xc0) {
+    const lead = slice[end - 1]!
+    const needed = lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4
+    if (slice.length - (end - 1) < needed) end--
+  }
+  return slice.subarray(0, end)
+}
+
+/** Whether a file's first bytes are binary - the cheap way to tell a large binary without reading it whole. */
 async function looksBinary(absolute: string): Promise<boolean> {
   let handle
   try {
     handle = await fs.open(absolute, "r")
     const { bytesRead, buffer } = await handle.read(Buffer.alloc(4096), 0, 4096, 0)
-    return decodeText(buffer.subarray(0, bytesRead)) === undefined
+    return decodeText(trimSniffWindow(buffer.subarray(0, bytesRead), bytesRead === 4096)) === undefined
   } catch {
     return false
   } finally {

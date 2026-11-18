@@ -80,7 +80,9 @@ const hashOf = (text: string | null) => (text === null ? null : crypto.createHas
 /** A file's contents as a snapshot keeps them: its text, and how it was stored when that was not plain UTF-8. */
 function snapshotOf(bytes: Buffer): { before: string; encoding?: SnapshotEncoding } {
   const decoded = decodeText(bytes)
-  if (!decoded) return { before: bytes.toString("base64"), encoding: "base64" }
+  if (!decoded || !encodeText(decoded.text, decoded.encoding).equals(bytes)) {
+    return { before: bytes.toString("base64"), encoding: "base64" }
+  }
   return decoded.encoding === "utf8" ? { before: decoded.text } : { before: decoded.text, encoding: decoded.encoding }
 }
 

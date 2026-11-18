@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { displayWidth, truncateToWidth, padToWidth } from "../src/tui/width"
+import { displayWidth, truncateToWidth, padToWidth, wrapToWidth } from "../src/tui/width"
 
 describe("display width", () => {
   test("ascii is one column per character", () => {
@@ -28,5 +28,10 @@ describe("display width", () => {
 
   test("padding reaches the target width", () => {
     expect(displayWidth(padToWidth("日本", 10))).toBe(10)
+  })
+
+  test("transport emoji is two columns and wrapping at width 1 terminates on wide glyphs", () => {
+    expect(displayWidth("🚀")).toBe(2)
+    expect(wrapToWidth("漢🚀a", 1)).toEqual(["漢", "🚀", "a"])
   })
 })

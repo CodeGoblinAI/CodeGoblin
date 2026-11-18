@@ -35,13 +35,40 @@ export function withLineEnding(text: string, ending: string): string {
  */
 export type TextEncoding = "utf8" | "utf8-bom" | "utf16le" | "utf16be"
 
-/** A file's text and how it was stored; undefined when it is not text (zero bytes and no UTF-16 mark). */
+const utf8Fatal = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+const utf16leFatal = new TextDecoder("utf-16le", { fatal: true, ignoreBOM: true })
+const utf16beFatal = new TextDecoder("utf-16be", { fatal: true, ignoreBOM: true })
+
+/** A file's text and how it was stored; undefined when it is not valid text (NULs, odd UTF-16, or invalid byte sequences). */
 export function decodeText(bytes: Buffer): { text: string; encoding: TextEncoding } | undefined {
-  if (bytes[0] === 0xff && bytes[1] === 0xfe) return { text: bytes.subarray(2).toString("utf16le"), encoding: "utf16le" }
-  if (bytes[0] === 0xfe && bytes[1] === 0xff) return { text: Buffer.from(bytes.subarray(2, 2 + ((bytes.length - 2) & ~1))).swap16().toString("utf16le"), encoding: "utf16be" }
-  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return { text: bytes.subarray(3).toString("utf8"), encoding: "utf8-bom" }
-  if (bytes.subarray(0, 8192).includes(0)) return undefined
-  return { text: bytes.toString("utf8"), encoding: "utf8" }
+  // 0xff 0xfe 0x00 0x00 is UTF-32LE (or a UTF-16 file starting with a NUL), not UTF-16 text.
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    if (bytes.length % 2 !== 0 || (bytes.length >= 4 && bytes[2] === 0 && bytes[3] === 0)) return undefined
+    try {
+      const text = utf16leFatal.decode(bytes.subarray(2))
+      return text.includes("\0") ? undefined : { text, encoding: "utf16le" }
+    } catch {
+      return undefined
+    }
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    if (bytes.length % 2 !== 0) return undefined
+    try {
+      const text = utf16beFatal.decode(bytes.subarray(2))
+      return text.includes("\0") ? undefined : { text, encoding: "utf16be" }
+    } catch {
+      return undefined
+    }
+  }
+  const hasBom = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
+  const body = hasBom ? bytes.subarray(3) : bytes
+  if (body.subarray(0, 8192).includes(0)) return undefined
+  try {
+    const text = utf8Fatal.decode(body)
+    return text.includes("\0") ? undefined : { text, encoding: hasBom ? "utf8-bom" : "utf8" }
+  } catch {
+    return undefined
+  }
 }
 
 /** Text as bytes, stored the way `encoding` says. */

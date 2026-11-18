@@ -55,14 +55,16 @@ function withoutConceal(params: string): string {
   const kept: string[] = []
   for (let at = 0; at < parts.length; at++) {
     const part = parts[at]!
+    const code = part === "" ? -1 : Number(part)
     // 38, 48 and 58 start an extended colour: "5;n" or "2;r;g;b" follow and are numbers, not styles.
-    if (part === "38" || part === "48" || part === "58") {
-      const take = parts[at + 1] === "5" ? 2 : parts[at + 1] === "2" ? 4 : 0
+    if (code === 38 || code === 48 || code === 58) {
+      const mode = parts[at + 1] === undefined || parts[at + 1] === "" ? -1 : Number(parts[at + 1])
+      const take = mode === 5 ? 2 : mode === 2 ? 4 : 0
       kept.push(...parts.slice(at, at + 1 + take))
       at += take
       continue
     }
-    if (part === "8") continue
+    if (code === 8) continue
     kept.push(part)
   }
   return kept.join(";")

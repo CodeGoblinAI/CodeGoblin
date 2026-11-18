@@ -20,7 +20,9 @@ const WIDE_RANGES: [number, number][] = [
   [0xff00, 0xff60], // Fullwidth Forms
   [0xffe0, 0xffe6],
   [0x1f300, 0x1f64f], // emoji
+  [0x1f680, 0x1f6ff], // transport and map emoji
   [0x1f900, 0x1f9ff],
+  [0x1fa70, 0x1faff], // extended emoji
   [0x20000, 0x3fffd], // CJK Extension B+
 ]
 
@@ -113,6 +115,12 @@ export function wrapToWidth(text: string, max: number): string[] {
     let rest = word
     while (displayWidth(rest) > max) {
       const piece = truncateToWidth(rest, max)
+      if (!piece) {
+        const first = [...rest][0]!
+        lines.push(first)
+        rest = rest.slice(first.length)
+        continue
+      }
       lines.push(piece)
       rest = rest.slice(piece.length)
     }
