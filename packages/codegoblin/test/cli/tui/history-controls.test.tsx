@@ -70,17 +70,17 @@ async function mount(older?: () => Promise<void>) {
 test("jump-to-latest appears after scrolling and its actual mouse target returns to the bottom", async () => {
   const local = await mount()
   try {
-    expect(local.app.captureCharFrame()).not.toContain("Jump to latest")
+    expect(local.app.captureCharFrame()).not.toContain("Jump to bottom")
     local.scroll.scrollBy(-20)
     await local.app.renderOnce()
-    expect(local.app.captureCharFrame()).toContain("Jump to latest")
+    expect(local.app.captureCharFrame()).toContain("Jump to bottom")
     const button = local.app.renderer.root.findDescendantById("history-latest")
     expect(button).toBeDefined()
     await local.app.mockMouse.click(button!.x + 2, button!.y)
     await local.app.renderOnce()
     await local.app.renderOnce()
     expect(local.scroll.scrollHeight - local.scroll.viewport.height - local.scroll.scrollTop).toBeLessThanOrEqual(1)
-    expect(local.app.captureCharFrame()).not.toContain("Jump to latest")
+    expect(local.app.captureCharFrame()).not.toContain("Jump to bottom")
   } finally {
     local.app.renderer.destroy()
   }
@@ -110,7 +110,7 @@ test("prepending older history preserves the reading anchor even when a new mess
     const after = local.scroll.getChildren().find((child) => child.id === before.id)!
     expect(after.y - local.scroll.viewport.y).toBe(offset)
     expect(local.app.captureCharFrame()).toContain("History entry 31")
-    expect(local.app.captureCharFrame()).toContain("Jump to latest")
+    expect(local.app.captureCharFrame()).toContain("Jump to bottom")
   } finally {
     complete.resolve()
     local.app.renderer.destroy()
@@ -139,9 +139,31 @@ test("jumping to latest during an older-page request stays at the bottom when it
     await local.app.renderOnce()
     local.scroll.scrollBy(-8)
     await local.app.renderOnce()
-    expect(local.app.captureCharFrame()).toContain("Jump to latest")
+    expect(local.app.captureCharFrame()).toContain("Jump to bottom")
   } finally {
     complete.resolve()
+    local.app.renderer.destroy()
+  }
+})
+
+test("output arriving below while scrolled up is announced on the button, and the view does not move", async () => {
+  const local = await mount()
+  try {
+    local.scroll.scrollBy(-20)
+    await local.app.renderOnce()
+    const top = local.scroll.scrollTop
+    expect(local.app.captureCharFrame()).not.toContain("New output")
+    local.setState("rows", (rows) => [...rows, 70, 71, 72])
+    await local.app.renderOnce()
+    await local.app.renderOnce()
+    expect(local.app.captureCharFrame()).toContain("New output · Jump to bottom")
+    expect(local.scroll.scrollTop).toBe(top)
+    const button = local.app.renderer.root.findDescendantById("history-latest")!
+    await local.app.mockMouse.click(button.x + 2, button.y)
+    await local.app.renderOnce()
+    await local.app.renderOnce()
+    expect(local.app.captureCharFrame()).not.toContain("Jump to bottom")
+  } finally {
     local.app.renderer.destroy()
   }
 })

@@ -20,7 +20,8 @@ import { useBindings, useCommandSlashes, useOpencodeModeStack } from "../../keym
 import { Reference } from "@/reference/reference"
 import { ConfigReference } from "@/config/reference"
 import { displayCharAt, mentionTriggerIndex, slashTriggerIndex } from "@/cli/cmd/prompt-display"
-import { builtinFirst, searchAutocomplete } from "./autocomplete-search"
+import { builtinFirst, noteSlashUse, recentFirst, searchAutocomplete } from "./autocomplete-search"
+import { useKV } from "../../context/kv"
 
 function extractLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -87,6 +88,10 @@ export function Autocomplete(props: {
   const { theme } = useTheme()
   const dimensions = useTerminalDimensions()
   const frecency = useFrecency()
+  const kv = useKV()
+  // Slash commands and skills chosen last, newest first: they lead the list,
+  // and rise among equally close matches, the way Claude Code orders it.
+  const slashRecent = (): string[] => kv.get("slash_recent", [])
   const tuiConfig = useTuiConfig()
   const [store, setStore] = createStore({
     index: 0,
@@ -596,14 +601,14 @@ export function Autocomplete(props: {
     const searchValue = search()
 
     if (!searchValue) {
-      return mixed
+      return store.visible === "/" ? recentFirst(mixed, slashRecent()) : mixed
     }
 
     if ((files.loading || referenceFiles.loading) && prev && prev.length > 0) {
       return prev
     }
 
-    return searchAutocomplete(searchValue, mixed, store.visible, (path) => frecency.getFrecency(path))
+    return searchAutocomplete(searchValue, mixed, store.visible, (path) => frecency.getFrecency(path), slashRecent())
   })
 
   createEffect(() => {
@@ -635,6 +640,7 @@ export function Autocomplete(props: {
   function select() {
     const selected = options()[store.selected]
     if (!selected) return
+    if (store.visible === "/") kv.set("slash_recent", noteSlashUse(slashRecent(), selected))
     hide()
     selected.onSelect?.()
   }
